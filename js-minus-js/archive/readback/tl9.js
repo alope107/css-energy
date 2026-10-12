@@ -1,0 +1,7 @@
+const { chromium } = require('/tmp/claude-0/-home-claude/e04c5771-1429-5249-9a5c-3c0abfaaefc8/scratchpad/chr/node_modules/playwright-core');
+(async () => { const b = await chromium.launch({ executablePath: '/tmp/chromium', args: ['--no-sandbox'] });
+  const p = await b.newPage(); await p.goto('file://' + require('path').resolve('tl9.html')); await p.waitForTimeout(300);
+  const v = () => p.evaluate(() => getComputedStyle(a).getPropertyValue('--w') + ' ' + getComputedStyle(a).animationPlayState);
+  await p.evaluate(() => { pz.checked = true; det.checked = true; }); await p.waitForTimeout(200); console.log('created with timeline appearing same frame:', await v());
+  await p.evaluate(() => mv.checked = true); await p.waitForTimeout(200); console.log('then moved:', await v());
+  await b.close(); })();

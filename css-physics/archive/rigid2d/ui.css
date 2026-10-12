@@ -1,0 +1,83 @@
+:root{
+  --bg:#14161a;--panel:#1c1f25;--ink:#e8e6e1;--dim:#8b8f98;--line:#2a2e36;--acc:#f2b134;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+#app{max-width:1000px;margin:0 auto;padding:20px 16px 40px}
+header h1{font-size:28px;margin:0 0 4px;letter-spacing:-.02em}
+header h1 span{color:var(--acc)}
+header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
+
+.stage{container-type:inline-size;width:100%}
+.arena{
+  --u:calc(100cqw / __W__);
+  position:relative;width:100%;aspect-ratio:__W__/__H__;overflow:hidden;
+  border:1px solid var(--line);border-radius:6px;
+  background:
+    linear-gradient(var(--line) 1px,transparent 1px) 0 0/calc(50 * var(--u)) calc(50 * var(--u)),
+    linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/calc(50 * var(--u)) calc(50 * var(--u)),
+    #101216;
+}
+.lv{position:absolute;inset:0;pointer-events:none}
+.b{position:absolute;left:0;top:0;display:block;pointer-events:none;will-change:transform}
+.bx{background:var(--c);border-radius:calc(3 * var(--u));
+  box-shadow:inset 0 0 0 calc(2 * var(--u)) rgb(0 0 0/.25),inset calc(6 * var(--u)) calc(6 * var(--u)) 0 rgb(255 255 255/.12)}
+.ci{border-radius:50%;
+  background:
+    radial-gradient(circle at 50% 20%,rgb(255 255 255/.7) 0 11%,transparent 12%),
+    linear-gradient(90deg,transparent 46%,rgb(0 0 0/.22) 46% 54%,transparent 54%),
+    var(--c);
+  box-shadow:inset 0 0 0 calc(2 * var(--u)) rgb(0 0 0/.25)}
+/*BODIES*/
+
+.ring{position:absolute;left:0;top:0;width:calc(14 * var(--u));height:calc(14 * var(--u));
+  border:2px solid var(--acc);border-radius:50%;pointer-events:none;
+  opacity:calc(clamp(0, var(--G), 1) * .9);
+  transform:translate(calc(var(--mx) * var(--u) - 50%),calc(var(--my) * var(--u) - 50%))}
+.tether{position:absolute;left:0;top:0;height:2px;background:var(--acc);pointer-events:none;
+  transform-origin:0 50%;opacity:clamp(0, var(--G), 1);
+  width:calc(hypot(var(--mx) - var(--Ngpx), var(--my) - var(--Ngpy)) * var(--u));
+  transform:translate(calc(var(--Ngpx) * var(--u)),calc(var(--Ngpy) * var(--u) - 1px))
+    rotate(atan2(calc(var(--my) - var(--Ngpy)), calc(var(--mx) - var(--Ngpx))))}
+.pin{position:absolute;left:0;top:0;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;
+  background:var(--acc);pointer-events:none;opacity:clamp(0, var(--G), 1);
+  transform:translate(calc(var(--Ngpx) * var(--u)),calc(var(--Ngpy) * var(--u)))}
+.gr{position:absolute;inset:0;display:grid;grid-template-columns:repeat(__GC__,1fr);
+  grid-template-rows:repeat(__GR__,1fr);cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;
+  /* local constants: pointer moves change these on #app, and without this override all
+     4,000 cells would restyle on every move */
+  --mx:0;--my:0;--att:0}
+.gr:active{cursor:grabbing}
+.gr i{display:block}
+
+.ctl{display:flex;flex-wrap:wrap;gap:12px 24px;margin:14px 0 6px}
+.grp{display:flex;align-items:center;gap:6px}
+.grp b{color:var(--dim);font-weight:400;margin-right:4px}
+.grp input{position:absolute;opacity:0;pointer-events:none}
+.grp label,.grp button{
+  font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);
+  border-radius:4px;padding:4px 10px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.grp label:hover,.grp button:hover{border-color:var(--dim)}
+.grp input:checked+label{background:var(--acc);color:#14161a;border-color:var(--acc)}
+.grp input:focus-visible+label{outline:2px solid var(--acc);outline-offset:2px}
+.grp label:active,.grp button:active{transform:translateY(1px);border-color:var(--acc)}
+.hint{color:var(--dim);margin:6px 0 0}
+footer p{color:var(--dim);font-size:13px;max-width:80ch;margin:18px 0 0}
+footer code{color:var(--ink)}
+
+/* controls */
+#app:has(#g-left:checked){--gx:-1400;--gy:0}
+#app:has(#g-up:checked){--gx:0;--gy:-1400}
+#app:has(#g-right:checked){--gx:1400;--gy:0}
+#app:has(#g-zero:checked){--gx:0;--gy:0}
+#app:has(#reset:active),#app:has(.scenes label:active){--rst:1}
+#app:has(#shake:active){--kick:1}
+#app:has(.gr:active){--att:1}
+/*GRID*/
+
+/* registers: hidden layout cells that hold state between frames */
+.regs{position:fixed;left:0;top:0;width:0;height:0;overflow:clip;visibility:hidden}
+.regs .sc{position:absolute;left:0;top:0;width:1px;height:__HS__px;overflow:hidden}
+.regs i{position:absolute;left:0;width:1px;height:1px}

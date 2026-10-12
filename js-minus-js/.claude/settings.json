@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make *)",
+      "Bash(python3 compiler/*)",
+      "Bash(python3 tests/*)",
+      "Bash(python3 tools/*)",
+      "Bash(python3 machine/*)",
+      "Bash(SPEC=1 python3 tests/*)",
+      "Bash(CPUMOD=cpu4 python3 machine/*)",
+      "Bash(node tests/*)",
+      "Bash(node machine/*)",
+      "Bash(node readback/*)",
+      "Bash(node compiler/libbuild.js *)",
+      "Bash(grep *)",
+      "Bash(diff *)"
+    ],
+    "deny": [
+      "Edit(archive/**)",
+      "Write(archive/**)"
+    ]
+  }
+}

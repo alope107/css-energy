@@ -1,0 +1,11 @@
+console.log(5000 * 1);
+console.log(500000 * 1);
+console.log(262143 * 1);
+console.log(262144 * 1);
+console.log(393216 * 1);
+console.log(458752 * 1);
+console.log(491520 * 1);
+console.log((0 - 1) * (0 - 1));
+console.log((0 - 4096) * (0 - 1));
+console.log((0 - 4095) * (0 - 1));
+console.log((0 - 300000) * (0 - 1));

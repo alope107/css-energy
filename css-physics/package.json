@@ -1,0 +1,13 @@
+{
+  "name": "rigid3d-css",
+  "private": true,
+  "description": "A 3D rigid body physics engine in pure CSS (generator + headless-Chromium test tools)",
+  "scripts": {
+    "smoke": "bash tools/smoke.sh 16",
+    "build:plain16": "mkdir -p out && COUNTS=16 PLAIN=1 python3 src/build3d.py out/plain16.html",
+    "site": "bash tools/make_site.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

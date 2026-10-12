@@ -1,0 +1,18 @@
+python3 compiler/mkimage.py tests/fizz.js build/ccimg.json
+steps 1330 rom 359
+CPUMOD=cpu4 python3 machine/fvm_build.py build/ccimg.json 16 32 build/f4cc_16
+build/f4cc_16.woff2 65740 bytes (ttf 1572764), 9749 glyphs, 1274 cells, 432 subtables/cycle, lookups {'lib': 199, 'pre': 1, 'cycle': 111, 'tail': 2}, 4.6s
+UI=1 python3 machine/gen_fvm4.py build/ccimg.json build/f4cc_16 build/js_in_css.xhtml
+compile chain {'char_levels': 1561, 'token_levels': 401, 'variants': 299, 'noop_codes': [19], 'lports': 22, 'css_bytes': 7515752}
+9612666 bytes 617 rules 2 shapings/frame max
+ARGS="$(python3 tests/suite_ui.py 400 6)"; EXP1=build/ui_exp/fizzbuzz.grid node machine/ui_seq.js build/js_in_css.xhtml $ARGS
+load ms 543
+{"label":"initial","compiledMs":5720,"haltMs":36383,"steps":1329,"status":"compiled:  counter(csn)  words","words":"45","ok":true}
+{"label":"user_report.js","compiledMs":2807,"haltMs":4444,"steps":105,"status":"compiled:  counter(csn)  words","words":"6","ok":true}
+{"label":"and_or_chain.js","compiledMs":4740,"haltMs":12819,"steps":347,"status":"compiled:  counter(csn)  words","words":"86","ok":true}
+{"label":"and_or_value.js","compiledMs":3203,"haltMs":5559,"steps":145,"status":"compiled:  counter(csn)  words","words":"22","ok":true}
+{"label":"array_basic.js","compiledMs":3717,"haltMs":9061,"steps":306,"status":"compiled:  counter(csn)  words","words":"17","ok":true}
+{"label":"array_loop.js","compiledMs":3529,"haltMs":7197,"steps":273,"status":"compiled:  counter(csn)  words","words":"23","ok":true}
+{"label":"array_neg.js","compiledMs":2542,"haltMs":5421,"steps":229,"status":"compiled:  counter(csn)  words","words":"13","ok":true}
+{"label":"assign_undef.js","compiledMs":2281,"haltMs":2439,"steps":0,"status":"error: undefined variable","words":"0","ok":true}
+{"label":"bad_char.js","compiledMs":2102,"haltMs":2248,"steps":0,"status":"syntax error ( counter(cse) )","words":"0","ok":true}

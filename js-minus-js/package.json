@@ -1,0 +1,15 @@
+{
+  "name": "js-in-css",
+  "private": true,
+  "description": "JavaScript compiled by a stylesheet and run by a font. Node is used only for the build and the test harnesses; the page runs no script.",
+  "scripts": {
+    "test": "make test",
+    "test:browser": "make test-browser"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.0"
+  },
+  "optionalDependencies": {
+    "@sparticuz/chromium": "^153.0.0"
+  }
+}

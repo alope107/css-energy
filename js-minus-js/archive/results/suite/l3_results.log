@@ -1,0 +1,106 @@
+load 301 ms
+ok   and_or_chain           1138 ms  err 0  words 86
+ok   and_or_value           537 ms  err 0  words 22
+ok   array_basic            706 ms  err 0  words 17
+ok   array_loop             583 ms  err 0  words 23
+ok   array_neg              436 ms  err 0  words 13
+ok   array_param            766 ms  err 0  words 31
+ok   array_sort             1181 ms  err 0  words 65
+ok   array_write            596 ms  err 0  words 25
+ok   asi_basic              720 ms  err 0  words 31
+ok   asi_brace              1326 ms  err 0  words 72
+ok   asi_continuation       873 ms  err 0  words 42
+ok   asi_control            1366 ms  err 0  words 58
+ok   asi_mixed              742 ms  err 0  words 39
+ok   big                    612 ms  err 0  words 27
+ok   bool_fn                645 ms  err 0  words 25
+ok   bool_literal           765 ms  err 0  words 18
+ok   bool_print             462 ms  err 0  words 16
+ok   bool_var               651 ms  err 0  words 24
+ok   braceless_loops        888 ms  err 0  words 52
+ok   break_nested           642 ms  err 0  words 36
+ok   bubble_sort_print      1540 ms  err 0  words 78
+ok   collatz                656 ms  err 0  words 31
+ok   comments               388 ms  err 0  words 6
+ok   comments_block         495 ms  err 0  words 13
+ok   compare                1241 ms  err 0  words 47
+ok   compound               506 ms  err 0  words 18
+ok   compound_array         768 ms  err 0  words 54
+ok   compound_ops           657 ms  err 0  words 33
+ok   cond_logic             1218 ms  err 0  words 65
+ok   continue_for           513 ms  err 0  words 19
+ok   continue_while         681 ms  err 0  words 25
+ok   dangling_else          754 ms  err 0  words 30
+ok   div_exact              511 ms  err 0  words 17
+ok   else_chain             967 ms  err 0  words 38
+ok   else_if_braceless      874 ms  err 0  words 38
+ok   else_if_long           2441 ms  err 0  words 140
+ok   else_if_mixed          803 ms  err 0  words 33
+ok   escapes_more           501 ms  err 0  words 13
+ok   expr_stmt_call         631 ms  err 0  words 21
+ok   fib                    783 ms  err 0  words 44
+ok   fizzbuzz               1119 ms  err 0  words 45
+ok   for                    410 ms  err 0  words 16
+ok   for_dec                468 ms  err 0  words 17
+ok   for_empty              653 ms  err 0  words 28
+ok   func_basic             801 ms  err 0  words 23
+ok   func_forward           427 ms  err 0  words 13
+ok   func_globals           576 ms  err 0  words 18
+ok   func_locals            629 ms  err 0  words 24
+ok   func_many_args         635 ms  err 0  words 20
+ok   func_noreturn          431 ms  err 0  words 12
+ok   func_recursion         755 ms  err 0  words 25
+ok   func_shadow            561 ms  err 0  words 20
+ok   gcd                    807 ms  err 0  words 30
+ok   if_no_braces           519 ms  err 0  words 14
+ok   inc_dec                470 ms  err 0  words 12
+ok   is_prime               891 ms  err 0  words 52
+ok   let_const              754 ms  err 0  words 23
+ok   logic                  836 ms  err 0  words 43
+ok   mod                    499 ms  err 0  words 18
+ok   multi_args             769 ms  err 0  words 51
+ok   neg                    535 ms  err 0  words 19
+ok   nested_calls_args      704 ms  err 0  words 26
+ok   nested_fn_calls_bool   731 ms  err 0  words 32
+ok   nested_loops           776 ms  err 0  words 32
+ok   num_print              476 ms  err 0  words 14
+ok   precedence             664 ms  err 0  words 35
+ok   prefix_inc             659 ms  err 0  words 28
+ok   primes                 786 ms  err 0  words 38
+ok   print_unknown          1713 ms  err 0  words 115
+ok   putc                   433 ms  err 0  words 13
+ok   return_early           838 ms  err 0  words 34
+ok   short_circuit          675 ms  err 0  words 28
+ok   short_circuit_side     913 ms  err 0  words 60
+ok   single_quote           552 ms  err 0  words 12
+ok   str_concat             1085 ms  err 0  words 45
+ok   str_escape             535 ms  err 0  words 13
+ok   str_literal            573 ms  err 0  words 10
+ok   str_mixed              693 ms  err 0  words 16
+ok   str_param              514 ms  err 0  words 14
+ok   str_return             721 ms  err 0  words 19
+ok   str_table              991 ms  err 0  words 48
+ok   str_var                365 ms  err 0  words 6
+ok   strict_eq              568 ms  err 0  words 17
+ok   strict_ops             633 ms  err 0  words 42
+ok   unary_not              435 ms  err 0  words 9
+ok   var_multi              1235 ms  err 0  words 60
+ok   while                  528 ms  err 0  words 15
+ok   while_break            578 ms  err 0  words 15
+ok   while_true_return      704 ms  err 0  words 23
+ok   assign_undef           295 ms  err 5 (want 5)  words 0
+ok   bad_char               354 ms  err 99 (want 48)  words 0
+ok   break_outside          397 ms  err 56 (want 56)  words 0
+ok   extra_brace            392 ms  err 54 (want 54)  words 0
+ok   fn_in_block            399 ms  err 41 (want 41)  words 0
+ok   missing_brace          419 ms  err 40 (want 40)  words 5
+ok   nested_function        438 ms  err 41 (want 41)  words 0
+ok   return_outside         331 ms  err 57 (want 57)  words 0
+ok   str_build              476 ms  err 63 (want 63)  words 0
+FAIL too_many_globals       60003 ms  err 0 (want 25)  words 0  code[4626] want 12461 got undefined; code[4627] want 28844 got undefined; code[4628] want 12480 got undefined; code[4629] want 28863 got undefined
+ok   too_much_string        613 ms  err 99 (want 48)  words 0
+ok   unclosed_paren         381 ms  err 47 (want 47)  words 0
+ok   undef_fn               441 ms  err 60 (want 60)  words 13
+ok   undef_var              326 ms  err 4 (want 4)  words 0
+ok   unterminated_str       666 ms  err 99 (want 3)  words 0
+103/104 pass  FAILED: too_many_globals

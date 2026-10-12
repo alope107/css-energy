@@ -1,0 +1,56 @@
+7s {"steps":30,"kind":0,"pc":0} rssMB 338
+14s {"steps":58,"kind":0,"pc":0} rssMB 263
+21s {"steps":88,"kind":0,"pc":0} rssMB 264
+27s {"steps":118,"kind":0,"pc":0} rssMB 237
+34s {"steps":151,"kind":0,"pc":0} rssMB 264
+41s {"steps":182,"kind":0,"pc":0} rssMB 265
+47s {"steps":211,"kind":0,"pc":0} rssMB 238
+54s {"steps":240,"kind":0,"pc":0} rssMB 264
+60s {"steps":269,"kind":0,"pc":0} rssMB 238
+67s {"steps":300,"kind":0,"pc":0} rssMB 263
+73s {"steps":332,"kind":0,"pc":0} rssMB 264
+80s {"steps":362,"kind":0,"pc":0} rssMB 247
+87s {"steps":394,"kind":0,"pc":0} rssMB 265
+93s {"steps":425,"kind":0,"pc":0} rssMB 265
+100s {"steps":456,"kind":0,"pc":0} rssMB 251
+107s {"steps":484,"kind":0,"pc":0} rssMB 266
+113s {"steps":516,"kind":0,"pc":0} rssMB 265
+120s {"steps":544,"kind":0,"pc":0} rssMB 264
+126s {"steps":574,"kind":0,"pc":0} rssMB 248
+133s {"steps":605,"kind":0,"pc":0} rssMB 265
+140s {"steps":636,"kind":0,"pc":0} rssMB 253
+146s {"steps":667,"kind":0,"pc":0} rssMB 266
+153s {"steps":698,"kind":0,"pc":0} rssMB 267
+160s {"steps":729,"kind":0,"pc":0} rssMB 252
+166s {"steps":758,"kind":0,"pc":0} rssMB 266
+173s {"steps":787,"kind":0,"pc":0} rssMB 265
+180s {"steps":819,"kind":0,"pc":0} rssMB 266
+186s {"steps":851,"kind":0,"pc":0} rssMB 267
+193s {"steps":882,"kind":0,"pc":0} rssMB 267
+200s {"steps":913,"kind":0,"pc":0} rssMB 257
+206s {"steps":942,"kind":0,"pc":0} rssMB 267
+213s {"steps":970,"kind":0,"pc":0} rssMB 258
+219s {"steps":1001,"kind":0,"pc":0} rssMB 261
+225s {"steps":1030,"kind":0,"pc":0} rssMB 259
+232s {"steps":1059,"kind":0,"pc":0} rssMB 269
+238s {"steps":1089,"kind":0,"pc":0} rssMB 269
+245s {"steps":1121,"kind":0,"pc":0} rssMB 269
+252s {"steps":1152,"kind":0,"pc":0} rssMB 270
+258s {"steps":1183,"kind":0,"pc":0} rssMB 267
+264s {"steps":1214,"kind":0,"pc":0} rssMB 275
+271s {"steps":1250,"kind":0,"pc":0} rssMB 267
+277s {"steps":1292,"kind":0,"pc":0} rssMB 267
+283s {"steps":1330,"kind":0,"pc":0} rssMB 268
+290s {"steps":1372,"kind":0,"pc":0} rssMB 268
+296s {"steps":1412,"kind":0,"pc":0} rssMB 267
+302s {"steps":1454,"kind":0,"pc":0} rssMB 269
+node:internal/process/promises:394
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+page.waitForTimeout: Target page, context or browser has been closed
+    at /root/vm/fullrun.js:14:13 {
+  log: []
+}
+
+Node.js v22.22.0

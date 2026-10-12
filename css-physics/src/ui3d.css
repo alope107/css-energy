@@ -1,0 +1,203 @@
+/* layout: header, then a 900x560 stage holding a CSS 3D camera over a walled tray, then controls */
+:root{
+  --bg:#14161a;--panel:#1c1f25;--ink:#e8e6e1;--dim:#8b8f98;--line:#2a2e36;--acc:#f2b134;
+  --floor:#1b1e24;--floorline:#2c313b;--void:#0e1013;
+  color-scheme:dark;
+}
+@property --yaw{syntax:'<number>';inherits:true;initial-value:0.25}
+@property --Rx{syntax:'<number>';inherits:false;initial-value:0}
+@property --Ry{syntax:'<number>';inherits:false;initial-value:0}
+@property --Rz{syntax:'<number>';inherits:false;initial-value:0}
+@property --Rw{syntax:'<number>';inherits:false;initial-value:1}
+@property --Ri{syntax:'<number>';inherits:false;initial-value:0}
+@property --Rj{syntax:'<number>';inherits:false;initial-value:0}
+@property --Rk{syntax:'<number>';inherits:false;initial-value:0}
+@property --Rg{syntax:'<number>';inherits:false;initial-value:0}
+@property --sel{syntax:'<number>';inherits:false;initial-value:0}
+@property --r00{syntax:'<number>';inherits:false;initial-value:1}
+@property --r01{syntax:'<number>';inherits:false;initial-value:0}
+@property --r02{syntax:'<number>';inherits:false;initial-value:0}
+@property --r10{syntax:'<number>';inherits:false;initial-value:0}
+@property --r11{syntax:'<number>';inherits:false;initial-value:1}
+@property --r12{syntax:'<number>';inherits:false;initial-value:0}
+@property --r20{syntax:'<number>';inherits:false;initial-value:0}
+@property --r21{syntax:'<number>';inherits:false;initial-value:0}
+@property --r22{syntax:'<number>';inherits:false;initial-value:1}
+@property --k0{syntax:'<color>';inherits:false;initial-value:#000}
+@property --k1{syntax:'<color>';inherits:false;initial-value:#000}
+@property --k2{syntax:'<color>';inherits:false;initial-value:#000}
+@property --k3{syntax:'<color>';inherits:false;initial-value:#000}
+@property --k4{syntax:'<color>';inherits:false;initial-value:#000}
+@property --k5{syntax:'<color>';inherits:false;initial-value:#000}
+@property --cs{syntax:'<color>';inherits:false;initial-value:#000}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+#app{max-width:1000px;margin:0 auto;padding:20px 16px 40px;timeline-scope:--pmx,--pmy,--tmx,--tmy}
+header h1{font-size:28px;margin:0 0 4px;letter-spacing:-.02em}
+header h1 span{color:var(--acc)}
+header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
+
+.stage{container-type:inline-size;width:100%}
+.arena{
+  --u:calc(100cqw / __VW__);
+  position:relative;width:100%;aspect-ratio:__VW__/__VH__;overflow:hidden;
+  border:1px solid var(--line);border-radius:6px;
+  background:radial-gradient(120% 90% at 50% 30%,#171a20,var(--void));
+}
+.lv{position:absolute;inset:0;pointer-events:none;z-index:1}
+/* the scene is laid out in fixed px (1 world unit = 1px) and scaled once: per-element cqw
+   units cost ~70us per element per pass when everything moves */
+.view{--sx:0;--sy:0;position:absolute;left:0;top:0;width:__VW__px;height:__VH__px;perspective:__PERSP__px;perspective-origin:50% 50%;
+  transform-origin:0 0;transform:scale(calc(100cqw / __VW__px))}
+.cam{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;
+  transform:translate3d(0,calc(__TY__ * 1px),calc(__NDIST__ * 1px)) rotateX(__TILT__deg) rotateY(calc(var(--yaw) * 1rad))}
+.cam > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
+
+.floor{width:calc(__2WX__ * 1px);height:calc(__2WZ__ * 1px);
+  margin:calc(-__WZ__ * 1px) 0 0 calc(-__WX__ * 1px);
+  background:
+    linear-gradient(var(--floorline) 1px,transparent 1px) 0 0/calc(40 * 1px) calc(40 * 1px),
+    linear-gradient(90deg,var(--floorline) 1px,transparent 1px) 0 0/calc(40 * 1px) calc(40 * 1px),
+    var(--floor);
+  border:1px solid #3a404b;transform:rotateX(90deg)}
+.ceil{width:calc(__2WX__ * 1px);height:calc(__2WZ__ * 1px);
+  margin:calc(-__WZ__ * 1px) 0 0 calc(-__WX__ * 1px);border:1px solid rgb(200 210 230/.13);
+  transform:translateY(calc(-__CEIL__ * 1px)) rotateX(90deg)}
+.post{width:1px;height:calc(__CEIL__ * 1px);margin-top:calc(-__CEIL__ * 1px);background:rgb(200 210 230/.13)}
+.p1{transform:translate3d(calc(-__WX__ * 1px),0,calc(-__WZ__ * 1px))}
+.p2{transform:translate3d(calc(__WX__ * 1px),0,calc(-__WZ__ * 1px))}
+.p3{transform:translate3d(calc(-__WX__ * 1px),0,calc(__WZ__ * 1px))}
+.p4{transform:translate3d(calc(__WX__ * 1px),0,calc(__WZ__ * 1px))}
+.rail{height:calc(26 * 1px);background:linear-gradient(rgb(160 175 200/.16),rgb(160 175 200/.05));
+  border-top:1px solid rgb(200 210 230/.35);margin-top:calc(-13 * 1px)}
+.rb,.rn{width:calc(__2WX__ * 1px);margin-left:calc(-__WX__ * 1px)}
+.rl,.rr{width:calc(__2WZ__ * 1px);margin-left:calc(-__WZ__ * 1px)}
+.rb{transform:translate3d(0,calc(-14 * 1px),calc((-__WZ__ - 2) * 1px))}
+.rn{transform:translate3d(0,calc(-14 * 1px),calc((__WZ__ + 2) * 1px))}
+.rl{transform:translate3d(calc((-__WX__ - 2) * 1px),calc(-14 * 1px),0) rotateY(90deg)}
+.rr{transform:translate3d(calc((__WX__ + 2) * 1px),calc(-14 * 1px),0) rotateY(90deg)}
+
+.sh{border-radius:50%;background:radial-gradient(closest-side,rgb(0 0 0/.75),rgb(0 0 0/0))}
+
+/* bodies: the wrapper (.bw) holds the pose as non-inherited props and translates; .bd pulls the
+   quaternion and grab index with explicit inherit, builds the rotation and the lit face colors */
+.bw{animation-duration:auto;animation-timing-function:linear;animation-fill-mode:both;
+  transform:translate3d(calc(var(--Rx) * 1px),calc(var(--Ry) * 1px),calc(var(--Rz) * 1px))}
+.bw > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
+.bd{width:0;height:0;--Ri:inherit;--Rj:inherit;--Rk:inherit;--Rg:inherit;
+  --Rw:calc(sqrt(max(0, 1 - var(--Ri) * var(--Ri) - var(--Rj) * var(--Rj) - var(--Rk) * var(--Rk))));
+  --r00:calc(1 - 2 * (var(--Rj) * var(--Rj) + var(--Rk) * var(--Rk)));
+  --r01:calc(2 * (var(--Ri) * var(--Rj) - var(--Rk) * var(--Rw)));
+  --r02:calc(2 * (var(--Ri) * var(--Rk) + var(--Rj) * var(--Rw)));
+  --r10:calc(2 * (var(--Ri) * var(--Rj) + var(--Rk) * var(--Rw)));
+  --r11:calc(1 - 2 * (var(--Ri) * var(--Ri) + var(--Rk) * var(--Rk)));
+  --r12:calc(2 * (var(--Rj) * var(--Rk) - var(--Ri) * var(--Rw)));
+  --r20:calc(2 * (var(--Ri) * var(--Rk) - var(--Rj) * var(--Rw)));
+  --r21:calc(2 * (var(--Rj) * var(--Rk) + var(--Ri) * var(--Rw)));
+  --r22:calc(1 - 2 * (var(--Ri) * var(--Ri) + var(--Rj) * var(--Rj)));
+  transform:matrix3d(var(--r00),var(--r10),var(--r20),0,var(--r01),var(--r11),var(--r21),0,var(--r02),var(--r12),var(--r22),0,0,0,0,1)}
+.bd > *{position:absolute;left:0;top:0;display:block}
+.f{backface-visibility:hidden;box-shadow:inset 0 0 0 1px rgb(0 0 0/.22)}
+.sp .disc,.sp .eq,.disc{width:calc(var(--r) * 2 * 1px);height:calc(var(--r) * 2 * 1px);
+  margin:calc(var(--r) * -1 * 1px) 0 0 calc(var(--r) * -1 * 1px);border-radius:50%}
+.disc{
+  transform:rotateY(calc(var(--yaw) * -1rad)) rotateX(calc(__TILT__deg * -1)) translateZ(calc(var(--r) * 0.25 * 1px));
+  background:
+    radial-gradient(circle at 36% 30%,rgb(255 255 255/.55),rgb(255 255 255/0) 32%),
+    radial-gradient(circle at 42% 38%,color-mix(in oklab,var(--c) 100%,#fff 8%),color-mix(in oklab,var(--c) 55%,#07080a) 78%,color-mix(in oklab,var(--c) 30%,#07080a))}
+.sp{color:color-mix(in oklab,rgb(255 255 255/.55),var(--acc) calc(var(--sel) * 100%))}
+.sp .eq{border:calc(2.5 * 1px) solid;transform-style:preserve-3d}
+.sp .eq2{border-color:rgb(0 0 0/.3);transform:rotateX(90deg)}
+.sh{--Ry:inherit;opacity:calc(0.5 * clamp(0, 1 + var(--Ry) / 500, 1));
+  transform:translateY(calc(var(--Ry) * -1px - 1px)) rotateX(90deg) scale(calc(1 - var(--Ry) / 700))}
+/*BODIES*/
+
+.gr{position:absolute;inset:0;display:flex;overflow:hidden;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;
+  --att:0}
+.gr:active{cursor:grabbing}
+.gr>b{flex:1;display:flex;flex-direction:column;contain:layout size style}
+.gr>b>i{flex:1;display:block}
+.gr>b>i:hover{anchor-name:--hov}
+.pm,.tpm{position:absolute;width:0;height:0;pointer-events:none;left:anchor(center,50%);top:anchor(center,50%)}
+.pm{position-anchor:--hov;view-timeline:--pmx x,--pmy y}
+.tpm{position-anchor:--thov;view-timeline:--tmx x,--tmy y}
+
+.ctl{display:flex;flex-wrap:wrap;gap:12px 24px;margin:14px 0 6px}
+.grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.grp b{color:var(--dim);font-weight:400;margin-right:4px}
+.grp input{position:absolute;opacity:0;pointer-events:none}
+.grp label,.grp button{
+  font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);
+  border-radius:4px;padding:4px 10px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.grp label:hover,.grp button:hover{border-color:var(--dim)}
+.grp input:checked+label{background:var(--acc);color:#14161a;border-color:var(--acc)}
+.grp input:focus-visible+label{outline:2px solid var(--acc);outline-offset:2px}
+.grp label:active,.grp button:active{transform:translateY(1px);border-color:var(--acc)}
+.hint{color:var(--dim);margin:6px 0 0}
+footer p{color:var(--dim);font-size:13px;max-width:80ch;margin:18px 0 0}
+footer code{color:var(--ink)}
+
+/* engines: one complete solver per body count; the unselected ones are display:none, so the
+   style engine never looks at them */
+.eng{position:absolute;inset:0;display:none;pointer-events:none}
+.ini,.ptr{position:absolute;inset:0}
+/* the pointer and the camera live on .ptr (below the scene's initial values on .ini), so moving
+   the mouse or orbiting the camera doesn't recompute the start positions of every body */
+/* The pointer: the hovered grid cell gets anchor-name, a zero-size marker is anchored to it, and a
+   view timeline on the marker turns its position into --sx/--sy. A hover change restyles two cells
+   and re-lays out one column; no selector anywhere depends on which cell is hovered (the earlier
+   :has(:nth-child():hover) rules cost ~30 ms per mouse move). */
+.ptr{--sx:0;--sy:0;transition:--yaw .9s ease;animation:pmx linear both,pmy linear both;animation-timeline:--pmx,--pmy}
+@keyframes pmx{from{--sx:__HVW__}to{--sx:-__HVW__}}
+@keyframes pmy{from{--sy:__HVH__}to{--sy:-__HVH__}}
+#app:has(#v-b:checked) .ptr{--yaw:0.85}
+#app:has(#v-c:checked) .ptr{--yaw:1.45}
+#app:has(#v-o:checked) .ptr{animation:orbit 40s linear infinite,pmx linear both,pmy linear both;animation-timeline:auto,--pmx,--pmy}
+@keyframes orbit{from{--yaw:0.25}to{--yaw:6.5332}}
+#app{--gy:__GRAV__;--att:0;--kick:0;--rst:0}
+#app:has(#g-up:checked){--gy:-1600}
+#app:has(#g-zero:checked){--gy:0}
+#app:has(#reset:active),#app:has(.scenes label:active){--rst:1}
+#app:has(#shake:active){--kick:1}
+
+/* touch: Chrome drops :active as soon as a finger starts moving and doesn't move :hover with it,
+   so a finger drag can't be watched the way a mouse drag is. A tap does toggle a checkbox and set
+   :hover, and a scroll follows the finger exactly and can be read with a scroll timeline. So on
+   touch screens: tap a body to pick it up (the tap point comes from the hovered cell of a grid
+   3x the arena's size), drag anywhere to move it (the grid scrolls with the finger, so the held
+   point = that cell minus the scroll offset), tap again to drop it. */
+.tl{position:absolute;inset:0;display:none;overflow:hidden;overscroll-behavior:contain;scrollbar-width:none;
+  scroll-snap-type:both mandatory}
+.tl::-webkit-scrollbar{display:none}
+.tg{display:flex;position:relative;width:300%;height:300%;touch-action:manipulation;user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;cursor:pointer}
+.tg>b{flex:1;display:flex;flex-direction:column;contain:layout size style}
+.tg>b>i{flex:1;display:block}
+.tg>b>i:hover{anchor-name:--thov}
+.tg .tmid{position:absolute;left:33.3333%;top:33.3333%;width:33.3333%;height:33.3333%;pointer-events:none;
+  scroll-snap-align:center;scroll-initial-target:nearest}
+#app:has(#tgrab:checked) .tl{overflow:scroll;scroll-snap-type:none}
+.hint .t{display:none}
+/* touch: Chrome drops :active as soon as a finger starts moving and doesn't move :hover with it, so
+   a finger drag can't be watched like a mouse drag. A tap does toggle a checkbox and set :hover, and
+   a scroll follows the finger exactly. So: tap a body to pick it up, drag anywhere to move it (the
+   layer 3x the arena's size scrolls with the finger, and the marker on the tapped cell moves with it;
+   its view timeline in the layer's viewport is the on-screen point), tap again to drop it. */
+@media (pointer:coarse){
+  .gr{display:none}
+  .tl{display:block}
+  .ptr{animation-timeline:--tmx,--tmy}
+  #app:has(#v-o:checked) .ptr{animation-timeline:auto,--tmx,--tmy}
+  #app:has(#tgrab:checked){--att:1}
+  .hint .m{display:none}
+  .hint .t{display:inline}
+}
+@media not (pointer:coarse){
+  #app:has(.gr:active){--att:1}
+}
+
+/* registers: hidden layout cells that hold state between frames */
+.regs{position:fixed;left:0;top:0;width:0;height:0;overflow:clip;visibility:hidden}
+.regs .sc{position:absolute;left:0;top:0;width:__HS__px;height:__HS__px;overflow:hidden}
+.regs i{position:absolute;width:1px;height:1px}
