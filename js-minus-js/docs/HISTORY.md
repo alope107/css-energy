@@ -170,6 +170,51 @@ reference run passed 37 of 53 programs.
 
 ---
 
+### Phase 9: execution speed (2026-10-13, branch `worktree-js-optimize`)
+
+**Where the time went.** A frame of the running page took 125–143 ms and held three passes: two with a shaping
+(17 ms of HarfBuzz each, plus about 22 ms of style and layout) and one settle pass (about 22 ms). A trace with
+`disabled-by-default-devtools.timeline.invalidationTracking` showed that 98% of all style resolutions happen
+*inside layout*: the readback readers are size containers, so every pass restyled their subtrees (about 1,300
+resolutions per pass) while the anchors they read moved. `#cpu`'s own restyle is about 5 ms per pass. The same
+CPU without the editor and compile chain ran FizzBuzz in 8.5 s instead of 12 s: the UI's frame-wide costs
+(animations for the 1,536 latch registers, root-layer repaints, a settle pass every frame) were the rest.
+
+**Traps.** The model (`tools/traps.py`) put 169 of FizzBuzz's 193 shapings down to traps: 58 PUTC (one per
+character), 56 EXT (`%` in the program, and `printNum`'s MOD / DIV per digit) and 53 cache misses.
+
+**What changed.**
+
+1. **The PRINT instruction family** (`PRINT PRINTB PRINTSP PRINTBSP PRINTLN PRINTBLN`, serviced by CSS). A
+   `console.log` argument is one word; the page prints up to 4 console cells per shaping (one write channel per
+   bank), tells strings from numbers at run time, and carries the position across shapings in a register
+   (`--pst`). The lib routines `printNum`, `puts`, `printBool` and their `…Ln` forms went away (the lib is `addc`
+   and `__init`, 93 ROM words). Model: FizzBuzz 1,329 → 476 steps and 193 → 103 shapings; the suite's shapings
+   fell 30% (5,967 → 4,147). Page: FizzBuzz HALT 14.0–14.7 s → 9.5–9.8 s after Run (execution about 12 s → 7.2 s).
+2. **Slim readback readers.** One fixed size container per reader, one scroller, and absolutely positioned
+   view-timeline subjects whose `top` reads `100cqi` directly, instead of a `.rv` → `.reg` → `.sp` / `.sub` /
+   `.pad` chain. CPU-only FizzBuzz 5.9 → 4.8 s from load; page 9.5–9.8 → 9.3–9.7 s; mid-run frames 143 → 125 ms.
+3. **The editor pane on its own compositor layer** (`#app { will-change: transform }`), so the CPU's per-pass
+   paint invalidations don't re-record the editor and notes (about 7 ms of paint per frame). Page: HALT 8.5–8.6 s
+   after Run (execution about 6.2 s).
+
+Net: FizzBuzz runs about 1.9× faster on the page (12 s → 6.2 s), 2.1× on the CPU alone (8.8–10 s → 4.8 s).
+
+**Measured but not changed.**
+
+- **More than 2 issues per frame** (`--issue=3`, `4`): the output is wrong (steps 1,555 / 3,323 instead of
+  1,329), so shapings ran on stale state. K = 2 stays.
+- **A code / data partition of the cache** (model): 10 or 11 lines for code blocks and the rest for data, each
+  its own ring. FizzBuzz improves (103 → 96 shapings) but the suite gets worse (4,147 → 4,368): small programs
+  then waste the other partition's lines.
+- **A bigger cache** (model): N = 32 cuts the suite's misses 27% but adds 1,136 glyph cells, and HarfBuzz time
+  grows with cells × lookups. Not built.
+- **More micro-cycles** (model): S = 48 / 64 cut shapings 17% / 24%, but the sanitizer caps S × 432 subtables at
+  16,384 (that is why S = 48 "never executed a step"), and HarfBuzz time per shaping grows with S, so the
+  per-shaping CSS cost would have to fall first.
+
+---
+
 ## Dead ends and superseded approaches
 
 | # | Tried | What happened | Replaced by |
@@ -204,6 +249,10 @@ reference run passed 37 of 53 programs.
 | 28 | Separator passed as an argument, or emitted by the caller | +9% steps, or code overflowing the cache | `…Ln` entry points |
 | 29 | A fresh wrapper per `else if` | a chain of 8 branches overflowed the control stack | the inner `if` reuses the outer `else`'s wrapper and label |
 | 30 | One set of label ports per possible deflab site | 26–35 ports per level | collected `&&`/`||` labels and pruned unreachable blocks (22 ports) |
+| 31 | Printing in the lib: PUTC per character, MOD / DIV per digit | 114 of FizzBuzz's 193 shapings | the PRINT instruction family, serviced by CSS, 4 console cells per shaping |
+| 32 | Readback readers with a value element, a scroller, a spacer and a pad under each size container | ~1,300 style resolutions inside layout per pass | one scroller with absolutely positioned subjects reading `100cqi` |
+| 33 | 3 or 4 issues per frame | wrong output: shapings ran on stale state | 2 issues per frame |
+| 34 | A code / data cache partition (model) | the suite's shapings +5% | the FIFO ring |
 
 ---
 
@@ -213,7 +262,7 @@ These come from earlier chats unless noted, and none has been measured on the cu
 
 ### Fewer traps
 
-The machine runs about 110 steps/s on the page (about 50 in the old sandbox), and traps end shapings early, so these matter most.
+Traps end shapings early, so these matter most. After phase 9 the suite's traps are 1,309 cache misses, 1,104 arithmetic EXT (MOD / DIV / MUL, 160 of them in `primes.js` alone) and about 230 PRINT chunks, so MOD / DIV in the font and fewer misses are the leads now.
 
 - **Do SHL13 in the font.** It's a linear shift.
 - **Do multiply-by-small-constant in the font.**
@@ -223,7 +272,7 @@ The machine runs about 110 steps/s on the page (about 50 in the old sandbox), an
 - **Service read misses inside one layout pass.** A toy chained 8 shapings in one layout; only writes are stuck
   at once per frame.
 - **Pack two characters per word.**
-- **Buffer PUTC** in the glyph string and flush it at the next trap that happens anyway.
+- ~~Buffer PUTC~~ — superseded by the PRINT family (phase 9): output is serviced in chunks of up to 4 cells.
 - **Keep the top of stack in registers.**
 
 ### More shapings per frame

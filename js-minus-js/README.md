@@ -10,12 +10,13 @@ editor and press Run. The program then goes through four stages:
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-11).**
+**Status (2026-10-13).**
 
 - All five test levels pass. That includes 89 programs checked against Node's output and 14 programs the
   compiler must reject.
-- On the page, compiling takes about 1.5–3.5 s from Run, including the readback sweep. The CPU runs about 110
-  bytecode steps per second, so FizzBuzz 1–15 finishes in about 14 s (headless Chromium 153, 2026-10-13).
+- On the page, compiling takes about 1.5–3.5 s from Run, including the readback sweep. FizzBuzz 1–15 then runs
+  in about 6 s and halts about 8.5 s after Run (headless Chromium 153, 2026-10-13); it was 14 s before printing
+  moved into the machine (one trap per output chunk instead of one per character).
 - See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the numbers and [docs/HISTORY.md](docs/HISTORY.md) for
   how the design got here.
 
@@ -70,15 +71,17 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 ### How values print
 
 - A string is a tagged pointer: its address minus 2^18. `console.log` can tell it from a number at run time.
-- The compiler also tracks each value's type statically and calls a matching print routine. The tracked types
-  are boolean, string, number and unknown, and they come from:
+- Printing is one machine instruction per argument (the PRINT family), serviced by the page's CSS: up to 4
+  console cells per shaping, so a short number or string costs one shaping instead of one per character.
+- The compiler also tracks each value's type statically, so that booleans print as `true` / `false`. The tracked
+  types are boolean, string, number and unknown, and they come from:
   - comparisons and `!`;
   - literals and arithmetic;
   - a variable's last assignment;
   - a function's returns.
 - `console.log(1 < 2)` prints `true`. So does a variable or a function the compiler knows holds a boolean.
-- Each print routine also checks the value at run time where that's cheap, so a wrong static guess still
-  prints a number or a string correctly.
+- The machine checks the value at run time, so a wrong static guess still prints a number or a string correctly
+  (only 0 / 1 depend on the static type: boolean or number).
 - `+` at the top level of a `console.log` argument joins strings: `"n = " + n`, `s + "!"`, `1 + n + "x"`.
   Strings can't be built anywhere else: `var s = "a" + "b"` is a compile error.
 

@@ -12,7 +12,7 @@ var OP_LOADI = 6; var OP_STOREI = 7; var OP_ADD = 8; var OP_SUB = 9; var OP_MUL 
 var OP_MOD = 12; var OP_LT = 13; var OP_GT = 14; var OP_LE = 15; var OP_GE = 16; var OP_EQ = 17; var OP_NE = 18;
 var OP_AND = 19; var OP_OR = 20; var OP_NOT = 21; var OP_NEG = 22; var OP_JMP = 23; var OP_JZ = 24;
 var OP_JNZ = 25; var OP_CALL = 26; var OP_ENTER = 27; var OP_RET = 28; var OP_POP = 29; var OP_DUP = 30;
-var OP_PUTC = 31; var OP_HALT = 32; var OP_JMPI = 33; var OP_SHL13 = 34; var OP_INCG = 35; var OP_INCL = 36; var OP_IDX = 37; var OP_IDXL = 38;
+var OP_PUTC = 31; var OP_HALT = 32; var OP_JMPI = 33; var OP_SHL13 = 34; var OP_INCG = 35; var OP_INCL = 36; var OP_IDX = 37; var OP_IDXL = 38; var OP_PRINT = 39;
 
 var src; var srcLen; var codeBase; var dataPtr; var printFn; var putsFn;
 
@@ -23,7 +23,7 @@ var pos = 0; var tok = 0; var tokVal = 0; var tokStart = 0; var tokLen = 0;
 // character classes: 1 alpha, 3 digit (odd = identifier char), 4 space
 var ctype = [0,0,0,0,0,0,0,0,0,4,4,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,3,3,3,3,3,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0];
 var tokHash = 0;
-var H_VAR = 1845; var H_IF = 3357; var H_ELSE = 3765; var H_WHILE = 289; var H_FOR = 3285; var H_RETURN = 8147; var H_FUNCTION = 4077; var H_PUTC = 4313; var H_PEEK = 4862; var H_POKE = 6461; var H_ALLOC = 3971; var H_EXEC = 6670; var H_HALT = 455; var H_CONSOLE = 4188; var H_PRINT = 1452; var H_PUTS = 4329;
+var H_VAR = 1845; var H_IF = 3357; var H_ELSE = 3765; var H_WHILE = 289; var H_FOR = 3285; var H_RETURN = 8147; var H_FUNCTION = 4077; var H_PUTC = 4313; var H_PEEK = 4862; var H_POKE = 6461; var H_ALLOC = 3971; var H_EXEC = 6670; var H_HALT = 455; var H_CONSOLE = 4188; var H_PRINT = 1452; var H_PUTS = 4329; var H_PRN = 4793;
 
 function next() {
   var c = src[pos]; var t = ctype[c]; var d = 0;
@@ -149,6 +149,7 @@ function parsePrimary() {
   // builtins (identifier hash first, the string compare only confirms)
   if (isP(40)) {
     if (h == H_PUTC) { if (identIs(start, n, "putc")) { next(); parseExpr(); expectP(41); emit(OP_PUTC, 0); emit(OP_PUSHI, 0); return 0; } }
+    if (h == H_PRN) { if (identIs(start, n, "prn")) { next(); parseExpr(); expectP(41); emit(OP_PRINT, 0); emit(OP_PUSHI, 0); return 0; } }   // the machine's PRINT (no separator)
     if (h == H_PEEK) { if (identIs(start, n, "peek")) { next(); parseExpr(); expectP(41); emit(OP_LOADI, 0); return 0; } }
     if (h == H_POKE) { if (identIs(start, n, "poke")) { next(); parseExpr(); expectP(44); parseExpr(); expectP(41); emit(OP_STOREI, 0); emit(OP_PUSHI, 0); return 0; } }
     if (h == H_ALLOC) { if (identIs(start, n, "alloc")) { next(); addr = dataPtr; dataPtr = dataPtr + tokVal; next(); expectP(41); emit(OP_PUSHI, addr); return 0; } }

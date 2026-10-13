@@ -31,7 +31,13 @@ import sys
 
 # opcodes (jsc.js)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
-    JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL = range(39)
+    JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL, \
+    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN = range(45)
+# PRINT family (serviced by CSS on the page, machine/uarch.py in the model): pop a value and print it. A tagged string pointer
+# prints its bytes, anything else prints in decimal; the B forms print 0 / 1 as false / true (the static type says
+# boolean). SP / LN add a space / newline. PRINT_OP[sep] + (type == boolean) is the opcode.
+PRINT_OP = {0: PRINT, 32: PRINTSP, 10: PRINTLN}
+PRINT_SEP = {PRINT: 0, PRINTB: 0, PRINTSP: 32, PRINTBSP: 32, PRINTLN: 10, PRINTBLN: 10}
 
 # limits (= the CSS chain's fixed table sizes)
 OD, CD, NS, NF, NL, EMAX = 8, 8, 32, 16, 64, 12
@@ -61,7 +67,7 @@ def prec(code):
     return {MUL: 6, DIV: 6, MOD: 6, ADD: 5, M_CADD: 5, SUB: 5, LT: 4, GT: 4, LE: 4, GE: 4, EQ: 3, NE: 3, AND: 2, OR: 1, NOT: 7, NEG: 7}.get(code, 0)
 
 # + at the top level of a console.log argument (value: the left operand's static type); precedence of +
-M_CADD = 39
+M_CADD = 50
 # OPS markers (codes >= 100)
 M_PAREN, M_CALL, M_IDXG, M_IDXL, M_PUTC, M_PRINT, M_IDXA = 100, 101, 102, 103, 104, 105, 107
 # control stack kinds. Bodies: IFB / ELSEB / LOOPB (a = continue target, b = break target) / FUNCB; + BRACELESS:
@@ -78,8 +84,6 @@ class Compiler:
     def __init__(self, data_base, code_base, lib):
         """lib: the runtime library's entry addresses (lib.json)"""
         self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
-        self.prfn = [lib[n] for n in ('printNum', 'printBool', 'puts', 'printNum')]          # by static type
-        self.prfn_ln = [lib[n] for n in ('printNumLn', 'printBoolLn', 'putsLn', 'printNumLn')]   # + newline
         # lexer
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.dp = data_base + 1             # globals and array literals (parser); data_base holds STRTAG
@@ -156,12 +160,9 @@ class Compiler:
             if self.cs[k][0] in (C_LOOPB, C_LOOPB1): return self.cs[k]
         return None
     def print_call(self, sep):
-        """print the value on the stack by its static type; then the separator sep (0: none, and drop the result)"""
-        if sep == 10: self.emit(CALL, self.prfn_ln[self.lb])
-        else:
-            self.emit(CALL, self.prfn[self.lb])
-            self.emit(POP)
-            if sep: self.emit(PUSHI, sep); self.emit(PUTC)
+        """print (and pop) the value on the stack, then the separator sep (0 none, 32 space, 10 newline): one PRINT word.
+        The machine tells strings from numbers at run time; only booleans need the static type (the B forms)."""
+        self.emit(PRINT_OP[sep] + int(self.lb == 1), b=0)
 
     # ---------------- lexer: one character -> at most one token
     def char(self, c, cn):
@@ -599,6 +600,17 @@ def run(rom, mem_init, sp0, out_base=7040, cols=8, rows=16, max_steps=10 ** 6):
         elif op == 36: mem[fp + simm] = s20(mem[fp + simm] + 1)
         elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) % 8192]
         elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) % 8192]
+        elif PRINT <= op <= PRINTBLN:
+            sp -= 1; v = mem[sp]; p = v + STRTAG; sep = PRINT_SEP[op]
+            if SDATA + 4096 <= p < 2 * SDATA + 4096:          # a tagged string (4352: the lib's DONE marker, empty)
+                text = []
+                while p != SDATA + 4096 and mem[p] != 0: text.append(mem[p]); p += 1
+            elif op % 2 == 0 and v in (0, 1): text = [ord(ch) for ch in ('true' if v else 'false')]
+            else: text = [ord(ch) for ch in str(v)]
+            for c in text + ([sep] if sep else []):
+                if c == 10: optr = (optr // cols + 1) * cols % (cols * rows)
+                else: mem[out_base + optr] = c; optr = (optr + 1) % (cols * rows)
+                out.append(c)
         else: raise RuntimeError(f'bad op {op} at {pc - 1}')
 
 LAYOUT = dict(data_base=4096, code_base=4608, sp0=5632)

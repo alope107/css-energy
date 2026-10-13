@@ -18,8 +18,16 @@ ROM = 4096
 MASK = (1 << 20) - 1
 def s20(v): v &= MASK; return v - (1 << 20) if v >> 19 else v
 
-OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split()
+# PRINT family: pop a value and print it (CSS services the trap: a number in decimal, a tagged string pointer's bytes, or with
+# the B flag true/false for 0/1); SP = a space after, LN = a newline after. One trap per chunk of up to 4 console cells
+# (one write channel per bank), so a short number or string costs one shaping, "false" or a 5-digit number two.
+PRINTOPS = ['PRINT', 'PRINTB', 'PRINTSP', 'PRINTBSP', 'PRINTLN', 'PRINTBLN']
+OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS
 OP = {n: i for i, n in enumerate(OPN)}
+STRTAG = 262144                             # a string value is its address - STRTAG (cc_ref.STRTAG)
+STR_LO, STR_HI = 4352, 4608                 # string area (cc_ref: data_base + SDATA .. + 2 * SDATA); STR_LO itself is the DONE marker
+OUT_BASE, OUT_COLS, OUT_ROWS = 7040, 8, 16  # console
+PRINT_CHUNK = 4                             # console cells one service can write (one per bank)
 FETCH = 39                                  # pseudo-op: fetch an instruction word from RAM
 
 def tdiv(a, b): return 0 if b == 0 else int(a / b)
@@ -75,7 +83,10 @@ UCODE = {
                dict(mem=W('SP-1', 'T3'), commit={'PC': 'PC+1'})],
     'IDXL':   [dict(mem=R('FP+SIM'), t={'T1': 'MDR'}), dict(mem=R('SP-1'), t={'T2': 'MDR'}), dict(mem=R('T1+T2'), t={'T3': 'MDR'}),
                dict(mem=W('SP-1', 'T3'), commit={'PC': 'PC+1'})],
+    # like PUTC, but the service may take several shapings: RESV is raised only when the whole value has been printed
+    **{n: [dict(mem=R('SP-1'), t={'T1': 'MDR'}), dict(ext=n, commit={'SP': 'SP-1', 'PC': 'PC+1'})] for n in PRINTOPS},
 }
+def ext_a(name): return name == 'SHL13' or name in PRINTOPS      # unary EXT ops: the operand is T1 (binary ones: a = T2, b = T1)
 assert set(UCODE) == set(OPN), set(OPN) - set(UCODE)
 
 def ev(e, r):
@@ -107,6 +118,7 @@ class Machine:
         self.res, self.resv, self.ackwb = 0, 0, 0
         self.inline = None                 # incoming line from the last service
         self.out, self.optr = [], 0
+        self.pst = 0                       # PRINT service state: 0 fresh; a string's next byte address; or chunks done + 1 for a number
         self.steps = self.cycles = self.shapings = self.traps = 0
         self.trapkinds = {}
         self.halted = False
@@ -153,7 +165,7 @@ class Machine:
             last = mu == len(UCODE[name]) - 1
             if cyc.get('halt'): return self.trap(('HALT',))
             if cyc.get('ext') and not self.resv:
-                return self.trap(('EXT', cyc['ext'], r.get('T2', 0) if cyc['ext'] != 'SHL13' else r['T1'], r.get('T1', 0)))
+                return self.trap(('EXT', cyc['ext'], r['T1'] if ext_a(cyc['ext']) else r.get('T2', 0), r.get('T1', 0)))
             if cyc.get('putc') and not self.resv:
                 return self.trap(('PUTC', r['T1']))
             m = cyc.get('mem')
@@ -177,7 +189,8 @@ class Machine:
         return None
 
     def trap(self, t):
-        self.traps += 1; self.trapkinds[t[0]] = self.trapkinds.get(t[0], 0) + 1
+        k = 'PRINT' if t[0] == 'EXT' and t[1] in PRINTOPS else t[0]      # counted apart from the arithmetic EXT ops
+        self.traps += 1; self.trapkinds[k] = self.trapkinds.get(k, 0) + 1
         return t
 
     def service(self, t):
@@ -194,6 +207,8 @@ class Machine:
                 assert t[1] >= ROM, ('read below RAM', t)
                 self.lines[self.vp] = [t[1], self.ram.get(t[1], 0), 0]
                 self.vp = (self.vp + 1) % self.N
+        elif k == 'EXT' and t[1] in PRINTOPS:
+            self.print_service(t[1], t[3])
         elif k == 'EXT':
             self.res = s20(EXTF[t[1]](t[2], t[3])); self.resv = 1
             assert abs(EXTF[t[1]](t[2], t[3])) < (1 << 19), t
@@ -201,6 +216,44 @@ class Machine:
             self.out.append(t[1]); self.resv = 1
         elif k == 'HALT':
             self.halted = True
+
+    def putc(self, c):
+        if c == 10: self.optr = (self.optr // OUT_COLS + 1) * OUT_COLS % (OUT_COLS * OUT_ROWS)
+        else: self.optr = (self.optr + 1) % (OUT_COLS * OUT_ROWS)
+        self.out.append(c)
+
+    def print_service(self, op, v):
+        """One shaping's worth of a PRINT: up to PRINT_CHUNK console cells (consecutive cells are in distinct banks), exactly
+        as the CSS service does it (gen_fvm4.py). A string chunk also ends at its block (one block read per service), at a
+        NUL (done) or at a newline (the newline is taken, the chunk ends). RESV is raised when the value and its separator
+        are out; until then the CPU re-traps with the same value and self.pst carries the position."""
+        sep = 10 if op.endswith('LN') else 32 if op.endswith('SP') else 0
+        isb = op in ('PRINTB', 'PRINTBSP', 'PRINTBLN')
+        p = v + STRTAG
+        if STR_LO <= p < STR_HI:                                 # a string (STR_LO: the lib's DONE marker, prints nothing)
+            q = self.pst or p
+            e, term = 0, 0
+            if q != STR_LO:
+                while (q + e) % 4 != 0 or e == 0:
+                    b = self.ram.get(q + e, 0) if q + e >= ROM else 0
+                    if b == 0 or b == 10: term = b; break
+                    e += 1
+                else: term = None                                 # block exhausted, no terminator seen
+            else: term = 0
+            for i in range(e): self.putc(self.ram.get(q + i, 0))
+            if term == 10: self.putc(10); self.pst = q + e + 1; return
+            if term is None: self.pst = q + e; return
+            text = ''                                             # NUL: the value is out; the separator follows
+        else:
+            text = ('true' if v else 'false') if isb and v in (0, 1) else str(v)
+            text = text[PRINT_CHUNK * (self.pst - 1):] if self.pst else text
+        chunk = text + (' ' if sep == 32 else '')
+        if len(chunk) > PRINT_CHUNK:
+            for ch in chunk[:PRINT_CHUNK]: self.putc(ord(ch))
+            self.pst = (self.pst or 1) + 1; return
+        for ch in chunk: self.putc(ord(ch))
+        if sep == 10: self.putc(10)
+        self.pst = 0; self.resv = 1
 
     def run(self, S, limit=10 ** 6):
         while not self.halted and self.shapings < limit:

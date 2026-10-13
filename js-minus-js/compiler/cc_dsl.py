@@ -73,8 +73,6 @@ class Prog(Base):
         """mode / tk: specialise for a known starting mode and token kind (and err == 0) -- the page selects the
         variant with a container query, so each level evaluates only the code reachable from that mode"""
         self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
-        self.prfn = [lib[n] for n in ('printNum', 'printBool', 'puts', 'printNum')]
-        self.prfn_ln = [lib[n] for n in ('printNumLn', 'printBoolLn', 'putsLn', 'printNumLn')]
         self.spec_mode, self.spec_tk, self.spec_tv = mode, tk, tv
         X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2'])
         X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), scA=K(0), scAl=K(0), scO=K(0), scOl=K(0))
@@ -227,12 +225,8 @@ class Prog(Base):
     def store(self, k, a):
         self.emit(ite(eq(k, 2), R.STOREL, R.STOREG), mod(a, 8192))
     def print_call(self, sep):
-        b = self.m(self.v('lb'), 'plb')
-        if sep == 10: self.emit(R.CALL, add(*[mul(eq(b, i), f) for i, f in enumerate(self.prfn_ln)]))
-        else:
-            self.emit(R.CALL, add(*[mul(eq(b, i), f) for i, f in enumerate(self.prfn)]))
-            self.emit(R.POP)
-            if sep: self.emit(R.PUSHI, sep); self.emit(R.PUTC)
+        # one PRINT word (cc_ref.print_call): the B form when the static type is boolean
+        self.emit(add(R.PRINT_OP[sep], eq(self.v('lb'), 1)), 0, b=0)
 
     # ---------------- lexer
     def lexer(self):

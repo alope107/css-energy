@@ -1,7 +1,8 @@
 """traps.py prog.js... — what each program costs the font CPU, from its reference model (no browser): code words,
 steps, shapings and traps by kind under uarch4 at the shipped configuration (N=16 lines, S=32 cycles/shaping).
 Shapings track wall time on the page (each one is a layout pass), and traps end shapings early: MISS / WFAIL are
-cache misses and write-backs, EXT is MUL/DIV/MOD/SHL13, PUTC is console output. MISS=1 prints misses by line."""
+cache misses and write-backs, EXT is MUL/DIV/MOD/SHL13, PRINT is a console-output chunk (the PRINT family), PUTC a single
+character. MISS=1 prints misses by line."""
 import os, sys; ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path[:0] = [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback')]  # repo root
 import json, collections
 import cc_ref as R

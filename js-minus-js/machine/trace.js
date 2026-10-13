@@ -1,4 +1,5 @@
 // trace.js page.html secs — Chrome trace, aggregate self time of top events (harness only). Writes trace.json in the cwd.
+// The window must sit inside the run: WAIT (default 3000 ms after load) and, with RUN=1, RUNWAIT (default 8000 ms after Run).
 // RUN=1 clicks Run (.runbtn) after load, so on the typed-input page the trace covers compile and CPU frames, not the idle scan.
 const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const fs = require('fs');
@@ -7,7 +8,7 @@ const fs = require('fs');
   const b = await chromium.launch({ args: ['--no-sandbox', '--no-proxy-server', '--disable-gpu'] });
   const p = await b.newPage({ viewport: { width: 1200, height: 800 } });
   await p.goto('file://' + require('path').resolve(pg));
-  await p.waitForTimeout(3000);
+  await p.waitForTimeout(+(process.env.WAIT || 3000));   // WAIT ms after load before Run / tracing (a CPU-only page starts at load)
   if (process.env.RUN) { await p.click('.runbtn'); await p.waitForTimeout(+(process.env.RUNWAIT || 8000)); }   // past the readback sweep + compile
   await b.startTracing(p, { path: 'trace.json', categories: ['blink', 'devtools.timeline', 'disabled-by-default-devtools.timeline', 'blink.animations', 'fonts', 'benchmark', 'cc', 'blink_style'] });
   await p.waitForTimeout(+secs * 1000);

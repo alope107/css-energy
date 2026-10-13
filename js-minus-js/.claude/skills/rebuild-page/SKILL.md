@@ -8,7 +8,7 @@ description: Rebuild dist/js_in_css.xhtml from source and verify it end to end i
    `build/ccimg.json`, `build/f4cc_16.woff2` (the CPU font, with the lib baked into its ROM) and
    `build/js_in_css.xhtml`. Builds are reproducible: the same sources give the same bytes.
 2. **Smoke-test.** Run `make l5-smoke` (about 1 minute). Every line must say `"ok":true`. The `initial` run is
-   FizzBuzz; its console is compared with Node's output, and it should halt about 14 s after Run. A `haltMs` near
+   FizzBuzz; its console is compared with Node's output, and it should halt about 8.5 s after Run. A `haltMs` near
    240000 means the harness gave up waiting.
 3. **Full test, if the change could affect particular programs.** Run `make l5` in the background (about
    10 minutes):
@@ -19,4 +19,4 @@ description: Rebuild dist/js_in_css.xhtml from source and verify it end to end i
    ```
 4. **Ship.** Run `make dist` to copy the page to `dist/`.
 5. **Check timing.** If wall time matters to the change, compare FizzBuzz `haltMs` with `docs/BENCHMARKS.md`
-   §5. The noise is about ±0.3 s.
+   §5. The noise is about ±0.2 s.

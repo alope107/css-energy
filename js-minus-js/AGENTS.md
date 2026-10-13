@@ -79,8 +79,12 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
 
 - Run `make l5-smoke`.
 - For speed claims, time FizzBuzz to HALT with `machine/ui_seq.js` (initial program) or `machine/ui_run.js`, before
-  and after, back to back in one session. Both press Run. Run-to-run noise is about ±0.3 s on ~14 s.
-  (`halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for the old fixed-program pages.)
+  and after, back to back in one session. Both press Run. Run-to-run noise is about ±0.2 s on ~8.5 s.
+- For a frame profile, keep the trace window inside the run: `RUN=1 RUNWAIT=3500 node machine/trace.js page 4`
+  (FizzBuzz halts about 8.5 s after Run; a window past HALT shows idle frames and flatters everything).
+- To separate machine costs from the UI's, time a CPU-only page (`gen_fvm4.py` without `UI=1` on a RAM image
+  that holds the program; `machine/halttime.js`): FizzBuzz 4.8 s from load vs 8.5 s after Run on the page.
+  (`halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for such CPU-only pages.)
 
 ## Done means
 

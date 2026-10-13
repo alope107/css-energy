@@ -107,3 +107,29 @@ that relies on it or records it.
 33. **avar2 can compute arbitrary two-input lookup tables.** It shipped in Chrome 148, and Chrome's Rust font
     library (Fontations) had a performance bug that scaled roughly as axes³. A related chat found this; it isn't
     used here yet.
+34. **A size container restyles its dependent subtree inside layout, every pass its size is dirty.** With the trace
+    category `disabled-by-default-devtools.timeline.invalidationTracking`, `StyleResolver::ResolveStyle` instants
+    show where style resolutions happen: on the CPU page 98% of them were inside `Layout`, about 1,300 per pass,
+    all under the 74 readback readers (`container-type: inline-size | size`, width from `anchor-size()`), while
+    `Document::recalcStyle` resolved only about 48 elements (`#cpu` and its ancestors). Keep what sits under a
+    size container tiny (`machine/gen_fvm4.py`: one scroller, one or two subjects). *(measured, 2026-10-13)*
+35. **A view-timeline subject may be absolutely positioned inside its scroller** with `top` from container units;
+    the timeline is active with no in-flow content and no scrollable overflow (`overflow: hidden` suffices). The
+    registers of `gen_fvm4.py` work this way. *(measured)*
+36. **`will-change: transform` on a large static pane keeps the root layer from re-recording it.** The CPU's
+    per-pass invalidations (hidden state text, status counters, console cells) made Blink re-record the root
+    layer, about 7 ms per frame with the editor and notes in it; `#app` on its own layer removed that.
+    *(measured: FizzBuzz 9.3–9.7 → 8.5–8.6 s after Run)*
+37. **More than two issues per frame run on stale state.** With `--issue=3` or `4` the CPU executed duplicate
+    steps (1,555 and 3,323 instead of 1,329) and the output was garbage; with 2 issues (3 passes per frame) it is
+    exact. The third pass propagates the second shaping's registers; what limits the number of useful passes was
+    not found. *(measured)*
+38. **Blink does not always run the settle pass.** The same CPU page without the editor and compile chain ran
+    2 passes per frame in most frames (66 ms), the full page always 3 (125 ms); both are correct. In both the
+    trigger of the third pass is the `ScrollTimeline` style invalidation of `#cpu` after the second shaping.
+    Not understood: on the CPU-only page a time-driven infinite animation changed nothing (2.5 passes per frame
+    either way), and 1,536 extra active view-timeline animations *removed* the third pass (2.00 per frame) at no
+    cost in frame time (`scratchpad` experiment `xp_regs`, 2026-10-13).
+39. **The trace window must sit inside the run.** `trace.js` with `RUN=1` starts tracing `RUNWAIT` ms after Run
+    (default 8 s); once FizzBuzz halts at about 8.5 s, that window shows idle frames (shaping 17 ms per frame
+    instead of 34) and flatters every number. Use `RUNWAIT=3500` with a 4 s trace.

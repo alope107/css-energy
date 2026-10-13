@@ -8,12 +8,13 @@ const fs = require('fs'), path = require('path');
   const p = await b.newPage(process.env.FLAGS ? { viewport: null } : { viewport: { width: 1300, height: 950 } });
   const t0 = Date.now(); await p.goto('file://' + path.resolve(pg), { timeout: 600000 }); console.log('load ms', Date.now() - t0);
   const st = () => p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'),
+    halted: +c.getPropertyValue('--isHALT') === 1,
     status: getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''), n: getComputedStyle(document.querySelector('.cstv')).getPropertyValue('--csn') }; });
   const out = () => p.evaluate(() => { const codes = [...document.querySelectorAll('.oc > b')].map(e => Math.round(e.parentElement.getBoundingClientRect().width) - 1048576);
     const rows = []; for (let i = 0; i < 16; i++) rows.push(codes.slice(i * 8, i * 8 + 8).map(c => c >= 32 && c < 127 ? String.fromCharCode(c) : ' ').join('').replace(/\s+$/, '')); return rows.join('\n').replace(/\s+$/, ''); });
   async function run(label, want) {
     const t = Date.now(); await p.click('.runbtn'); let r, comp = null;
-    while (Date.now() - t < 240000) { await p.waitForTimeout(100); r = await st(); if (comp === null && /compiled|error/.test(r.status)) comp = Date.now() - t; if (r.kind === 97 || /error/.test(r.status)) break; }
+    while (Date.now() - t < 240000) { await p.waitForTimeout(100); r = await st(); if (comp === null && /compiled|error/.test(r.status)) comp = Date.now() - t; if (r.halted || /error/.test(r.status)) break; }
     const o = await out(); let ok;
     if (want.startsWith('ERR:')) ok = r.status.includes(want.slice(4)); else ok = o === want.replace(/\s+$/, '');
     console.log(JSON.stringify({ label, compiledMs: comp, haltMs: Date.now() - t, steps: r.steps, status: r.status, words: r.n, ok }));

@@ -1,4 +1,4 @@
-// libbuild.js out.json — compile jsc's runtime library (printNum/print/puts) into ROM with jsc itself,
+// libbuild.js out.json — compile the runtime library (lib_src.js: addc) into ROM with jsc itself,
 // and end the ROM with a jump to the user code buffer instead of HALT.
 const fs = require("fs"), vm = require("vm");
 const jscSource = fs.readFileSync(__dirname + "/jsc.js", "utf8");
@@ -21,6 +21,5 @@ for (let i = 0; i < env.nsym; i++) {
 }
 const CODE_BASE = +process.argv[3] || 4608;
 const len = env.cp; rom[len - 1] = 23 * 8192 + CODE_BASE;     // final HALT -> JMP user code
-fs.writeFileSync(process.argv[2], JSON.stringify({ rom: Array.from(rom.slice(0, len)), printBool: names.printBool, puts: names.puts, printNum: names.printNum, addc: names.addc,
-  printBoolLn: names.printBoolLn, putsLn: names.putsLn, printNumLn: names.printNumLn, codeBase: CODE_BASE, init: INIT }));
-console.log("lib ROM", len, "words; print", names.print, "printBool", names.printBool, "puts", names.puts, "last word", rom[len - 1]);
+fs.writeFileSync(process.argv[2], JSON.stringify({ rom: Array.from(rom.slice(0, len)), addc: names.addc, codeBase: CODE_BASE, init: INIT }));
+console.log("lib ROM", len, "words; addc", names.addc, "last word", rom[len - 1]);

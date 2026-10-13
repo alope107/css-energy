@@ -1,4 +1,4 @@
-// halttime.js page.html [maxSec] — time from navigation to HALT (kind 97), polled every 250 ms; checks console output against IMG (harness only)
+// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every 250 ms; checks console output against IMG (harness only)
 const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const path = require('path'), fs = require('fs');
 (async () => {
@@ -9,9 +9,9 @@ const path = require('path'), fs = require('fs');
   let r, first = null;
   while ((Date.now() - t0) / 1000 < +maxs) {
     await p.waitForTimeout(250);
-    r = await p.evaluate(() => { const cs = getComputedStyle(document.querySelector('#cpu')); return { steps: +cs.getPropertyValue('--steps'), kind: +cs.getPropertyValue('--kind') }; });
+    r = await p.evaluate(() => { const cs = getComputedStyle(document.querySelector('#cpu')); return { steps: +cs.getPropertyValue('--steps'), kind: +cs.getPropertyValue('--kind'), halted: +cs.getPropertyValue('--isHALT') === 1 }; });
     if (first === null && r.steps > 0) first = Date.now() - t0;
-    if (r.kind === 97) break;
+    if (r.halted) break;
   }
   const th = Date.now() - t0;
   const codes = await p.evaluate(() => [...document.querySelectorAll('.oc > b')].map(e => Math.round(e.parentElement.getBoundingClientRect().width) - 1048576));

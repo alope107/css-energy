@@ -51,10 +51,17 @@ The RAM runs from 4096 to 7167 (`ramSize` 3072).
 **Instruction word.** A word is `op × 8192 + imm`, with a 13-bit immediate. `LOADL` / `STOREL` / `INCL` /
 `IDXL` read the immediate as signed (≥ 4096 means negative, relative to FP).
 
-**Opcodes.** There are 39, listed in `compiler/cc_ref.py` and `machine/uarch.py`:
+**Opcodes.** There are 45, listed in `compiler/cc_ref.py` and `machine/uarch.py`:
 
 > NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ
-> JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL
+> JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL PRINT PRINTB PRINTSP PRINTBSP PRINTLN PRINTBLN
+
+- The PRINT family pops a value and prints it; the page's CSS services it (§3.3). A tagged string pointer prints
+  its bytes, 0 / 1 print as `false` / `true` with the B forms (the compiler knows the type is boolean), anything
+  else prints in decimal. SP / LN add a space / a newline. One service writes up to 4 console cells (one write
+  channel per bank), so a short value costs one trap; a string chunk also ends at its 4-word block or at a `\n`.
+  Until the value is out, the CPU re-traps with the same value and the page's `--pst` register carries the
+  position (a string's next byte, or the chunks done for a number).
 
 - Constants of 8192 or more take `PUSHI hi; SHL13; PUSHI lo; ADD`. SHL13 is a trap (an EXT op), so avoid
   large constants in hot code.
@@ -70,15 +77,15 @@ The RAM runs from 4096 to 7167 (`ramSize` 3072).
 - **Booleans** are 0 or 1 at run time.
 
 **Static types.** The compiler tracks the static type of the last value it emitted (`lb`: 0 unknown,
-1 boolean, 2 string, 3 number) and picks a print routine by it:
+1 boolean, 2 string, 3 number). Each `console.log` argument is one PRINT word: the B form when the type is
+boolean (0 / 1 would otherwise print as numbers), the plain form for everything else, since the machine tells a
+string from a number at run time. The last argument takes the LN form, the others the SP form.
 
-- `printNum` checks for a string tag only in its negative branch, so it is also the unknown-type print.
-- `puts` treats a non-negative value as a number.
-- `printBool` prints a value other than 0 / 1 as a number.
-- The `…Ln` forms add a newline, so `console.log`'s last argument costs one CALL word.
 - `addc` does `+` inside a `console.log` argument when the operand types aren't both known numbers. It either
-  adds, or prints both pieces and returns DONE (the tag of 4352, never a valid string), which the print
-  routines skip.
+  adds, or prints both pieces (PRINT) and returns DONE (the tag of 4352, never a valid string), which PRINT
+  prints as nothing.
+- Before 2026-10-13 printing was done by lib routines (`printNum`, `puts`, `printBool`, their `…Ln` forms) with
+  one PUTC trap per character and a MOD / DIV trap per digit; see HISTORY.md.
 
 The language itself, its limits and the error messages are in [the README](../README.md#the-language).
 
@@ -227,7 +234,8 @@ writes those cells: code, strings and staging are read-only at run time.
   - An instruction commits PC, SP, FP and its memory write only in its last micro-cycle, so a trap simply
     restarts it.
   - A trap sets the control glyph to `('T', kind)`, and the rest of the shaping does nothing.
-  - Trap kinds: MISS (cache miss), WFAIL (dirty victim), EXT (MUL, DIV, MOD, SHL13), PUTC, HALT.
+  - Trap kinds: MISS (cache miss), WFAIL (dirty victim), EXT (MUL, DIV, MOD, SHL13, and the six PRINT ops),
+    PUTC, HALT. A PRINT trap repeats until the service has written the whole value (RESV is raised then).
 - **Cache**:
   - 16 lines of 4 words, organised as a ring with a victim pointer. No data ever moves between lines.
   - A MISS on an absent block writes back the victim's dirty words (one per bank) and fills the whole block.
@@ -259,6 +267,11 @@ The page does at most 2 shapings per frame.
 - Off-path tree nodes compute constants, so restyling stops one level below them. This took style plus layout
   per pass from 70 ms to about 20 ms.
 - The service also computes EXT ops (MUL, DIV, MOD, SHL13) and writes PUTC output into the console.
+- PRINT service: the trap's value (T1) is classified at run time (string pointer, boolean with the B forms, number);
+  the four bank read ports are pointed at the string's block (`--mblk`), the chunk's characters are computed
+  (`--pch0…3`), and each goes to the bank of its console cell (`(optr + i) mod 4`, so consecutive cells never
+  share a bank). The register `--pst` carries the position between services; `--resvT` is raised when the value
+  and its separator are out. `uarch.Machine.print_service` is the same state machine in Python.
 
 **Precision and pixels**
 
@@ -275,7 +288,8 @@ The page does at most 2 shapings per frame.
 ### 3.4 Runtime library
 
 - The source is `compiler/lib_src.js`, written in jsc's dialect. `libbuild.js` compiles it with the self-hosted
-  `jsc.js` under Node into `lib.json`: ROM words plus entry addresses.
+  `jsc.js` under Node into `lib.json`: ROM words plus entry addresses. It holds only `addc` now (93 ROM words);
+  printing is the PRINT instruction family (jsc's `prn(x)` builtin emits a PRINT).
 - `__init` copies the staged globals into place, then the ROM's last word jumps to the user code at 4608.
 - The lib is baked into the CPU font, so a lib change means `make page` (lib → image → font → page).
 
@@ -331,7 +345,9 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 **Not covered**
 
-- L5 includes only programs that finish within 1,500 steps, because the CPU runs about 110 steps/s.
+- L5 includes only programs that finish within 1,500 steps (86 of 89 since the PRINT family; `tests/suite_ui.py`).
+- The harnesses detect HALT through the page's `--isHALT` flag, not a trap-kind index (the index moves when
+  opcodes are added: HALT is 109 now, 97 before the PRINT family).
 - Error 99 on the page stands for a specific code from the reference: a token no variant accepts.
 
 **Other tools**

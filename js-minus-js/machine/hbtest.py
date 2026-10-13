@@ -37,7 +37,7 @@ def trap_of(st):
     if k == 'MISS': return ('MISS', st['mar'])
     if k.startswith('EXT_'):
         op = k[4:]
-        return ('EXT', op, st['t1'] if op == 'SHL13' else st['t2'], st['t1'])
+        return ('EXT', op, st['t1'] if uarch.ext_a(op) else st['t2'], st['t1'])
     if k == 'PUTC': return ('PUTC', st['t1'])
     return (k,)
 
@@ -76,7 +76,7 @@ def main():
         m = ref; m.service(t_ref); shp += 1
         if shp % 200 == 0: print(f'  {shp} shapings ok, {m.steps} steps, hb {t_hb/shp*1e3:.2f} ms/shaping', flush=True)
     out = ''.join(map(chr, m.out))
-    print(f'done: {shp} shapings, {m.steps} steps, halted={m.halted}, output ok={out == image["expected"]}, hb {t_hb/max(1,shp)*1e3:.2f} ms/shaping')
+    print(f'done: {shp} shapings, {m.steps} steps, halted={m.halted}, output ok={out == image.get("rawExpected", image["expected"])}, hb {t_hb/max(1,shp)*1e3:.2f} ms/shaping')
     return 0
 
 if __name__ == '__main__':

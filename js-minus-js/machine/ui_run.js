@@ -8,7 +8,7 @@ const fs = require('fs'), path = require('path');
   const p = await b.newPage(process.env.FLAGS ? { viewport: null } : { viewport: { width: 1300, height: 950 } });
   const t0 = Date.now(); await p.goto('file://' + path.resolve(pg), { timeout: 600000 }); console.log('load ms', Date.now() - t0);
   const cpu = () => p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); const s = getComputedStyle(document.querySelector('.cstv'), '::before');
-    return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'), run: +c.getPropertyValue('--run'), ccok: +c.getPropertyValue('--ccok'), status: s.content }; });
+    return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'), halted: +c.getPropertyValue('--isHALT') === 1, run: +c.getPropertyValue('--run'), ccok: +c.getPropertyValue('--ccok'), status: s.content }; });
   const consoleText = () => p.evaluate(() => { const codes = [...document.querySelectorAll('.oc > b')].map(e => Math.round(e.parentElement.getBoundingClientRect().width) - 1048576);
     const rows = []; for (let i = 0; i < 16; i++) rows.push(codes.slice(i * 8, i * 8 + 8).map(c => c >= 32 && c < 127 ? String.fromCharCode(c) : ' ').join('').replace(/\s+$/, ''));
     return rows.join('\n').replace(/\s+$/, ''); });
@@ -16,7 +16,7 @@ const fs = require('fs'), path = require('path');
     const t = Date.now(); await p.click('.runbtn'); let r, first = null, comp = null;
     while (Date.now() - t < 300000) { await p.waitForTimeout(100); r = await cpu();
       if (comp === null && /compiled|error/.test(r.status)) comp = Date.now() - t;
-      if (first === null && r.steps > 0) first = Date.now() - t; if (r.kind === 97 || /error/.test(r.status)) break; }
+      if (first === null && r.steps > 0) first = Date.now() - t; if (r.halted || /error/.test(r.status)) break; }
     const out = await consoleText();
     console.log(JSON.stringify({ label, compiledMs: comp, firstStepMs: first, haltMs: Date.now() - t, steps: r.steps, status: r.status, ok: want === undefined ? null : out === want.replace(/\s+$/, '') }));
     if (want !== undefined && out !== want.replace(/\s+$/, '')) console.log('got:\n' + out + '\nwant:\n' + want);
