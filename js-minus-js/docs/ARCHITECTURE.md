@@ -244,8 +244,9 @@ The page does at most 2 shapings per frame.
 - RAM is four banks (address mod 4), each its own decode tree (`memtree.py`). A whole cache line is written back
   or filled in one service, through four bank read ports and up to four writes per issue.
 - A read port takes two steps (`gen_fvm4.py`, `mux()` and `.rp<w>`). A two-level `if()` picks the cell's anchor name
-  `--c<k>` from its bank's 768 cells: 12 branches on the high digit, then 64 on the low one, so at most 76
-  `style()` tests. Then one `anchor-size()` reads the whole word, and a size container turns it into a property.
+  `--c<k>` from its bank's 4,096 cells: 64 branches on the high digit, then 64 on the low one, so at most 128
+  `style()` tests (76 with the 3K RAM's 768 cells). Then one `anchor-size()` reads the whole word, and a size
+  container turns it into a property.
 - A RAM leaf is a `content-visibility: hidden` element whose remembered width is the word plus 2^20.
 - Off-path tree nodes compute constants, so restyling stops one level below them. This took style plus layout
   per pass from 70 ms to about 20 ms.

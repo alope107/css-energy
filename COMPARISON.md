@@ -58,7 +58,7 @@ both `CLAUDE.md`/`AGENTS.md` files.
    lands on presses, so this is low priority; it is worth one measurement of a grab press at 64 bodies.
 5. **Anchor-name reads as dynamic indexing (a real lead, untried).** A js-minus-js read port
    (`machine/gen_fvm4.py`, `mux()` and `.rp<w>`) works in two steps. A two-level `if()` picks an anchor name
-   `--c<k>`: at most 12 + 64 `style()` tests for 768 cells, so O(√N), once per port. Then one `anchor-size()`
+   `--c<k>`: at most 64 + 64 `style()` tests for a bank's 4,096 cells, so O(√N), once per port. Then one `anchor-size()`
    reads the whole word. css-physics has assumed it has no dynamic indexing, which is why every pair of bodies
    has its own rules. With this technique, a body could keep K contact slots: each slot picks its partner's
    register elements by name and reads their positions directly. That would make the pair rules O(N·K) instead
