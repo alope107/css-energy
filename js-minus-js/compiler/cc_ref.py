@@ -27,7 +27,13 @@ printBool, puts or printNum (also for an unknown type: printNum checks for a str
 wrong guess costs nothing for non-negative numbers and still prints correctly). The last argument calls the ...Ln entry (prints a newline); others
 are followed by PUSHI 32 PUTC.
 """
-import sys
+import sys, json, os
+
+# the memory map (compiler/layout.json): ROM 0..rom_size-1 (the lib); RAM from rom_size = data_base; see layout.json's _doc
+LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
+LAYOUT['out_base'] = LAYOUT['rom_size'] + LAYOUT['ram_size'] - LAYOUT['cols'] * LAYOUT['rows']
+assert LAYOUT['data_base'] == LAYOUT['rom_size'], 'RAM index = address - rom_size = address - data_base (the compile chain relies on it)'
+AMASK = 32767                           # addresses are 15-bit (the font's address registers: 4 hex digits, the top one 3 bits)
 
 # opcodes (jsc.js)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
@@ -549,8 +555,9 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator (= build.js run())
-def run(rom, mem_init, sp0, out_base=7040, cols=8, rows=16, max_steps=10 ** 6):
-    mem = [0] * 8192
+def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6):
+    if out_base is None: out_base = LAYOUT['out_base']
+    mem = [0] * (AMASK + 1)
     for i, w in enumerate(rom): mem[i] = w
     for a, v in mem_init.items(): mem[a] = v
     pc, sp, fp, optr, steps, out = 0, sp0, sp0, 0, 0, []
@@ -567,8 +574,8 @@ def run(rom, mem_init, sp0, out_base=7040, cols=8, rows=16, max_steps=10 ** 6):
         elif op == 3: sp -= 1; mem[imm] = mem[sp]
         elif op == 4: mem[sp] = mem[fp + simm]; sp += 1
         elif op == 5: sp -= 1; mem[fp + simm] = mem[sp]
-        elif op == 6: a = mem[sp - 1]; mem[sp - 1] = mem[a % 8192]
-        elif op == 7: sp -= 1; b = mem[sp]; sp -= 1; a = mem[sp]; mem[a % 8192] = b
+        elif op == 6: a = mem[sp - 1]; mem[sp - 1] = mem[a & AMASK]
+        elif op == 7: sp -= 1; b = mem[sp]; sp -= 1; a = mem[sp]; mem[a & AMASK] = b
         elif 8 <= op <= 20:
             sp -= 1; b = mem[sp]; a = mem[sp - 1]
             mem[sp - 1] = [s20(a + b), s20(a - b), s20(a * b), tdiv(a, b), tmod(a, b), int(a < b), int(a > b), int(a <= b), int(a >= b), int(a == b), int(a != b),
@@ -598,13 +605,13 @@ def run(rom, mem_init, sp0, out_base=7040, cols=8, rows=16, max_steps=10 ** 6):
         elif op == 34: mem[sp - 1] = s20(mem[sp - 1] * 8192)
         elif op == 35: mem[imm] = s20(mem[imm] + 1)
         elif op == 36: mem[fp + simm] = s20(mem[fp + simm] + 1)
-        elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) % 8192]
-        elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) % 8192]
+        elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) & AMASK]
+        elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) & AMASK]
         elif PRINT <= op <= PRINTBLN:
             sp -= 1; v = mem[sp]; p = v + STRTAG; sep = PRINT_SEP[op]
-            if SDATA + 4096 <= p < 2 * SDATA + 4096:          # a tagged string (4352: the lib's DONE marker, empty)
+            if LAYOUT["data_base"] + SDATA <= p < LAYOUT["data_base"] + 2 * SDATA:   # a tagged string (data_base + SDATA: the lib's DONE marker, empty)
                 text = []
-                while p != SDATA + 4096 and mem[p] != 0: text.append(mem[p]); p += 1
+                while p != LAYOUT["data_base"] + SDATA and mem[p] != 0: text.append(mem[p]); p += 1
             elif op % 2 == 0 and v in (0, 1): text = [ord(ch) for ch in ('true' if v else 'false')]
             else: text = [ord(ch) for ch in str(v)]
             for c in text + ([sep] if sep else []):
@@ -613,11 +620,10 @@ def run(rom, mem_init, sp0, out_base=7040, cols=8, rows=16, max_steps=10 ** 6):
                 out.append(c)
         else: raise RuntimeError(f'bad op {op} at {pc - 1}')
 
-LAYOUT = dict(data_base=4096, code_base=4608, sp0=5632)
-
-def image_mem(c, words, data, init=5120):
+def image_mem(c, words, data, init=None):
     """RAM as the CSS compiler leaves it: code words; strings in place; initialised globals/arrays staged at
     init (the lib's startup copies them into the data area), their count at init - 1"""
+    if init is None: init = LAYOUT['init']
     mem = dict(words)
     sbase = c.db + SDATA
     for a, v in data.items():

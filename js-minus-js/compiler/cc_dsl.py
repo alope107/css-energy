@@ -760,7 +760,7 @@ class Prog(Base):
             group(f'o_v{s}', or_(*sels), [
                 (f'o_w{s}', add(*[mul(sel, add(mul(op, 8192), mul(1 - islab, imm))) for sel, (g, addr, op, imm, islab) in zip(sels, code)])),
                 (f'o_l{s}', sub(add(*[mul(sel, add(imm, 1)) for sel, (g, addr, op, imm, islab) in zip(sels, code) if islab]), 1)),
-                (f'o_a{s}', add(cp0, self.cb + s - 4096))])
+                (f'o_a{s}', add(cp0, self.cb + s - self.db))])      # RAM index (address - rom_size = data_base)
         self.nlports = len(labs)
         for k, (g, l, v) in enumerate(labs):               # label definitions: one anchor element per port
             group(f'o_lv{k}', g, [(f'o_lj{k}', l), (f'o_lx{k}', v)])
@@ -769,7 +769,7 @@ class Prog(Base):
             group(f'o_{pre}w', or_(*[r[0] for r in recs]), [(f'o_{pre}{f}', add(*[mul(r[0], r[i + 1]) for r in recs])) for i, f in enumerate(fields)])
         port('y', self.symw, ('i', 'h1', 'h2', 'k'))
         port('f', self.fnw, ('i', 'h1', 'h2', 'l'))
-        group('o_dv', or_(*[g for g, a, v in data]), [('o_da', sub(add(*[mul(g, a) for g, a, v in data]), 4096)),
+        group('o_dv', or_(*[g for g, a, v in data]), [('o_da', sub(add(*[mul(g, a) for g, a, v in data]), self.db)),
                                                      ('o_dw', add(*[mul(g, v) for g, a, v in data]))])
 
 
@@ -777,7 +777,7 @@ class LexProg(Prog):
     """per character: lexer step. inputs c, cn (this and next character), ptk (did the parent level complete a token)"""
     def __init__(self, data_base, c=None, cset=None):
         if cset is not None and len(cset) == 1: c = next(iter(cset)); cset = None
-        self.spec_c = c; self.cset = cset
+        self.spec_c = c; self.cset = cset; self.db = data_base
         X = self.x = Ctx(LEX_STATE, ['c', 'cn', 'ptk'])
         X.cur.update(tk=K(0), tv=K(0), th1=K(0), th2=K(0))
         self.data = []; self.out = []
@@ -792,6 +792,6 @@ class LexProg(Prog):
         self.named('o_tc', add(tk, mul(eq(tk, 4), add(*[mul(eq(tv, v), i + 2) for i, v in enumerate(PUNCT)]))))
         self.named('o_pp', self.v('pp'))
         self.named('o_sv', or_(*[g for g, a, v in self.data]))
-        self.named('o_sa', sub(add(*[mul(g, a) for g, a, v in self.data]), 4096))
+        self.named('o_sa', sub(add(*[mul(g, a) for g, a, v in self.data]), self.db))
         self.named('o_sw', add(*[mul(g, v) for g, a, v in self.data]))
         self.x.dce(self.out)

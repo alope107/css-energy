@@ -63,8 +63,9 @@ def cell_html(k, j):
     return (f'<b class="cr"><b class="c1" style="view-timeline-name: --ch{k}_{j}"></b>'
             f'<b class="cp"></b></b>')
 
-def build(lib, L, P, TMAX, code_base=4608, data_base=4096, short=True, static_src=None):
-    initw = lib.get('init', 5120)
+def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_src=None):
+    code_base = R.LAYOUT['code_base'] if code_base is None else code_base; data_base = R.LAYOUT['data_base'] if data_base is None else data_base
+    initw = lib.get('init', R.LAYOUT['init'])
     code_cells = initw - 1 - code_base; data_cells = R.SDATA; ishift = initw - data_base
     lst = [n for n in D.LEX_STATE if n != 'pp']
     pst, tabs = D.parse_state_names(), D.table_names(); tset = set(tabs)
@@ -261,7 +262,7 @@ def build(lib, L, P, TMAX, code_base=4608, data_base=4096, short=True, static_sr
         tcond = f'style(--tcq: {tcs[0]})' if len(tcs) == 1 else '(' + ' or '.join(f'style(--tcq: {t})' for t in tcs) + ')'
         css.append(f'@container style(--vh: {key[0]}) and {tcond} {{ .tpA, .tpB {{ ' + ' '.join(decl) + ' } }')
     # code / data overlays (fixed, contained by #tcr)
-    cb0 = code_base - 4096
+    cb0 = code_base - R.LAYOUT['rom_size']          # RAM index of the first code word (--c<index> names RAM cells)
     css.append('.ov, .ovd { position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; display: none; }')
     for s in range(E):
         a = f'q-o_a{s}'; N.add(f'{a}-h', False)

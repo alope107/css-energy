@@ -23,7 +23,7 @@ all: page
 
 # ---- runtime library -> ROM (jsc.js, the self-hosted subset compiler, compiles lib_src.js under Node)
 lib: $(CC)/lib.json
-$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js
+$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.json
 	$(NODE) $(CC)/libbuild.js $@
 
 # ---- image (ROM = lib) -> CPU font (ROM baked into GSUB) -> page (editor + readback + CSS compiler + font CPU)

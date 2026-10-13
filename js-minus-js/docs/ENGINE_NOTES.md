@@ -138,3 +138,22 @@ that relies on it or records it.
 39. **The trace window must sit inside the run.** `trace.js` with `RUN=1` starts tracing `RUNWAIT` ms after Run
     (default 8 s); once FizzBuzz halts at about 8.5 s, that window shows idle frames (shaping 17 ms per frame
     instead of 34) and flatters every number. Use `RUNWAIT=3500` with a 4 s trace.
+40. **Every rendered anchor costs about 1.5 µs per layout pass**, whether or not anything reads it: Blink merges the
+    anchors of every child into the containing block's anchor query each time the block lays out. A CPU-only page with
+    32K anchored RAM cells spent 272 ms per frame against 137 ms with the unused cells' `anchor-name` removed.
+    *(measured, 2026-10-13)*
+41. **An inherited custom property that changes restyles the whole subtree below it, every time.** Redeclaring it as a
+    constant one level down does not stop the cascade: with a read block pushed down the RAM decode trees every pass,
+    `Document::recalcStyle` resolved about 38,000 elements per pass at 16K cells (90 ms). The write channels only
+    change on write passes, which is why the trees looked cheap. Keep per-pass state `inherits: false`, and keep
+    anything that changes per pass out of the ancestors of large subtrees. *(measured; supersedes the "restyling stops
+    one level below" claim in note 22, which holds only for passes where the channel registers don't change)*
+42. **A `display: none` subtree costs nothing per pass** (no style, layout or anchors), and a transition-latched custom
+    property can show it for good once a write reaches it (`machine/memtree.py` groups: `--live` with a 0 s transition
+    and a 1,000,000 s delay, as the readback latches). Elements in a hidden subtree have no anchors, so
+    `anchor-size(--name width, <fallback>)` reads them as the fallback. Two things bit: the latch's delayed transition
+    also delays a *first* 0 → 1 from a static declaration (give always-on elements `transition: none`), and
+    `display: if(style(--x: 1))` matches only 1, so a flag that can sum to 2 must be clamped. *(measured: sparse RAM, HISTORY phase 10)*
+43. **The top hex digit of a readback span is limited by the glyph advance**: an advance is at most 32,767 font units,
+    so a 4-digit span (weights 1, 16, 256, 4096) carries 15 bits. 16-bit addresses would need a second span per
+    register (as T1 / T2 have).

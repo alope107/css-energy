@@ -13,10 +13,10 @@ N, S = 16, 32
 ok = 0; tot = 0
 for f in sorted(glob.glob(d + '/*.js')):
     name = os.path.basename(f)[:-3]; want = open(f[:-3] + '.out').read(); tot += 1
-    c = R.Compiler(4096, 4608, lib); words, data = c.compile(C.padded_source(open(f).read().rstrip('\n'), 24, 64))
+    c = R.Compiler(R.LAYOUT['data_base'], R.LAYOUT['code_base'], lib); words, data = c.compile(C.padded_source(open(f).read().rstrip('\n'), 24, 64))
     if c.err: print(f'{name:22} COMPILE-ERR {c.err}'); continue
     mem = R.image_mem(c, words, data, lib['init'])
-    image = dict(rom=lib['rom'], ram=[mem.get(ROM + i, 0) for i in range(3072)], sp0=R.LAYOUT['sp0'])
+    image = dict(rom=lib['rom'], ram=[mem.get(ROM + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0'])
     m = Machine4(image, N)
     try: m.run(S)
     except Exception as e: print(f'{name:22} CRASH {e}'); continue

@@ -4,6 +4,7 @@ const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'bro
 const fs = require('fs'), path = require('path');
 (async () => {
   const page = path.resolve(process.argv[2]); const exp = JSON.parse(fs.readFileSync(page + '.exp.json', 'utf8'));
+  const base = exp._base || 4096; delete exp._base;
   const only = process.argv.slice(3); const names = Object.keys(exp).filter(n => !only.length || only.includes(n));
   const b = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
   const p = await b.newPage(); const t0 = Date.now();
@@ -11,7 +12,7 @@ const fs = require('fs'), path = require('path');
   let pass = 0; const fails = [];
   for (const name of names) {
     const e = exp[name];
-    const r = await p.evaluate(async (lines) => {
+    const r = await p.evaluate(async ([lines, base]) => {
       const frame = () => new Promise(r => requestAnimationFrame(r));
       const run = document.getElementById('run'); run.checked = false; await frame();
       const rows = document.querySelectorAll('.rows > .row');
@@ -29,10 +30,10 @@ const fs = require('fs'), path = require('path');
       const ms = performance.now() - t; const code = {}, data = {};
       for (const el of document.querySelectorAll('.ov, .ovd, .ovs, .ovn, .ovk')) {
         if (!el.getClientRects().length) continue; const an = getComputedStyle(el).anchorName;
-        if (an && an !== 'none') (el.classList.contains('ov') ? code : data)[+an.slice(3) + 4096] = Math.round(el.getBoundingClientRect().width) - 1048576;
+        if (an && an !== 'none') (el.classList.contains('ov') ? code : data)[+an.slice(3) + base] = Math.round(el.getBoundingClientRect().width) - 1048576;
       }
       return { ms, info, ok, code, data };
-    }, e.lines);
+    }, [e.lines, base]);
     const err = Math.floor(r.info / 2) % 512;
     const diff = [];
     for (const [kind, want, got] of [['code', e.code, r.code], ['data', e.data, r.data]])

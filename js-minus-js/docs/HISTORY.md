@@ -215,6 +215,71 @@ Net: FizzBuzz runs about 1.9× faster on the page (12 s → 6.2 s), 2.1× on the
 
 ---
 
+### Phase 10: 16K RAM (2026-10-13, branch `worktree-ram-expand`)
+
+**The question.** What does more RAM cost, and can the machine use it? Two separate limits: the page (one element
+per word) and the ISA (13-bit addresses, with the ROM occupying 0 … 4095 for a lib of 93 words).
+
+**Scaling of the page as it was** (CPU-only FizzBuzz pages padded with unused cells; the CPU never touched them):
+
+| RAM words | page | load | HALT after load | frame (mid-run) |
+|---|---|---|---|---|
+| 3,072 | 1.1 MB | 0.2 s | 4.8–5.0 s | 85 ms |
+| 8,192 | 2.0 MB | 0.4 s | 6.1–6.3 s | 124 ms |
+| 16,384 | 3.4 MB | 0.7 s | 8.4 s | 166 ms |
+| 32,768 | 6.3 MB | 1.4 s | 13.8–14.4 s | 272 ms |
+
+About 2.4 ms per pass per 1,000 cells, for cells that are never read or written. Stripping the `anchor-name` from the
+unused cells took 16K to 114 ms and 32K to 137 ms: Blink merges every anchor into the containing block's anchor
+query on every layout pass (about 1.5 µs each). Making the decode-tree nodes blocks instead of `display: contents`
+saved another ~5%. The rest is per-child layout work and the write cascade (below).
+
+**A dead end: read-decoded anchors.** Sending the read block down the decode tree (like a write) so that only the
+four cells being read carry an anchor removed the anchor cost but exposed the real one: a trace with invalidation
+tracking showed ~38,000 `StyleResolver::ResolveStyle` per pass (90 ms per style recalc at 16K). Blink restyles a
+whole subtree whenever an inherited custom property changes above it, and pinning constants one level down does not
+stop it. The write channels only change on write passes (a quarter of them), which is why the tree looked cheap
+before. Reverted.
+
+**Sparse RAM** (what shipped). The trees stay as they were, but 256-leaf groups are `display: none` until a write
+reaches them: the group node latches `--live` with a transition (0 s to take a write, a 1,000,000 s delay to hold),
+its wrapper child is shown by it, and hidden cells have no anchor, so the read ports' `anchor-size()` fallback reads
+them as 0, which is what unwritten RAM holds. Groups the page needs from the start (the console; on a CPU-only page
+also the static areas) are live from the start. Style, layout and anchor work now follow the cells the program has
+touched. Three bugs on the way, all found with a probe polling the cells' widths during a run: the always-live
+groups' latch transition delayed their initial 0 → 1 (`transition: none` for them); two write channels reaching one
+group in the same pass summed to a flag of 2, which `display: if(style(--live: 1))` does not match, hiding the group
+for a pass and destroying its remembered sizes (`min(1, …)`); and the immediate's sign extension (below).
+
+CPU-only pages, HALT after load (dense → sparse): FizzBuzz 3K 4.8–5.0 → 5.0 s, 16K 8.4 → 5.4 s, 32K 13.8–14.4 → 5.8 s;
+bubble sort (16K, 82 misses) 8.1 s, str_table 2.4 s, array_sort 3.7 s, all with the model's exact step counts.
+Load: 32K 1.4 → 0.23 s (hidden groups are not laid out). Mid-run frames 93–106 ms at every size (the window
+0.7–3.7 s after load, heavier than the earlier late window).
+
+The real page with 16K sparse RAM (11.9 MB, 9.5 MB before): L3 104/104, l5-smoke 9/9, FizzBuzz HALT 9.7–10.4 s after
+Run against 8.5–8.6 s with 3K dense RAM: about 1.3 s for the latches and group activations, where 16K dense RAM
+would have cost about 4 s. The chain's overlay addresses had kept the old literal `4096` in `cc_dsl.outputs` (L2 did
+not notice a uniform shift of every code address; L3 did: 14/104).
+Group size (real page, FizzBuzz, two runs each, with another session loading the machine): 256 leaves 9.8 / 10.7 s,
+64 leaves 10.5 / 11.9 s, 16 leaves 10.3 / 11.5 s; 256 is the default (16 latches per bank at 16K).
+
+**The ISA and the map.** Addresses are 15-bit now: the font's address registers (PC, SP, FP, MAR) mask their top
+hex digit to 3 bits instead of 1 (the immediate keeps its 1-bit mask: an instruction word is still op × 8192 + a
+13-bit immediate, and everything the compiler addresses directly sits below 2,304). The ROM shrank to 1,024 words
+(fewer glyphs: 9,875 → 6,803, HarfBuzz 19.0 → 18.2 ms per shaping) and the map moved down: `compiler/layout.json`
+is the single source (ROM 0 … 1023, data at 1024, code at 1536, staging at 2048, stack from 2560, RAM 16,384 words,
+console in the last 128). `tests/suite/deep_recursion.js` recurses 700 deep (4 words a frame, 2,800 words of
+stack; about 8,400 steps): the old 1,408-word stack would have run into the console, and the old model off the end of its
+8,192-word memory. That is above L5's 1,500-step cap, so only L1, L2 and L4 run it.
+
+**Tradeoffs.** Page size and load time still grow with RAM (16K: 3.4 MB, 0.7 s load; 32K: 6.3 MB, 1.4 s), since
+every word is an element; per-pass cost does not. The cache (16 lines × 4 words) is unchanged, so a program that
+touches many groups pays for the write cascade in each live group (about 150 elements restyled per write pass per
+live group's path). 32K is the ceiling of 15-bit addresses with the 1K ROM; beyond that the readback spans
+(a glyph advance is at most 32,767 units) and the 6-digit `<integer>` precision bite.
+
+---
+
 ## Dead ends and superseded approaches
 
 | # | Tried | What happened | Replaced by |
@@ -253,6 +318,8 @@ Net: FizzBuzz runs about 1.9× faster on the page (12 s → 6.2 s), 2.1× on the
 | 32 | Readback readers with a value element, a scroller, a spacer and a pad under each size container | ~1,300 style resolutions inside layout per pass | one scroller with absolutely positioned subjects reading `100cqi` |
 | 33 | 3 or 4 issues per frame | wrong output: shapings ran on stale state | 2 issues per frame |
 | 34 | A code / data cache partition (model) | the suite's shapings +5% | the FIFO ring |
+| 35 | Read-decoded anchors (the read block down the decode trees, four read anchors) | every pass restyled the whole trees: 38,000 style resolutions, 90 ms per recalc at 16K | sparse RAM: groups rendered on first write |
+| 36 | 13-bit addresses with the ROM at 0 … 4095 for a 93-word lib | RAM capped at 4K words | 15-bit addresses, ROM 1K, the map in `compiler/layout.json` |
 
 ---
 

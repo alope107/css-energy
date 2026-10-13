@@ -11,10 +11,10 @@ from uarch import ROM
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 N, S = int(os.environ.get('N', 16)), int(os.environ.get('S', 32))
 for f in sys.argv[1:]:
-    c = R.Compiler(4096, 4608, lib); words, data = c.compile(open(f).read())
+    c = R.Compiler(R.LAYOUT['data_base'], R.LAYOUT['code_base'], lib); words, data = c.compile(open(f).read())
     if c.err: print(f'{os.path.basename(f):24} compile error {c.err}'); continue
     mem = R.image_mem(c, words, data, lib['init'])
-    m = uarch4.Machine4(dict(rom=lib['rom'], ram=[mem.get(ROM + i, 0) for i in range(3072)], sp0=R.LAYOUT['sp0']), N)
+    m = uarch4.Machine4(dict(rom=lib['rom'], ram=[mem.get(ROM + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0']), N)
     miss = collections.Counter(); svc = m.service
     def service(t, svc=svc):
         if t and t[0] == 'MISS': miss[t[1] // 4 * 4] += 1

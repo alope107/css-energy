@@ -356,7 +356,41 @@ unread or wrong cells.
 
 The scan advances one column per frame over P = 64 columns, so one sweep is ≥ 64 frames; *(derived)* ~18 ms per column.
 
-## 8. Caveats
+## 8. RAM size (2026-10-13, branch `worktree-ram-expand`)
+
+CPU-only FizzBuzz pages (`machine/gen_fvm4.py` without `UI=1`, `machine/halttime.js`: HALT measured from load; frames
+from a 3 s trace starting 0.7 s after load, a heavier window than §6's). "Dense" is the RAM as it was (every cell
+rendered and anchored); "sparse" renders a group of cells only once a write has reached it (HISTORY phase 10; 64-cell
+groups in this table, 256 in the shipped page: real-page FizzBuzz 9.8 / 10.7 s with 256, 10.5 / 11.9 s with 64,
+10.3 / 11.5 s with 16, measured with another session loading the machine).
+
+| RAM words | page bytes (dense / sparse) | load, dense | HALT, dense | frame, dense | load, sparse | HALT, sparse | frame, sparse |
+|---|---|---|---|---|---|---|---|
+| 3,072 | 1.09 MB / 1.09 MB | 194–221 ms | 4,771–5,046 ms | 85 ms | 160 ms | 4,997 ms | 93 ms |
+| 4,096 | 1.27 MB | 207–225 ms | 5,025–5,188 ms | 89 ms | – | – | – |
+| 8,192 | 1.99 MB | 363 ms | 6,111–6,284 ms | 124 ms | – | – | – |
+| 16,384 | 3.44 MB / 3.44 MB | 667–702 ms | 8,415–8,459 ms | 166 ms | 183 ms | 5,421 ms | 106 ms |
+| 32,768 | 6.35 MB / 6.35 MB | 1,391 ms | 13,757–14,415 ms | 272 ms | 228 ms | 5,814 ms | 101 ms |
+
+*(derived)* Dense: about 2.4 ms per pass per 1,000 cells, for cells the program never touches. The same pages with the
+unused cells' `anchor-name` removed: 16K 114 ms, 32K 137 ms frames (HALT 6.2 / 8.6 s), so anchors are two thirds of it;
+with the decode-tree nodes as blocks another ~5% (16K 106 ms, 32K 131 ms). Sparse: flat to within noise.
+
+Sparse pages at 16K with programs that re-read evicted data (exact step counts, correct output): `bubble_sort_print`
+8,133 ms (901 steps), `array_sort` 3,747 ms (635), `str_table` 2,436 ms (168).
+
+Dead end, measured: pushing the read block down the decode trees so that only four cells carry anchors made every
+pass restyle the whole trees (16K: 38,000 `ResolveStyle` per pass, 90 ms per recalc; 3K HALT 9.6 s, 16K 15.9 s).
+
+The real page with 16K sparse RAM (`machine/ui_seq.js`, initial FizzBuzz): compiled 2,413 / 2,602 ms, HALT 10,359 /
+9,712 ms (run ≈ 7.5 s; 3K dense: 8,600 / 8,477 ms, run ≈ 6.2 s). Mid-run trace: 3 passes, 108 ms style+layout, 35 ms
+shaping, 137 ms frame (3K dense: 128 ms). Page 11.9 MB (9.5 MB). L3 104/104, l5-smoke 9/9, full L5 **101/101** (14.5 min
+with another session's benchmarks running on the same machine, so its timings are not recorded here).
+
+HarfBuzz alone with the 1K ROM (6,803 glyphs): FizzBuzz 18.1 ms per shaping (103 shapings), bubble sort 17.9 ms
+(167), array_sort 18.3 ms (77), str_table 18.3 ms (40); every shaping matches the model.
+
+## 9. Caveats
 
 - The headless runs have no GPU, so desktop Chrome timings will differ.
 - The harness's own mouse moves show up in traces as hit testing (§6).

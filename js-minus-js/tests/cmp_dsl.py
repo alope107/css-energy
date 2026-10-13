@@ -5,12 +5,13 @@ import os, sys; ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 import cc_ref as R, cc_dsl as D
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 SPEC = os.environ.get('SPEC') == '1'
-gen = D.Prog(4096, 4608, lib)
+DB, CB = R.LAYOUT['data_base'], R.LAYOUT['code_base']
+gen = D.Prog(DB, CB, lib)
 variants = {}
 def prog_for(mode, tk, tv):
     if not SPEC: return gen
     key = D.variant_key(mode, tk, tv)
-    if key not in variants: variants[key] = D.Prog(4096, 4608, lib, *key)
+    if key not in variants: variants[key] = D.Prog(DB, CB, lib, *key)
     return variants[key]
 
 def ref_state(c):
@@ -29,10 +30,10 @@ def ref_state(c):
         for nm, v in ((f'fh1_{k}', e[0]), (f'fh2_{k}', e[1]), (f'fl_{k}', e[2] + 64 * e[3])): st[nm] = v if k < c.nfn else None
     return st
 allok = True
-lexp = D.LexProg(4096)
+lexp = D.LexProg(DB)
 if SPEC:                                         # class-specialised lexers, as the page picks them (ccpage5.CLASSES)
     import ccpage5 as C5
-    lexes = [D.LexProg(4096, cset=cs) for cs in C5.CLASSES]
+    lexes = [D.LexProg(DB, cset=cs) for cs in C5.CLASSES]
     def lex_for(c): return lexes[next(i for i, cs in enumerate(C5.CLASSES) if c in cs)]
 else:
     def lex_for(c): return lexp
@@ -41,8 +42,8 @@ work = 0; steps = 0
 for f in sys.argv[1:]:
     text = open(f).read().rstrip('\n') + '\n'
     src = [ord(ch) for ch in text] + [0, 0]
-    ref = R.Compiler(4096, 4608, lib)
-    ls = D.initial_lex(4096); ps = D.initial_parse(4096); tab = {n: 0 for n in D.table_names()}; lab = {}; code = {}; data = {}
+    ref = R.Compiler(DB, CB, lib)
+    ls = D.initial_lex(DB); ps = D.initial_parse(DB); tab = {n: 0 for n in D.table_names()}; lab = {}; code = {}; data = {}
     prev = dict(o_tkany=0); pw = None
     for i in range(len(src)):
         c, cn = src[i], (src[i + 1] if i + 1 < len(src) else 0)
@@ -61,16 +62,16 @@ for f in sys.argv[1:]:
                 ps, e = pg.x.run_python(env); e = collections.defaultdict(int, e); work += len(pg.x.temps); steps += 1
                 for s in range(R.EMAX):
                     if e[('T', f'o_v{s}')]:
-                        w, l, a = e[('T', f'o_w{s}')], e[('T', f'o_l{s}')], e[('T', f'o_a{s}')] + 4096 - 4608
+                        w, l, a = e[('T', f'o_w{s}')], e[('T', f'o_l{s}')], e[('T', f'o_a{s}')] + DB - CB
                         code[a] = (w // 8192, l if l >= 0 else w % 8192, int(l >= 0))
-                if e[('T', 'o_dv')]: data[e[('T', 'o_da')] + 4096] = e[('T', 'o_dw')]
+                if e[('T', 'o_dv')]: data[e[('T', 'o_da')] + DB] = e[('T', 'o_dw')]
                 for k in range(pg.nlports):
                     if e[('T', f'o_lv{k}')]: lab[e[('T', f'o_lj{k}')]] = e[('T', f'o_lx{k}')]
                 pw = collections.defaultdict(int, {n: e[('T', n)] for n in pg.out})
         env = {('S', n): v for n, v in ls.items()}; env[('I', 'c')] = c; env[('I', 'cn')] = cn; env[('I', 'ptk')] = prev['o_tkany']
         lx_ = lex_for(c); ls, e = lx_.x.run_python(env)
         prev = {n: e[('T', n)] for n in lx_.out}
-        if prev['o_sv']: data[prev['o_sa'] + 4096] = prev['o_sw']
+        if prev['o_sv']: data[prev['o_sa'] + DB] = prev['o_sw']
     s0 = [ord(ch) for ch in text] + [0]
     for i in range(len(s0)): ref.char(s0[i], s0[i + 1] if i + 1 < len(s0) else 0)
     rs = ref_state(ref); st = dict(ps); st.update(tab); st.update(ls)
