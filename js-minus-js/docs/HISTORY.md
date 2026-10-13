@@ -17,32 +17,6 @@ Every number here has its source in [BENCHMARKS.md](BENCHMARKS.md).
 
 ---
 
-## Before this codebase (earlier chats)
-
-1. **Universal computation in pure CSS.** A self-clocked Rule 110 cellular automaton, followed by a Scratch-like
-   block language composed from menus and executed by CSS.
-   - A first attempt at a typed-input JavaScript interpreter was dropped, because key input was unreliable and
-     the parser was too hard at that point.
-2. **A JavaScript bytecode VM in CSS.** `jsc.js` is a compiler for a JS subset, written in that subset. It
-   compiles itself into ROM words, so the page could compile source text at run time on the VM.
-   ([JavaScript interpreter in pure CSS](https://claude.ai/chat/cd931a2c-eda6-4b07-bf2a-0ff924a46b99),
-   [Minimal JavaScript bytecode interpreter](https://claude.ai/chat/66a45806-3264-43a8-b06d-2ddd3e22d6ca))
-3. **Architecture survey** ([CSS JS interpreter architectures](https://claude.ai/chat/b3d4a15f-b63f-4ef7-af89-4d4ce7360f46)).
-   - The cost isn't stack vs register machine. It's which state lives in custom properties (updated every
-     layout pass) and which lives in layout-remembered RAM (committed once per frame).
-4. **Text readback** ([ASCII sum calculator CSS](https://claude.ai/chat/fbdb756b-6c90-4667-961a-b2652895dfe6)).
-   This is the origin of `readback/mkfont2.py`.
-   - **How it reads:** a variable axis selects GSUB substitutions that copy one column's character into a
-     sentinel glyph's width. Probes measure that width, and latches hold the codes.
-   - **Problems solved there:**
-     - Width changes driven by the axis round to whole pixels, so the axis only selects substitutions and the
-       marker glyphs have fixed widths.
-     - A private-use marker got its own shaping run; U+2058 joins the text's run instead.
-     - An inherited `--scan` restyled all 4,096 cells every frame, so it was made non-inherited.
-     - A back-and-forth sweep worked around a dropped frame that skipped a column.
-
----
-
 ## In this codebase
 
 ### Phase 0: HarfBuzz spikes (2026-10-09 morning; `archive/spikes/hb`, `archive/spikes/first_deliverable`)

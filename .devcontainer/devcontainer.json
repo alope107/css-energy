@@ -1,0 +1,15 @@
+{
+  "name": "css-energy",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  },
+  "remoteUser": "pwuser",
+  "init": true,
+  "runArgs": ["--ipc=host"],
+  "mounts": ["source=claude-code-config-${devcontainerId},target=/home/pwuser/.claude,type=volume"],
+  "containerEnv": {
+    "CHROME": "/usr/local/bin/chromium",
+    "CLAUDE_CONFIG_DIR": "/home/pwuser/.claude"
+  }
+}
