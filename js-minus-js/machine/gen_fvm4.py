@@ -2,8 +2,9 @@
 """gen_fvm4.py image.json fcpu4 out.html [--issue=K] — the HarfBuzz-CPU page for the 4-word-line font (cpu4.py).
 
 RAM is four banks (address mod 4), each its own decode tree with its own write channels, so a whole cache line
-(one aligned block) is written back or filled in one service: four bank read ports (768-way muxes) and up to four
-writes per issue. Per cache line the page reads back 8 spans (tag + victim flag, 7 x three value nibbles; the
+(one aligned block) is written back or filled in one service: four bank read ports and up to four writes per issue.
+A read port picks a cell's anchor name with a two-level if() (high digit, then low), then reads it with one
+anchor-size(). Per cache line the page reads back 8 spans (tag + victim flag, 7 x three value nibbles; the
 last also carries the four word states).
 
 (gen_fvm.py notes follow.)

@@ -12,11 +12,14 @@ Earlier versions of this file were measured on a 2-core VM in Chromium 141, so i
 | `bench.sh reps page…` | Min-of-bigmed over interleaved repeats of `tr.js`. Use this to compare variants. |
 | `perf3.js page…` | User-level: chaos fps for the first 6 s, time to settle (all asleep), idle fps, drag fps (tower top box), hold fps. |
 | `freeze3.js src ms prefix tgt…` | Snapshot the state registers at `ms` and bake them into copies of `tgt` as constants with a tiny wobble, so every dependent prop recomputes every frame while all gates stay fixed. **The way to profile one physics step** without the scene evolving. `ONLYAWAKE=1` keeps sleepers frozen. |
-| `freezegrab.js` | Same, while holding a grab. |
+| `freezegrab.js src ms out` | Same, while holding a grab (`BODY=k` grabs body k wherever it is; `TOWER=1` the tower's top box). |
 | `traceagg.js page delay dur` | Aggregates all trace events (blink, cc, animation) by total time. |
 | `gates.js page N ms,ms…` | Counts active pair gates (np, tcp, ov, uA). The waits are cumulative. |
 | `cen.js`, `grabcen.js` | Census of matched gated blocks by category, with a cost model. |
 | `sleepy.js page N [s]` | Asleep count every 0.5 s. |
+| `sparse.js page N [k\|c]` | The sparse regime: drags body k (`c`: the one nearest the tray centre) through a sleeping scene for 3 s; median style pass, fps, bodies woken, time to settle again. Use with `SCENE=field`. |
+| `bpcount.js page N ms,…` | Broadphase candidates from live state: bounding-sphere pairs, world-AABB pairs, touching pairs. |
+| `cellcheck.js page N [k]` | `CELLS=1` pages only: during a drag, checks that every sleeper in reach of an awake body is present. |
 | `ablate.py page NAME=REGEX…` | Copies of a page with families of gated blocks removed (for cost attribution). |
 | `sanity3.js`, `smoke.js` | Physics sanity (floor penetration, sphere overlap, speed, sleepers); `smoke.js` exits 1 on failure. |
 | `stylebench.js page…` | Median style pass for microbenchmark pages (also used for experiments). |

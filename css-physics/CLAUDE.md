@@ -1,6 +1,6 @@
 # rigid3d.css
 
-A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely in Chrome's style engine. `src/gen3d.py` generates the CSS; `src/build3d.py` builds pages. Read `docs/ARCHITECTURE.md` before changing the generator; `docs/BENCHMARKS.md` has the measured cost model; `docs/ROADMAP.md` lists what's next; `docs/HISTORY.md` lists what already failed (check it before proposing an idea).
+A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely in Chrome's style engine. `src/gen3d.py` generates the CSS; `src/build3d.py` builds pages. Read `docs/ARCHITECTURE.md` before changing the generator; `docs/BENCHMARKS.md` has the measured cost model; `docs/HISTORY.md` lists what already failed (check it before proposing an idea) and, at its end, the open ideas not yet tried.
 
 ## Hard rules
 - IMPORTANT: generated pages contain **no JavaScript**, ever, unless the user explicitly asks. JS is fine in `tools/` and `experiments/` (test harnesses only).

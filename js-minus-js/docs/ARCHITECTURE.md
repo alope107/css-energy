@@ -1,6 +1,6 @@
 # Architecture: how it works now
 
-The page is `dist/js_in_css.xhtml`, built by `make page`. It is one XHTML file of about 9.6 MB that runs no
+The page is `dist/js_in_css.xhtml`, built by `make page`. It is one XHTML file of about 9.5 MB that runs no
 script. The user types JavaScript into an editor, presses Run, and the program runs in four stages. CSS reads the
 text back, CSS compiles it to bytecode, and a font executes the bytecode while Chrome shapes text. Output appears
 in an 8 × 16 console.
@@ -254,15 +254,18 @@ writes those cells: code, strings and staging are read-only at run time.
 1. The state is rendered as a line of text, one counter per state digit, through a `@counter-style` that maps to
    the CPU glyphs.
 2. HarfBuzz shapes it.
-3. The widths of about 60 spans are the next state. They are read back two per reader: width and height, with
-   `container-type: size`.
+3. The widths of about 140 spans are the next state. 76 readers read them back, most of them two per reader
+   (width and height, with `container-type: size`).
 
 The page does at most 2 shapings per frame.
 
 **Trap service (CSS)**
 
 - RAM is four banks (address mod 4), each its own decode tree (`memtree.py`). A whole cache line is written back
-  or filled in one service, through four bank read ports (768-way muxes) and up to four writes per issue.
+  or filled in one service, through four bank read ports and up to four writes per issue.
+- A read port takes two steps (`gen_fvm4.py`, `mux()` and `.rp<w>`). A two-level `if()` picks the cell's anchor name
+  `--c<k>` from its bank's 768 cells: 12 branches on the high digit, then 64 on the low one, so at most 76
+  `style()` tests. Then one `anchor-size()` reads the whole word, and a size container turns it into a property.
 - A RAM leaf is a `content-visibility: hidden` element whose remembered width is the word plus 2^20.
 - Off-path tree nodes compute constants, so restyling stops one level below them. This took style plus layout
   per pass from 70 ms to about 20 ms.
@@ -380,8 +383,10 @@ make dist   # copy it to dist/
 
 **Toolchain**
 
-- Python 3.13, fontTools 4.65 and brotli (uharfbuzz 0.56 is optional).
-- Node 22, with playwright-core 1.64 for the harnesses.
-- Chromium 153.0.8010.0 headless, from the npm package `@sparticuz/chromium` (Linux x64); `CHROME=/path`
-  overrides it.
+- Python 3.12 or later, fontTools 4.65 or later and brotli (uharfbuzz 0.56 is optional). The devcontainer has
+  Python 3.12 and fontTools 4.66.
+- Node 22 or later (the devcontainer has 24), with playwright-core 1.64 for the harnesses.
+- Chromium 153 headless: either 153.0.8010.0 from the npm package `@sparticuz/chromium` (Linux x64), or the
+  browser `CHROME=/path` points at. The devcontainer sets `CHROME=/usr/local/bin/chromium` (153.0.8010.12, Chrome for
+  Testing, arm64), which is what BENCHMARKS.md was measured on.
 - The page needs at least CSS `if()` and `sibling-index()`. It has only been tested on that Chromium.

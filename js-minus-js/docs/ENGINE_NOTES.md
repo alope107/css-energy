@@ -3,8 +3,8 @@
 These are observed facts, found the hard way and mostly not written down anywhere else. Each one names the file
 that relies on it or records it.
 
-- **Tested on**: Chromium 153.0.8010.0, headless, Linux, `--no-sandbox --disable-gpu`. Treat every entry as
-  "true there".
+- **Tested on**: Chromium 153 headless on Linux (153.0.8010.0 from `@sparticuz/chromium`, and 153.0.8010.12 Chrome
+  for Testing in the devcontainer), `--no-sandbox --disable-gpu`. Treat every entry as "true there".
 - **Re-check after a Chrome upgrade.** Several of these may be bugs, not specified behaviour.
 - **Evidence**: entries marked *(measured)* were measured when they were found; numbers for code that still exists are in [BENCHMARKS.md](BENCHMARKS.md), and the rest are in [HISTORY.md](HISTORY.md). The others were
   seen in tests or probes.
@@ -31,7 +31,12 @@ that relies on it or records it.
    to benefit. (Related chat.)
 7. **Rules selected by container query only cost where they match.** That makes specialising code per
    (mode, token) a big win: a level evaluates only its own variant. *(measured)*
-   - Each container rule still costs roughly 1.6–4 µs per element it's tested against.
+   - Each container rule still costs time on every element it's tested against. An earlier, undated measurement
+     here gave roughly 1.6–4 µs. css-physics measured Chromium 153 on 2026-10-13 (its `docs/BENCHMARKS.md` §2):
+     a false `style(--x: v)` costs 0.6–0.7 µs per rule, `style(--x)` without a value 0.4 µs, a range query
+     such as `style(--x > 5)` 1.6 µs.
+   - `and` is evaluated left to right and stops at the first false test; nested `@container` rules evaluate the
+     innermost query first (same source). Put the test that rejects most variants first.
    - Over-specialising to 46 MB of CSS was slower (`archive/results/compiler/cc3_*.json`).
 8. **The CSS `font` shorthand resets `font-variation-settings`** when it's declared after it. (Related chat.)
 
@@ -110,7 +115,7 @@ that relies on it or records it.
 34. **A size container restyles its dependent subtree inside layout, every pass its size is dirty.** With the trace
     category `disabled-by-default-devtools.timeline.invalidationTracking`, `StyleResolver::ResolveStyle` instants
     show where style resolutions happen: on the CPU page 98% of them were inside `Layout`, about 1,300 per pass,
-    all under the 74 readback readers (`container-type: inline-size | size`, width from `anchor-size()`), while
+    all under the readback readers (74 then, 76 now) (`container-type: inline-size | size`, width from `anchor-size()`), while
     `Document::recalcStyle` resolved only about 48 elements (`#cpu` and its ancestors). Keep what sits under a
     size container tiny (`machine/gen_fvm4.py`: one scroller, one or two subjects). *(measured, 2026-10-13)*
 35. **A view-timeline subject may be absolutely positioned inside its scroller** with `top` from container units;

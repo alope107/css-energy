@@ -288,7 +288,7 @@ Traps end shapings early, so these matter most. After phase 9 the suite's traps 
 
 ### Compile time
 
-At 2–7 s on the page, about half of compile time is the readback sweep.
+On the page compiling takes 1.6–4.8 s from Run (median 1.75 s), and the readback sweep is about 1.2 s of it.
 
 - **Read several columns per frame.**
 - **Lex in parallel**, with a prefix scan over the DFA's transition functions.
