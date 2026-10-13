@@ -15,7 +15,7 @@
   - `benchmark`: measure and record performance.
 - **Delegate log and trace digging to a subagent.** Chrome traces and harness logs are large; ask for the
   numbers, not the dump.
-- **Run browser jobs in the background.** `make l3` takes about 3 minutes and `make l5` about 45. Redirect their
+- **Run browser jobs in the background.** `make l3` takes about 1.5 minutes and `make l5` about 10. Redirect their
   output to a file and poll it, rather than blocking a tool call past its timeout.
 - **When compacting**, preserve:
   - the list of modified files;

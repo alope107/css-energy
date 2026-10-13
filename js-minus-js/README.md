@@ -14,8 +14,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 - All five test levels pass. That includes 89 programs checked against Node's output and 14 programs the
   compiler must reject.
-- On the page, compiling takes about 2–7 s from Run, including the readback sweep. The CPU runs about 50
-  bytecode steps per second, so FizzBuzz 1–15 finishes in about 32 s.
+- On the page, compiling takes about 1.5–3.5 s from Run, including the readback sweep. The CPU runs about 110
+  bytecode steps per second, so FizzBuzz 1–15 finishes in about 14 s (headless Chromium 153, 2026-10-13).
 - See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the numbers and [docs/HISTORY.md](docs/HISTORY.md) for
   how the design got here.
 
@@ -24,9 +24,9 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 ```
 npm install                       # playwright-core + @sparticuz/chromium (Chromium 153, Linux x64), for the test harnesses only
 pip install -r requirements.txt   # fontTools, brotli (uharfbuzz optional)
-make page                         # -> build/js_in_css.xhtml (about 45 s; reproducible)
-make test                         # fast tests, no browser (about 10 s)
-make test-browser                 # the CSS compiler in Chrome (about 3 min)
+make page                         # -> build/js_in_css.xhtml (about 25 s; reproducible)
+make test                         # fast tests, no browser (about 5 s)
+make test-browser                 # the CSS compiler in Chrome (about 1.5 min)
 make test-ui-smoke                # the real page, typed like a user (about 2 min)
 ```
 

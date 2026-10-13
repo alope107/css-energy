@@ -22,13 +22,13 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Published site: `bash tools/make_site.sh` (counts 8–64; the CSS is split into ≤14 MB files)
 
 ## Working style for performance work
-- Hypothesis → microbenchmark or freeze+ablate → change → short tests at 16–32 bodies → validate at 48/64 only now and then (big builds take minutes).
+- Hypothesis → microbenchmark or freeze+ablate → change → short tests at 16–32 bodies → validate at 48/64 only now and then (a 64-body build takes about 30 s, and its runs are slow).
 - Timings are noisy: interleave repeats and compare relatively. Sanity-check that a change kept physics correct (`smoke.sh`, `sleepy.js`) before reporting a speedup.
 - Record every new measurement in `docs/BENCHMARKS.md` and every dead end, with its reason, in `docs/HISTORY.md`.
 
 ## Non-obvious gotchas
 - `var()` of a registered number keeps only **6 significant digits**; the wake digests rely on this (6 bodies per decimal word).
-- `@container` rules with an **absent** container name are free. A present name with a false `style()` costs about 3.5 µs per rule per pass. Gate with owner names (`b{i}`), and put `container-name: var(--AN)` on **every** level: Chrome only re-matches style-container-dependent rules for direct children.
+- `@container` rules with an **absent** container name are cheap (about 0.13 µs per rule per pass in Chromium 153; free in 141). A present name with a false `style()` costs about 0.9 µs per rule per pass. Gate with owner names (`b{i}`), and put `container-name: var(--AN)` on **every** level: Chrome only re-matches style-container-dependent rules for direct children.
 - Gauss–Seidel order: tray planes **first**, then pair rounds. Planes-last leaves stacks with phantom velocities that never sleep.
 - Keep the `.ts` timeline-scope wrappers **above** `#RB`. Inside `.rz`, rendering vanishes.
 - The camera constants (`PERSP`, `TILT`, `CAM_TY`, `CAM_DIST`) are duplicated in `gen3d.py`, `ui3d.css` (as placeholders filled by build3d) and the grab/perf tools' `proj()`. Change all of them together.

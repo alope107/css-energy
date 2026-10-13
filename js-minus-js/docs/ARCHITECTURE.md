@@ -310,7 +310,7 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 ## 5. Tests
 
-`make test` runs the fast levels (about 10 s). `make test-browser` runs level 3, and `make test-ui-smoke` /
+`make test` runs the fast levels (about 5 s). `make test-browser` runs level 3, and `make test-ui-smoke` /
 `make test-ui` run level 5.
 
 | Level | Command | What runs | Checked against |
@@ -331,7 +331,7 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 **Not covered**
 
-- L5 includes only programs that finish within 1,500 steps, because the CPU runs about 50 steps/s.
+- L5 includes only programs that finish within 1,500 steps, because the CPU runs about 110 steps/s.
 - Error 99 on the page stands for a specific code from the reference: a token no variant accepts.
 
 **Other tools**
@@ -354,7 +354,7 @@ make dist   # copy it to dist/
 ```
 
 - Builds are reproducible: the Makefile pins `PYTHONHASHSEED` and `SOURCE_DATE_EPOCH`.
-- `make page` takes about 45 s: the page generator about 30 s, the font about 4 s.
+- `make page` takes about 25 s, of which the font build is about 2 s.
 - The image (`mkimage.py tests/fizz.js`) supplies the ROM and the editor's initial program.
 - Page-generator environment variables (`gen_fvm4.py`):
   - `UI=1`: the typed-input page, which is the product.

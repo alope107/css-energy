@@ -36,7 +36,7 @@ CSS). Both change together, in this order.
    - Report total temps and the maximum label ports before and after.
    - A jump in ports (elements on all 400 levels) or in temps (CSS per level) needs a reason or a fix: fold
      constants, collect labels, prune unreachable blocks.
-5. **Run `make l3`** (about 3 minutes, in the background). Every program must match the reference word for word.
+5. **Run `make l3`** (about 1.5 minutes, in the background). Every program must match the reference word for word.
 6. **If the runtime library changed** (`compiler/lib_src.js`), compare `python3 tools/traps.py
    tests/suite/fizzbuzz.js tests/programs/t*.js` before and after. Shapings are the cost.
 7. **Rebuild and check the page**: `make page && make l5-smoke`, then `make dist`.

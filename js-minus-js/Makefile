@@ -12,11 +12,11 @@ export SOURCE_DATE_EPOCH := 0
         expect l1 l2 l2-generic l3 l4 l5 l5-smoke clean
 
 help:
-	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~45 s)"
-	@echo "make test           fast levels, no browser: Node oracle, L1 reference, L2 DSL, L4 machine model (~10 s)"
-	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~3 min)"
-	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~2 min)"
-	@echo "make test-ui        L5 on every quick program (~45 min)"
+	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
+	@echo "make test           fast levels, no browser: Node oracle, L1 reference, L2 DSL, L4 machine model (~5 s)"
+	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~1.5 min)"
+	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~1 min)"
+	@echo "make test-ui        L5 on every quick program (~10 min)"
 	@echo "make dist           copy the built page to dist/"
 
 all: page

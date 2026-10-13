@@ -19,11 +19,11 @@ The README describes the project; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e
 
 ```
 npm install && pip install -r requirements.txt     # once
-make page            # build/js_in_css.xhtml: lib -> image -> CPU font -> page (~45 s, reproducible)
-make test            # fast gate, no browser (~10 s): Node oracle, L1, L2, L4
-make l3              # the generated CSS compiler in Chrome vs the reference (~3 min)
-make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~2 min)
-make l5              # every program under 1,500 steps (~45 min; run in the background)
+make page            # build/js_in_css.xhtml: lib -> image -> CPU font -> page (~25 s, reproducible)
+make test            # fast gate, no browser (~5 s): Node oracle, L1, L2, L4
+make l3              # the generated CSS compiler in Chrome vs the reference (~1.5 min)
+make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~1 min)
+make l5              # every program under 1,500 steps (~10 min; run in the background)
 make dist            # copy the built page to dist/
 python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
 ```
@@ -79,7 +79,7 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
 
 - Run `make l5-smoke`.
 - For speed claims, time FizzBuzz to HALT with `machine/ui_seq.js` (initial program) or `machine/ui_run.js`, before
-  and after, back to back in one session. Both press Run. Run-to-run noise is about ±1 s on ~32 s.
+  and after, back to back in one session. Both press Run. Run-to-run noise is about ±0.3 s on ~14 s.
   (`halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for the old fixed-program pages.)
 
 ## Done means

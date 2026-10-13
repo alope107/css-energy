@@ -93,7 +93,7 @@ A body can be touched by any round. Instead of summing over every possible partn
 ### Gating: what makes a sleeping or sparse scene cheap
 
 - **Gates.** Each declaration's gate is a style() condition on a flag computed at L0/L1. Examples: `ac{i}` (body awake and this pass advances time), `np{a}_{b}` (pair near), `tcp…` (touching), `p{a}_{b}uA/uB` (which reference face), `nw{i}{F|C|X|Z}` (near a plane).
-- **Named containers.** A rule whose container name is absent from every ancestor is skipped essentially for free: 50,000 such rules measured at 0 ms. An unnamed or present-name style() rule costs about 2.5–3.5 µs per pass even when false.
+- **Named containers.** A rule whose container name is absent from every ancestor is skipped cheaply: 50,000 such rules measured at 0 ms in Chromium 141 and about 7 ms per pass in Chromium 153. A present-name style() rule costs about 0.9 µs per pass even when false (2.5–3.5 µs in 141), about 6× an absent one.
   - So every rule owned by body i, or by a pair whose lower index is i, is written `@container b{i} style(--gate: v){…}`.
   - L0 computes `--A{i}: if(style(--ac{i}:1) or style(--nbs{i}:1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`.
   - **Every** level has `container-name: var(--AN)`. Chrome only re-matches rules that depend on a style container for that container's direct children, so the names must be on every level.
@@ -169,16 +169,16 @@ A body can be touched by any round. Instead of summing over every possible partn
 
 ---
 
-## 5. Where the time goes (summary; details in BENCHMARKS.md)
+## 5. Where the time goes (summary; details in BENCHMARKS.md, measured 2026-10-13 in Chromium 153)
 
-- **Per-property cost.** A registered property costs about 1.5–2 µs plus about 0.35 µs per arithmetic operation and about 0.5 µs per `var()` reference. Arithmetic is not the bottleneck; property count is.
-- **A 48-body pile.** One step costs about 90–100 ms, almost all of it style recalculation:
-  - contact pairs about 40 ms;
-  - per-body awake blocks about 40–50 ms (82 + 24 props per body);
-  - base about 12 ms.
+- **Per-property cost.** A registered property costs about 1.5–2 µs plus about 0.1–0.15 µs per arithmetic operation and about 0.17 µs per `var()` reference. Arithmetic is not the bottleneck; property count is.
+- **A 48-body pile.** One step costs about 37 ms (frozen at 4 s), almost all of it style recalculation:
+  - contact pairs about 15 ms;
+  - per-body awake blocks about 27 ms (82 + 24 props per body; overlaps with the pairs);
+  - base about 6 ms.
 - **N² costs (all bodies awake, 48 bodies).**
-  - The all-pairs broadphase is 1,128 near tests at about 12.5 µs each, about 14 ms.
-  - Owner-named pair rules whose name is present (body awake) but whose style() is false add about 3.5 µs × 3,360 ≈ 12 ms.
-  - Together that is about 28% of a step, and it grows with N².
+  - The all-pairs broadphase is 1,128 near tests at about 2.9 µs each, about 3.3 ms.
+  - Owner-named pair rules whose name is present (body awake) but whose style() is false add about 0.9 µs × 3,360 ≈ 3 ms.
+  - Together that is about 17% of a step, and it grows with N².
 - **Registers.** About 20 µs per register element restyle (2 values).
-- **An idle scene** costs about 1 ms of style per frame.
+- **An idle scene** (32 bodies, all asleep) costs about 2 ms per style pass, 2 passes per frame.

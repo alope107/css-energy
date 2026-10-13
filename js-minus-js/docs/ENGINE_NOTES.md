@@ -6,7 +6,7 @@ that relies on it or records it.
 - **Tested on**: Chromium 153.0.8010.0, headless, Linux, `--no-sandbox --disable-gpu`. Treat every entry as
   "true there".
 - **Re-check after a Chrome upgrade.** Several of these may be bugs, not specified behaviour.
-- **Evidence**: entries marked *(measured)* have numbers in [BENCHMARKS.md](BENCHMARKS.md). The others were
+- **Evidence**: entries marked *(measured)* were measured when they were found; numbers for code that still exists are in [BENCHMARKS.md](BENCHMARKS.md), and the rest are in [HISTORY.md](HISTORY.md). The others were
   seen in tests or probes.
 
 ## CSS values and custom properties
@@ -90,7 +90,7 @@ that relies on it or records it.
     broadcast (`machine/cpu4.py`).
 28. **HarfBuzz's cost is roughly the rules tried times the context walk distance.** Make every state glyph a GDEF
     mark and use mark-filtering sets so each lookup sees only the cells it needs (`machine/cpugen.py`).
-    *(per-lookup timing scripts: BENCHMARKS.md §3)*
+    *(per-lookup timing scripts: `archive/machine/`, see `archive/README.md`)*
 29. **Glyph positions must line up exactly.** HarfBuzz positions are 16.16 fixed point and Chrome positions glyphs
     in whole device pixels. One font unit must be exactly one device pixel, no glyph may be 32,768 device px or
     wider, and the page finds the device-pixel ratio with resolution media queries (`machine/zoomfix.py`).

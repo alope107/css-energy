@@ -7,7 +7,7 @@ This was reconstructed from three sources:
   files aren't in this repo unless noted.
 - **Notes from this conversation.**
 
-Every number here has its source in [BENCHMARKS.md](BENCHMARKS.md).
+Numbers about superseded code come from the raw logs in `archive/results/` and from earlier chats, and can no longer be reproduced. [BENCHMARKS.md](BENCHMARKS.md) holds the re-measurements of the current code (2026-10-13, a different sandbox), so its numbers differ from the ones quoted here.
 
 **Notation.**
 
@@ -213,7 +213,7 @@ These come from earlier chats unless noted, and none has been measured on the cu
 
 ### Fewer traps
 
-The machine runs about 50 steps/s on the page, and traps end shapings early, so these matter most.
+The machine runs about 110 steps/s on the page (about 50 in the old sandbox), and traps end shapings early, so these matter most.
 
 - **Do SHL13 in the font.** It's a linear shift.
 - **Do multiply-by-small-constant in the font.**
