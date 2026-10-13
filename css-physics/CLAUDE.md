@@ -30,7 +30,12 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 
 ## Non-obvious gotchas
 - `var()` of a registered number keeps only **6 significant digits**; the wake digests rely on this (6 bodies per decimal word).
-- `@container` rules with an **absent** container name are cheap (about 0.13 µs per rule per pass in Chromium 153; free in 141). A present name with a false `style()` costs about 0.9 µs per rule per pass. Gate with owner names (`b{i}`), and put `container-name: var(--AN)` on **every** level: Chrome only re-matches style-container-dependent rules for direct children.
+- `@container` rules with an **absent** container name are cheap only at shallow depth: the lookup walks every ancestor and scans its name list (about 0.2 µs + 0.6 ns × depth × names; about 0.2 + 0.01 × depth µs in the engine). A present name costs 0.16 µs, `style(--flag)` 0.4 µs, `style(--flag: 1)` 0.7 µs, a range query 1.6 µs. Gate with owner names (`b{i}`), and put `container-name: var(--AN)` on **every** level: Chrome only re-matches style-container-dependent rules for direct children. Nested queries evaluate the innermost first.
+- `style(--x)` (no value) on a registered property is true iff its value differs from the initial value; 0/1 gates use it (`BOOLQ`).
+- CSS math functions (`mod`, `round`, `pow`) are dear: a digit extraction costs about 5 µs. Anything computed per sleeping body per pass kills the sparse regime; charge awake bodies instead (the digests do).
+- Spatial cells were measured and lost (`CELLS=1` builds them; HISTORY.md). The N² floor is the rule visits (about 3 per pair), not the near tests.
+- `freeze3.js` wobbles every register: a frozen page's base is 2–3× the live base. Compare frozen variants with each other only.
+- Sparse-regime benchmark: `SCENE=field TRAY=2 FIELD_GAP=30 COUNTS=64 PLAIN=1 python3 src/build3d.py out/g64.html` then `node tools/sparse.js out/g64.html 64 c`; freeze mid-drag with `BODY=k node tools/freezegrab.js`.
 - Gauss–Seidel order: tray planes **first**, then pair rounds. Planes-last leaves stacks with phantom velocities that never sleep.
 - Keep the `.ts` timeline-scope wrappers **above** `#RB`. Inside `.rz`, rendering vanishes.
 - The camera constants (`PERSP`, `TILT`, `CAM_TY`, `CAM_DIST`) are duplicated in `gen3d.py`, `ui3d.css` (as placeholders filled by build3d) and the grab/perf tools' `proj()`. Change all of them together.

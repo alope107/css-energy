@@ -41,14 +41,14 @@ Read alongside `src/gen3d.py`. Its module docstring and section comments (`# ---
 
 ### Why the wrapper stack looks the way it does
 
-`.ptr > .ts… > #RB > .rz > #LS > #LT > (rt regs) + plain wrapper > L0 > L1 > … > LF > .regs`
+`.ptr > .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
 
 - **`.ptr`** holds the pointer (`--sx/--sy` from a view timeline on a hover-anchored marker) and the camera yaw.
 - **`#RB`** gates the pointer by `--att`: it is only nonzero while grabbing.
 - **`.rz`** zeroes `--sx/--sy/--yaw`, so hovering doesn't restyle `#LS`.
 - **`#LS`** reads the state registers. In a fully sleeping scene nothing in it changes, so it isn't restyled.
 - **`#LT`** sits inside `#LS` and changes every pass because of the clock. Everything it passes down is either non-inherited or derived only from state, so the solver levels are not restyled while the scene sleeps. This took idle style cost from 13.6 to about 1.0 ms per frame at 32 bodies.
-- **The plain wrapper** between #LT and L0 keeps L0 out of #LT's every-pass child restyle unless L0's inputs really changed.
+- **#LM and #LW** are two plain wrappers between #LT and L0; they keep L0 out of #LT's every-pass child restyle unless L0's inputs really changed. With `CELLS=1` (an evaluated dead end, see below) they hold the spatial cells: #LM the cell marks of awake bodies and the cell of each sleeper, #LW the summed words, the sleepers' presence and the container names that #L0's own rules then query.
 - **The grab overlay** (ring, pin, tether) hangs off L0, the only level that uses the pointer. L1 zeroes the pointer for everything below it.
 
 ---
@@ -92,12 +92,21 @@ A body can be touched by any round. Instead of summing over every possible partn
 
 ### Gating: what makes a sleeping or sparse scene cheap
 
-- **Gates.** Each declaration's gate is a style() condition on a flag computed at L0/L1. Examples: `ac{i}` (body awake and this pass advances time), `np{a}_{b}` (pair near), `tcp…` (touching), `p{a}_{b}uA/uB` (which reference face), `nw{i}{F|C|X|Z}` (near a plane).
-- **Named containers.** A rule whose container name is absent from every ancestor is skipped cheaply: 50,000 such rules measured at 0 ms in Chromium 141 and about 7 ms per pass in Chromium 153. A present-name style() rule costs about 0.9 µs per pass even when false (2.5–3.5 µs in 141), about 6× an absent one.
-  - So every rule owned by body i, or by a pair whose lower index is i, is written `@container b{i} style(--gate: v){…}`.
-  - L0 computes `--A{i}: if(style(--ac{i}:1) or style(--nbs{i}:1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`.
-  - **Every** level has `container-name: var(--AN)`. Chrome only re-matches rules that depend on a style container for that container's direct children, so the names must be on every level.
-  - The rules of a sleeping neighbourhood are rejected without evaluating their style() query.
+- **Gates.** Each declaration's gate is a style() condition on a flag computed at L0/L1. A 0/1 flag is tested as `style(--flag)` (true iff the registered value differs from its initial 0), which costs about 0.4 µs per rule against 0.7 µs for `style(--flag: 1)` (`BOOLQ`). Examples: `ac{i}` (body awake and this pass advances time), `np{a}_{b}` (pair near), `tcp…` (touching), `p{a}_{b}uA/uB` (which reference face), `nw{i}{F|C|X|Z}` (near a plane).
+- **Named containers.** A rule whose container name is absent from every ancestor is skipped without evaluating its style() query: about 0.1 µs per rule at shallow depth in Chromium 153 (free in 141), against 0.4–0.7 µs for a present name with a false style() (2.5–3.5 µs in 141).
+  - So every rule owned by body i, or by a pair whose lower index is i, is written `@container b{i} style(--gate){…}` at every level from L1 down (`OWNLEV`; L0's rules query the plain wrapper, which has no names).
+  - L0 computes `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`: `b{i}` while body i is awake or near an awake body (with `CELLS=1` an awake body also gets `w{i}`).
+  - **Every** level has `container-name: var(--AN)`, so a named rule resolves at its parent. Chrome only re-matches rules that depend on a style container for that container's direct children, so the names must be on every level.
+  - A present name is found at the parent (about 0.16 µs). An **absent name walks every ancestor and scans each one's name list**: about 0.2 µs + 0.6 ns × depth × names in a microbenchmark, and about 0.2 + 0.01 × depth µs in the engine. With few names present (a sparse scene) that is still cheaper than an unnamed `style()` (0.4 µs): unnamed deep rules (`OWNLEV=1`) made a 64-body one-body drag 30% slower. When everything is awake, all names are present and the form doesn't matter.
+  - The cost of a rule nobody matches is the N² floor of this design: about 3 rules per pair (narrowphase, solve, alias) at 0.2–0.7 µs, so 4 ms per pass at 64 bodies in a one-body drag, and growing like N² × depth.
+
+### Spatial cells: evaluated, off by default (`CELLS=1`, `CELL`)
+
+The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't change which rules exist (every pair has its own static rules), only how cheaply irrelevant ones are rejected and how many per-pair properties are computed. The implementation, kept for comparison:
+
+- **Marks (#LM).** An awake body marks every column and row its reach (`R_i + max R + MARGIN`, around its predicted position) can touch. A mark is a decimal word with one digit per column: `(B^hi − B^lo) / (B − 1)` sets digits lo…hi−1 in one term; `B = 10^(digits of N)` so a digit can't overflow, and a word holds `6 // digits` columns (6 significant digits survive `var()`). A sleeping body declares its own column and row (`hx{i}`, `hz{i}`).
+- **Words and presence (#LW).** `SX{w}`/`SZ{w}` sum the marks of all bodies (an undeclared mark is 0). A sleeper is present, `nb{i} = 1`, if the digit of its column and the digit of its row are both nonzero (a separable superset of "an awake body is in reach"). Presence gates the name `b{i}`, the sleeper's rotation matrices at L1 and its wake test; the near test of a pair becomes a name-only nest `@container w{a}{@container b{b}{#L0{--np{a}_{b}: …}}}` (plus its mirror), evaluated inner-first, so a far sleeper costs one absent-name lookup at depth 1 instead of a property.
+- **Why it loses** (HISTORY.md has the numbers): the sleepers pay per pass (two cell properties and a presence property, about 80 µs per sleeper: CSS math functions are dear), while the all-pairs digest charges only awake bodies (N/6 words each) and the near tests it would save cost a few µs per awake body per partner. With one body awake among 64 the cells build is 6 ms per pass slower; with everything awake nothing is saved.
 - **Shared names (`SHARE=1`).** A property declared and read on only one batch level is invisible to every other level (it is non-inherited), so properties of different levels share names (`zn0, zn1, …`). This shrinks the `@property` list by about a third at 64 bodies.
 
 ### Sleeping and waking
@@ -105,10 +114,10 @@ A body can be touched by any round. Instead of summing over every possible partn
 - **Going to sleep.** A body that moves less than `SLEEP_DX`/`SLEEP_DA` in a step counts up `SC` to `SLEEP_K` (45 passes). At `SLEEP_K` it is "ready", and it sleeps (SC = SLEEP_K + 1) unless it is blocked by touching a body that isn't ready.
 - **The stillness test uses displacement, not velocity.** Resting boxes carry a bounded phantom velocity from the split impulse. The test also counts a step that undoes the previous one as still, because resting boxes can rock by a hair every other step.
 - **Waking.** A sleeping body wakes on shake, reset, a gravity change, being grabbed, or a moving body coming near.
-- **Neighbourhood digests.** "A moving body is near me" is computed with decimal words:
+- **Neighbourhood digests.** "A moving body is near me" (and "a body that isn't ready is near me") is computed with decimal words:
   - Each awake body j sums its near flags into words where body i is digit `i % 6` of word `i // 6`. A registered number survives `var()` with only 6 significant digits.
   - Summing the words over all bodies tells every body at once whether an awake, moving or not-ready body is near it.
-  - The gates are `mix`, `anyrd`, `pk`, `bk` and `nbs`.
+  - The gates are `mix`, `anyrd`, `pk`, `bk` and `nb` ("asleep, near an awake body", formerly `nbs`).
 - **Starting asleep.** Scenes start with bodies asleep only if they are at rest **and touching the floor** (`scene_decls`). Anything placed in the air starts awake.
 
 ### Grabbing (mouse and touch)
@@ -152,7 +161,11 @@ A body can be touched by any round. Instead of summing over every possible partn
 | `PATCHW` | soft | box/plane contact: soft (one patch) \| even \| depth (8 corners) |
 | `PATCHB` | corners | box/box: corners (clipped incident corners) \| soft (experimental, jitters) |
 | `PATCHC` | 1.0 | patch weighting constant |
-| `SCENE`, `SCENE_LIST` | tower | first scene and the scene list (tower, rain, stack; also calm, pair) |
+| `SCENE`, `SCENE_LIST` | tower | first scene and the scene list (tower, rain, stack; also calm, pair, field) |
+| `CELLS`, `CELL` | 0, 120 | spatial cells for presence and near tests (an evaluated dead end; 1 builds it for comparison) |
+| `BOOLQ` | 1 | gate 0/1 flags with `style(--flag)` instead of `style(--flag: 1)` |
+| `OWNLEV` | 999 | owner-named container rules only at levels ≤ this (1 was measured slower: see Gating) |
+| `TRAY`, `FIELD_GAP` | 1, 6 | tray scale (benchmarks only: the camera doesn't follow) and the spacing of the field scene |
 | `SIMPLIFY` | 1 | `simp.py` calc() simplifier |
 | `INLINE2`, `INL_DEPTH`, `INL_ONLY1` | 1, 2, 1 | inline single-use props into their consumers |
 | `SHARE` | 1 | shared names for level-local props |
@@ -166,6 +179,7 @@ A body can be touched by any round. Instead of summing over every possible partn
 - **Layer 0:** an 8×5 grid on the floor, clear of the hand-placed bodies.
 - **Upper layers:** offset by half a cell and dropped from above.
 - **Rain:** the original 24 drop columns, then a higher offset set.
+- **Field:** every body shelf-packed at rest on the floor, axis-aligned, `FIELD_GAP` apart, so the scene loads asleep; what doesn't fit drops from just above. The sparse-regime benchmark scene (`tools/sparse.js`).
 
 ---
 

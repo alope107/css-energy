@@ -49,7 +49,9 @@ PATCHC = float(os.environ.get('PATCHC', 1.0))  # 'even': weight = depth + PATCHC
 DENS = 0.00001
 
 # tray: floor y = 0 (y points down, as in CSS), walls at x = +-WX, z = +-WZ, ceiling y = -CEIL
-WX, WZ, CEIL = 280, 180, 280   # ceiling at the top edge of the default view
+# (TRAY scales the floor for big sparse scenes; the camera doesn't follow, so it's for benchmarks)
+TRAY = float(os.environ.get('TRAY', 1))
+WX, WZ, CEIL = int(280 * TRAY), int(180 * TRAY), 280   # ceiling at the top edge of the default view
 # contact groups per body against the tray: floor and ceiling as fixed planes, and the two
 # opposite walls of each axis as ONE group whose normal faces away from the nearer wall
 # (a body can't touch both at once): 4 groups instead of 6
@@ -103,6 +105,25 @@ for b in BODIES:
     b['im'] = 1 / b['m']
     b['ii'] = tuple(1 / v for v in b['I'])
 
+# ---- spatial cells (CELLS=1; off: measured as a dead end, see HISTORY.md) ------------------------
+# The floor is cut into CELL-sized cells along x and z. An awake body marks every cell column (x) and row
+# (z) its reach (R_i + max R + margin) can touch, as digits of decimal words: one digit per column, B10 =
+# 10^(digits of N) per digit so a count can't overflow, CPW columns per word (a registered number survives
+# var() with 6 significant digits). A sleeping body is "present" (its rules are evaluated and it can be
+# touched or woken) only if some awake body marks both its column and its row. Far sleepers then cost one
+# absent-name rule per pair instead of a broadphase property, and the all-pairs digest that said "an awake
+# body is near me" is replaced. (The test is separable, so it's a superset: with many awake bodies
+# everything is present, as before.) It loses because every sleeper pays its cell and presence properties
+# on every pass (about 80 us each), more than the near tests it saves; the digest only charges awake bodies.
+CELLS = os.environ.get('CELLS', '0') == '1'
+CELL = float(os.environ.get('CELL', 120))
+KX, KZ = -(-int(2 * WX) // int(CELL)), -(-int(2 * WZ) // int(CELL))
+RMAX = max(b['R'] for b in BODIES)
+DIG = len(str(N))
+B10 = 10 ** DIG
+CPW = 6 // DIG
+NWX, NWZ = -(-KX // CPW), -(-KZ // CPW)
+
 
 def quat(ax=0.0, ay=0.0, az=0.0):
     """quaternion (w, x, y, z) for intrinsic rotations x, then y, then z (radians)"""
@@ -144,14 +165,42 @@ SCENES = {
         S(-60, -25, 0), S(-60, -75, 0), S(-60, -118, 0), S(-60, -145, 0),
         S(-200, -28, -100), S(120, -22, 60), S(200, -18, -80), S(60, -24, -120),
     ],
+    'field': [],    # every body at rest on the floor, shelf-packed (the sparse-regime benchmark scene)
 }
 import random as _rnd
+
+
+def _field():
+    """shelf-pack all bodies on the floor, axis-aligned, so the whole scene starts asleep; what doesn't
+    fit is dropped from just above the pile"""
+    fp = []
+    for i, b in enumerate(BODIES):
+        w, d, hgt = (2 * b['h'][0], 2 * b['h'][2], b['h'][1]) if b['k'] == 'box' else (2 * b['r'],) * 2 + (b['r'],)
+        fp.append((i, w, d, hgt))
+    fp.sort(key=lambda t: -t[2])
+    GAP = float(os.environ.get('FIELD_GAP', 6))
+    res = [None] * N
+    x, z, rowd = -WX + GAP, -WZ + GAP, 0
+    rest = []
+    for i, w, d, hgt in fp:
+        if x + w > WX - GAP:
+            x, z, rowd = -WX + GAP, z + rowd + GAP, 0
+        if z + d > WZ - GAP:
+            rest.append((i, w, d, hgt)); continue
+        res[i] = S(x + w / 2, -hgt, z + d / 2)
+        x += w + GAP; rowd = max(rowd, d)
+    rng = _rnd.Random(11)
+    for k, (i, w, d, hgt) in enumerate(rest):
+        res[i] = S(rng.uniform(-WX + w, WX - w), -90 - 70 * (k // 12), rng.uniform(-WZ + d, WZ - d))
+    return res
 
 
 def _extend(scene, name):
     """place bodies beyond the hand-made 8: resting on a non-overlapping grid clear of the hand-placed
     ones; once the floor is full, further layers are dropped from a little above, offset by half a
     cell ('rain' drops everything from random heights)"""
+    if name == 'field':
+        return _field()
     rng = _rnd.Random(7 + len(name))
     base = list(scene)
     order = [i for i, b in enumerate(BODIES) if b['k'] == 'box'] + [i for i, b in enumerate(BODIES) if b['k'] == 'sph']
@@ -422,8 +471,8 @@ for i, b in enumerate(BODIES):
         Rv = [[g.P(f'R{i}{r}{cc}', R[r][cc], L0, AW(i)) for cc in range(3)] for r in range(3)]
         for r in range(3):
             for cc in range(3):
-                g.A(f'R{i}{r}{cc}', R[r][cc], L1, f'nbs{i}')
-        g.A(f'il{i}', f'2 / ({w_} * {w_} + {x_} * {x_} + {y_} * {y_} + {z_} * {z_})', L1, f'nbs{i}')
+                g.A(f'R{i}{r}{cc}', R[r][cc], L1, f'nb{i}')
+        g.A(f'il{i}', f'2 / ({w_} * {w_} + {x_} * {x_} + {y_} * {y_} + {z_} * {z_})', L1, f'nb{i}')
         d['col'] = [tuple(Rv[r][k] for r in range(3)) for k in range(3)]   # body axes in world
     B[i] = d
 
@@ -467,15 +516,21 @@ for gr in groups:
         dv = vsub(B[a]['p'], B[bb]['p'])
         e = f"{f(rr)} - hypot({', '.join(dv)})"
     gr['flag'] = f'n{gr["id"]}'
-    g.P(gr['flag'], f'sign(max(0, {e}))', L0, AW(a), syntax='<integer>')
-    if not pl:
-        g.A(gr['flag'], f'sign(max(0, {e}))', L0, AW(bb))
+    if pl or not CELLS:
+        g.P(gr['flag'], f'sign(max(0, {e}))', L0, AW(a), syntax='<integer>')
+        if not pl:
+            g.A(gr['flag'], f'sign(max(0, {e}))', L0, AW(bb))
+    else:
+        # a pair's near test exists only while one body is awake (name w) and the other present (name
+        # b: awake, or asleep in the reach of an awake body): two name-only nested rules, no style()
+        g.P(gr['flag'], f'sign(max(0, {e}))', L0, ('nn', a, bb), syntax='<integer>')
+        g.A(gr['flag'], f'sign(max(0, {e}))', L0, ('nn', bb, a))
 # Neighbourhood digests. Each awake body j sums its near flags into decimal words (body i is digit
 # i % 6 of word i // 6; a registered number survives var() with 6 significant digits, so a word holds
 # six bodies, each counting up to 9 awake neighbours). Summing the words over all bodies (asleep ones
 # contribute nothing: their words are undeclared) tells every body at once whether an awake body is
 # near it, whether a moving one is, and whether one that isn't ready to sleep is: one digit each
-# instead of a sum over every possible partner per body.
+# instead of a sum over every possible partner per body. (With CELLS=1 the first comes from the cells.)
 NW = (N + 5) // 6
 pflag = {(gr['a'], gr['b']): gr['flag'] for gr in groups if not gr['plane']}
 fl_ = lambda i, j: V(pflag[(min(i, j), max(i, j))])
@@ -486,14 +541,24 @@ for j in range(N):
             g.P(f'nm{j}_{m}', ' + '.join(terms), L0, AW(j))
 for m in range(NW):
     ws = [V(f'nm{j}_{m}') for j in range(N) if (f'nm{j}_{m}') in g.props]
-    g.P(f'SN{m}', ' + '.join(ws), L0, ('mix', 1))
+    if not CELLS:
+        g.P(f'SN{m}', ' + '.join(ws), L0, ('mix', 1))
     g.P(f'SP{m}', ' + '.join(f'{w} * var(--mf{j})' for j, w in zip([j for j in range(N) if f'nm{j}_{m}' in g.props], ws)), L0, ('mix', 1))
     g.P(f'SB{m}', ' + '.join(f'{w} * var(--nr{j})' for j, w in zip([j for j in range(N) if f'nm{j}_{m}' in g.props], ws)), L0, ('anyrd', 1))
 dig = lambda S, i: f'sign(mod(round(down, var(--{S}{i // 6}) / {10 ** (i % 6)}), 10))'
 for i in range(N):
     g.P(f'pk{i}', dig('SP', i), L0, AS(i), syntax='<integer>')    # asleep, near a body that is moving
     g.P(f'bk{i}', dig('SB', i), L0, (f'rd{i}', 1), syntax='<integer>')   # ready, touching one that isn't
-    g.P(f'nbs{i}', dig('SN', i), L0, AS(i), syntax='<integer>')   # asleep, near an awake body
+    if not CELLS:
+        g.P(f'nb{i}', dig('SN', i), L0, AS(i), syntax='<integer>')   # asleep, near an awake body (all-pairs digest)
+        continue
+    g.reg(f'nb{i}', syntax='<integer>')     # asleep, in the reach of an awake body (cells; declared on #LW)
+    g.reg(f'hx{i}', syntax='<integer>')     # a sleeper's cell column and row (declared on #LM)
+    g.reg(f'hz{i}', syntax='<integer>')
+    for w_ in range(NWX):
+        g.reg(f'xm{i}_{w_}')                # an awake body's column marks, one word each (declared on #LM)
+    for w_ in range(NWZ):
+        g.reg(f'zm{i}_{w_}')
 
 # ---- grab (L0, gated on the pointer being down) ----------------------------------
 # Two phases. Picking (pointer down, nothing held yet: --pick at #LS) ray-casts every body once and
@@ -1456,7 +1521,11 @@ _ord = sorted(blocks.items(), key=lambda kv: 1.2 if isinstance(kv[0][1], tuple) 
 # sleeping neighbourhood cost nothing at all. (Rules at level >= 2 then evaluate their gate on L1,
 # which holds every gate value: they are all computed at L0/L1 and inherited.)
 _OWN = [re.compile(p) for i_, p in enumerate((r'^np(\d+)_\d+$', r'^tcp(\d+)_\d+$', r'^p(\d+)_\d+(uA|uB|ov)$', r'^nw(\d+)[FCXZ]$',
-                                r'^(?:tw|nbs|ac|as)(\d+)$')) if str(i_) in os.environ.get('OWNSET', '01234')]
+                                r'^(?:tw|nb|ac|as)(\d+)$')) if str(i_) in os.environ.get('OWNSET', '01234')]
+
+
+OWNLEV = int(os.environ.get('OWNLEV', 999))
+BOOLQ = os.environ.get('BOOLQ', '1') == '1'
 
 
 def owner(gn):
@@ -1471,17 +1540,52 @@ for (lev, gate), ds in _ord:
     rule = f'#L{lev}{{{";".join(ds)}}}'
     if gate is None:
         w(rule)
+    elif isinstance(gate, tuple) and gate[0] == 'nn':
+        # a pair's near test: body gate[1] awake (w) and body gate[2] present (b); the inner name is
+        # evaluated first and short-circuits, so a far sleeper costs one absent-name lookup
+        w(f'@container w{gate[1]}{{@container b{gate[2]}{{{rule}}}}}')
     else:
         gn, gv = gate if isinstance(gate, tuple) else (gate, 1)
-        own = owner(gn) if lev >= 1 else None
+        own = owner(gn) if lev <= OWNLEV and (CELLS or lev >= 1) else None
         if own is not None:
             assert decl_level.get(gn, -1) <= 1, gn
-        w(f'@container {f"b{own} " if own is not None else ""}style(--{gn}: {gv}){{{rule}}}')
+        # style(--flag) is true iff the registered flag differs from its initial 0: the same test as
+        # style(--flag: 1) for a 0/1 flag, at about 0.4 us per rule instead of 0.7
+        q = f'style(--{gn})' if BOOLQ and gv == 1 and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
+        w(f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}')
+# ---- cells: #LM marks (awake) and cell coordinates (asleep), #LW words, presence and the names ----
+h_ = f(STEP)
+for i in range(N if CELLS else 0):
+    ds = []
+    reach = f(BODIES[i]['R'] + RMAX + MARGIN + 1)
+    for ax_, W_, NW_, nm_ in (('X', WX, NWX, 'xm'), ('Z', WZ, NWZ, 'zm')):
+        pos_ = f'(var(--{ax_}{i}) + var(--V{ax_}{i}) * {h_} + {W_})'
+        for w_ in range(NW_):
+            lo = f'clamp(0, round(down, ({pos_} - {reach}) / {f(CELL)}) - {w_ * CPW}, {CPW})'
+            hi = f'clamp(0, round(down, ({pos_} + {reach}) / {f(CELL)}) + 1 - {w_ * CPW}, {CPW})'
+            ds.append(f'--{nm_}{i}_{w_}:calc((pow({B10}, {hi}) - pow({B10}, {lo})) / {B10 - 1})')
+    w(f'@container style(--ac{i}: 1){{#LM{{{";".join(ds)}}}}}')
+    w(f'@container style(--as{i}: 1){{#LM{{--hx{i}:calc(clamp(0, round(down, (var(--X{i}) + {WX}) / {f(CELL)}), {KX - 1}));'
+      f'--hz{i}:calc(clamp(0, round(down, (var(--Z{i}) + {WZ}) / {f(CELL)}), {KZ - 1}))}}}}')
+if CELLS:
+    w('#LW{' + ''.join(f'--SX{w_}:calc(' + ' + '.join(f'var(--xm{i}_{w_})' for i in range(N)) + ');' for w_ in range(NWX)) +
+      ''.join(f'--SZ{w_}:calc(' + ' + '.join(f'var(--zm{i}_{w_})' for i in range(N)) + ');' for w_ in range(NWZ)) + '}')
+
+
+def _digit(S, NW_, hv):
+    """digit hv of the word row S: pick the word by hv // CPW, then the digit hv % CPW"""
+    sel = ' + '.join(f'(1 - min(1, abs(round(down, {hv} / {CPW}) - {w_}))) * var(--{S}{w_})' for w_ in range(NW_))
+    return f'mod(round(down, ({sel}) / pow({B10}, mod({hv}, {CPW}))), {B10})'
+
+
+for i in range(N if CELLS else 0):
+    w(f'@container style(--as{i}: 1){{#LW{{--nb{i}:calc(sign({_digit("SX", NWX, f"var(--hx{i})")}) * sign({_digit("SZ", NWZ, f"var(--hz{i})")}))}}}}')
 _names = ' '.join(f'var(--A{i})' for i in range(N))
-w('#L0{' + ''.join(f'--A{i}:if(style(--ac{i}: 1) or style(--nbs{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
+# (without cells the presence digest is computed on #L0, so the names are too, as before)
+w(('#LW{' if CELLS else '#L0{') + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}{" w" + str(i) if CELLS else ""}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
 # every level carries the names, so a named rule always resolves to its parent (Chrome only forces
 # a re-match of rules that depend on a style container for that container's children)
-w(','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
+w(('#LW,' if CELLS else '') + ','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
 
 
 def _canon(st):
@@ -1615,10 +1719,12 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
             # this keeps L0 out of that unless its inputs really changed)
             # (the grab overlay hangs off L0, the only level that uses the pointer; L1 zeroes the pointer
             # for everything below, so a pointer move alone restyles nothing past L1)
-            '<div class="lv">' + ''.join(f'<div class="lv" id="L{l}">' + ('<i class="tether"></i><i class="pin"></i><i class="ring"></i>' if l == 0 else '')
+            # (two wrappers; with CELLS=1, #LM holds the cell marks of awake bodies and the cells of sleeping
+            # ones, #LW the cell words, the presence of sleepers and the container names that #L0's rules query)
+            '<div class="lv" id="LM"><div class="lv" id="LW">' + ''.join(f'<div class="lv" id="L{l}">' + ('<i class="tether"></i><i class="pin"></i><i class="ring"></i>' if l == 0 else '')
                                          for l in range(NLEV)) +
             '<div class="regs"><div class="sc">' + reg_html + '</div></div>' +
-            '</div>' * (NLEV + 4) +
+            '</div>' * (NLEV + 5) +
             '<div class="view"><div class="cam"><i class="floor"></i><i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i>'
             '<i class="rail rn"></i>' + ''.join(render_html) + '</div></div></div>' + '</div>' * NTS + '</div></div></div>')

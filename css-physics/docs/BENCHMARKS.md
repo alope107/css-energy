@@ -143,6 +143,53 @@ The tower's sphere overlap (3.06 px) is the closest any check comes to its limit
 
 ---
 
+### The sparse regime (field scene, 2026-10-13)
+
+`SCENE=field` packs every body at rest on the floor (`FIELD_GAP` apart; `TRAY=2` doubles the floor for benchmarks), so the scene loads asleep. `tools/sparse.js page N c` drags the body nearest the tray centre in a circle for 3 s and reports the median style pass, fps and how many bodies woke.
+
+| Page | Awake during the drag | Style pass | fps |
+|---|---|---|---|
+| 64, gap 6 (dense pile) | 13–25 | 45–55 ms | 8–10 |
+| 64, gap 6, double tray | 15 | 35–43 ms | 11–13 |
+| 64, gap 30, double tray (one body alone) | 1–2 | 15.7–16.7 ms | 24–26 |
+| 96, gap 30, double tray | 4 | 38–41 ms | 10–11 |
+| 32, gap 6 | 31 (the whole pile wakes) | 14–18 ms | 22–28 |
+
+Frozen mid-drag (`BODY=k tools/freezegrab.js`), 64 bodies, `bench.sh`:
+
+| Removed | dense pile, 13 awake | gap 30, 1 awake |
+|---|---|---|
+| nothing | 52.5 | 13.1 |
+| all pair blocks | 32.3 | 9.0 |
+| per-body awake blocks (`ac`) | 25.8 | — |
+| sleeping-body blocks (`as`) | 50.8 | 12.4 |
+| every gated block | 12.5 (5.1 with static registers: the freeze's wobble of all 840 registers is 7 ms) | 7.4 |
+
+In the dense pile the awake cluster has about 90 near and 40 touching pairs: 20 ms of narrowphase and solves. In the one-body drag the 6,016 pair rules cost 4 ms (0.67 µs each, nearly all rejected by an absent owner name: the ancestor walk costs about 0.2 + 0.01 × depth µs in the engine).
+
+### Spatial cells A/B (`CELLS=1`, 2026-10-13; see HISTORY.md)
+
+| Page (field, gap 30, double tray, one body dragged) | Style pass, two runs |
+|---|---|
+| 64, all-pairs digest (default) | 15.7, 16.7 ms |
+| 64, cells | 21.6, 23.1 ms |
+| 64, cells + `BOOLQ` | 24.2, 21.8 ms |
+| 64, cells + `BOOLQ` + unnamed deep rules (`OWNLEV=1`) | 29.0, 29.2 ms |
+| 96, digest + `BOOLQ` | 42.7, 40.5 ms |
+| 96, cells + `BOOLQ` | 57.7, 63.6 ms |
+
+Frozen one-body drag at 64: digest 13.1 ms, cells 19.3; without the sleepers' blocks 12.4 / 14.3 (the cells' per-sleeper bookkeeping is 5 ms); without the name-nested near-test rules 18.4 (4,032 rules at 0.2 µs). Frozen tower chaos at 48 with one baked state: 37.5 (p48), 38.9 (digest rebuilt), 39.9 (cells), 38.3 (cells + BOOLQ), 37.3 (+ OWNLEV=1): within noise when everything is awake.
+
+### 64 and 96 bodies, live (tower, 2026-10-13)
+
+| Page | Style pass at 3 s | fps | Active gates at 3 s |
+|---|---|---|---|
+| 48 | 49–58 ms | 8–10 | np 63, tcp 15, ov 4 |
+| 64 | 80–100 ms | 5–6 | np 117, tcp 27, ov 10 |
+| 96 | 183 ms | 3.3 | nothing asleep for 24 s (a second trace crashed the renderer) |
+
+Frozen at 3 s, 64 bodies: 59.6 ms; without pair blocks 32.3 (pairs ≈ 27 ms); without `ac` blocks 18.5; without any gated block 7.7. Hiding the faces saves 8 ms per live pass, hiding the bodies' internals 12 ms (the render at 64 is about 190 µs per body per pass). Owner names off (`OWNSET=`) changes nothing with everything awake (91 vs 80–90 ms). The world-AABB broadphase would keep 107 of 124 sphere-near pairs (`tools/bpcount.js`); 32 touch.
+
 ## 2. Style engine cost model (microbenchmarks)
 
 Pages: `experiments/costs/mk*.py`, generated in a scratch directory, then `node tools/stylebench.js <pages> 500 1500`, three interleaved repeats; each number is the median of the three medians. Inputs come from an animated `--t`. "Per unit" subtracts a baseline page and divides by the count; the baseline is the empty page (`cq0.html`, 0.28 ms) unless the row says otherwise.
@@ -186,6 +233,31 @@ Compared with the Chromium 141 numbers, expression tokens cost about a third as 
 | 2,000 three-deep, all present (declaring the same prop) | 1.81 ms | 1.5 ms |
 | 5,000 `@container pres style(--gK: 7)` (name present, false, container restyles each frame) | 4.75 ms | 4.5 ms ⇒ **0.89 µs per rule** |
 | the same 5,000 with the name absent | 1.00 ms | 0.7 ms ⇒ 0.14 µs per rule |
+
+**Rule matching at scale** (`experiments/costs/mk_part.py`, `part_depth.py`, `part_order.py`, `part_styleform.py`; 24k rules on one element unless noted, baseline subtracted; 2026-10-13):
+
+| Form | µs per rule |
+|---|---|
+| absent name, 3 named ancestors of 3 names | 0.09–0.13, linear to 300k rules (24k 2.3 ms, 100k 11 ms, 300k 38 ms) |
+| absent name, D named ancestors of M names each | ≈ 0.2 + 0.6 ns × D × M (D=32, M=128: 2.1; D=100, M=32: 2.0; D=100, M=128: 8.2) |
+| present name, no `style()` | 0.07–0.16 |
+| present name + false `style(--g: 1)` | 0.56–0.74 (independent of depth and list length: found at the parent) |
+| present name + `style(--g)` (true iff value ≠ initial), false / true | 0.40 / 0.41 |
+| unregistered `style(--u: 1)` / `style(--u)` | 0.51 / 0.43 |
+| unnamed `style()` false / true | 0.58 / 0.48 |
+| range `style(--h > 9)` false / true; `8 < --h < 9`; bound `calc(var())` | 1.57 / 1.66; 2.24; 1.95 |
+| `style(--x: var(--y))` (true) | 0.64 |
+| `or` of 9 `style()` | 5.2 (0.58 per disjunct) |
+| nested queries | inner first, short-circuit (outer true + inner false 0.63; outer false + inner true 1.27) |
+| `and` | left to right, short-circuit (false and true 0.64; true and false 1.19) |
+| outer present name, inner absent + `style()` (K such rules per pair) | 0.10 each |
+| unregistered `calc(var(--t) * k)` / 4-branch `if()` producing an ident / 12-branch | 1.25 / 2.0 / 2.6 |
+
+Feature support in 153 (`part_feat.py`): range style queries with literal, `var()` and `calc()` bounds, and ident equality `style(--cell: var(--cell2))` all work. `style(--x)` on a registered property is true iff the computed value differs from its initial value (`--h: 7` with initial 7 is false, `calc(1 - 1)` is false); on an unregistered one iff it is declared at all (`--u: 0` is true).
+
+**Register readback floor** (`mk_regs.py`: 60 levels, R register elements with two view timelines each, 2R animations on one #LS-like element): R = 420: no timelines 1.6 ms; 7 moving registers 2.3 ms; all moving 2.4 ms (and the frame rate halves: ticking 840 timelines costs outside style); #LS split into one element per body 2.7 ms. R = 840: 3.0 / 5.2 / 10 ms. About 2 µs per static register element per pass; per-body readback elements don't help.
+
+**Inherited custom properties down a deep chain** (`mk_inherit2.py`): 6,000 inherited registered properties declared at level 1 cost 7.1 ms at 8, 66 and 130 levels deep (at the root: 10 ms). No depth × properties term. An empty level costs about 15 µs per pass (66 levels 1.3 ms, 130 levels 2.1 ms).
 
 **Absent container names are no longer free.** In Chromium 141, 50,000 absent-name rules cost nothing measurable (0.18–0.21 ms against a 0.19 ms base). Here they cost about 7 ms per pass, and the cost is not linear in the rule count. Gating by owner name still pays: a present name with a false `style()` costs about 6× an absent one. The engine has about 4,000 gated blocks at 48 bodies, so this overhead is small next to its step.
 
