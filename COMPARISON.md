@@ -56,7 +56,24 @@ both `CLAUDE.md`/`AGENTS.md` files.
 4. **Sibling selectors instead of `:has()` for controls.** js-minus-js reads run state with
    `#run:checked ~ …`. css-physics sets gravity, reset, shake, scene and grab with `#app:has(…)`. The cost only
    lands on presses, so this is low priority; it is worth one measurement of a grab press at 64 bodies.
-5. **Layer isolation for static panes.** `will-change: transform` on js-minus-js's editor saved about 7 ms of
+5. **Anchor-name reads as dynamic indexing (a real lead, untried).** A js-minus-js read port
+   (`machine/gen_fvm4.py`, `mux()` and `.rp<w>`) works in two steps. A two-level `if()` picks an anchor name
+   `--c<k>`: at most 12 + 64 `style()` tests for 768 cells, so O(√N), once per port. Then one `anchor-size()`
+   reads the whole word. css-physics has assumed it has no dynamic indexing, which is why every pair of bodies
+   has its own rules. With this technique, a body could keep K contact slots: each slot picks its partner's
+   register elements by name and reads their positions directly. That would make the pair rules O(N·K) instead
+   of O(N²). Caveats:
+   - The value arrives in layout. It reaches style only inside a size-container reader, so the solver that uses
+     it would have to sit under that reader. js-minus-js found that restyles inside size containers dominated
+     its layout until it slimmed its readers.
+   - css-physics once read registers through anchor positioning and measured about 5 ms of layout per frame
+     (HISTORY.md, from an earlier session's summary).
+   - Choosing which K partners to keep is still a ranking over candidates, which the broadphase digests would
+     have to supply.
+
+   A first test is a microbenchmark: N register elements and N·K readers that each pick a partner by name, timed
+   against the per-pair rules at 64 bodies.
+6. **Layer isolation for static panes.** `will-change: transform` on js-minus-js's editor saved about 7 ms of
    paint per frame. css-physics paints under 1 ms per frame, so this does not pay there today.
 
 Not transferable, with reasons:
@@ -64,9 +81,6 @@ Not transferable, with reasons:
 - **Execution in a GSUB font.** Physics needs fractional, branchy math. The variable-font experiments in
   css-physics already rejected font compute for this (a rotation matrix costs about 105 µs in a font against
   about 36 µs in CSS).
-- **Decode trees and anchor-name RAM.** These give js-minus-js addressed memory, which is the missing piece for
-  "contact slots" in css-physics. But reads still go through N-way muxes, so a slot with a dynamic partner costs
-  O(N) per value. That is no better than the per-pair rules it would replace.
 - **Remembered-size RAM leaves.** They hold state with no per-pass cost, but update only once per frame. That
   would halve css-physics's step rate.
 
@@ -113,5 +127,6 @@ Not transferable, with reasons:
 | js-minus-js | Measure latch restarts against the `@property` count during the readback sweep | small | could speed up compile, unknown how much |
 | css-physics | Python evaluator over `g.decl` as a reference test | medium | safer generator changes; a browser-free cost model |
 | css-physics | One `invalidationTracking` trace of a 64-body pass | small | shows which elements restyle |
+| css-physics | Microbenchmark anchor-name partner reads for contact slots | small, then large to build | could remove the N² pair rules |
 | js-minus-js | Freeze-and-ablate the trap service | medium | attributes 100 ms per frame |
 | js-minus-js | Update the container-rule costs in ENGINE_NOTES.md and reorder the dispatch test | small | small |
