@@ -12,9 +12,11 @@ complement (the compiler never needs more; asserted).
 
 CSS-side service (modelled in `service`): write back / read RAM, compute EXT, print.
 """
-import json, sys
+import json, sys, os
 
-ROM = 4096
+LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'compiler', 'layout.json')))
+ROM = LAYOUT['rom_size']                    # RAM starts here
+AMASK = 32767                               # 15-bit addresses
 MASK = (1 << 20) - 1
 def s20(v): v &= MASK; return v - (1 << 20) if v >> 19 else v
 
@@ -25,8 +27,9 @@ PRINTOPS = ['PRINT', 'PRINTB', 'PRINTSP', 'PRINTBSP', 'PRINTLN', 'PRINTBLN']
 OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS
 OP = {n: i for i, n in enumerate(OPN)}
 STRTAG = 262144                             # a string value is its address - STRTAG (cc_ref.STRTAG)
-STR_LO, STR_HI = 4352, 4608                 # string area (cc_ref: data_base + SDATA .. + 2 * SDATA); STR_LO itself is the DONE marker
-OUT_BASE, OUT_COLS, OUT_ROWS = 7040, 8, 16  # console
+STR_LO, STR_HI = LAYOUT['data_base'] + 256, LAYOUT['data_base'] + 512   # string area (cc_ref: data_base + SDATA .. + 2 * SDATA); STR_LO itself is the DONE marker
+OUT_COLS, OUT_ROWS = LAYOUT['cols'], LAYOUT['rows']
+OUT_BASE = LAYOUT['rom_size'] + LAYOUT['ram_size'] - OUT_COLS * OUT_ROWS   # console: the last words of RAM
 PRINT_CHUNK = 4                             # console cells one service can write (one per bank)
 FETCH = 39                                  # pseudo-op: fetch an instruction word from RAM
 
@@ -181,7 +184,7 @@ class Machine:
             for t, e in cyc.get('t', {}).items(): r[t] = s20(ev(e, r))
             if last:
                 new = {k: s20(ev(e, r)) for k, e in cyc.get('commit', {}).items()}
-                self.pc = new.get('PC', self.pc) & 8191; self.sp = new.get('SP', self.sp); self.fp = new.get('FP', self.fp)
+                self.pc = new.get('PC', self.pc) & AMASK; self.sp = new.get('SP', self.sp) & AMASK; self.fp = new.get('FP', self.fp) & AMASK
                 if cyc.get('ext') or cyc.get('putc'): self.resv = 0
                 self.steps += 1; ir = None; r = None
             else:

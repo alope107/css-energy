@@ -401,7 +401,8 @@ class Program:
         for x in range(1, 48):
             add(('ADD', x), {t.gid0 + i: t.gid0 + i + x for t in d48 for i in range(48 - x)}, f'ADD{x}')
         for x in range(3):
-            add(('ADDM', x), {self.types[tn].gid0 + i: self.types[tn].gid0 + (((i + x) % 16) & 1) for tn in top13 for i in range(48)}, f'ADDM{x}')
+            tm = getattr(self, 'topmask', lambda tn: 1)      # the top digit's mask per register (cpu4.topmask)
+            add(('ADDM', x), {self.types[tn].gid0 + i: self.types[tn].gid0 + (((i + x) % 16) & tm(tn)) for tn in top13 for i in range(48)}, f'ADDM{x}')
         if ptype:
             P = self.types[ptype]; n = len(P.values) - 1          # last value = RAM marker
             for x in range(16): add(('PSET', x), {P.g(v): P.gid0 + x for v in P.values}, f'PSET{x}')

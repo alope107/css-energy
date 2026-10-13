@@ -8,7 +8,8 @@ lib = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'l
 src = open(sys.argv[1]).read()
 c, r = R.compile_and_run(src, lib)
 assert not c.err and r, c.err
-im = dict(rom=lib['rom'], ram=[0] * 3072, ramSize=3072, sp0=R.LAYOUT['sp0'], outBase=7040, rows=16, cols=8, source=src,
-          codeBase=R.LAYOUT['code_base'], steps=r[0], expected=r[1], direct=False, romWords=len(lib['rom']), cssCompiled=True)
+L = R.LAYOUT
+im = dict(rom=lib['rom'], romSize=L['rom_size'], ram=[0] * L['ram_size'], ramSize=L['ram_size'], sp0=L['sp0'], outBase=L['out_base'], rows=L['rows'], cols=L['cols'],
+          source=src, codeBase=L['code_base'], init=L['init'], steps=r[0], expected=r[1], direct=False, romWords=len(lib['rom']), cssCompiled=True)
 json.dump(im, open(sys.argv[2], 'w'))
 print('steps', r[0], 'rom', len(lib['rom']))

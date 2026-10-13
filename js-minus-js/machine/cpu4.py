@@ -19,6 +19,11 @@ Semantics = uarch.py (victim-pointer ring, no evict buffer).
 import re
 from cpugen import Program, A, RA, MAP, DA, Op
 from uarch import OPN, UCODE, ROM, MASK, s20, PRINTOPS
+# the 4-digit registers' top digit is masked: addresses (PC, SP, FP, MAR) to 3 bits (15-bit addresses: ROM + RAM up to 32K words),
+# the immediate to 1 bit (an instruction word is op * 8192 + a 13-bit immediate)
+TOPMASK = {'IMM3': 1}
+def topmask(reg3): return TOPMASK.get(reg3, 7)
+assert ROM % 256 == 0 and ROM <= 4096
 
 D16 = [(d, 0) for d in range(16)]
 D48 = [(d, c) for c in range(3) for d in range(16)]
@@ -31,7 +36,12 @@ OKV = ['ok', 'miss', 'wfail', 'wait']
 REG13 = ['IMM', 'PC', 'FP', 'SP', 'MAR']
 REG20 = ['MDR', 'RES', 'T1', 'T2', 'T3', 'D', 'MDW']
 BLOCK = ['MDR', 'RES', 'IMM', 'PC', 'FP', 'SP', 'T1', 'T2', 'T3', 'D', 'MAR', 'MDW']   # dispatch sources before targets
-def width(r): return 4 if r in REG13 else 5
+def width(r): return 4 if r in REG13 or r == 'SIM' else 5
+# SIM: the 13-bit immediate read as signed (>= 4096 means negative). The address registers are 15-bit now, so adding it to FP
+# must sign-extend: when the immediate's top digit is 1 (its only possible nonzero value), the sum's top digit gets 7 = 1 + 6
+# (0x6000 = 32768 - 8192), and the carry stage's ADDM masks the result to 3 bits.
+def regcell(r): return 'IMM' if r == 'SIM' else r
+def srcdigit(r, j, v): return (7 if v & 1 else 0) if r == 'SIM' and j == 3 else v     # (the rules are enumerated for every digit value; only 0 / 1 occur)
 WB = 4
 LINEF = (['BOP', 'MB', 'VF', 'VD', 'WE'] + [x for j in range(4) for x in (f'BA{j}', f'TAG{j}')] + ['WH'] +
          [x for j in range(5) for x in [f'GS{j}', f'BD{j}'] + [f'VAL{w}_{j}' for w in range(WB)] + [f'G{4*j+i}' for i in range(4)]] +
@@ -55,14 +65,14 @@ def parse(e):
     for sign, tok in re.findall(r'([+-]?)([A-Z0-9]+)', e):
         sg = -1 if sign == '-' else 1
         if tok.isdigit(): K += sg * int(tok)
-        else: terms.append((sg, 'IMM' if tok == 'SIM' else tok))
+        else: terms.append((sg, tok))
     return terms, K
 
 class CPU:
     def __init__(self, image, N=16):
         self.image, self.N = image, N
         P = self.P = Program(); t = P.T
-        t('P', list(range(4096)) + ['RAM']); t('C', CVALS); t('RESV', BIT); t('NI', list(range(64)))
+        t('P', list(range(ROM)) + ['RAM']); t('C', CVALS); t('RESV', BIT); t('NI', list(range(64)))
         self.HDR = [('HPC', 4), ('HSP', 4), ('HFP', 4), ('HRES', 5), ('HMAR', 4), ('HT1', 5), ('HT2', 5)]
         for h, w in self.HDR:
             for j in range(w): t(f'{h}{j}', D16)
@@ -89,7 +99,7 @@ class CPU:
         for n in ['ZT1', 'ZT2', 'ZD', 'SD', 'OK1', 'OK', 'FAIL', 'MBC', 'FAIL0', 'HIT', 'VANY', 'MOP']: put(n)
         self.lines = [{f: P.cell(P.types[f'L.{f}'], 'L', k, f) for f in LINEF} for k in range(N)]
         # ---- readback: export twins (base glyphs) whose advances encode values; spans are contiguous cell ranges
-        self.weights = {'C': lambda v: CVALS.index(v), 'RESV': lambda v: 256 * v, 'NI': lambda v: v, 'L.VF': lambda v: 2048 * (v == 1)}
+        self.weights = {'C': lambda v: CVALS.index(v), 'RESV': lambda v: 256 * v, 'NI': lambda v: v, 'L.VF': lambda v: 8192 * (v == 1)}   # tag < 8192
         for h, w in self.HDR:
             if h == 'HRES': continue
             for j in range(w):
@@ -114,7 +124,7 @@ class CPU:
             for s_ in range(7):
                 a, b = ln[NIB[3 * s_]], (ln[NIB[min(3 * s_ + 2, 19)]] if s_ < 6 else ln[f'WS{WB - 1}'])
                 self.spans.append((f'L{k}V{s_}', rng(a, b)))
-        self.top13 = [f'{r}3' for r in REG13]
+        self.top13 = [f'{r}3' for r in REG13]; P.topmask = topmask
         import os
         if os.environ.get('SPLITALL'):
             orig = P.stage
@@ -189,18 +199,18 @@ class CPU:
             for j in range(tw):
                 tgt = self.c(f'{target}{j}')
                 mask = tw == 4 and j == 3 and not carry
-                def setop(raw, mask=mask): return ('SET', ((raw % 16) & 1, 0) if mask else (raw % 16, raw // 16))
-                if j < width(ra) and self.before(f'{ra}{j}', f'{target}{j}') or ra == target:
-                    def fn(it, k, semof=semof, j=j, sa=sa, setop=setop, kd=kd):
+                def setop(raw, mask=mask, tm=topmask(f'{target}3')): return ('SET', ((raw % 16) & tm, 0) if mask else (raw % 16, raw // 16))
+                if j < width(ra) and self.before(f'{regcell(ra)}{j}', f'{target}{j}') or ra == target:
+                    def fn(it, k, semof=semof, j=j, sa=sa, setop=setop, kd=kd, ra=ra):
                         p = semof(k)
                         if p is None: return None
-                        a = k['src'] if sa > 0 else 15 - k['src']
+                        a = srcdigit(ra, j, k['src']) if sa > 0 else 15 - k['src']
                         return [(0, setop(a + kd(p, j)))]
-                    R1.append(DA(f'{target}{j}<-{ra}', [dict(src=self.c(f'{ra}{j}'), targets=[tgt], gates=gates(j))],
+                    R1.append(DA(f'{target}{j}<-{ra}', [dict(src=self.c(f'{regcell(ra)}{j}'), targets=[tgt], gates=gates(j))],
                                  {'src': lambda v: v[0], **gkeys}, fn))
                 elif j < width(ra):
                     # source sits after the target: backtrack-style copy (16 rules, gated by the local control copy)
-                    assert len(terms) == 1 and sa > 0, (target, gk)
+                    assert len(terms) == 1 and sa > 0 and ra != 'SIM', (target, gk)
                     def fna(cell, k, semof=semof, j=j, setop=setop, kd=kd):
                         p = semof(k)
                         if p is None: return None
@@ -219,12 +229,12 @@ class CPU:
                 if len(terms) > 1:
                     (sb, rb) = terms[1]
                     if j < width(rb):
-                        assert self.before(f'{rb}{j}', f'{target}{j}'), (target, rb)
-                        def fnb(it, k, semof=semof, sb=sb):
+                        assert self.before(f'{regcell(rb)}{j}', f'{target}{j}'), (target, rb)
+                        def fnb(it, k, semof=semof, sb=sb, rb=rb, j=j):
                             if semof(k) is None: return None
-                            b = k['src'] if sb > 0 else 15 - k['src']
+                            b = srcdigit(rb, j, k['src']) if sb > 0 else 15 - k['src']
                             return [(0, ('ADD', b))] if b else None
-                        R2.append(DA(f'{target}{j}+={rb}', [dict(src=self.c(f'{rb}{j}'), targets=[tgt], gates=gates(j))],
+                        R2.append(DA(f'{target}{j}+={rb}', [dict(src=self.c(f'{regcell(rb)}{j}'), targets=[tgt], gates=gates(j))],
                                      {'src': lambda v: v[0], **gkeys}, fnb))
                     elif sb < 0 and not ungated:
                         R2.append(DA(f'{target}{j}+=15', [dict(src=self.c(f'CJ{j}'), targets=[tgt], gates={x: y for x, y in gates(j).items() if x != 'cj'})],
@@ -262,8 +272,9 @@ class CPU:
         pcd = self.reg('PC')
         start = lambda v: v == ('S',)
         # ---- K0: composite PC glyph, then one dispatch sets op and imm from the ROM
+        # P2: a PC digit 2 at or past the ROM's size (ROM // 256 pages) is RAM, like any nonzero digit 3
         for name, role, f in [('P0', 0, lambda k: Op('PSET', k['pc'])), ('P1', 1, lambda k: Op('P16', k['pc']) if k['pc'] else None),
-                              ('P2', 2, lambda k: Op('P256', k['pc']) if k['pc'] else None)]:
+                              ('P2', 2, lambda k: (Op('P256', k['pc']) if k['pc'] < ROM // 256 else Op('PRAM')) if k['pc'] else None)]:
             P.stage(f'K0 {name}', [A(name, [core['P']], (lambda r: lambda c: {'c': C, 'pc': pcd[r]})(role),
                                      {'c': start, 'pc': lambda v: v[0]}, (lambda f: lambda cell, k: f(k) if k['c'] else None)(f))])
         P.stage('K0 P3', [A('P3', [core['P']], lambda c: {'c': C, 'pc': pcd[3]}, {'c': start, 'pc': lambda v: v[0] != 0},
@@ -430,7 +441,7 @@ class CPU:
                 else: out[(cv, None)] = e
             return out
         self.stage3('K5 spE', self.lin('SP', chooser('SP', lambda e: 'FP' in e), commit=True))
-        P.stage('K5 spE.norm', [MAP('spnorm', [P.types[f'SP{j}'] for j in range(4)], lambda t, v: ((v[0] & 1) if t.name == 'SP3' else v[0], 0))])
+        P.stage('K5 spE.norm', [MAP('spnorm', [P.types[f'SP{j}'] for j in range(4)], lambda t, v: ((v[0] & topmask('SP3')) if t.name == 'SP3' else v[0], 0))])
         P.stage('K5 fp', self.lin('FP', chooser('FP', lambda e: True), commit=True)[0])
         r_sp = self.lin('SP', chooser('SP', lambda e: 'FP' not in e), commit=True)
         r_pc = self.lin('PC', chooser('PC', lambda e: True), commit=True)
@@ -459,7 +470,7 @@ class CPU:
                               {'self': lambda v: v if v == ('F', 0) else None, 'ok': lambda v: v, 'm3': lambda v: v[0], 'm4': lambda v: v[0]}, fetch_c)])
         norm = [P.types[f'{r}{j}'] for r in BLOCK for j in range(width(r))]
         def normf(t, v):
-            d = v[0] & 1 if t.name in self.top13 else v[0]
+            d = v[0] & topmask(t.name) if t.name in self.top13 else v[0]
             return (d, 0)
         P.stage('K5 norm', [MAP('norm', norm, normf), ])
         P.stage('K5 vf', [MAP('vfclr', [Lt('VF')], lambda t, v: {2: 0, 3: 1}.get(v, v))])
@@ -521,7 +532,7 @@ class CPU:
         def s(x, bits=20): return x - (1 << bits) if x >= 1 << (bits - 1) else x
         lines, vp = [], None
         for k in range(self.N):
-            a = sv[f'L{k}A']; tag = a % 2048; vf = a // 2048
+            a = sv[f'L{k}A']; tag = a % 8192; vf = a // 8192
             sp = [sv[f'L{k}V{i}'] for i in range(7)]
             nib = []
             for i in range(20): nib.append((sp[i // 3] >> (4 * (i % 3))) & 15)

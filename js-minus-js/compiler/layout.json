@@ -1,0 +1,11 @@
+{
+ "rom_size": 1024,
+ "data_base": 1024,
+ "code_base": 1536,
+ "init": 2048,
+ "sp0": 2560,
+ "ram_size": 16384,
+ "cols": 8,
+ "rows": 16,
+ "_doc": "The memory map (words; addresses are 15-bit). ROM 0..rom_size-1 holds the lib; RAM starts at rom_size (= data_base: globals, then strings at +256, code at code_base, the staged-data count at init-1, staging at init, the stack from sp0 up); the console is the last cols*rows words of RAM. Read by cc_ref.py (LAYOUT), libbuild.js, uarch.py and the page generator."
+}

@@ -32,62 +32,42 @@ back to zero.
 
 ## 1. Memory map and ISA
 
-Addresses are words. A word is a 20-bit two's-complement integer.
+Addresses are words, 15 bits wide (the font's address registers are 4 hex digits with the top digit masked to 3 bits).
+A word is a 20-bit two's-complement integer. The map lives in `compiler/layout.json` (`cc_ref.LAYOUT`; `libbuild.js`,
+`uarch.py` and the page generator read the same file):
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 4095 | ROM: the runtime library (`compiler/lib_src.js`, compiled by `jsc.js`). It ends with a jump to 4608. | baked into the CPU font's GSUB |
-| 4096 | `STRTAG` = 262144, the untag constant read by the lib | lib `__init`, copied from staging |
-| 4097 … 4351 | globals and array literals (255 words) | lib `__init` copies the initial values; the program writes the rest |
-| 4352 … 4607 | string literals, each `[tag word][bytes…][0]` | compiler overlays, read-only |
-| 4608 … 5118 | code (511 words) | compiler overlays, read-only |
-| 5119 | count of staged words | compiler `.fin` |
-| 5120 … | staged initial globals and array data, with `STRTAG` at 5120 | compiler overlays |
-| 5632 ↑ | stack (`sp0`) | program |
-| 7040 … 7167 | console, 8 columns × 16 rows | PUTC service |
+| 0 … 1023 | ROM (`rom_size`): the runtime library (`compiler/lib_src.js`, compiled by `jsc.js`, 103 words). It ends with a jump to `code_base`. | baked into the CPU font's GSUB |
+| 1024 | `data_base`: `STRTAG` = 262144, the untag constant read by the lib | lib `__init`, copied from staging |
+| 1025 … 1279 | globals and array literals (255 words) | lib `__init` copies the initial values; the program writes the rest |
+| 1280 … 1535 | string literals, each `[tag word][bytes…][0]` | compiler overlays, read-only |
+| 1536 … 2046 | code (`code_base`, 511 words) | compiler overlays, read-only |
+| 2047 | count of staged words | compiler `.fin` |
+| 2048 … 2303 | staged initial globals and array data (`init`), with `STRTAG` at 2048 | compiler overlays |
+| 2560 ↑ | stack (`sp0`), up to the console | program |
+| 17280 … 17407 | console, 8 columns × 16 rows: the last `cols × rows` words of RAM | PUTC / PRINT service |
 
-The RAM runs from 4096 to 7167 (`ramSize` 3072).
+RAM runs from `rom_size` (= `data_base`; the compile chain names RAM cell `k` `--c<k>` with `k` = address − 1024) for
+`ram_size` = 16,384 words, so to 17,407. Before 2026-10-13 the ROM took 0 … 4095 (for a lib of 93 words) and RAM was
+4096 … 7167 (3,072 words); addresses were 13-bit. The code and data limits are the compiler's tables (§2), not RAM.
 
-**Instruction word.** A word is `op × 8192 + imm`, with a 13-bit immediate. `LOADL` / `STOREL` / `INCL` /
-`IDXL` read the immediate as signed (≥ 4096 means negative, relative to FP).
+**RAM on the page** (`machine/memtree.py`, `gen_fvm4.py`): one leaf element per word (a `content-visibility: hidden`
+element whose remembered width is the word + 2^20, with `anchor-name: --c<k>`) in four bank trees (address mod 4),
+each a decode tree of radix-4 nodes that routes the write channels (`wa` / `wd` registers, one per issue) to the leaf.
+Reads are `anchor-size(--c<k> width, 2^20px)` through a per-bank name mux; the compile chain's overlays, named after
+the cells they supply, come later in tree order and so win for the static areas (strings, code, count, staging).
 
-**Opcodes.** There are 45, listed in `compiler/cc_ref.py` and `machine/uarch.py`:
-
-> NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ
-> JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL PRINT PRINTB PRINTSP PRINTBSP PRINTLN PRINTBLN
-
-- The PRINT family pops a value and prints it; the page's CSS services it (§3.3). A tagged string pointer prints
-  its bytes, 0 / 1 print as `false` / `true` with the B forms (the compiler knows the type is boolean), anything
-  else prints in decimal. SP / LN add a space / a newline. One service writes up to 4 console cells (one write
-  channel per bank), so a short value costs one trap; a string chunk also ends at its 4-word block or at a `\n`.
-  Until the value is out, the CPU re-traps with the same value and the page's `--pst` register carries the
-  position (a string's next byte, or the chunks done for a number).
-
-- Constants of 8192 or more take `PUSHI hi; SHL13; PUSHI lo; ADD`. SHL13 is a trap (an EXT op), so avoid
-  large constants in hot code.
-- Calling convention: `CALL` pushes the return PC. `ENTER n` saves FP and reserves `n` locals. `RET n` drops `n`
-  arguments and leaves the return value.
-- Parameter `k` of `n` lives at `fp − 1 − n + k`.
-
-**Values.**
-
-- **Numbers** are 20-bit and wrap.
-- **Strings** are tagged pointers: `address − 262144`. The value of a literal is the tag word stored in front of
-  its bytes, loaded with `LOADG` (`PUSHI` can't hold a negative number).
-- **Booleans** are 0 or 1 at run time.
-
-**Static types.** The compiler tracks the static type of the last value it emitted (`lb`: 0 unknown,
-1 boolean, 2 string, 3 number). Each `console.log` argument is one PRINT word: the B form when the type is
-boolean (0 / 1 would otherwise print as numbers), the plain form for everything else, since the machine tells a
-string from a number at run time. The last argument takes the LN form, the others the SP form.
-
-- `addc` does `+` inside a `console.log` argument when the operand types aren't both known numbers. It either
-  adds, or prints both pieces (PRINT) and returns DONE (the tag of 4352, never a valid string), which PRINT
-  prints as nothing.
-- Before 2026-10-13 printing was done by lib routines (`printNum`, `puts`, `printBool`, their `…Ln` forms) with
-  one PUTC trap per character and a MOD / DIV trap per digit; see HISTORY.md.
-
-The language itself, its limits and the error messages are in [the README](../README.md#the-language).
+**Sparse groups.** Below one tree level the leaves sit in groups of 256 (`memtree.GROUP`) that are `display: none` until a write reaches
+them: the group node turns its channel enables into `--live` through a transition latch (0 s to take a write, a
+1,000,000 s delay to hold it) and shows its wrapper child by it. A hidden cell has no anchor, so a read of it falls back
+to 0: unwritten RAM. Groups the page needs from the start are live from the start (the console; on a CPU-only page also
+the static areas). This is what makes RAM size cheap: Blink restyles a whole subtree whenever an inherited property
+changes above it (every write pass here), merges every rendered anchor into the containing block's anchor query on each
+layout pass (about 1.5 µs each), and walks every child of a laid-out block, so a rendered cell cost about 2.4 µs per
+pass whether or not the program ever touched it. With groups, the per-pass cost follows the program's working set: a
+CPU-only FizzBuzz halts 5.0 / 5.4 / 5.8 s after load with 3K / 16K / 32K words (dense: 4.8 / 8.4 / 14 s). Page size
+and load time still grow with RAM (every word is an element): 16K is 3.4 MB.
 
 ---
 
@@ -288,9 +268,9 @@ The page does at most 2 shapings per frame.
 ### 3.4 Runtime library
 
 - The source is `compiler/lib_src.js`, written in jsc's dialect. `libbuild.js` compiles it with the self-hosted
-  `jsc.js` under Node into `lib.json`: ROM words plus entry addresses. It holds only `addc` now (93 ROM words);
+  `jsc.js` under Node into `lib.json`: ROM words plus entry addresses. It holds only `addc` now (103 ROM words);
   printing is the PRINT instruction family (jsc's `prn(x)` builtin emits a PRINT).
-- `__init` copies the staged globals into place, then the ROM's last word jumps to the user code at 4608.
+- `__init` copies the staged globals into place, then the ROM's last word jumps to the user code at `code_base` (1536).
 - The lib is baked into the CPU font, so a lib change means `make page` (lib → image → font → page).
 
 ---

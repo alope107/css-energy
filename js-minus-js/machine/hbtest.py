@@ -66,7 +66,7 @@ def main():
         tr = trap_of(st)
         want = dict(pc=ref.pc, sp=ref.sp, fp=ref.fp, resv=ref.resv, lines=ref.lines, vp=ref.vp)
         got = {k: st[k] for k in want}
-        if sw['ni'] != ref.steps - m.steps: print('NI mismatch', sw['ni'], ref.steps - m.steps); return 1
+        if sw['ni'] != ref.steps - m.steps: print(f'NI mismatch at shaping {shp}: font {sw["ni"]} model {ref.steps - m.steps}; start pc {st0["pc"]} sp {st0["sp"]} fp {st0["fp"]}; font C {st["C"]} pc {st["pc"]} t1 {st["t1"]} t2 {st["t2"]} / model trap {t_ref} pc {ref.pc}'); return 1
         if got != want or tr != t_ref:
             print(f'MISMATCH at shaping {shp}: trap font={tr} model={t_ref}')
             for k in want:

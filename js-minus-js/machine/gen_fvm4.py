@@ -26,7 +26,7 @@ meta = json.load(open(pre + '.json')); font64 = base64.b64encode(open(pre + '.wo
 K = int(next((a.split('=')[1] for a in sys.argv if a.startswith('--issue=')), 2))
 RAMMODE = 'tree'
 N, S = meta['N'], meta['S']
-ROM, RAMN, WOFF = 4096, image['ramSize'], 1 << 20
+ROM, RAMN, WOFF = image.get('romSize', 4096), image['ramSize'], 1 << 20
 WB = meta['B']; assert WB == 4
 BANKN = RAMN // WB
 OUT_BASE, ROWS, COLS = image['outBase'], image['rows'], image['cols']
@@ -47,8 +47,9 @@ M20 = 1 << 20
 # ---------------- registers: (name, H, OFF). Value range [-OFF, H-OFF)
 # 20-bit machine words are kept SIGNED (|v| < 2^19) in every property that crosses a var(): Chrome substitutes a
 # registered <integer> by its serialization, which has 6 significant digits, so 1048575 (= -1) became 1048580.
-regs = [("CR", 512, 0), ("PC", 8192, 0), ("SP", 8192, 0), ("FP", 8192, 0), ("MAR", 8192, 0), ("T1", M20, M20 // 2), ("T2", M20, M20 // 2),
-        ("RES", M20, M20 // 2), ("init", 2, 0), ("optr", 256, 0), ("pst", 8192, 0), ("k", 16, 0), ("par", 2, 0), ("tprev", 65536, 0), ("steps", 1 << 21, 0), ("fok", 2, 0), ("nsh", 1 << 21, 0)]
+A15 = 32768     # 15-bit addresses
+regs = [("CR", 512, 0), ("PC", A15, 0), ("SP", A15, 0), ("FP", A15, 0), ("MAR", A15, 0), ("T1", M20, M20 // 2), ("T2", M20, M20 // 2),
+        ("RES", M20, M20 // 2), ("init", 2, 0), ("optr", 256, 0), ("pst", A15, 0), ("k", 16, 0), ("par", 2, 0), ("tprev", 65536, 0), ("steps", 1 << 21, 0), ("fok", 2, 0), ("nsh", 1 << 21, 0)]
 regs += [(f"A{k}", 32768, 0) for k in range(N)] + [(f"V{k}_{s}", 32768, 0) for k in range(N) for s in range(7)]   # one H: a pair shares a scroller
 if UI: regs.append(("ccok", 2, 0))
 regs += [(f"wa{w}{c}", BANKN + 1, 0) for w in range(WB) for c in CH] + [(f"wd{w}{c}", 1 << 21, 1 << 20) for w in range(WB) for c in CH]
@@ -82,8 +83,8 @@ eff = [f"--first: calc(1 - var(--init));",
        "--resvin: calc(var(--init) * round(down, var(--CR) / 256));"]
 def nib(k, i): return f"mod(round(down, var(--Ve{k}_{i // 3}) / {16 ** (i % 3)}), 16)"
 for k in range(N):
-    eff += [f"--Ae{k}: calc(var(--init) * var(--A{k}) + var(--first) * {2048 if k == 0 else 0});",
-            f"--vf{k}: round(down, var(--Ae{k}) / 2048);", f"--tag{k}: mod(var(--Ae{k}), 2048);"]
+    eff += [f"--Ae{k}: calc(var(--init) * var(--A{k}) + var(--first) * {8192 if k == 0 else 0});",     # tag (13 bits) + 8192 * victim flag
+            f"--vf{k}: round(down, var(--Ae{k}) / 8192);", f"--tag{k}: mod(var(--Ae{k}), 8192);"]
     eff += [f"--Ve{k}_{s}: calc(var(--init) * var(--V{k}_{s}));" for s in range(7)]
     eff.append(f"--st{k}: round(down, var(--Ve{k}_6) / 256);")
     for w in range(WB):
@@ -254,7 +255,7 @@ css = ["#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t
 css += [f"@keyframes r-{n} {{ from {{ --{n}: {H - OFF}; }} to {{ --{n}: {-1 - OFF}; }} }}" for n, H, OFF in regs]
 for w in range(WB):
     css.append(f"#cpu {{ --sR{w}: " + mux("rb", BANKN, lambda b, w=w: f"--c{4 * b + w}", f"--c{w}") + "; }")
-    css.append(f".rp{w} {{ width: anchor-size(var(--sR{w}) width); }} .vp{w} {{ --mval{w}: calc(100cqi / 1px - {WOFF}); }}")
+    css.append(f".rp{w} {{ width: anchor-size(var(--sR{w}) width, {WOFF}px); }} .vp{w} {{ --mval{w}: calc(100cqi / 1px - {WOFF}); }}")   # no anchor: an unwritten cell, 0
 css.append(".vp3 { " + "\n  ".join(svc_inner + inp + nx) + " }")
 # writes
 if RAMMODE == 'flat':   # one rule per cell per channel
@@ -279,7 +280,7 @@ else:
 # console readers
 for i in range(OUT_SIZE):
     r, c = divmod(i, COLS)
-    css.append(f".oc{i} {{ width: anchor-size(--c{OUT_BASE - ROM + i} width); left: calc(24px + {c} * 11px); top: calc(24px + {r} * 20px); }}")
+    css.append(f".oc{i} {{ width: anchor-size(--c{OUT_BASE - ROM + i} width, {WOFF}px); left: calc(24px + {c} * 11px); top: calc(24px + {r} * 20px); }}")
 css.append('@counter-style ascii { system: fixed 32; symbols: ' + " ".join('"\\""' if c == 34 else '"\\\\"' if c == 92 else f'"{chr(c)}"' for c in range(32, 127)) + '; fallback: blank; }')
 css.append('@counter-style blank { system: cyclic; symbols: " "; }')
 
@@ -394,7 +395,12 @@ if CC:
              f"so the font CPU's memory reads find it. Then HarfBuzz runs it: each layout pass shapes the machine state as a line of text "
              f"({S} micro-cycles of a bytecode CPU in GSUB, a {N}-line cache of RAM, four words per line) and the widths of its spans are the next state. "
              f"The ROM holds only the runtime library.</p><pre>{src_html}</pre>")
-mem_outer, mem_inner = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w)) for w in range(WB)), ""
+# groups live from the start: the console (its readers) and, without a compile chain to supply them, the static areas (strings,
+# code, count, staging); every other group appears when the program first writes into it
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'compiler')); import cc_ref as _R
+STATIC_CELLS = set(range(_R.LAYOUT['data_base'] + _R.SDATA - ROM, image.get('init', _R.LAYOUT['init']) + _R.SDATA - ROM))
+LIVE = set(range(OUT_BASE - ROM, OUT_BASE - ROM + OUT_SIZE)) | (set() if UI else STATIC_CELLS)
+mem_outer, mem_inner = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB)), ""
 page = f"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">

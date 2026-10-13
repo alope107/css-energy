@@ -90,6 +90,8 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Program size**:
   - 24 lines of 64 columns, 400 tokens, 511 code words.
   - 256 words of string data, including one tag word per string, and 255 words of globals and arrays.
+  - RAM is 16K words (`compiler/layout.json`); the stack has about 14,700 words, so recursion can go a few thousand
+    calls deep. Before 2026-10-13 RAM was 3K words and the stack 1,408.
   - 64 labels, 32 variables in scope, 16 functions.
   - Blocks nest 8 deep. Expressions nest 8 operators or parentheses deep.
   - A long `else if` chain counts as one level of nesting.
