@@ -231,7 +231,20 @@ At 100 elements every variant sits at the same floor; the 400-element pages sepa
 | real engine, 48 bodies, `.bw,.bd{transition:transform 250ms linear}` | 109 ms | 4.3 | **60** |
 | same, 700 ms | 125 ms | 4.0 | 61 |
 
-Transitions still fire although the pose comes from scroll-driven animations, and the compositor draws at 60 fps. **But they now cost the main thread about half its frame rate**: the style pass grows by about 1.25 ms per body per pass on the real engine. On Chromium 141 the extra cost was about 0.17 ms per body. The heavy-prop count of the synthetic page in the earlier measurement was not recorded; 30,000 was chosen here.
+The compositor draws at 60 fps. **But the transitions cost the main thread about half its frame rate**, and in the `.bw,.bd` rows only the rotation is interpolated (see below). The heavy-prop count of the synthetic page in the earlier measurement was not recorded; 30,000 was chosen here.
+
+**Why** (2026-10-13, two interleaved repeats each, `compframes.js`):
+
+- **Each transition restart costs time in proportion to the number of registered properties on the page.** On the synthetic page, the same 10,000 heavy declarations cost 24.5 → 45 ms per pass with the transition when registered, and 10.4 → 11.3 ms when unregistered. The 48-body page has 24,896 `@property` rules; *(derived)* about 1.25 ms per transitioned body per pass, roughly 0.05 µs per registered property per restart.
+- It scales with the number of transitioned bodies: 1 body 49.6 ms (no change), 8 bodies 59–63 ms, 48 bodies 108–113 ms, against 47–53 ms without.
+- Passes per frame don't change (2.0 without, 1.9 with), and each pass still runs one `Document::recalcStyle`; that recalc just takes longer.
+- `will-change: transform` alone, and an unrelated element with a compositor `@keyframes` animation, cost nothing. Neither restarts a transition.
+- A frozen page (`FZ4000_p48.html`) shows no cost (35.5 vs 35.9 ms): frozen poses barely move, so nothing restarts.
+- **A transition on `.bw` never fires** (draws stay at 9/s). `.bw` gets its pose from its own animation, and changes caused by an element's own animations don't start transitions. Only `.bd`, which inherits the quaternion, transitions, so `.bw,.bd{transition…}` smooths rotation only.
+- Registrations are page-global, so CSS can't shield the bodies from them. Avoiding the cost would mean fewer registered properties in the engine.
+- This is not new in Chromium 153. The 141 synthetic pages showed the same ratio: 110 vs 62 ms per pass, 8.3 vs 15.7 main frames/s. In 141 the real engine's main-thread rate didn't change (2.7 fps with and without); that is unexplained.
+
+Interpolating body poses this way was tried and dropped: transitions on `.bd` restart from the spawn pose, so bodies jump back and forth. See [HISTORY.md](HISTORY.md).
 
 ## 5. Process parallelism (`experiments/iframes/`)
 

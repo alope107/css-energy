@@ -20,9 +20,11 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
 - Profile one step: `node tools/freeze3.js out/p48.html 4000 FZ out/p48.html`, then `python3 tools/ablate.py out/FZ_p48.html pairs='--(tcp|np|p\d+_\d+(uA|uB|ov))' all=.`, then `tr.js` on each
 - Published site: `bash tools/make_site.sh` (counts 8–64; the CSS is split into ≤14 MB files)
+- Motion checks: `node tools/filmstrip.js page.html out.png [delay] [dur]` (compositor frames as a contact sheet, plus a snap-back score); `node tools/transcheck.js page.html` (transform transitions must restart where the running one was; `--selftest-ok` / `--selftest-bad` check the checker).
 
 ## Working style for performance work
 - Hypothesis → microbenchmark or freeze+ablate → change → short tests at 16–32 bodies → validate at 48/64 only now and then (a 64-body build takes about 30 s, and its runs are slow).
+- Anything that changes how things move (transitions, animations, interpolation) needs a motion check, not just screenshots and fps: run `filmstrip.js` on it and the unchanged page, look at the contact sheet, and compare the snap-back scores. A settled screenshot and a 60 fps draw count both looked perfect on a page whose bodies jumped back and forth.
 - Timings are noisy: interleave repeats and compare relatively. Sanity-check that a change kept physics correct (`smoke.sh`, `sleepy.js`) before reporting a speedup.
 - Record every new measurement in `docs/BENCHMARKS.md` and every dead end, with its reason, in `docs/HISTORY.md`.
 
