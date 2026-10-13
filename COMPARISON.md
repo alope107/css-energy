@@ -94,8 +94,8 @@ Not transferable, with reasons:
    a measurement confirms it, the sweep, which is half of compile time, could get cheaper by moving the latches
    into a document or iframe with few registrations, or by cutting `@property` count further.
 2. **The rule-matching cost table.** css-physics measured matching tiers at scale in Chromium 153 (its
-   BENCHMARKS.md §2). js-minus-js's ENGINE_NOTES.md quotes 1.6–4 µs per container rule from an earlier, undated measurement; the
-   current figures are lower:
+   BENCHMARKS.md §2). js-minus-js's ENGINE_NOTES.md quoted 1.6–4 µs per container rule from an earlier, undated
+   measurement (it now cites these figures too); the current figures are lower:
    - a present name with a false `style()` costs 0.6–0.7 µs per rule;
    - `style(--x)` without a value (true when a registered property differs from its initial value) costs 0.4 µs;
    - range queries such as `style(--x > 5)` work, at about 1.6 µs.
@@ -129,4 +129,4 @@ Not transferable, with reasons:
 | css-physics | One `invalidationTracking` trace of a 64-body pass | small | shows which elements restyle |
 | css-physics | Microbenchmark anchor-name partner reads for contact slots | small, then large to build | could remove the N² pair rules |
 | js-minus-js | Freeze-and-ablate the trap service | medium | attributes 100 ms per frame |
-| js-minus-js | Update the container-rule costs in ENGINE_NOTES.md and reorder the dispatch test | small | small |
+| js-minus-js | Reorder the dispatch test (ENGINE_NOTES.md already has the new costs) | small | small |

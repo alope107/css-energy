@@ -14,7 +14,7 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 - All five test levels pass. That includes 89 programs checked against Node's output and 14 programs the
   compiler must reject.
-- On the page, compiling takes about 1.5–3.5 s from Run, including the readback sweep. FizzBuzz 1–15 then runs
+- On the page, compiling takes about 1.6–4.8 s from Run (median 1.75 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
   in about 6 s and halts about 8.5 s after Run (headless Chromium 153, 2026-10-13); it was 14 s before printing
   moved into the machine (one trap per output chunk instead of one per character).
 - See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the numbers and [docs/HISTORY.md](docs/HISTORY.md) for
@@ -28,7 +28,7 @@ pip install -r requirements.txt   # fontTools, brotli (uharfbuzz optional)
 make page                         # -> build/js_in_css.xhtml (about 25 s; reproducible)
 make test                         # fast tests, no browser (about 5 s)
 make test-browser                 # the CSS compiler in Chrome (about 1.5 min)
-make test-ui-smoke                # the real page, typed like a user (about 2 min)
+make test-ui-smoke                # the real page, typed like a user (about 1 min)
 ```
 
 - To open the page, load `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome.

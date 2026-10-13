@@ -55,7 +55,7 @@ Read alongside `src/gen3d.py`. Its module docstring and section comments (`# ---
 
 ## 2. The solver levels
 
-Every physics quantity is a registered custom property (`@property --name{syntax:'<number>';…}`) declared at a **level** (the element `#L<k>`) and inherited downward. Later levels read earlier quantities with `var()`. Each declaration sits inside a **gate**, an `@container … style(--flag: v)` rule, so work that isn't needed is never declared.
+Every physics quantity is a registered custom property (`@property --name{syntax:'<number>';…}`) declared at a **level** (the element `#L<k>`) and inherited downward. Later levels read earlier quantities with `var()`. Each declaration sits inside a **gate**, an `@container … style(--flag)` or `style(--flag: v)` rule, so work that isn't needed is never declared.
 
 | Level | Contents |
 |---|---|
@@ -194,5 +194,5 @@ The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't 
   - The all-pairs broadphase is 1,128 near tests at about 2.9 µs each, about 3.3 ms.
   - Owner-named pair rules whose name is present (body awake) but whose style() is false add about 0.9 µs × 3,360 ≈ 3 ms.
   - Together that is about 17% of a step, and it grows with N².
-- **Registers.** About 20 µs per register element restyle (2 values).
+- **Registers.** About 2–8 µs per register element (2 values) per pass in a microbenchmark, rising with the register count (BENCHMARKS.md §2, `mk_regs.py`).
 - **An idle scene** (32 bodies, all asleep) costs about 2 ms per style pass, 2 passes per frame.

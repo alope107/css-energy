@@ -82,14 +82,14 @@ At 24 bodies drag ran at 18 fps; at 48 bodies drag was 4–5 fps and hold 8 fps;
 ## Phase 3: bug fix and architecture exploration, Oct 11
 
 - **Fixed:** floor-grid upper layers started asleep and floated in mid-air. The cause was that any body placed with zero velocity started asleep. Now a body starts asleep only if its lowest point touches the floor.
-- **Measured the cost model precisely**, then evaluated alternative substrates and strategies. Most were rejected; see below and ROADMAP.md.
+- **Measured the cost model precisely**, then evaluated alternative substrates and strategies. Most were rejected; see below.
 
 ## Phase 4: spatial partitioning, Oct 13
 
 Goal: cut the N² costs so that more bodies run smoothly. The session measured the rule-matching cost model at scale first (BENCHMARKS.md §2), then built and A/B-tested a cell-based broadphase and presence scheme.
 
 - **Measured the matching tiers.** An absent container name is the only cheap rejection (about 0.1 µs at shallow depth), but it walks every ancestor: about 0.2 µs + 0.6 ns × depth × names per ancestor in a microbenchmark, about 0.2 + 0.01 × depth µs in the engine. A present name costs 0.16 µs, `style(--x: 1)` 0.7 µs, `style(--x)` 0.4 µs, a range query 1.6 µs, a property 2 µs and up.
-- **Kept:** `style(--flag)` for 0/1 gates (`BOOLQ`, about 0.3 µs per rule cheaper, within noise in the engine at 48–64); owner names on every level (confirmed best); the `field` scene and `tools/sparse.js` for the sparse regime; `tools/freezegrab.js BODY=k`; `tools/bpcount.js`, `tools/cellcheck.js`; the `CELLS=1` build path, off by default, for comparison.
+- **Kept:** `style(--flag)` for 0/1 gates (`BOOLQ`, about 0.3 µs per rule cheaper, within noise in the engine at 48–64); owner names on every level (confirmed best); the `field` scene and `tools/sparse.js` for the sparse regime; `tools/freezegrab.js BODY=k`; `tools/bpcount.js`, `tools/cellcheck.js` (for `CELLS=1` pages); the `CELLS=1` build path, off by default, for comparison.
 - **Rejected:** cell-based presence (below), unnamed deep rules, AABB broadphase, per-body readback elements.
 - **Found that in the sparse regime the pass is contact work**: dragging one body through a dense 64-body pile costs 45–55 ms per pass, of which the awake cluster's narrowphase and solves are 20 ms, its per-body blocks 10–25 ms and the base 5–12 ms; the near tests and digests are a few ms. The N² floor of the design is the rule visits: about 3 rules per pair at 0.2–0.7 µs each (4 ms at 64, growing like N² × depth because absent names walk the chain). With 96 bodies asleep and 4 awake a pass costs 40 ms.
 
@@ -148,7 +148,8 @@ Each entry gives what was tried, what happened, and why.
 - **Process parallelism with iframes.** Cross-site iframes (e.g. 127.0.0.1 and 127.0.0.2) do run in separate renderer processes, giving 2× throughput on the 2-core sandbox. Sandboxed same-origin frames share **one** process (also with `--enable-features=IsolateSandboxedIframes`). And the only script-free channel between frames is the iframe's size, which flows parent to child only. So one world can't be split across processes, and a single-origin artifact can't use this at all.
 - **Newer Chrome.** Chromium 153 is only about 10–15% cheaper per property than 141.
 
-### Algorithmic ideas evaluated, not yet tried (see ROADMAP.md)
+### Open ideas, not yet tried
 
 - **Spheres only** with the current engine: 1.5–2.5× faster per step at the same body count, which buys about a third more bodies (48 → 64) at equal fps. Not dramatic on its own: per-body overhead, registers and the N² pair table remain.
+- **Contact slots read by anchor name** (from js-minus-js, 2026-10-13; see `../../COMPARISON.md`). js-minus-js reads RAM by picking a cell's anchor name with a two-level `if()` (O(√N) `style()` tests) and reading it with one `anchor-size()`: dynamic indexing, which this engine has assumed it lacks. K slots per body that read their partner's register elements by name would make the pair rules O(N·K) instead of O(N²). Caveats: the value arrives in layout, so the solver using it must sit under a size-container reader; anchor-positioned registers once cost about 5 ms of layout per frame here (Phase 2, †); choosing the K partners still needs the broadphase. First step: a microbenchmark against the per-pair rules at 64 bodies.
 - **AVBD** (Giles, Diaz and Yuksel, SIGGRAPH 2025). Body-centric gather (good for CSS) and stable stacks at few iterations. But the per-body 6×6 Hessian plus LDLᵀ is costly in calc, and warm starting needs per-contact persistent state, i.e. registers. Recommended prototype: plain JS outside the browser first.
