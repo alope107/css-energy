@@ -34,6 +34,7 @@ Open a built page in Chrome; for 48 and 64, serve or open the folder, because th
 |---|---|
 | 24 | drag at about 18 fps |
 | 48 | chaos 5–12 fps, drag 4–5 fps |
-| 64 | loads in about 4 s, runs at about 6 fps |
+| 64 | loads in about 4 s, runs at about 6 fps; dragging one body through a sleeping field runs at about 25 fps |
+| 96 | about 3 fps while everything is awake, about 10 fps with 4 bodies awake |
 
-Measured in a 2-core sandbox; a desktop is faster. Idle scenes cost about 1 ms of style per frame. The next steps are spatial partitioning of the pair broadphase and compositor-interpolated rendering (see the roadmap).
+Measured in an 8-vCPU devcontainer (Chromium 153); a desktop is faster. Idle scenes cost about 1 ms of style per frame. Spatial partitioning of the broadphase was built and measured (2026-10-13) and does not pay in this design: the all-pairs digest charges only awake bodies, and the N² floor is the static per-pair rules (docs/HISTORY.md).

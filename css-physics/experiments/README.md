@@ -14,6 +14,9 @@ node ~/repo/tools/stylebench.js r_const.html,r_var1.html 500 1500     # median s
 | `costs/mk3.py` | paused-animation evaluator vs calc | about 87 µs per element vs 12 µs for calc: dead |
 | `costs/mk_gating.py` | `@container` rules with absent/present names, nested, style() | absent name ≈ 0.13 µs per rule (free in Chromium 141); present + false style() ≈ 0.9 µs |
 | `costs/mk_flags.py` | the all-pairs broadphase at 48 bodies | about 2.9 µs per pair flag |
+| `costs/mk_part.py`, `part_depth.py`, `part_order.py`, `part_styleform.py`, `part_feat.py` | rule matching at scale: absent-name walk vs depth and list length, nesting order, `style()` forms, range queries, `if()` idents | absent name ≈ 0.2 µs + 0.6 ns × depth × names; `style(--x)` 0.4 µs, `style(--x: 1)` 0.7, range 1.6; inner query first |
+| `costs/mk_regs.py` | the register readback floor vs register count, moving registers and per-body readback elements | about 2 µs per static register element; per-body split no better |
+| `costs/mk_inherit2.py` | inherited custom properties declared below the chain root vs depth | no depth × properties term |
 | `fonts/vf.py` | minimal variable-font builder (fontTools): HVAR glyph advances, MVAR metrics, axes ±16384 = F2DOT14 | — |
 | `fonts/t1.py` + `t1.js` | `1ch`/`1ic`/`1ex`/`1cap` read HVAR/MVAR at style time | exact, including bilinear terms |
 | `fonts/t2.py` | cost of new font instances vs calc | about 4 µs per new instance over calc; cached ≈ free |

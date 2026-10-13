@@ -9,7 +9,9 @@ const p=await b.newPage({viewport:{width:1000,height:900}});await p.goto(require
 const ar=await p.locator('.arena').boundingBox();const sc=ar.width/VW;
 const proj=([x,y,z],yaw=0.25)=>{const c=Math.cos(yaw),s=Math.sin(yaw),ct=Math.cos(TILT*Math.PI/180),st_=Math.sin(TILT*Math.PI/180);
  const x1=x*c+z*s,z1=-x*s+z*c,y3=y*ct-z1*st_+TY,z3=y*st_+z1*ct-DIST,k=PERSP/(PERSP-z3);return [ar.x+ar.width/2+x1*k*sc, ar.y+ar.height/2+y3*k*sc]};
-const [bx,by]=proj(process.env.TOWER?[70,-145,10]:[-60,-145,0]);await p.mouse.move(bx,by);await p.mouse.down();
+// BODY=k grabs body k wherever it is (read from the state registers); TOWER the tower's top box; default the stack's
+const at=process.env.BODY!==undefined?await p.evaluate(i=>{const c=getComputedStyle(document.getElementById('LS'));return ['X','Y','Z'].map(k=>+c.getPropertyValue('--'+k+i))},+process.env.BODY):(process.env.TOWER?[70,-145,10]:[-60,-145,0]);
+const [bx,by]=proj(at);await p.mouse.move(bx,by);await p.mouse.down();
 for(let k=0;k<40;k++){await p.mouse.move(bx+60*Math.sin(k/6),by+40*Math.cos(k/5)-Math.min(k,40)*2);await p.waitForTimeout(16)}
 const vals=await p.evaluate((names)=>{const c=getComputedStyle(document.getElementById('LS'));return names.map(n=>c.getPropertyValue('--'+n))},names);
 const ptr=await p.evaluate(()=>{const c=getComputedStyle(document.querySelector('.ptr'));return ['sx','sy','yaw'].map(n=>c.getPropertyValue('--'+n))});

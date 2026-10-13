@@ -84,6 +84,15 @@ At 24 bodies drag ran at 18 fps; at 48 bodies drag was 4–5 fps and hold 8 fps;
 - **Fixed:** floor-grid upper layers started asleep and floated in mid-air. The cause was that any body placed with zero velocity started asleep. Now a body starts asleep only if its lowest point touches the floor.
 - **Measured the cost model precisely**, then evaluated alternative substrates and strategies. Most were rejected; see below and ROADMAP.md.
 
+## Phase 4: spatial partitioning, Oct 13
+
+Goal: cut the N² costs so that more bodies run smoothly. The session measured the rule-matching cost model at scale first (BENCHMARKS.md §2), then built and A/B-tested a cell-based broadphase and presence scheme.
+
+- **Measured the matching tiers.** An absent container name is the only cheap rejection (about 0.1 µs at shallow depth), but it walks every ancestor: about 0.2 µs + 0.6 ns × depth × names per ancestor in a microbenchmark, about 0.2 + 0.01 × depth µs in the engine. A present name costs 0.16 µs, `style(--x: 1)` 0.7 µs, `style(--x)` 0.4 µs, a range query 1.6 µs, a property 2 µs and up.
+- **Kept:** `style(--flag)` for 0/1 gates (`BOOLQ`, about 0.3 µs per rule cheaper, within noise in the engine at 48–64); owner names on every level (confirmed best); the `field` scene and `tools/sparse.js` for the sparse regime; `tools/freezegrab.js BODY=k`; `tools/bpcount.js`, `tools/cellcheck.js`; the `CELLS=1` build path, off by default, for comparison.
+- **Rejected:** cell-based presence (below), unnamed deep rules, AABB broadphase, per-body readback elements.
+- **Found that in the sparse regime the pass is contact work**: dragging one body through a dense 64-body pile costs 45–55 ms per pass, of which the awake cluster's narrowphase and solves are 20 ms, its per-body blocks 10–25 ms and the base 5–12 ms; the near tests and digests are a few ms. The N² floor of the design is the rule visits: about 3 rules per pair at 0.2–0.7 µs each (4 ms at 64, growing like N² × depth because absent names walk the chain). With 96 bodies asleep and 4 awake a pass costs 40 ms.
+
 ---
 
 ## Paths that didn't work (or didn't pay)
@@ -114,6 +123,17 @@ Each entry gives what was tried, what happened, and why.
   - **It halves the physics rate.** Each transition restart costs time in proportion to the page's registered properties (24,896 at 48 bodies, about 1.25 ms per body per pass). At 48 bodies the main thread fell from 8.7 to about 4 fps, and settling took 21.5 s instead of 9 s. Registrations are page-global, so CSS can't avoid it.
   - Settled screenshots and draw counts (60/s) looked perfect throughout; only frame-by-frame checks showed the glitch.
 - **Hypothesis rejected: quadratic copying of inherited custom properties down a deep chain.** A microbenchmark showed no difference between inherited and non-inherited across 50 levels (4.8 ms either way for 2,000 props). Blink doesn't copy per level in a way that matters here.
+
+### Spatial partitioning (Phase 4, 2026-10-13)
+
+- **Cell-based presence and near tests (`CELLS=1`).** The floor cut into 120-unit columns and rows; awake bodies mark the columns and rows in their reach as digits of decimal words (one closed-form term per body and word), sleepers read the digit of their own column and row, and a sleeper is "present" (named, touchable, wakeable) only when both are marked. The near test of a pair became a name-only nested rule evaluated inner-first (`@container w{a}{@container b{b}{…}}`), so a far sleeper costs one absent-name lookup instead of a property. Physics correct (smoke tests pass; no presence violations during drags). **Slower:** dragging one body through 64 sleepers, 21.6 ms per pass against 15.7 for the all-pairs digest; frozen, 19.3 vs 13.1; at 96 bodies with 4 awake, 55 vs 40 ms. The sleepers' per-pass bookkeeping (two cell properties and one digit extraction each, about 80 µs per sleeper: CSS math functions are dear) costs 5 ms at 64, while the near tests it saves cost a few µs per awake body per partner. The all-pairs digest only charges awake bodies (N/6 words each) and is exact, so cells lose whenever few bodies are awake and save nothing when all are. With everything awake (tower 48, frozen) all variants were within noise. Kept behind `CELLS=1`.
+- **Unnamed rules at the round levels (`OWNLEV=1`).** Expected to beat the absent-name walk (0.2 + 0.01 × depth µs) with a 0.4 µs unnamed `style()`. Measured 29 vs 22 ms per pass in the one-body drag at 64: with few names present the walk is cheap, and the unnamed form costs more than its microbenchmark suggests in the engine. Names stay on every level.
+- **Tighter broadphase (world AABB instead of bounding spheres).** Counted from live state (`tools/bpcount.js`): 124 sphere-near pairs vs 107 AABB-near at 64 bodies, of which 32 touch. The narrowphase work on near-but-not-touching pairs is geometry (a pile is full of close pairs), not a loose test.
+- **Range style queries as the broadphase** (`style(calc(var(--px) − R) < --px2 < calc(var(--px) + R))`). Supported in Chromium 153, but 1.6–2.2 µs per rule, about a property's cost, and nested per axis it costs more than the `hypot` flag it would replace.
+- **Per-body readback elements** (split #LS's 13N view-timeline animations into one element per body so sleeping bodies' animations aren't re-sampled). Microbenchmark: no gain (2.7 vs 2.3 ms at 420 registers); Blink doesn't re-sample unchanged timelines, and the static register elements cost about 2 µs each regardless.
+- **Hypothesis rejected: Blink copies the inherited custom-property map at every level below the root.** 6,000 inherited properties declared at level 1 cost the same at 8, 66 and 130 levels deep (7.1 ms).
+- **Freeze-based attribution overstates the base.** `freeze3.js` wobbles every register, so "every gated block removed" measured 12.5 ms at 64 bodies; with static registers it is 5.1 ms. Read frozen bases with that in mind.
+- **Alternatives considered, not built:** contact slots with dynamically bound partners (no dynamic indexing: selecting a partner's state costs O(N) terms per input, or an `if()` chain, per slot; ranking the nearest partners is O(N²) terms), Jacobi-style rounds with several pairs per body per level (per-body sums cost more than the aliases they remove, and stacks need the Gauss–Seidel order), per-pair container names (the name list would have N²/2 idents on every level), K rules per pair under per-cell names (K × 0.1 µs per pair, no better than today), content-visibility or display:none subtrees per pair (the rules must inherit into the chain).
 
 ### Alternative compute substrates (Phase 3)
 
