@@ -268,8 +268,9 @@ hex digit to 3 bits instead of 1 (the immediate keeps its 1-bit mask: an instruc
 13-bit immediate, and everything the compiler addresses directly sits below 2,304). The ROM shrank to 1,024 words
 (fewer glyphs: 9,875 → 6,803, HarfBuzz 19.0 → 18.2 ms per shaping) and the map moved down: `compiler/layout.json`
 is the single source (ROM 0 … 1023, data at 1024, code at 1536, staging at 2048, stack from 2560, RAM 16,384 words,
-console in the last 128). `tests/suite/deep_recursion.js` recurses 2,000 deep (6,000 words of stack); the old
-1,408-word stack would have run into the console.
+console in the last 128). `tests/suite/deep_recursion.js` recurses 700 deep (4 words a frame, 2,800 words of
+stack; about 8,400 steps): the old 1,408-word stack would have run into the console, and the old model off the end of its
+8,192-word memory. That is above L5's 1,500-step cap, so only L1, L2 and L4 run it.
 
 **Tradeoffs.** Page size and load time still grow with RAM (16K: 3.4 MB, 0.7 s load; 32K: 6.3 MB, 1.4 s), since
 every word is an element; per-pass cost does not. The cache (16 lines × 4 words) is unchanged, so a program that
