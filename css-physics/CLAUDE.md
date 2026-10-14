@@ -44,6 +44,8 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Non-PLAIN builds prefix and minify every engine name; debug only on PLAIN builds.
 
 ## User preferences
+- **Never merge into `main` until the user says so.** That covers merges of any kind, rebasing or cherry-picking onto it, and committing on it directly. Finish the work on a branch or worktree, report, and wait. A go-ahead for one merge doesn't cover the next.
+- **Whenever you have something new for the user, build it and give them a link to test it by hand, plus the build's path.** Build a user page (not `PLAIN`) with `python3 src/build3d.py out/<name>.html` (in that checkout or worktree). Serve the repo root in the background with `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspaces/css-energy` (VS Code forwards the port), link `http://localhost:8765/<path from the repo root>` (a worktree's build: `.claude/worktrees/<name>/css-physics/out/<name>.html`), and check the link with `curl -sI` first. The link is in addition to your own headless checks (Hard rules), not instead of them.
 - Terse, direct. Explain the reasoning behind conclusions, label estimates vs measurements, and cite sources for claims about the outside world.
 - When reviewing user-shared code, critique rather than rewrite. When sharing config or code files, give the whole file.
 
