@@ -1536,6 +1536,9 @@ def owner(gn):
     return None
 
 
+# flags tested against a value other than 0 or 1 somewhere are not 0/1 flags: BOOLQ must not shorten their gates
+_MULTI = {gt[0] for _l, gt, _n, _e in g.decl if isinstance(gt, tuple) and len(gt) == 2 and isinstance(gt[1], (int, float))
+          and gt[1] not in (0, 1)}
 for (lev, gate), ds in _ord:
     rule = f'#L{lev}{{{";".join(ds)}}}'
     if gate is None:
@@ -1551,7 +1554,9 @@ for (lev, gate), ds in _ord:
             assert decl_level.get(gn, -1) <= 1, gn
         # style(--flag) is true iff the registered flag differs from its initial 0: the same test as
         # style(--flag: 1) for a 0/1 flag, at about 0.4 us per rule instead of 0.7
-        q = f'style(--{gn})' if BOOLQ and gv == 1 and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
+        # (only for real 0/1 flags: GIr holds the held body's index + 1, and style(--GIr) for body 0's block was true
+        # whenever ANY body was held, so dragging anything also pulled body 0; tools/statcheck.py, grabtest.js)
+        q = f'style(--{gn})' if BOOLQ and gv == 1 and gn not in _MULTI and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
         w(f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}')
 # ---- cells: #LM marks (awake) and cell coordinates (asleep), #LW words, presence and the names ----
 h_ = f(STEP)
@@ -1612,8 +1617,11 @@ def scene_decls(sn):
             ext = b['r']
         return abs(st[1] + ext) < 0.5
     rest = [sn != 'rain' and on_floor(i) for i in range(N)]
+    # every body's start counter is declared in every scene's rule, 0 when it doesn't start asleep: the scene rules
+    # cascade over the first scene's, so an undeclared counter kept that scene's value and bodies started asleep in
+    # mid-air in the next scene (tools/floatcheck.js, tools/statcheck.py)
     return ';'.join(f'--i{fl}{i}:{f(val)}' for i in range(N) for fl, val in zip(FIELDS, _canon(SCENES[sn][i]))) + \
-        ''.join(f';--isc{i}:{SLEEP_K + 1}' for i in range(N) if rest[i])
+        ''.join(f';--isc{i}:{SLEEP_K + 1 if rest[i] else 0}' for i in range(N))
 
 
 # the scene's initial state lives on this engine's .ini element (not on #app, which restyles on
