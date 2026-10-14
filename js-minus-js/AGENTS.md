@@ -29,7 +29,8 @@ python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings
 ```
 
 - **Browser**: harnesses launch Chromium through `tools/browser.js`. `CHROME=/path` overrides; otherwise the npm
-  package `@sparticuz/chromium` (Linux x64) is used. The launcher is shared with css-physics (`../shared/`, profile
+  package `@sparticuz/chromium` is used on Linux x64 (its only build), and elsewhere Playwright's own Chromium, falling
+  back to the devcontainer image's `/usr/local/bin/chromium`. The launcher is shared with css-physics (`../shared/`, profile
   `fontcpu`: `--no-sandbox --no-proxy-server --disable-gpu`, the flags BENCHMARKS.md was measured with); `tools/page.js` reads
   the console grid and types into the editor. After changing either, run `make test-shared` at the repo root, `make test`,
   `make l3` and `make l5-smoke`.

@@ -56,8 +56,8 @@ Every performance measurement of the current code, with how to re-run it.
 | Where a frame goes | `RUN=1 RUNWAIT=3500 node machine/trace.js build/js_in_css.xhtml 4 && python3 machine/passprof.py trace.json` | Without `RUN=1` it traces the idle editor scan. The window must sit inside the run (FizzBuzz halts ~8.5 s after Run). `WAIT` (ms after load, default 3000) for CPU-only pages. Writes `trace.json` in the cwd. |
 | Readback sweep | `python3 readback/rb_only2.py rb.xhtml && node readback/rbsweep.js rb.xhtml tests/fizz.js 3` | |
 
-`machine/halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for CPU-only (fixed-program) pages. `readback/rbtest.js` reads the old `--v` latches without pressing Run and reports `match false` on the
-current readback page; use `rbsweep.js`.
+`machine/halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for CPU-only (fixed-program) pages. `readback/rbtest.js page prog.js` types the file, sets Run, waits for `--rbready` and prints what the latches read, line
+by line (`match true` when it equals the file); `rbsweep.js` repeats that and counts misses.
 
 ---
 

@@ -8,12 +8,16 @@
 // docs/BENCHMARKS.md stays comparable. --disable-gpu changes the raster and compositor path: don't merge the
 // profiles without re-measuring both projects' baselines.
 //   physics  css-physics/tools: npm `playwright`; CHROME=/path, else Playwright's own Chromium; --no-sandbox
-//   fontcpu  js-minus-js: npm `playwright-core`; CHROME=/path, else @sparticuz/chromium (Linux x64);
-//            --no-sandbox --no-proxy-server --disable-gpu
+//   fontcpu  js-minus-js: npm `playwright-core`; CHROME=/path, else @sparticuz/chromium on Linux x64 (its only
+//            build), else Playwright's own Chromium; --no-sandbox --no-proxy-server --disable-gpu
+// Without CHROME, when Playwright's own browser isn't installed (the npm package can be newer than the devcontainer's
+// Playwright image, which only has the builds of its own version), launch() falls back to the image's Chromium,
+// IMAGE_CHROME: the binary the devcontainer's CHROME points at anyway. It says so on stderr.
 // The npm packages resolve from the running tool's own project, so each project keeps its own node_modules; a tool
 // outside both projects (engine/) gets the profile's own project's (physics: css-physics, fontcpu: js-minus-js).
-const path = require('path'), url = require('url');
+const fs = require('fs'), path = require('path'), url = require('url');
 const ROOT = path.join(__dirname, '..', '..');
+const IMAGE_CHROME = '/usr/local/bin/chromium';   // .devcontainer/Dockerfile links it to the image's Chromium
 
 function load(name, home) {
   const paths = [require.main && require.main.path, path.join(ROOT, home)].filter(Boolean);
@@ -31,6 +35,7 @@ const PROFILES = {
     args: ['--no-sandbox', '--no-proxy-server', '--disable-gpu'],
     executablePath: async () => {
       if (process.env.CHROME) return process.env.CHROME;
+      if (process.platform !== 'linux' || process.arch !== 'x64') return undefined;
       const m = await import(url.pathToFileURL(require.resolve('@sparticuz/chromium', { paths: [path.join(ROOT, 'js-minus-js')] })).href);
       return m.default.executablePath();
     },
@@ -55,7 +60,14 @@ function profile(name) {
     get chromium() { return pw(); },
     async launch(opts = {}) {
       const { args, extraArgs = [], ...rest } = opts;
-      return pw().launch({ ...rest, executablePath: await P.executablePath(), args: [...(args || P.args), ...extraArgs] });
+      const o = { ...rest, executablePath: await P.executablePath(), args: [...(args || P.args), ...extraArgs] };
+      try {
+        return await pw().launch(o);
+      } catch (e) {
+        if (o.executablePath || !/Executable doesn't exist/.test(e.message) || !fs.existsSync(IMAGE_CHROME)) throw e;
+        console.error(`browser.js: Playwright's own Chromium isn't installed; using ${IMAGE_CHROME} (set CHROME to choose)`);
+        return pw().launch({ ...o, executablePath: IMAGE_CHROME });
+      }
     },
     async open(browser, file, pageOpts = {}, gotoOpts) {
       const p = await browser.newPage(pageOpts);
@@ -65,4 +77,4 @@ function profile(name) {
   };
 }
 
-module.exports = { profile, fileUrl, envArgs, PROFILES };
+module.exports = { profile, fileUrl, envArgs, PROFILES, IMAGE_CHROME };

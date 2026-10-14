@@ -10,7 +10,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 
 ## Setup
 - Python 3.10+ (stdlib only for `src/`); `pip install fonttools` for `experiments/fonts`.
-- `npm install && npx playwright install chromium`. Tools use Playwright's Chromium, or set `CHROME=/path/to/chrome`. Tools resolve page paths against the cwd: run from the repo root.
+- `npm install && npx playwright install chromium`. Tools use Playwright's Chromium, or set `CHROME=/path/to/chrome`; if Playwright's own build isn't installed (the npm package is newer than the devcontainer image), they fall back to the image's `/usr/local/bin/chromium` and say so. Tools resolve page paths against the cwd: run from the repo root.
 - The tools share their harness code with js-minus-js through `../shared/` (`shared/README.md`): the launcher (profile `physics`: `--no-sandbox`, the flags every number in BENCHMARKS.md was taken with), tracing, motion checks, ablation. What only this project's tools share is in `tools/lib/physics.js` (camera projection, BODYINFO, freezing). After changing either, run `make test-shared` at the repo root and `smoke.sh`.
 - avar2 needs Chrome 148+. Chromium 153 for Linux: `npm i @sparticuz/chromium@153.0.0`, then `node -e "require('@sparticuz/chromium').default.executablePath().then(console.log)"`. Launch flags: `--no-sandbox --no-zygote --single-process --use-angle=swiftshader --enable-unsafe-swiftshader`; one page per browser in single-process mode.
 - `make engine-check` at the repo root re-checks the Chrome behaviours this engine depends on (6-digit `var()`, boolean `style()`, the `font` shorthand, …; `engine/README.md`). Run it after any Chrome upgrade.
@@ -22,7 +22,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
 - Profile one step: `node tools/freeze3.js out/p48.html 4000 FZ out/p48.html`, then `python3 tools/ablate.py out/FZ_p48.html pairs='--(tcp|np|p\d+_\d+(uA|uB|ov))' all=.`, then `tr.js` on each
 - Published site: `bash tools/make_site.sh` (counts 8–64; the CSS is split into ≤14 MB files)
-- Motion checks: `node tools/filmstrip.js page.html out.png [delay] [dur]` (compositor frames as a contact sheet, plus a snap-back score); `node tools/transcheck.js page.html` (transform transitions must restart where the running one was; `--selftest-ok` / `--selftest-bad` check the checker).
+- Motion checks: `node tools/filmstrip.js page.html out.png [delay] [dur]` (compositor frames as a contact sheet, plus a snap-back score); `node tools/transcheck.js page.html` (transform transitions must restart where the running one was, within one frame's motion along the path; `--selftest-ok` must pass, `--selftest-bad` and `--selftest-small` (10 px off the path) must fail).
 
 ## Working style for performance work
 - Hypothesis → microbenchmark or freeze+ablate → change → short tests at 16–32 bodies → validate at 48/64 only now and then (a 64-body build takes about 30 s, and its runs are slow).

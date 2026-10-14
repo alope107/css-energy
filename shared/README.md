@@ -27,14 +27,17 @@ its own flags. `--disable-gpu` changes the raster and compositor path, so the fl
 
 | Profile | Project | npm package | Executable | Flags |
 |---|---|---|---|---|
-| `physics` | css-physics | `playwright` | `CHROME`, else Playwright's own Chromium | `--no-sandbox` |
-| `fontcpu` | js-minus-js | `playwright-core` | `CHROME`, else `@sparticuz/chromium` | `--no-sandbox --no-proxy-server --disable-gpu` |
+| `physics` | css-physics | `playwright` | `CHROME`, else Playwright's own Chromium, else the image's | `--no-sandbox` |
+| `fontcpu` | js-minus-js | `playwright-core` | `CHROME`, else `@sparticuz/chromium` (Linux x64), else Playwright's own, else the image's | `--no-sandbox --no-proxy-server --disable-gpu` |
 
 Tools that used other flags still pass them: `launch({args: [...]})` replaces the profile's flags, and
 `launch({extraArgs: envArgs('FLAGS')})` appends. Don't merge the profiles without re-measuring both baselines.
 
-Without `CHROME`, the `physics` profile needs Playwright's own browser build. Playwright 1.64 asks for a newer build
-than the devcontainer's v1.63 image ships, so keep `CHROME` set (the devcontainer sets it).
+Without `CHROME`, `launch()` tries Playwright's own browser build (`fontcpu`: `@sparticuz/chromium` first, on Linux x64
+only, its one build). If that build isn't installed, it falls back to the devcontainer image's Chromium
+(`/usr/local/bin/chromium`, the binary `CHROME` points at there anyway) and says so on stderr. That happens in the
+devcontainer, because the npm package (1.64) is newer than the Playwright image (v1.63) and asks for a build the image
+doesn't have.
 
 ## A/B timing (`js/ab.js`)
 
