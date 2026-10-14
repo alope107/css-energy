@@ -8,3 +8,7 @@ Two experiments in computing inside Chrome's rendering pipeline, with no script 
 | [js-minus-js/](js-minus-js/) | JavaScript compiled by a stylesheet and executed by a GSUB "CPU" font while Chrome shapes text |
 
 [COMPARISON.md](COMPARISON.md) compares their techniques and lists what each could borrow from the other.
+
+[shared/](shared/) holds the test and profiling harness code both use (browser profiles, tracing, A/B timing, motion
+checks, freezing, ablation). [engine/](engine/) re-checks the Chrome behaviour both depend on (`make engine-check`,
+`make engine-costs`).

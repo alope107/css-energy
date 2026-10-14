@@ -5,7 +5,8 @@ that relies on it or records it.
 
 - **Tested on**: Chromium 153 headless on Linux (153.0.8010.0 from `@sparticuz/chromium`, and 153.0.8010.12 Chrome
   for Testing in the devcontainer), `--no-sandbox --disable-gpu`. Treat every entry as "true there".
-- **Re-check after a Chrome upgrade.** Several of these may be bugs, not specified behaviour.
+- **Re-check after a Chrome upgrade.** Several of these may be bugs, not specified behaviour. `make engine-check` at the
+  repo root re-checks the entries marked *(probe: `id`)* on minimal pages (`engine/check.js`, `engine/README.md`).
 - **Evidence**: entries marked *(measured)* were measured when they were found; numbers for code that still exists are in [BENCHMARKS.md](BENCHMARKS.md), and the rest are in [HISTORY.md](HISTORY.md). The others were
   seen in tests or probes.
 
@@ -13,10 +14,15 @@ that relies on it or records it.
 
 1. **`@container style()` never matches a calc()-computed `<integer>` of 256 or more.** So anything dispatched by
    style query (parser mode, token code, variant id, lexer class) must stay below 256. Split larger ids into
-   small fields. (`compiler/ccpage3.py`, now archived; probes in `archive/spikes/scratch/t*.js`.)
+   small fields. (`compiler/ccpage3.py`, now archived; probes in `archive/spikes/scratch/t*.js`.) *(probe: `style-int-256`)*
 2. **A registered `<integer>` that crosses `var()` keeps only 6 significant digits.** 1048575 came back as
    1048580. Keep 20-bit words signed (|v| < 2^19) in every property that crosses a `var()`.
    (`machine/gen_fvm4.py`, "20-bit machine words are kept SIGNED".)
+   - Precisely: it is a *calc()-computed* value that serializes with 6 significant digits (`1.04858e+06`). Inside
+     `calc()` that reads back as 1048580. A literal `--x: 1048575` keeps all 7 digits.
+   - A plain `--y: var(--x)` of such a value into another registered `<integer>` is invalid at computed-value time:
+     `1.04858e+06` is not an integer token, so `--y` silently takes its initial value. Another reason to stay below 10⁶.
+   - *(measured 2026-10-14, Chromium 153; probe: `var-6-digits`)*
 3. **Registered integers are stored as floats.** The DSL keeps |value| < 2^24 (`compiler/dsl.py`).
 4. **Every registered property costs time on every animated element, even where it's unused.** Keep the number
    of `@property` declarations small:
@@ -38,12 +44,13 @@ that relies on it or records it.
    - `and` is evaluated left to right and stops at the first false test; nested `@container` rules evaluate the
      innermost query first (same source). Put the test that rejects most variants first.
    - Over-specialising to 46 MB of CSS was slower (`archive/results/compiler/cc3_*.json`).
-8. **The CSS `font` shorthand resets `font-variation-settings`** when it's declared after it. (Related chat.)
+8. **The CSS `font` shorthand resets `font-variation-settings`** when it's declared after it. (Related chat.) *(probe: `font-resets-fvs`)*
 
 ## Animations and timelines
 
 9. **`animation-play-state` is read from the base style.** A pause driven by an animated flag is ignored
-   (`compiler/ccpage5.py`; probes `archive/readback/tl*.js`).
+   (`compiler/ccpage5.py`; probes `archive/readback/tl*.js`). *(probe: `play-state-base`, the literal reading: an
+   element's own animated flag in `animation-play-state: if(style(…))`)*
 10. **An animation created paused doesn't reliably take its timeline's value.** So the compiler's source
     animations keep running, and the chain is hidden and shown instead (`display: if(style(--ccgo: 1): …)`).
 11. **A paused animation keeps its value after its timeline is detached.**
@@ -68,11 +75,12 @@ that relies on it or records it.
 ## Layout, DOM and parsing
 
 19. **The HTML parser stops nesting at 512 elements. XHTML doesn't**, so the pages are XHTML. Chains of
-    `display: contents` levels work to at least 4,000 deep in XHTML.
+    `display: contents` levels work to at least 4,000 deep in XHTML. *(probe: `html-nesting-512`)*
 20. **`display: contents` levels avoid deep layout recursion.** `contain: strict` on the chain keeps its layout
     out of the CPU's per-frame layout (`ccpage5.py`).
 21. **When several elements share an anchor name, `anchor-size()` reads the last one in tree order.** The
-    compiler's overlays override RAM leaves this way. Only use it for cells the program never writes.
+    compiler's overlays override RAM leaves this way. Only use it for cells the program never writes. *(probe:
+    `anchor-last`)*
 22. **A RAM leaf is a `content-visibility: hidden` element whose remembered width is the stored value.** Writing
     makes it visible with the new width. A decode tree whose off-path nodes compute constants stops restyling
     one level below them: style plus layout per pass went from 70 ms to about 20 ms. *(measured;
@@ -153,7 +161,8 @@ that relies on it or records it.
     and a 1,000,000 s delay, as the readback latches). Elements in a hidden subtree have no anchors, so
     `anchor-size(--name width, <fallback>)` reads them as the fallback. Two things bit: the latch's delayed transition
     also delays a *first* 0 → 1 from a static declaration (give always-on elements `transition: none`), and
-    `display: if(style(--x: 1))` matches only 1, so a flag that can sum to 2 must be clamped. *(measured: sparse RAM, HISTORY phase 10)*
+    `display: if(style(--x: 1))` matches only 1, so a flag that can sum to 2 must be clamped. *(measured: sparse RAM, HISTORY phase 10;
+    probe: `anchor-hidden`)*
 43. **The top hex digit of a readback span is limited by the glyph advance**: an advance is at most 32,767 font units,
     so a 4-digit span (weights 1, 16, 256, 4096) carries 15 bits. 16-bit addresses would need a second span per
     register (as T1 / T2 have).

@@ -8,7 +8,7 @@ Everything runs in headless Chromium through `tools/` (run from the repo root; `
 
 ## 1. Whole-page numbers
 - Step cost: `node tools/tr.js out/A.html,out/B.html 1500 1500`. `bigmed` is the median of the big (physics) passes; a live page runs about 2 physics passes per frame. `V=1` lists the top trace events.
-- Comparing variants: `bash tools/bench.sh 3 out/A.html out/B.html` (min of medians).
+- Comparing variants: `bash tools/bench.sh 3 out/A.html out/B.html` (min of medians), or `node ../shared/js/ab.js -p bigmed 'node tools/tr.js {} 1500 1500' out/A.html out/B.html` for the ratio to A per rotated round with its spread. Run A against itself once to see the noise floor before reading a few percent as a win.
 - What the user feels: `node tools/perf3.js out/A.html` (chaos fps, settle time, idle, drag, hold).
 
 ## 2. Attribute one physics step
@@ -18,6 +18,7 @@ Everything runs in headless Chromium through `tools/` (run from the repo root; `
 3. Strip gate families: `python3 tools/ablate.py out/FZ_p48.html pairs='--(tcp|np|p\d+_\d+(uA|uB|ov))' ac='--ac\d' nw='--nw' all=.`
 4. `node tools/tr.js out/FZ_p48.html,out/FZ_p48_pairs.html,... 1500 1500`. The deltas overlap (removing a family changes later gates).
 5. Active gate counts: `node tools/gates.js out/p48.html 48 1500,3000`
+6. Where a pass's time goes, without double-counting nested events: `SELF=1 node tools/traceagg.js out/FZ_p48.html` (self time on the main thread).
 
 ## 3. Microbenchmarks (is construct X cheaper than Y?)
 - Write a tiny page: an element animated by `@keyframes t{from{--t:0}to{--t:1000}}` on an ancestor, and the construct under test repeated 1,000–5,000× on one element. Template: `experiments/costs/mk2.py`.

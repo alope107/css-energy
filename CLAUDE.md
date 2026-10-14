@@ -3,6 +3,17 @@
 Two projects: `css-physics/` and `js-minus-js/`, each with its own CLAUDE.md. `COMPARISON.md` compares their
 techniques.
 
+## Shared code
+
+- `shared/` is harness code both projects' tools use: browser launch profiles, tracing, A/B timing, motion checks,
+  freezing, ablation (`shared/README.md`). Each project's commands are unchanged. A change there touches both: run
+  `make test-shared`, css-physics `bash tools/smoke.sh 16`, and js-minus-js `make test`, `make l3`, `make l5-smoke`.
+- The two projects launch Chromium with different flags (`shared/js/browser.js` profiles). Their benchmark numbers
+  were taken with those flags; don't unify them without re-measuring both.
+- `engine/` checks the Chrome behaviour both projects depend on: `make engine-check` (facts, pass/fail, ~20 s) and
+  `make engine-costs` (the style-engine cost table against the docs, ~2 min, no other browser jobs). Run both after a
+  Chrome upgrade; `engine/README.md` lists the facts and which notes cite them.
+
 ## User rules (all projects)
 
 - **Never merge into `main` until the user says so.** That covers merges of any kind, rebasing or cherry-picking

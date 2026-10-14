@@ -29,7 +29,12 @@ python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings
 ```
 
 - **Browser**: harnesses launch Chromium through `tools/browser.js`. `CHROME=/path` overrides; otherwise the npm
-  package `@sparticuz/chromium` (Linux x64) is used.
+  package `@sparticuz/chromium` (Linux x64) is used. The launcher is shared with css-physics (`../shared/`, profile
+  `fontcpu`: `--no-sandbox --no-proxy-server --disable-gpu`, the flags BENCHMARKS.md was measured with); `tools/page.js` reads
+  the console grid and types into the editor. After changing either, run `make test-shared` at the repo root, `make test`,
+  `make l3` and `make l5-smoke`.
+- **Engine facts**: `make engine-check` at the repo root re-checks the notes in `docs/ENGINE_NOTES.md` that have a probe
+  (`engine/README.md`). Run it after any Chrome upgrade.
 - **Background runs**: long browser runs exceed default tool timeouts. Write their output to a file and poll it.
 - **Single files**: `python3 compiler/cc_ref.py prog.js` compiles and runs one program; `python3
   tests/suite_ref.py` runs only L1; `SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js` runs L2 on one program.
@@ -42,7 +47,7 @@ compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same 
 machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py (font)  gen_fvm4.py (page)  memtree.py (RAM)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  level harnesses
-tools/     browser.js  traps.py  vsz.py  lp.py
+tools/     browser.js page.js (harness helpers)  traps.py  vsz.py  lp.py  filmstrip.js (motion check, ../shared)
 archive/   superseded code, spikes, raw logs. Reference only: paths inside are stale, don't build on it.
 ```
 
@@ -79,12 +84,16 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
 
 - Run `make l5-smoke`.
 - For speed claims, time FizzBuzz to HALT with `machine/ui_seq.js` (initial program) or `machine/ui_run.js`, before
-  and after, back to back in one session. Both press Run. Run-to-run noise is about ±0.2 s on ~8.5 s.
+  and after, back to back in one session. Both press Run. Run-to-run noise is about ±0.2 s on ~8.5 s. For a ratio
+  with its spread, interleave them: `EXP1=build/ui_exp/fizzbuzz.grid node ../shared/js/ab.js -p haltMs 'node
+  machine/ui_seq.js {}' before.xhtml after.xhtml`, and run one page against itself first to see the noise floor.
 - For a frame profile, keep the trace window inside the run: `RUN=1 RUNWAIT=3500 node machine/trace.js page 4`
   (FizzBuzz halts about 8.5 s after Run; a window past HALT shows idle frames and flatters everything).
 - To separate machine costs from the UI's, time a CPU-only page (`gen_fvm4.py` without `UI=1` on a RAM image
   that holds the program; `machine/halttime.js`): FizzBuzz 4.8 s from load vs 8.5 s after Run on the page.
-  (`halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for such CPU-only pages.)
+  (`halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for such CPU-only pages.) Without `UI=1`
+  the page is HTML, not XHTML: name it `.html`. As `.xhtml` Chrome parses it as XML, there is no `#cpu`, and every
+  harness fails on its first read.
 
 ## Done means
 

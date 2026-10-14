@@ -8,12 +8,13 @@ Earlier versions of this file were measured on a 2-core VM in Chromium 141, so i
 
 | Script | Measures |
 |---|---|
-| `tr.js page[,page2] [delayMs] [durMs]` | CDP trace: median `UpdateLayoutTree` (style pass) ms, "bigmed" (median of the big passes), fps, layout/paint per frame. `V=1` prints the top trace events; `HOVER=1` / `PRESS=1` add pointer state. |
+| `tr.js page[,page2] [delayMs] [durMs]` | CDP trace: median `UpdateLayoutTree` (style pass) ms, "bigmed" (median of the big passes), fps, layout/paint per frame. `V=1` prints the top trace events; `HOVER=1` / `PRESS=1` add pointer state; `TRACE=t.json` saves the trace (with `CAT=blink,devtools.timeline,disabled-by-default-devtools.timeline,cc`, `python3 ../shared/py/passprof.py t.json` gives passes and style+layout ms per frame). |
 | `bench.sh reps page…` | Min-of-bigmed over interleaved repeats of `tr.js`. Use this to compare variants. |
+| `../shared/js/ab.js -p bigmed 'node tools/tr.js {} 1500 1500' a.html b.html` | Ratio of each variant's bigmed to the first's per rotated round (median and IQR), each run a fresh process. Pass one page twice for the noise floor: an A-vs-A run of 6 rounds can still land a few percent off 1. Shared with js-minus-js (`shared/README.md`). |
 | `perf3.js page…` | User-level: chaos fps for the first 6 s, time to settle (all asleep), idle fps, drag fps (tower top box), hold fps. |
 | `freeze3.js src ms prefix tgt…` | Snapshot the state registers at `ms` and bake them into copies of `tgt` as constants with a tiny wobble, so every dependent prop recomputes every frame while all gates stay fixed. **The way to profile one physics step** without the scene evolving. `ONLYAWAKE=1` keeps sleepers frozen. |
 | `freezegrab.js src ms out` | Same, while holding a grab (`BODY=k` grabs body k wherever it is; `TOWER=1` the tower's top box). |
-| `traceagg.js page delay dur` | Aggregates all trace events (blink, cc, animation) by total time. |
+| `traceagg.js page delay dur` | Aggregates all trace events (blink, cc, animation) by total time; `SELF=1` by self time on the main thread (totals double-count nested events). |
 | `gates.js page N ms,ms…` | Counts active pair gates (np, tcp, ov, uA). The waits are cumulative. |
 | `cen.js`, `grabcen.js` | Census of matched gated blocks by category, with a cost model. |
 | `sleepy.js page N [s]` | Asleep count every 0.5 s. |

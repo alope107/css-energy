@@ -107,6 +107,9 @@ Not transferable, with reasons:
    deleting families of rules (`ablate.py`). js-minus-js could attribute its 100 ms of style and layout per frame
    the same way: freeze the CPU registers, then strip the trap service's families (memory tree, PRINT, EXT) one at
    a time.
+   The ablation half is ready: `shared/py/ablate.py` works on js-minus-js's XHTML (it skips braces in CSS strings
+   and never overwrites the source), and `shared/js/freeze.js` has the wobbling-constant clock. Freezing the CPU
+   is still open, because much of its state lives in layout (view timelines, remembered sizes), not in custom properties.
 
 Not transferable, with reasons:
 

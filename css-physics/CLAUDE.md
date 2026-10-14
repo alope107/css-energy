@@ -11,12 +11,14 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 ## Setup
 - Python 3.10+ (stdlib only for `src/`); `pip install fonttools` for `experiments/fonts`.
 - `npm install && npx playwright install chromium`. Tools use Playwright's Chromium, or set `CHROME=/path/to/chrome`. Tools resolve page paths against the cwd: run from the repo root.
+- The tools share their harness code with js-minus-js through `../shared/` (`shared/README.md`): the launcher (profile `physics`: `--no-sandbox`, the flags every number in BENCHMARKS.md was taken with), tracing, motion checks, ablation. What only this project's tools share is in `tools/lib/physics.js` (camera projection, BODYINFO, freezing). After changing either, run `make test-shared` at the repo root and `smoke.sh`.
 - avar2 needs Chrome 148+. Chromium 153 for Linux: `npm i @sparticuz/chromium@153.0.0`, then `node -e "require('@sparticuz/chromium').default.executablePath().then(console.log)"`. Launch flags: `--no-sandbox --no-zygote --single-process --use-angle=swiftshader --enable-unsafe-swiftshader`; one page per browser in single-process mode.
+- `make engine-check` at the repo root re-checks the Chrome behaviours this engine depends on (6-digit `var()`, boolean `style()`, the `font` shorthand, …; `engine/README.md`). Run it after any Chrome upgrade.
 
 ## Commands (repo root)
 - Debug build (readable names + BODYINFO, which the tools need): `COUNTS=16 PLAIN=1 python3 src/build3d.py out/p16.html` (`SCENE=tower|rain|stack`, `NBOX_FIX=4` for 4 boxes and the rest spheres)
 - Smoke and regression tests (pass/fail, ~3 min): `bash tools/smoke.sh 16`. Run it after every generator change. Besides the physics check it runs `statcheck.py` (every scene declares every body's start state; boolean gates only on 0/1 flags), `floatcheck.js` (no body asleep in mid-air, on load or after switching scenes) and `grabtest.js` (dragging one body moves no other). Each of these guards a bug that shipped.
-- Step cost: `node tools/tr.js out/p16.html 1500 1500`; compare variants with `bash tools/bench.sh 3 a.html b.html`
+- Step cost: `node tools/tr.js out/p16.html 1500 1500`; compare variants with `bash tools/bench.sh 3 a.html b.html`, or with ratios and their spread: `node ../shared/js/ab.js -p bigmed 'node tools/tr.js {} 1500 1500' a.html b.html` (pass one page twice for the noise floor)
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
 - Profile one step: `node tools/freeze3.js out/p48.html 4000 FZ out/p48.html`, then `python3 tools/ablate.py out/FZ_p48.html pairs='--(tcp|np|p\d+_\d+(uA|uB|ov))' all=.`, then `tr.js` on each
 - Published site: `bash tools/make_site.sh` (counts 8–64; the CSS is split into ≤14 MB files)
@@ -39,7 +41,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Sparse-regime benchmark: `SCENE=field TRAY=2 FIELD_GAP=30 COUNTS=64 PLAIN=1 python3 src/build3d.py out/g64.html` then `node tools/sparse.js out/g64.html 64 c`; freeze mid-drag with `BODY=k node tools/freezegrab.js`.
 - Gauss–Seidel order: tray planes **first**, then pair rounds. Planes-last leaves stacks with phantom velocities that never sleep.
 - Keep the `.ts` timeline-scope wrappers **above** `#RB`. Inside `.rz`, rendering vanishes.
-- The camera constants (`PERSP`, `TILT`, `CAM_TY`, `CAM_DIST`) are duplicated in `gen3d.py`, `ui3d.css` (as placeholders filled by build3d) and the grab/perf tools' `proj()`. Change all of them together.
+- The camera constants (`PERSP`, `TILT`, `CAM_TY`, `CAM_DIST`) are duplicated in `gen3d.py`, `ui3d.css` (as placeholders filled by build3d) and `tools/lib/physics.js` (the tools' projection). Change all of them together.
 - RATE below 90 doesn't settle piles. Sleep is tested on displacement, not velocity.
 - The CSS `font` shorthand resets `font-variation-settings`; declare the latter after it.
 - Non-PLAIN builds prefix and minify every engine name; debug only on PLAIN builds.
