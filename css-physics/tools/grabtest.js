@@ -4,14 +4,13 @@
 // of it; a press that picks nothing is skipped, and fewer than 3 picks fail) and that, while it is held, no other body that touches nothing changes velocity: with no gravity a free body keeps its
 // velocity, so any acceleration means a grab force leaked to another body. (The bug this guards: body 0's grab block
 // was gated by style(--GIr), true whenever anything was held, so every drag also pulled body 0.)
-const {chromium}=require('playwright');const fs=require('fs');
-const [PERSP,TILT,TY,DIST,VW]=[1500,-28,95,-260,900];
+const {launch,open,bodyInfo,arena}=require('./lib/physics');const fs=require('fs');
 (async()=>{const f=process.argv[2];const src=fs.readFileSync(f,'utf8');
-const info=JSON.parse(src.match(/<!--BODYINFO (.*?)-->/)[1]);const N=info.length;
+const info=bodyInfo(src);const N=info.length;
 const ks=process.argv.length>3?process.argv.slice(3).map(Number):[...new Set([...Array.from({length:9},(_,j)=>1+Math.floor(j*(N-1)/9)),0])];
-const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});let fail=0,nheld=0;
+const b=await launch();let fail=0,nheld=0;
 for(const k of ks){
- const p=await b.newPage({viewport:{width:1000,height:900}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);
+ const p=await open(b,f,{viewport:{width:1000,height:900}});
  await p.waitForTimeout(300);await p.click('label[for=g-zero]');await p.waitForTimeout(100);
  // field page (SCENE=field FIELD_GAP=30: bodies spread out, best for this test): shake wakes every body and kicks it
  // into a slow drift; otherwise restart in the rain scene, whose bodies start awake in mid-air
@@ -23,9 +22,7 @@ for(const k of ks){
   const near=Array.from({length:N},(_,i)=>['F','C','X','Z'].some(q=>fl('nw'+i+q))||Array.from({length:N},(_,j)=>j!==i&&fl('np'+Math.min(i,j)+'_'+Math.max(i,j))).some(Boolean));
   return {GI:g('GI'),near,B:Array.from({length:N},(_,i)=>[g('X'+i),g('Y'+i),g('Z'+i),g('VX'+i),g('VY'+i),g('VZ'+i)])}},N);
  await p.waitForTimeout(400);const s0=await st();
- const ar=await p.locator('.arena').boundingBox();const sc=ar.width/VW;
- const proj=([x,y,z],yaw=0.25)=>{const c=Math.cos(yaw),s=Math.sin(yaw),ct=Math.cos(TILT*Math.PI/180),st_=Math.sin(TILT*Math.PI/180);
-  const x1=x*c+z*s,z1=-x*s+z*c,y3=y*ct-z1*st_+TY,z3=y*st_+z1*ct-DIST,q=PERSP/(PERSP-z3);return [ar.x+ar.width/2+x1*q*sc, ar.y+ar.height/2+y3*q*sc]};
+ const {proj}=await arena(p);
   // aim at the body's current position; a press that picks nothing (the body drifted) is released and retried
   let bx,by;for(let tr=0;tr<4;tr++){const cur=tr?await st():s0;const pk=cur.B[k];[bx,by]=proj([pk[0],pk[1],pk[2]]);
    await p.mouse.move(bx,by);await p.mouse.down();await p.waitForTimeout(60);const g0=Math.round((await st()).GI);

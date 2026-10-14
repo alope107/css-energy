@@ -1,17 +1,17 @@
 // ui_seq.js page.xhtml [prog expected]... — act like a user (harness only): wait for the scan, Run the initial program,
 // then for each further program: Edit, retype the editor, Run, and check the console (or the status, for 'ERR:text').
-const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
+const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
+const { consoleCodes, gridText, typeLines } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs'), path = require('path');
 (async () => {
   const [pg, ...rest] = process.argv.slice(2);
-  const b = await chromium.launch({ args: ['--no-sandbox', '--no-proxy-server', '--disable-gpu', ...(process.env.FLAGS ? process.env.FLAGS.split(' ') : [])] });
+  const b = await launch({ extraArgs: envArgs('FLAGS') });
   const p = await b.newPage(process.env.FLAGS ? { viewport: null } : { viewport: { width: 1300, height: 950 } });
-  const t0 = Date.now(); await p.goto('file://' + path.resolve(pg), { timeout: 600000 }); console.log('load ms', Date.now() - t0);
+  const t0 = Date.now(); await p.goto(fileUrl(pg), { timeout: 600000 }); console.log('load ms', Date.now() - t0);
   const st = () => p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'),
     halted: +c.getPropertyValue('--isHALT') === 1,
     status: getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''), n: getComputedStyle(document.querySelector('.cstv')).getPropertyValue('--csn') }; });
-  const out = () => p.evaluate(() => { const codes = [...document.querySelectorAll('.oc > b')].map(e => Math.round(e.parentElement.getBoundingClientRect().width) - 1048576);
-    const rows = []; for (let i = 0; i < 16; i++) rows.push(codes.slice(i * 8, i * 8 + 8).map(c => c >= 32 && c < 127 ? String.fromCharCode(c) : ' ').join('').replace(/\s+$/, '')); return rows.join('\n').replace(/\s+$/, ''); });
+  const out = async () => gridText(await consoleCodes(p));
   async function run(label, want) {
     const t = Date.now(); await p.click('.runbtn'); let r, comp = null;
     while (Date.now() - t < 240000) { await p.waitForTimeout(100); r = await st(); if (comp === null && /compiled|error/.test(r.status)) comp = Date.now() - t; if (r.halted || /error/.test(r.status)) break; }
@@ -24,9 +24,7 @@ const fs = require('fs'), path = require('path');
   }
   async function type(file) {
     await p.click('.runbtn'); await p.waitForTimeout(300);           // Edit
-    await p.click('#ed'); await p.keyboard.press('Control+A'); await p.keyboard.press('Delete');
-    const lines = fs.readFileSync(file, 'utf8').replace(/\n$/, '').split('\n');
-    for (let i = 0; i < lines.length; i++) { if (i) await p.keyboard.press('Enter'); await p.keyboard.insertText(lines[i]); }
+    await typeLines(p, fs.readFileSync(file, 'utf8').replace(/\n$/, '').split('\n'));
     await p.waitForTimeout(+(process.env.TYPEWAIT || 500));
   }
   await p.waitForTimeout(+(process.env.INITWAIT || 3000));

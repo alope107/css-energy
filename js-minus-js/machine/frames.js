@@ -1,9 +1,8 @@
 // frames.js page.html nframes — per-frame trace of fvm internals from frame 0 (harness-injected, page has no script)
-const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
-const path = require('path');
+const { launch, fileUrl } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 (async () => {
   const [pg, nf = '12', extra = ''] = process.argv.slice(2);
-  const b = await chromium.launch({ args: ['--no-sandbox', '--no-proxy-server', '--disable-gpu'] });
+  const b = await launch();
   const p = await b.newPage({ viewport: { width: 1200, height: 800 } });
   await p.addInitScript(([nf, extra]) => {
     window.__tr = [];
@@ -18,7 +17,7 @@ const path = require('path');
     };
     requestAnimationFrame(f);
   }, [+nf, extra]);
-  await p.goto('file://' + path.resolve(pg), { timeout: 600000 });
+  await p.goto(fileUrl(pg), { timeout: 600000 });
   for (let i = 0; i < 60; i++) { const n = await p.evaluate(() => __tr.length); console.error("n", n); if (n >= +nf) break; await p.waitForTimeout(1000); }
   for (const o of await p.evaluate(() => __tr)) console.log(JSON.stringify(o));
   await b.close();

@@ -1,18 +1,15 @@
 // node tools/cellcheck.js page.html N [bodyIndex] : drag body k through a (cells-gated) page and, every 100 ms, check that
 // every sleeper within reach of an awake body is present (--nb = 1 on #LW, i.e. its name is in --AN), and count how
 // many sleepers are present at all. Prints violations (asleep, near an awake body, not present) and the presence rate.
-const {chromium}=require('playwright');const fs=require('fs');
-const [PERSP,TILT,TY,DIST,VW]=[1500,-28,95,-260,900];
+const {launch,open,bodyInfo,arena}=require('./lib/physics');const fs=require('fs');
 (async()=>{const f=process.argv[2],N=+process.argv[3],K=+(process.argv[4]||0);
-const info=JSON.parse(fs.readFileSync(f,'utf8').match(/<!--BODYINFO (.*?)-->/)[1]);
+const info=bodyInfo(fs.readFileSync(f,'utf8'));
 const R=info.map(b=>b.k==='sph'?b.r:Math.hypot(...b.h));
-const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
-const p=await b.newPage({viewport:{width:1000,height:900}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);
+const b=await launch();
+const p=await open(b,f,{viewport:{width:1000,height:900}});
 await p.waitForTimeout(2000);
 const pos=i=>p.evaluate(i=>{const c=getComputedStyle(document.getElementById('LS'));return ['X','Y','Z'].map(k=>+c.getPropertyValue('--'+k+i))},i);
-const ar=await p.locator('.arena').boundingBox();const sc=ar.width/VW;
-const proj=([x,y,z],yaw=0.25)=>{const c=Math.cos(yaw),s=Math.sin(yaw),ct=Math.cos(TILT*Math.PI/180),st_=Math.sin(TILT*Math.PI/180);
- const x1=x*c+z*s,z1=-x*s+z*c,y3=y*ct-z1*st_+TY,z3=y*st_+z1*ct-DIST,k=PERSP/(PERSP-z3);return [ar.x+ar.width/2+x1*k*sc, ar.y+ar.height/2+y3*k*sc]};
+const {proj}=await arena(p);
 const [bx,by]=proj(await pos(K));await p.mouse.move(bx,by);await p.mouse.down();
 let worst=[],samples=0,present=0,sleepers=0,viol=0;
 const t=Date.now();let k=0;

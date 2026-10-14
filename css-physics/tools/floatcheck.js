@@ -5,15 +5,14 @@
 // point is more than TOL px above the floor and its bounding sphere doesn't reach another body's. A sleeping body is
 // frozen, so one that starts asleep in the air hangs there until something hits it. That bug has come back more
 // than once (scene start states leaking between scenes; upper layers starting asleep).
-const {chromium}=require('playwright');const fs=require('fs');
+const {launch,open,bodyInfo}=require('./lib/physics');const fs=require('fs');
 const TOL=+(process.env.TOL||2);
-(async()=>{let fail=0;const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
+(async()=>{let fail=0;const b=await launch();
 for(const f of process.argv.slice(2)){
-const src=fs.readFileSync(f,'utf8');const m=src.match(/<!--BODYINFO (.*?)-->/);if(!m){console.error(f,'no BODYINFO: build with COUNTS=<n> PLAIN=1');process.exit(2)}
-const info=JSON.parse(m[1]);const scenes=[...src.matchAll(/id="lb-([a-z]+)"/g)].map(x=>x[1]);
+const src=fs.readFileSync(f,'utf8');const info=bodyInfo(src);if(!info){console.error(f,'no BODYINFO: build with COUNTS=<n> PLAIN=1');process.exit(2)}const scenes=[...src.matchAll(/id="lb-([a-z]+)"/g)].map(x=>x[1]);
 const runs=[[scenes[0],false],...scenes.map(s=>[s,true])];
 for(const [sc,click] of runs){
- const p=await b.newPage({viewport:{width:1000,height:900}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);
+ const p=await open(b,f,{viewport:{width:1000,height:900}});
  // a real press: the label's :active must last through a style pass, or the scene radio flips without the reset
  if(click){await p.waitForTimeout(300);const lb=await p.locator(`#lb-${sc}`).boundingBox();await p.mouse.move(lb.x+lb.width/2,lb.y+lb.height/2);
   await p.mouse.down();await p.waitForTimeout(150);await p.mouse.up()}

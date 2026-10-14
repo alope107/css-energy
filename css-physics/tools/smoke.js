@@ -1,12 +1,11 @@
 // node tools/smoke.js page.html [ms] : pass/fail physics check on a PLAIN single-engine page (exit 1 on failure)
 // Runs the page for ms (default 12000) and fails on: non-finite state, floor penetration > 3 px in the second
 // half, sphere/sphere overlap > 4 px in the second half, or speed > 5000.
-const {chromium}=require('playwright');const fs=require('fs');
+const {launch,open,bodyInfo}=require('./lib/physics');const fs=require('fs');
 (async()=>{const f=process.argv[2];const T=+(process.argv[3]||12000);const s=fs.readFileSync(f,'utf8');
-const m=s.match(/<!--BODYINFO (.*?)-->/);if(!m){console.error('no BODYINFO: build with COUNTS=<n> PLAIN=1');process.exit(2)}
-const info=JSON.parse(m[1]);
-const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
-const p=await b.newPage({viewport:{width:1000,height:760}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);
+const info=bodyInfo(s);if(!info){console.error('no BODYINFO: build with COUNTS=<n> PLAIN=1');process.exit(2)}
+const b=await launch();
+const p=await open(b,f,{viewport:{width:1000,height:760}});
 const r=await p.evaluate(([info,T])=>new Promise(res=>{const el=document.getElementById('LS');let pen=-1e9,ov=0,vmax=0,bad=0,n=0;const t0=performance.now();
 function rd(){const st=getComputedStyle(el);const g=k=>parseFloat(st.getPropertyValue('--'+k));return info.map((bi,i)=>({x:g('X'+i),y:g('Y'+i),z:g('Z'+i),w:g('QW'+i),qx:g('QX'+i),qy:g('QY'+i),qz:g('QZ'+i),v:Math.hypot(g('VX'+i),g('VY'+i),g('VZ'+i)),sc:g('SC'+i)}))}
 function f(){const B=rd();n++;const late=performance.now()-t0>T*0.5;

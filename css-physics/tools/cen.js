@@ -1,10 +1,10 @@
 // census of matched blocks by category for a (frozen or live) page: node cen.js page.html waitms
-const {chromium}=require('playwright');const fs=require('fs');
+const {launch,open}=require('./lib/physics');const fs=require('fs');
 (async()=>{const f=process.argv[2];const s=fs.readFileSync(f,'utf8');
 const TOK=/var\(--[A-Za-z0-9_]+|-?\d+\.?\d*(?:e-?\d+)?|[+*\/]|(?<=\s)-(?=\s)|[a-z]+\(/g;
 const blocks=[...s.matchAll(/@container (?:b\d+ )?style\(--([A-Za-z0-9_]+): (\d+)\)\{#L(\d+)\{([^}]*)\}\}/g)].map(m=>({g:m[1],v:+m[2],l:+m[3],t:(m[4].match(TOK)||[]).length,n:m[4].split(';--').length}));
-const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
-const p=await b.newPage({viewport:{width:1000,height:800}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);await p.waitForTimeout(+process.argv[3]||1000);
+const b=await launch();
+const p=await open(b,f,{viewport:{width:1000,height:800}});await p.waitForTimeout(+process.argv[3]||1000);
 const q={};for(const x of blocks){(q[x.l]=q[x.l]||new Set()).add(x.g)}
 const act=await p.evaluate(q=>{const o={};for(const [l,gs] of Object.entries(q)){const el=document.getElementById(+l?'L'+(l-1):'LT');const c=getComputedStyle(el);for(const g of gs)o[g+'|'+l]=+c.getPropertyValue('--'+g)}return o},Object.fromEntries(Object.entries(q).map(([k,v])=>[k,[...v]])));
 const cat={};let tot=0,nb=0;

@@ -1,10 +1,10 @@
 // node tools/bpcount.js page.html N ms[,ms...] : broadphase candidate counts from the live state at each time (cumulative waits):
 // sphere test (what the engine uses: R_a + R_b + 3 > dist), world AABB overlap (+3 margin), and pairs actually touching (tcp/np-exact).
-const {chromium}=require('playwright');const fs=require('fs');
+const {launch,open,bodyInfo}=require('./lib/physics');const fs=require('fs');
 (async()=>{const f=process.argv[2],N=+process.argv[3];
-const info=JSON.parse(fs.readFileSync(f,'utf8').match(/<!--BODYINFO (.*?)-->/)[1]);
-const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
-const p=await b.newPage({viewport:{width:1000,height:800}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);
+const info=bodyInfo(fs.readFileSync(f,'utf8'));if(!info)throw new Error(f+': no BODYINFO (build with COUNTS=<n> PLAIN=1)');
+const b=await launch();
+const p=await open(b,f,{viewport:{width:1000,height:800}});
 for(const t of process.argv[4].split(',')){await p.waitForTimeout(+t);
  const r=await p.evaluate(([info,N])=>{const c=getComputedStyle(document.getElementById('LS'));const g=k=>+c.getPropertyValue('--'+k);
   const B=info.map((bi,i)=>{const q=[g('QW'+i),g('QX'+i),g('QY'+i),g('QZ'+i)];const [w,x,y,z]=q;

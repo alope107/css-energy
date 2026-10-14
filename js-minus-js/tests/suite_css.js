@@ -1,14 +1,14 @@
 // suite_css.js page.xhtml [name...] — level 3 driver (harness script): for each test, Run off, write the program's
 // codes into the latch cells, Run on, wait for the chain's done anchor, read every code/data overlay, compare.
-const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
+const { launch, fileUrl } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const fs = require('fs'), path = require('path');
 (async () => {
   const page = path.resolve(process.argv[2]); const exp = JSON.parse(fs.readFileSync(page + '.exp.json', 'utf8'));
   const base = exp._base || 4096; delete exp._base;
   const only = process.argv.slice(3); const names = Object.keys(exp).filter(n => !only.length || only.includes(n));
-  const b = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
+  const b = await launch({ args: ['--no-sandbox', '--disable-gpu'] });
   const p = await b.newPage(); const t0 = Date.now();
-  await p.goto('file://' + page, { timeout: 900000 }); console.log('load', Date.now() - t0, 'ms');
+  await p.goto(fileUrl(page), { timeout: 900000 }); console.log('load', Date.now() - t0, 'ms');
   let pass = 0; const fails = [];
   for (const name of names) {
     const e = exp[name];

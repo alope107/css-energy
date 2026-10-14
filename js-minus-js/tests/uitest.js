@@ -1,9 +1,9 @@
 // uitest.js page — load with Run off, wait, switch Run on, time until the chain reports done; read the overlay words (harness only)
-const { chromium } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
-(async () => { const b = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
+const { launch, fileUrl } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
+(async () => { const b = await launch({ args: ['--no-sandbox', '--disable-gpu'] });
   const p = await b.newPage(); const cdp = await p.context().newCDPSession(p); await cdp.send('Performance.enable');
   const met = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(x => [x.name, x.value]));
-  const t0 = Date.now(); await p.goto('file://' + require('path').resolve(process.argv[2]), { timeout: 600000 }); const tl = Date.now() - t0;
+  const t0 = Date.now(); await p.goto(fileUrl(process.argv[2]), { timeout: 600000 }); const tl = Date.now() - t0;
   await p.waitForTimeout(800); const m0 = await met();
   const r0 = await p.evaluate(() => new Promise(res => { const t = performance.now(); document.getElementById('run').checked = true;
     const vis = e => e.getClientRects().length > 0;

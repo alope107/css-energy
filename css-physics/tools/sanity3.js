@@ -1,8 +1,8 @@
 // node sanity3.js page.html ms : run, then report floor penetration, sphere overlaps, speeds, sleepers
-const {chromium}=require('playwright');const fs=require('fs');
-(async()=>{const f=process.argv[2];const s=fs.readFileSync(f,'utf8');const info=JSON.parse((process.argv[4]?fs.readFileSync(process.argv[4],'utf8'):s).match(/<!--BODYINFO (.*?)-->/)[1]);
-const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
-const p=await b.newPage({viewport:{width:1000,height:760}});await p.goto(require('url').pathToFileURL(require('path').resolve(f)).href);
+const {launch,open,bodyInfo}=require('./lib/physics');const fs=require('fs');
+(async()=>{const f=process.argv[2];const s=fs.readFileSync(f,'utf8');const info=bodyInfo(process.argv[4]?fs.readFileSync(process.argv[4],'utf8'):s);if(!info)throw new Error(f+': no BODYINFO (build with COUNTS=<n> PLAIN=1)');
+const b=await launch();
+const p=await open(b,f,{viewport:{width:1000,height:760}});
 const r=await p.evaluate(([info,T])=>new Promise(res=>{const el=document.getElementById('LS');let worst=-1e9,ov=0,vmax=0,n=0,t0=performance.now();
 function rd(){const st=getComputedStyle(el);const g=k=>+st.getPropertyValue('--'+k);return info.map((bi,i)=>({x:g('X'+i),y:g('Y'+i),z:g('Z'+i),w:g('QW'+i),qx:g('QX'+i),qy:g('QY'+i),qz:g('QZ'+i),v:Math.hypot(g('VX'+i),g('VY'+i),g('VZ'+i)),sc:g('SC'+i)}))}
 function f(){const B=rd();n++;const late=performance.now()-t0>T*0.5;

@@ -1,6 +1,6 @@
-const {chromium}=require('playwright');
-(async()=>{const b=await chromium.launch({executablePath:process.env.CHROME||undefined,args:['--no-sandbox']});
-const p=await b.newPage({viewport:{width:1000,height:800}});await p.goto(require('url').pathToFileURL(require('path').resolve(process.argv[2])).href);
+const {launch,open}=require('./lib/physics');
+(async()=>{const b=await launch();
+const p=await open(b,process.argv[2],{viewport:{width:1000,height:800}});
 const N=+process.argv[3];
 for(const t of process.argv[4].split(',')){await p.waitForTimeout(+t);
 console.log(t, await p.evaluate(N=>{const els=[...document.querySelectorAll('[id^=L]')].filter(e=>/^L\d+$/.test(e.id));
