@@ -15,7 +15,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 
 ## Commands (repo root)
 - Debug build (readable names + BODYINFO, which the tools need): `COUNTS=16 PLAIN=1 python3 src/build3d.py out/p16.html` (`SCENE=tower|rain|stack`, `NBOX_FIX=4` for 4 boxes and the rest spheres)
-- Physics smoke test (pass/fail, ~1 min): `bash tools/smoke.sh 16`. Run it after every generator change.
+- Smoke and regression tests (pass/fail, ~3 min): `bash tools/smoke.sh 16`. Run it after every generator change. Besides the physics check it runs `statcheck.py` (every scene declares every body's start state; boolean gates only on 0/1 flags), `floatcheck.js` (no body asleep in mid-air, on load or after switching scenes) and `grabtest.js` (dragging one body moves no other). Each of these guards a bug that shipped.
 - Step cost: `node tools/tr.js out/p16.html 1500 1500`; compare variants with `bash tools/bench.sh 3 a.html b.html`
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
 - Profile one step: `node tools/freeze3.js out/p48.html 4000 FZ out/p48.html`, then `python3 tools/ablate.py out/FZ_p48.html pairs='--(tcp|np|p\d+_\d+(uA|uB|ov))' all=.`, then `tr.js` on each
@@ -31,7 +31,8 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 ## Non-obvious gotchas
 - `var()` of a registered number keeps only **6 significant digits**; the wake digests rely on this (6 bodies per decimal word).
 - `@container` rules with an **absent** container name are cheap only at shallow depth: the lookup walks every ancestor and scans its name list (about 0.2 µs + 0.6 ns × depth × names; about 0.2 + 0.01 × depth µs in the engine). A present name costs 0.16 µs, `style(--flag)` 0.4 µs, `style(--flag: 1)` 0.7 µs, a range query 1.6 µs. Gate with owner names (`b{i}`), and put `container-name: var(--AN)` on **every** level: Chrome only re-matches style-container-dependent rules for direct children. Nested queries evaluate the innermost first.
-- `style(--x)` (no value) on a registered property is true iff its value differs from the initial value; 0/1 gates use it (`BOOLQ`).
+- `style(--x)` (no value) on a registered property is true iff its value differs from the initial value; 0/1 gates use it (`BOOLQ`). Never for a multi-valued flag: `style(--GIr)` as body 0's grab gate was true whenever any body was held, so every drag also pulled body 0 (the generator now skips flags tested against other values).
+- Scene start states cascade: the first scene's `#INI` rule is overridden by the selected scene's, so every scene rule must declare every body's `--isc` (start sleep counter), or a body keeps another scene's "asleep" and hangs in mid-air. Test scene switches with a real press (~150 ms): an instant click flips the radio without the reset.
 - CSS math functions (`mod`, `round`, `pow`) are dear: a digit extraction costs about 5 µs. Anything computed per sleeping body per pass kills the sparse regime; charge awake bodies instead (the digests do).
 - Spatial cells were measured and lost (`CELLS=1` builds them; HISTORY.md). The N² floor is the rule visits (about 3 per pair), not the near tests.
 - `freeze3.js` wobbles every register: a frozen page's base is 2–3× the live base. Compare frozen variants with each other only.

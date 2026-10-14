@@ -95,6 +95,21 @@ Goal: cut the N² costs so that more bodies run smoothly. The session measured t
 
 ---
 
+## Regressions found by the user (2026-10-14), now covered by `tools/smoke.sh`
+
+- **Bodies asleep in mid-air after switching scenes** (the second time this class of bug shipped, after Phase 3's
+  floating upper layers). Each scene's `#INI` rule declared the start sleep counter only for the bodies that rest on
+  the floor in that scene; the rules cascade over the first scene's, so in rain (which declares none) every body that
+  rested in the tower kept `isc = 46` and started asleep at its rain position, up to 175 px up. Fixed by declaring
+  every body's counter in every scene. Tests: `statcheck.py` (static) and `floatcheck.js` (browser, every scene, with
+  a real 150 ms press: Playwright's instant click flipped the radio without the reset and hid the bug).
+- **Dragging any body also pulled body 0** (the tower's bottom box, whenever it was awake). `BOOLQ` turned body 0's
+  grab gate `style(--GIr: 1)` into `style(--GIr)`, which is true for any held body. The shortening now applies only
+  to flags never tested against other values. Tests: `statcheck.py` and `grabtest.js` (gravity 0, shaken spread-out
+  field; other bodies with no contact must keep their velocity: the old gate changed body 0's by 73–102 px/s).
+
+---
+
 ## Paths that didn't work (or didn't pay)
 
 Each entry gives what was tried, what happened, and why.
