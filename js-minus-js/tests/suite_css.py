@@ -19,6 +19,7 @@ for f in sorted(f for d in dirs for f in glob.glob(d + '/*.js')):
     exp[os.path.basename(f)[:-3]] = dict(lines=[[ord(ch) for ch in ln] for ln in lines], err=c.err,
                                          code={str(a): w for a, w in words.items()}, data={str(a): v for a, v in im.items()})
 exp['_base'] = R.LAYOUT['rom_size']           # anchor --c<k> is RAM index k = address - rom_size
+os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
 json.dump(exp, open(out + '.exp.json', 'w'))
 if os.path.exists(out) and os.environ.get('REBUILD') != '1': print('page exists; expectations written'); sys.exit()
 css, html, tls, info = C.build(lib, L, P, T)
@@ -26,5 +27,5 @@ cells = ''.join('<div class="row">' + ''.join(f'<i style="--lv: 0">{C.cell_html(
 page = (f'<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/><style><![CDATA[@property --lv {{ syntax: "<integer>"; inherits: false; initial-value: -1; }}\n'
         f'body {{ timeline-scope: {", ".join(tls)}; }} .rows {{ height: 0; overflow: hidden; position: relative; }} .row {{ position: relative; }}\n'
         f'{C.cell_css()}\n{css}\n#run:checked ~ #ccw {{ animation: none; --ccgo: 1; }}]]></style></head><body><input type="checkbox" id="run"/><div class="rows">{cells}</div>{html}</body></html>')
-os.makedirs(os.path.dirname(out), exist_ok=True); open(out, 'w').write(page)
+open(out, 'w').write(page)
 print(info, len(page))
