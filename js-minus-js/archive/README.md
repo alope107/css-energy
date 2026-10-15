@@ -1,14 +1,15 @@
-# archive/: superseded code, spikes and raw results
+# archive/: raw results, and an index of removed code
 
-This directory is for reference only.
+- **`results/`** holds the raw logs that [../docs/BENCHMARKS.md](../docs/BENCHMARKS.md) and
+  [../docs/HISTORY.md](../docs/HISTORY.md) cite. Nothing here is part of the build or the tests.
+- **The superseded code and spikes were removed on 2026-10-15.** The tables below still describe them, by their old
+  paths under `archive/`. Commit `91d73bc` is the last one that has them:
+  `git show 91d73bc:js-minus-js/archive/machine/gen_vm.py`, or `git checkout 91d73bc -- js-minus-js/archive` to
+  restore them all. Their paths were already stale (`/root/cc`, `/root/vm`, `/root/ui`, `/tmp/...`), so don't build
+  on them.
+- `machine/image.json`, the self-compile image, is still in use and moved to `tests/programs/jsc_self.json`.
 
-- **Don't build on it.** Nothing here is part of the build or the tests.
-- **Paths inside are stale.** Most scripts point at the sandbox directories they ran in (`/root/cc`, `/root/vm`,
-  `/root/ui`, `/tmp/...`) and at sibling files that may not be here.
-- **Generated pages and fonts were dropped.** Regenerate them from the generators if needed.
-
-[../docs/HISTORY.md](../docs/HISTORY.md) explains why each approach was replaced, and
-[../docs/BENCHMARKS.md](../docs/BENCHMARKS.md) cites the logs in `results/`.
+[../docs/HISTORY.md](../docs/HISTORY.md) explains why each approach was replaced.
 
 ## compiler/: earlier compile chains
 

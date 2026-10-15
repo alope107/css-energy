@@ -2,7 +2,9 @@
 
 This was reconstructed from three sources:
 
-- **File timestamps, docstrings, version diffs and result logs.** These are mostly preserved under `archive/`.
+- **File timestamps, docstrings, version diffs and result logs.** The result logs are in `archive/results/`. The
+  code was removed on 2026-10-15. Paths below under `archive/` name it as it was at commit `91d73bc`, and
+  `archive/README.md` says how to restore it.
 - **Earlier claude.ai chats.** Links are given where they matter. Those chats ran in other sandboxes, so their
   files aren't in this repo unless noted.
 - **Notes from this conversation.**

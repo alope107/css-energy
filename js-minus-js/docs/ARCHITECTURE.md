@@ -360,7 +360,7 @@ make dist   # copy it to dist/
   - `UI=1`: the typed-input page, which is the product.
   - `UIL` / `UIP` / `UIT`: lines, columns and tokens.
   - `SHORT=0`: readable property names, for debugging (short names are the default).
-- Without `UI=1`, the generator builds the older fixed-program pages; see `archive/`.
+- Without `UI=1`, the generator builds the older fixed-program pages (CPU-only; `machine/halttime.js` times them).
 
 **Toolchain**
 

@@ -49,7 +49,7 @@ machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  level harnesses
 tools/     browser.js page.js (harness helpers)  traps.py  vsz.py  lp.py  filmstrip.js (motion check, ../shared)
-archive/   superseded code, spikes, raw logs. Reference only: paths inside are stale, don't build on it.
+archive/   results/ (raw logs the docs cite). README.md indexes the removed old code and how to restore it from git.
 ```
 
 ## How to make changes
@@ -127,7 +127,8 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
   accepts any nonzero error for `suite_err` programs.
 - **`tests/suite` programs must fit the editor (24 × 64).** `suite_ref.py` warns when one doesn't. The page
   truncates long lines, so such a test fails for the wrong reason.
-- **`archive/` is not maintained.** Its scripts point at old absolute paths (`/root/cc`, `/root/vm`).
+- **Doc paths under `archive/` other than `archive/results/` name removed code.** `archive/README.md` says how to
+  restore it. Its scripts point at old absolute paths (`/root/cc`, `/root/vm`), so don't build on them.
 
 ## Docs
 
