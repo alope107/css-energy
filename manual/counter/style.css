@@ -1,0 +1,66 @@
+/* Taken from https://dev.to/janeori/expert-css-the-cpu-hack-4ddj */
+
+/*
+    1. Initial state
+        Both animations are paused.
+       --hoist-frame
+       --frame-count is -1 + 1 = 0
+    2. run-capture is hovered
+        capture animation begins running, --cached-frame gets --frame-count
+    3. cache-capture is hovered
+        capture animation stops running, --cached-frame remains at --frame-count
+    4. run-hoist is hovered
+        hoist animation begins running, --hoist-frame gets --cached-frame
+        --input-frame gets --hoist-frame, --frame-count gets --input-frame
+
+*/
+
+body {
+    animation: hoist 1ms infinite, capture 1ms infinite;
+    animation-play-state: paused, paused;
+    --frame-count: calc(var(--hoist-frame, -1) + 1);
+}
+
+@property --frame-count {
+    syntax: "<integer>";
+    initial-value: 0;
+    inherits: true;
+}
+body::after {
+    /* We need to use a counter to convert the int to a string */
+    counter-reset: frame var(--frame-count);
+    content: "Pets: " counter(frame);
+}
+
+body:has(.run-capture:hover) {
+    animation-play-state: paused, running;
+}
+body:has(.cache-capture:hover) {
+    animation-play-state: paused, paused;
+}
+body:has(.run-hoist:hover) {
+    animation-play-state: running, paused;
+}
+
+.run-capture {
+    background-color: green;
+}
+.cache-capture {
+    background-color: blue;
+}
+.run-hoist {
+    background-color: red;
+}
+
+div:hover {
+    background-color: aqua;
+}
+
+@keyframes hoist {
+    0%, 100% { --hoist-frame: var(--cached-frame, 0)}
+}
+
+@keyframes capture {
+    0%, 100% { --cached-frame: var(--frame-count); }
+}
+
