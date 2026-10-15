@@ -1,0 +1,54 @@
+:root {
+    --h: 400;
+}
+@property --n {
+    syntax: "<integer>";
+    inherits: true;
+    initial-value: 0;
+}
+
+body {
+    height: 100dvh;
+}
+
+.clock {
+    timeline-scope: --timlin;
+    animation: read auto linear both;
+    animation-timeline: --timlin;
+}
+
+.register {
+    height: calc(var(--h) * 1px);
+    overflow: hidden;
+    position: relative;
+    visibility: hidden;
+}
+
+.subject {
+    position: absolute;
+    width: 30px;
+    height: 1px;
+    background-color: green;;
+    view-timeline: --timlin;
+    top: calc(mod(var(--n) + 1, var(--h)) * 1px);
+    visibility: visible;
+}
+
+#candy {
+    position: fixed;
+    top: 50px;
+    left: 50px;
+    width: 300px;
+    background: purple;
+    transform: scaleX(calc(var(--n)/var(--h)));
+}
+
+#candy::after {
+    counter-reset: n var(--n);
+    content: "YAH " counter(n);
+}
+
+@keyframes read {
+    from { --n: var(--h); }
+    to { --n: -1;}
+}

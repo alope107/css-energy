@@ -3,7 +3,7 @@
 /*
     1. Initial state
         Both animations are paused.
-       --hoist-frame
+       --hoist-frame starts undefined
        --frame-count is -1 + 1 = 0
     2. run-capture is hovered
         capture animation begins running, --cached-frame gets --frame-count
