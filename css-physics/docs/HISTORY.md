@@ -1,6 +1,6 @@
 # How we got here
 
-This is a chronological account of the engine, reconstructed from the generator versions kept in `archive/`, the code comments, the end-of-session summaries and the last session's notes (Oct 9–11, 2026, about three working days in one long Claude session).
+This is a chronological account of the engine, reconstructed from the generator versions in `archive/` (the 2D ones were removed on 2026-10-15; `archive/README.md` says how to restore them), the code comments, the end-of-session summaries and the last session's notes (Oct 9–11, 2026, about three working days in one long Claude session).
 
 Numbers marked † come from summaries of earlier sessions; their raw logs no longer exist. Everything else was measured in the last session (Chromium 141, a 2-core VM) with the scripts listed in BENCHMARKS.md. BENCHMARKS.md now holds the 2026-10-13 re-measurements on a different machine and Chromium 153, so its numbers differ from the ones quoted here.
 
