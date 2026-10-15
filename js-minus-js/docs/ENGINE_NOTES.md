@@ -9,6 +9,8 @@ that relies on it or records it.
   repo root re-checks the entries marked *(probe: `id`)* on minimal pages (`engine/check.js`, `engine/README.md`).
 - **Evidence**: entries marked *(measured)* were measured when they were found; numbers for code that still exists are in [BENCHMARKS.md](BENCHMARKS.md), and the rest are in [HISTORY.md](HISTORY.md). The others were
   seen in tests or probes.
+- **`archive/` paths** other than `archive/results/` name code removed on 2026-10-15. It is still in git at commit
+  `91d73bc`; `archive/README.md` says how to restore it.
 
 ## CSS values and custom properties
 

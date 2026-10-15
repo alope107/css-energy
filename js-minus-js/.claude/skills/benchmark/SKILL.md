@@ -24,5 +24,6 @@ Pick the cheapest tool that answers the question, and always measure before and 
 - **Run comparisons back to back on the same machine.** The headless sandbox's run-to-run noise is about ±3%.
 - **Record every result in `docs/BENCHMARKS.md`.** Give what was measured, the command, the numbers, the date,
   and *(derived)* for computed values.
-- **Older benchmark scripts are in `archive/machine/`.** They include the HarfBuzz per-lookup timers, the cache
-  sweeps and ablations. Their paths are stale (`/root/vm`), so fix them before running.
+- **Older benchmark scripts were removed from `archive/machine/`.** They include the HarfBuzz per-lookup timers, the
+  cache sweeps and ablations. `archive/README.md` lists them and how to restore them from git. Their paths are stale
+  (`/root/vm`), so fix them before running.

@@ -46,7 +46,7 @@ tests/      suite/ (89 programs + Node .out), suite_err/ (14 rejects), harnesses
 tools/      browser.js (launcher), traps.py (cost of a program on the CPU), vsz.py / lp.py (variant sizes)
 dist/       the built page
 docs/       ARCHITECTURE.md, HISTORY.md, BENCHMARKS.md, ENGINE_NOTES.md
-archive/    superseded generators, spikes, and raw result logs (paths inside are stale; reference only)
+archive/    raw result logs; README.md indexes the removed superseded code (restore it from git)
 AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 ```
 
