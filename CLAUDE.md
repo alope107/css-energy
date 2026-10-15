@@ -16,6 +16,8 @@ techniques.
 
 ## User rules (all projects)
 
+- **Never touch anything under `.auberon/`.** It holds the user's own worktrees. Don't create, edit, delete or build
+  files there. Read them only when the user points you at them. Put examples and builds in your own branch or worktree instead.
 - **Never merge into `main` until the user says so.** That covers merges of any kind, rebasing or cherry-picking
   onto it, and committing on it directly. Finish the work on a branch or worktree, report, and wait. A go-ahead
   for one merge doesn't cover the next.
