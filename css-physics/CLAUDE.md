@@ -21,7 +21,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Step cost: `node tools/tr.js out/p16.html 1500 1500`; compare variants with `bash tools/bench.sh 3 a.html b.html`, or with ratios and their spread: `node ../shared/js/ab.js -p bigmed 'node tools/tr.js {} 1500 1500' a.html b.html` (pass one page twice for the noise floor)
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
 - Profile one step: `node tools/freeze3.js out/p48.html 4000 FZ out/p48.html`, then `python3 tools/ablate.py out/FZ_p48.html pairs='--(tcp|np|p\d+_\d+(uA|uB|ov))' all=.`, then `tr.js` on each
-- Published site: `bash tools/make_site.sh` (counts 8–64; the CSS is split into ≤14 MB files)
+- Published site: `bash tools/make_site.sh` (the default build into `site/`, with 24 as the default page; the CSS is split into ≤14 MB files)
 - Motion checks: `node tools/filmstrip.js page.html out.png [delay] [dur]` (compositor frames as a contact sheet, plus a snap-back score); `node tools/transcheck.js page.html` (transform transitions must restart where the running one was, within one frame's motion along the path; `--selftest-ok` must pass, `--selftest-bad` and `--selftest-small` (10 px off the path) must fail).
 
 ## Working style for performance work
@@ -48,7 +48,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 
 ## User preferences
 - **Never merge into `main` until the user says so.** That covers merges of any kind, rebasing or cherry-picking onto it, and committing on it directly. Finish the work on a branch or worktree, report, and wait. A go-ahead for one merge doesn't cover the next.
-- **Whenever you have something new for the user, build it and give them a link to test it by hand, plus the build's path.** Build a user page (not `PLAIN`) with `python3 src/build3d.py out/<name>.html` (in that checkout or worktree). Serve the repo root in the background with `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspaces/css-energy` (VS Code forwards the port), link `http://localhost:8765/<path from the repo root>` (a worktree's build: `.claude/worktrees/<name>/css-physics/out/<name>.html`), and check the link with `curl -sI` first. The link is in addition to your own headless checks (Hard rules), not instead of them.
+- **Whenever you have something new for the user, build it and give them a link to test it by hand, plus the build's path.** Build a user page (not `PLAIN`) with `python3 src/build3d.py out/<name>.html` (in that checkout or worktree; it writes `out/<name>-N.html` for N = 8–64, linked to each other, and `out/<name>.html` = the 16 page). Serve the repo root in the background with `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspaces/css-energy` (VS Code forwards the port), link `http://localhost:8765/<path from the repo root>` (a worktree's build: `.claude/worktrees/<name>/css-physics/out/<name>.html`), and check the link with `curl -sI` first. The link is in addition to your own headless checks (Hard rules), not instead of them.
 - Terse, direct. Explain the reasoning behind conclusions, label estimates vs measurements, and cite sources for claims about the outside world.
 - When reviewing user-shared code, critique rather than rewrite. When sharing config or code files, give the whole file.
 

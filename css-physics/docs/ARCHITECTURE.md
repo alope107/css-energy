@@ -143,8 +143,8 @@ The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't 
 | Command | Output |
 |---|---|
 | `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine with readable names and a `<!--BODYINFO …-->` comment. **This is what the test tools expect.** |
-| `python3 src/build3d.py out/x.html` | One page with several engines (default 8, 12, 16, 24), selected by radios; unselected engines are `display:none`. |
-| `MULTI=1 COUNTS=… DEFAULT=24 python3 src/build3d.py site/rigid3d.html` (`tools/make_site.sh`) | One page per count, linked to each other. |
+| `python3 src/build3d.py out/x.html` | One page per count (default 8, 16, 24, 32, 48, 64), `out/x-N.html`, linked to each other; `out/x.html` is a copy of the `DEFAULT` count's page (16). A stylesheet over `CSS_SPLIT` (14 MB) goes out as linked `x-N.k.css` files. `tools/make_site.sh` does this into `site/` with `DEFAULT=24`. |
+| `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios; unselected engines are `display:none`. |
 
 - **Prefixes.** Engines are generated in parallel, one `gen3d.py` process per count. Each non-PLAIN engine gets a name prefix (`PFX`) and minified property names.
 - **CSS splitting.** A stylesheet over `CSS_SPLIT` (14 MB, the artifact host's per-file limit) is split into linked `rigid3d-N.k.css` files, cut between top-level rules.

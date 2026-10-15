@@ -33,4 +33,4 @@ techniques.
 | Project | Build | Lands in |
 |---|---|---|
 | js-minus-js | `make page` (in `js-minus-js/`) | `js-minus-js/build/js_in_css.xhtml` |
-| css-physics | `python3 src/build3d.py out/<name>.html` (in `css-physics/`) | `css-physics/out/<name>.html` |
+| css-physics | `python3 src/build3d.py out/<name>.html` (in `css-physics/`) | `css-physics/out/<name>.html` (the 16-body page; it links `<name>-N.html` for 8–64) |
