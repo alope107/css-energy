@@ -1,0 +1,31 @@
+/* Taken from https://dev.to/janeori/expert-css-the-cpu-hack-4ddj */
+body {
+    /* send both animations */
+    animation: color-keys 3s step-end infinite, cache 1s infinite;
+    /* set background-color to the cached version */
+    background-color: var(--bg);
+
+    width: 100dvw;
+    height: 100dvh;
+    
+}
+
+/* Invalidates animation cache of "cache" on hover change */
+body:hover {
+    animation-play-state: running, paused;
+}
+
+/* Displays simple cycling color */
+div {
+    background-color: var(--color);
+}
+
+/* Steps through 3 colors */
+@keyframes color-keys {
+  0%, 33% { --color: blue; }
+  33%, 67% { --color: green; }
+  67%, 100% { --color: red; }
+}
+
+/* Locks --bg to --color whenever animation cache is reset*/
+@keyframes cache {0%, 100% {--bg: var(--color);}}
