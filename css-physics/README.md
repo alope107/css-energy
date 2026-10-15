@@ -25,7 +25,7 @@ Open a built page in Chrome; for 48 and 64, serve or open the folder, because th
 | `src/page3d.html`, `src/ui3d.css` | page template and UI/render CSS |
 | `tools/` | headless-Chromium harnesses: smoke test, profiling, fps, freeze/ablate |
 | `experiments/` | microbenchmarks behind the cost model: style costs, variable fonts as compute, compositor interpolation, iframe processes, `ident()` |
-| `archive/` | earlier generators: the 2D engine and the pre-optimization 3D baseline |
+| `archive/` | the pre-optimization 3D generator, still buildable as an A/B baseline; README.md indexes the removed 2D engine |
 | `docs/` | ARCHITECTURE (how it works), HISTORY (how we got here and what failed), BENCHMARKS (all measurements) |
 
 ## Status (Oct 2026)
