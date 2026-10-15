@@ -13,7 +13,7 @@ Every performance measurement of the current code, with how to re-run it.
   own compositor layer). Both were measured in the same session, back to back, the before numbers from
   `dist/js_in_css.xhtml` of that commit.
 - *(derived)* marks a value computed from logged data.
-- "Self-compile" means the self-hosted jsc (`archive/machine/image.json`) compiles FizzBuzz on the CPU, then runs it.
+- "Self-compile" means the self-hosted jsc (`tests/programs/jsc_self.json`) compiles FizzBuzz on the CPU, then runs it.
 - Earlier versions of this file recorded measurements of pages, generators and fonts that no longer exist (the
   pure-CSS VM, cpu2, the fixed-program compile pages) and numbers from other chats. Those were removed on 2026-10-13
   because they can't be reproduced. [HISTORY.md](HISTORY.md) still tells that story, and the raw logs are in
@@ -48,7 +48,7 @@ Every performance measurement of the current code, with how to re-run it.
 |---|---|---|
 | Shapings for a program (model) | `python3 tools/traps.py prog.js…` | `uarch4` model, N16 S32. Instant. |
 | Compiler size | `python3 tools/vsz.py`, `python3 tools/lp.py` | Variants before the page's no-op merge. |
-| HarfBuzz alone | `CPUMOD=cpu4 python3 machine/hbtest.py image.json N S [maxshapings]` | Writes `cpu.ttf` in the cwd. The image must hold the program's code: `build/ccimg.json` doesn't (the page's CSS compiler supplies it), so it never halts. Use `archive/machine/image.json`, or build an image the way `tests/suite_machine.py` does. |
+| HarfBuzz alone | `CPUMOD=cpu4 python3 machine/hbtest.py image.json N S [maxshapings]` | Writes `cpu.ttf` in the cwd. The image must hold the program's code: `build/ccimg.json` doesn't (the page's CSS compiler supplies it), so it never halts. Use `tests/programs/jsc_self.json`, or build an image the way `tests/suite_machine.py` does. |
 | CSS compiler in Chrome | `make l3`, or for every line: `node tests/suite_css.js build/suite_css.xhtml` | Run → done, without readback. |
 | Typed-input chain alone | `python3 tests/ui_test.py tests/fizz.js out.xhtml && node tests/uitest.js out.xhtml` | Fake latch cells, no editor. |
 | The real page | `make l5` / `make l5-smoke`, or `EXP1=build/ui_exp/fizzbuzz.grid node machine/ui_seq.js build/js_in_css.xhtml` | `compiledMs` includes the readback sweep; `haltMs` is Run → HALT (the page's `--isHALT`). `machine/ui_run.js page` also reports the first step. |
@@ -122,7 +122,7 @@ line reads `9875 glyphs, 1274 cells, 111 lookups/cycle, 432 subtables/cycle, 217
 |---|---|---|---|---|---|
 | FizzBuzz, after (RAM image built as in `tests/suite_machine.py`) | 16, 32 | 103 | 476 | halted, every shaping matches the model | 19.02 ms per shaping |
 | FizzBuzz, before | 16, 32 | 193 | 1329 | halted, output ok | 19.15 ms per shaping |
-| Self-compile (`archive/machine/image.json`, before) | 16, 16 | 2,919 | 14,985 | halted, output ok | 9.88 ms per shaping |
+| Self-compile (`tests/programs/jsc_self.json`, before) | 16, 16 | 2,919 | 14,985 | halted, output ok | 9.88 ms per shaping |
 
 *(derived)* FizzBuzz after: 4.6 steps per shaping, 2.0 s of HarfBuzz time; before: 6.9 steps per shaping, 3.7 s. Self-compile: 5.1 steps per
 shaping, 28.8 s of HarfBuzz time, ~520 steps/s. The self-compile's shaping and step counts are identical to the
