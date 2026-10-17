@@ -18,6 +18,7 @@ loads `playwright` / `playwright-core` from the project of the tool that runs, s
 | `js/freeze.js` | the wobbling-constant clock that freezes a page's state for profiling | css-physics `freeze3.js`, `freezegrab.js` (via `tools/lib/physics.js`) |
 | `py/ablate.py` | copies of a page with families of `@container` blocks removed (string- and comment-aware; never overwrites the source, `.xhtml` included) | css-physics `tools/ablate.py`; any js-minus-js page |
 | `py/passprof.py` | per-frame passes, style+layout ms and shaping ms from a saved trace | js-minus-js `machine/passprof.py`; css-physics `TRACE=… CAT=… tools/tr.js` |
+| `make/checks.mk`, `make/logged.sh`, `make/report.sh`, `js/runid.js` | checks as make targets: skipped while nothing they depend on changed | every project's Makefile (below) |
 | `test/` | unit tests (`make test-shared` at the repo root) | |
 
 ## Browser profiles
@@ -53,11 +54,50 @@ column: a swing in machine load cancels out of a ratio taken in the same round. 
 noise floor; an A-vs-A ratio should straddle 1.00. `-p name` takes a JSON field (the js-minus-js harnesses print JSON
 lines) or the first number after `name` in text output.
 
+## Checks in make (`make/checks.mk`)
+
+The slow checks are make targets, so make skips one while nothing it depends on has changed since it last passed:
+
+| Project | Checks | Always run |
+|---|---|---|
+| css-physics | `smoke.sh` (= `make -k smoke N=…`): `smoke.js` per scene, `floatcheck.js`, `grabtest.js` | `statcheck.py` (20 ms) |
+| js-minus-js | `make l2`, `l3`, `l5`, `l5-smoke`, `l5-input` | `expect`, `l1`, `l4` (< 1 s) |
+| paint | `make test-selftest`, `make test-e2e` | |
+| repo root | `make engine-check` | `make engine-costs` (a measurement) |
+
+**How.** A check's target is its log, `build/<check>.log` (css-physics: `out/smoke_<N>….<browser>.log`; root:
+`engine/build/`). `make/logged.sh` runs the check, shows its output, and writes the log only on a pass: exit 0, and for
+the L2/L3/L5 harnesses, which exit 0 whatever happens, their summary lines (`-p`/`-f`). So make re-runs a check when
+its last run failed or when any prerequisite is newer than its log. The phony target (`make l3`) then says
+`up to date: … passed <time>` and shows the end of that pass's log, or nothing extra when the check just ran.
+
+**What a check depends on** is in its rule, read from the harnesses (and checked against the files each check
+actually opened, recorded once by tracing it): the page or site it loads, its harness and the shared JS (whole
+directories, `tools/*.js`, `shared/js/*.js`, rather than single files), the suite programs, and a `.id` file for
+everything outside the repo. `js/runid.js` writes the `.id`: Node and Python versions, the Playwright version, the
+browser executable and its `--version`, and the value of every environment variable the check's scripts read by name
+(found in their source, so a new variable can't be left off). Make refreshes each `.id` while it reads the Makefile
+(`$(call id,…)`, ~50 ms) but rewrites it only when its content changes, so a Chrome upgrade or `BROWSER=firefox` makes
+it newer and the check re-runs. (A rule with `FORCE` would look remade under `make -n`, every check out of date.) Pages are
+rebuilt only when their generator (or a variable it reads) changed; `make expect` rewrites an `.out` only when it
+changes.
+
+- `RERUN=1` runs every check asked for, up to date or not (`RERUN=1 make l3`, `RERUN=1 bash tools/smoke.sh 16`). Use
+  it for the evidence before a merge, for a suspected flake, and after changing `shared/make/` itself.
+- `make -n l3` shows whether it would run; `make --debug=b l3` says which prerequisite is newer.
+
+**What it can't see.** Only what the rules name. A harness that starts reading a new file outside the directories its
+rule lists, or an input that isn't a file (machine load), isn't tracked. Make compares modification times, not
+content: any edit, checkout or rebuild that touches a prerequisite re-runs the check (even when the bytes are the
+same), and a copy that keeps an old mtime (`cp -p`, `tar`) could hide a change. Each worktree has its own logs.
+
 ## Changing shared code
 
 The projects depend on it, so check each:
 
 - `make test-shared` (unit tests, no browser);
+- `RERUN=1` on the commands below: their checks depend on `shared/js/*.js`, so they re-run anyway, but not on a
+  change in `shared/make/`;
 - css-physics `bash tools/smoke.sh 16`;
 - js-minus-js `make test`, `make l3` and `make l5-smoke`;
 - paint `make test`, for a change in `browser.js` (the only shared file it uses);

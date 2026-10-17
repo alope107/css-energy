@@ -26,8 +26,9 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
 - Manual-test link for the user: `node serve.js site 8766` in the background, link `http://localhost:8766/`, check it
   with `curl -sI`. Not the repo-root `http.server`: it sends none of the headers, and nothing works without them.
 - Rebuild: `python3 build.py [W] [H]` (cells ≤ 490). Self-test site: `python3 selftest/build.py`.
-- Tests: `make test` = `node tools/selftest.js` (~1 min) then `node tools/e2e.js [seed]` (~6 min). Long runs exceed
-  default tool timeouts: write output to a file and poll it.
+- Tests: `make test` = `node tools/selftest.js` (~1 min) then `node tools/e2e.js [seed]` (~6 min). Through `make`, a
+  test whose site, tools and browser haven't changed since it passed prints `up to date`; `RERUN=1` runs it.
+  Long runs exceed default tool timeouts: write output to a file and poll it.
 
 ## Non-obvious gotchas
 - **Registering a dictionary** needs a fresh-cacheable response (`max-age` > 0; `no-cache`/`no-store`/`max-age=0`
