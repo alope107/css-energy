@@ -17,6 +17,15 @@ their techniques.
   jobs). Run both after a Chrome upgrade; `engine/README.md` lists the facts and which notes cite them. paint's facts
   (dictionary registration rules, the frame limit) are checked by its own `make test`.
 
+## Deploys
+
+- `.github/workflows/deploy.yml` deploys to Cloudflare Pages: `main` → production, any other branch → a preview of
+  the projects it changed. `deploy/README.md` has the setup and the trust model.
+- **Pushing a branch publishes a public preview: push only when the user asks.** Then `deploy/status.sh` waits for
+  the run and prints the preview URLs; give the user the `<hash>` URL along with the local link.
+- `deploy/assemble.sh <project> <dir>` builds exactly what CI deploys; `npx wrangler pages dev <dir>` serves it with
+  Pages semantics, no credentials needed.
+
 ## User rules (all projects)
 
 - Be terse and direct.
