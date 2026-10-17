@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>preserve-3d: a cube resting on another draws behind it (document order, not depth)</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  .view { position: relative; width: 300px; height: 260px; perspective: 600px; background: #333; overflow: hidden; }
+  .cam { position: absolute; left: 50%; top: 65%; transform-style: preserve-3d; transform: rotateX(-30deg) rotateY(20deg); }
+  .cube { position: absolute; transform-style: preserve-3d; }
+  .f { position: absolute; width: 60px; height: 60px; margin: -30px 0 0 -30px; backface-visibility: hidden; }
+  .f0 { transform: translateZ(30px); } .f1 { transform: rotateY(180deg) translateZ(30px); }
+  .f2 { transform: rotateY(90deg) translateZ(30px); } .f3 { transform: rotateY(-90deg) translateZ(30px); }
+  .f4 { transform: rotateX(90deg) translateZ(30px); } .f5 { transform: rotateX(-90deg) translateZ(30px); }
+  .red .f { background: #c55; } .red .f4 { background: #e88; }
+  .blue .f { background: #66b; } .blue .f4 { background: #99e; }
+</style>
+<p>A blue cube rests on a red one (1px apart). From above, the blue cube must hide the back of the red cube's top face.
+The blue cube comes first in the document.</p>
+<div class="view"><div class="cam">
+  <div class="cube blue" style="transform: translateY(-61px) rotateY(-10deg)"><i class="f f0"></i><i class="f f1"></i><i class="f f2"></i><i class="f f3"></i><i class="f f4"></i><i class="f f5"></i></div>
+  <div class="cube red" style="transform: rotateY(25deg)"><i class="f f0"></i><i class="f f1"></i><i class="f f2"></i><i class="f f3"></i><i class="f f4"></i><i class="f f5"></i></div>
+</div></div>
+<!--
+Observed (Playwright's Firefox 157, Linux, headless, software WebRender, 2026-10-17): the red cube's top face is drawn over the
+blue cube; swapping the two cubes in the document draws them correctly. The same happens with all 12 faces as direct
+children of .cam. Chrome 153: correct either way. Not tested with GPU WebRender.
+Spec (css-transforms-2 §4.1): planes of a 3D rendering context are intersected and depth-sorted (Newell's algorithm);
+only coplanar ones fall back to painting order.
+Related reports: bug 1709716 ([meta] 3D transforms and preserve-3d correctness), 1025439 (depth sorting breaks with many
+preserve-3d nodes), 766346 (3D errors with software WebRender), 2038549 (plane splitting in root space, fixed in 152).
+-->
