@@ -39,8 +39,10 @@ def initial_parse(data_base):
     st['dp'] = data_base + 1; st['mode'] = R.S_STMT
     return st
 
-# punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant
-PUNCT = sorted({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, 58, 63, R.T_NL} | set(R.BIN) | set(R.COMPOUND))
+# punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant.
+# '?' and ':' are not among them: every variant costs some time on every token level, whether it applies or not, and
+# only S_OPER (and the modes that fall into it) accepts them, so they share the 'other punctuation' variant there
+PUNCT = sorted({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL} | set(R.BIN) | set(R.COMPOUND))
 import os
 SPEC_LEVEL = os.environ.get('SPECK', 'mtv')     # m: mode only; mt: + token kind; mtv: + punctuation value
 def variant_key(mode, tk, tv):
@@ -76,8 +78,7 @@ class Prog(Base):
         self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
         self.spec_mode, self.spec_tk, self.spec_tv = mode, tk, tv
         X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2'])
-        X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), scA=K(0), scAl=K(0), scO=K(0), scOl=K(0),
-                     scT=K(0), scTl=K(0))
+        X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), scA=K(0), scAl=K(0), scO=K(0), scOl=K(0))
         if mode is not None: X.cur['mode'] = K(mode); X.cur['err'] = K(0)
         self.code = []      # (valid, addr, op, imm, islab)  addr relative to code base
         self.labs = []      # (valid, label, value)
@@ -165,7 +166,7 @@ class Prog(Base):
         instead of emitting; at most one of each is popped (the stack's precedences increase upwards between
         markers, and cc_ref's M_TELSE chain rule keeps one M_TELSE per segment), and all are defined at the
         address after the pops, so they are collected and defined afterwards."""
-        go = K(1)
+        go = K(1); osp_in = self.m(self.v('osp'), 'ospi')
         for _ in range(OD):
             code, val = self.top_op()
             p = self.prec(code)
@@ -175,8 +176,6 @@ class Prog(Base):
                 with self.when(eq(code, R.AND)): self.set('scA', 1); self.set('scAl', val)
                 with self.when(eq(code, R.OR)): self.set('scO', 1); self.set('scOl', val)
                 lb = self.m(self.v('lb'), 'plb')
-                with self.when(eq(code, R.M_TELSE)):
-                    self.set('scT', 1); self.set('scTl', mod(val, 64)); self.set('lb', self.tmerge(fdiv(val, 64), lb))
                 with self.when(eq(code, R.ADD)):
                     with self.when(or_(eq(val, 2), eq(lb, 2))): self.fail(63)
                 with self.when(eq(code, R.M_CADD)):
@@ -185,7 +184,12 @@ class Prog(Base):
                 with self.when(not_(anyeq(code, (R.AND, R.OR, R.M_CADD, R.M_TELSE)))): self.emit(code)
         with self.when(self.v('scA')): self.deflab(self.v('scAl'), self.here())
         with self.when(self.v('scO')): self.deflab(self.v('scOl'), self.here())
-        with self.when(self.v('scT')): self.deflab(self.v('scTl'), self.here())
+        # an M_TELSE is the bottom of its segment, so if one was popped it was the last: the entry at the new osp
+        osp = self.m(self.v('osp'), 'ospo')
+        w = self.m(add(*[mul(eq(osp, k), self.v(f'op{k}')) for k in range(OD)]), 'lastw')
+        with self.when(and_(lt(osp, osp_in), eq(fdiv(w, 8192), R.M_TELSE))):
+            val = self.m(mod(w, 8192), 'tev')
+            self.deflab(mod(val, 64), self.here()); self.set('lb', self.tmerge(fdiv(val, 64), self.v('lb')))
     def tmerge(self, a, b): return self.m(mul(eq(a, b), b), 'tmg')
     def lookup(self, h1, h2):
         """index of the symbol with this name, or -1: the latest block-scoped one (scores NS+1..2NS), else the latest
@@ -781,13 +785,13 @@ class Prog(Base):
             t = self.pop_cs(); k = t[0]; self.set('nlet', t[5])
             with self.when(eq(k, R.C_BLOCK)): self.set(flag, 1); self.done()
             with self.when(eq(k, R.C_IFB)): self.set('pendLa', t[1]); self.set('mode', R.S_ELSE); self.done()
-            with self.when(anyeq(k, (R.C_ELSEB, R.C_DOB))): self.deflab(t[1], self.here())
-            with self.when(eq(k, R.C_ELSEB)): self.set(flag, 1); self.done()
+            with self.when(eq(k, R.C_LOOPB)): self.emit(R.JMP, 0, t[1])
+            with self.when(eq(k, R.C_FUNCB)): self.emit(R.PUSHI, 0); self.emit(R.RET, self.v('npar')); self.deflab(t[2], self.v('nloc'))
+            # the end label of whichever body closed (one kind per call, so one label port serves them all)
+            with self.when(anyeq(k, (R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB))): self.deflab(ite(eq(k, R.C_LOOPB), t[2], t[1]), self.here())
+            with self.when(anyeq(k, (R.C_ELSEB, R.C_LOOPB))): self.set(flag, 1); self.done()
             with self.when(eq(k, R.C_DOB)): self.set('csp', self.v('csp') + 1); self.set('mode', R.S_DOWHILE); self.done()
-            with self.when(eq(k, R.C_LOOPB)):
-                self.emit(R.JMP, 0, t[1]); self.deflab(t[2], self.here()); self.set(flag, 1); self.done()
             with self.when(eq(k, R.C_FUNCB)):
-                self.emit(R.PUSHI, 0); self.emit(R.RET, self.v('npar')); self.deflab(t[2], self.v('nloc')); self.deflab(t[1], self.here())
                 self.set('curf', 0); self.set('nsym', self.v('fsym')); self.set('mode', R.S_STMT); self.done()
             with self.when(not_(anyeq(k, (R.C_BLOCK, R.C_IFB, R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB)))): self.fail(55)
 

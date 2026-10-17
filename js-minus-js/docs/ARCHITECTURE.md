@@ -125,7 +125,8 @@ These are in `cc_ref.py` and shared by the DSL.
   defines `L1` and replaces the marker with the operator `M_TELSE` (`L2`), which has the lowest precedence (1; the
   others moved up by one) and defines `L2` when popped. A ternary in another's else branch (`a ? x : b ? y : z`)
   jumps to the outer `L2` instead of pushing its own `M_TELSE`, like an `else if` chain, so at most one `M_TELSE`
-  sits between markers and `popops` defines at most one more label (`scT`, next to `scA` / `scO`). The value's
+  sits between markers, always at the bottom of its segment. So if `popops` pops one, it was the last pop: the DSL
+  reads it once after its unrolled loop (the entry at the new `osp`) rather than in every iteration. The value's
   static type is the branches' type if they agree, else unknown.
 - **`do … while`**: `do` defines the loop top and pushes `C_DOB` (a = continue, b = break, c = top). When the body
   ends, the continue label is defined and the entry stays on the stack, with mode `S_DOWHILE` waiting for `while`.
