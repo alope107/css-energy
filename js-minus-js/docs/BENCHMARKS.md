@@ -224,7 +224,8 @@ across rounds.
   `S_VARAFTER` on punctuation tokens) into shared rules made the compiler about 3% faster than the baseline.
 
 L3 itself: **122/122 pass** in every round (97 valid programs, 25 error programs with the intended codes 64–67, 3, 4
-and 47). L1 97/97, L2 ALL OK, L4 97/97, `make l5-smoke` 9/9.
+and 47). L1 97/97, L2 ALL OK, L4 97/97, `make l5-smoke` 9/9, `make l5` 119/119 (every program under 1,500 steps,
+typed into the real page; the new ones compile in 2.5–6.7 s after Run).
 
 ---
 
