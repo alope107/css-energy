@@ -103,11 +103,17 @@ if (CERT) {
   srv.on('sessionError', () => {});
   srv.listen(PORT, () => console.log(`serving ${ROOT} on https://localhost:${PORT}/ (HTTP/2)`));
 } else {
-  const srv = http.createServer((req, res) => {
+  const onRequest = (req, res) => {
     respond(req.method, req.url.split('?')[0], req.headers, (status, hdrs, body, len) => {
       res.writeHead(status, { ...hdrs, 'content-length': len ?? body.length }); res.end(body || undefined);
     });
-  });
-  srv.keepAliveTimeout = 60000;
-  srv.listen(PORT, 'localhost', () => console.log(`serving ${ROOT} on http://localhost:${PORT}/` + (FAULT ? ` (fault: ${FAULT})` : '')));
+  };
+  // Both loopbacks: Node resolves 'localhost' to ::1 only, and VS Code's port forwarder connects to 127.0.0.1.
+  for (const host of ['127.0.0.1', '::1']) {
+    const srv = http.createServer(onRequest);
+    srv.keepAliveTimeout = 60000;
+    if (host === '::1') srv.on('error', e => { if (e.code !== 'EADDRNOTAVAIL' && e.code !== 'EAFNOSUPPORT') throw e; });
+    srv.listen(PORT, host, host === '::1' ? undefined :
+      () => console.log(`serving ${ROOT} on http://localhost:${PORT}/` + (FAULT ? ` (fault: ${FAULT})` : '')));
+  }
 }
