@@ -4,7 +4,8 @@ Both projects compute inside Chrome's rendering pipeline with no script on the p
 runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js compiles
 JavaScript with CSS and executes the bytecode in a GSUB "CPU" font while Chrome shapes a line of text. This report
 lists what they share, where they differ, and which techniques could move from one to the other. Numbers are from
-each project's `docs/BENCHMARKS.md` (Chromium 153, the same devcontainer, 2026-10-13) unless marked *(estimate)*.
+each project's `docs/BENCHMARKS.md` (Chromium 153, the same devcontainer; css-energy's numbers were re-measured on the
+Ubuntu mini PC on 2026-10-17) unless marked *(estimate)*.
 
 ## What both rely on
 
@@ -96,9 +97,9 @@ Not transferable, with reasons:
 2. **The rule-matching cost table.** css-physics measured matching tiers at scale in Chromium 153 (its
    BENCHMARKS.md §2). js-minus-js's ENGINE_NOTES.md quoted 1.6–4 µs per container rule from an earlier, undated
    measurement (it now cites these figures too); the current figures are lower:
-   - a present name with a false `style()` costs 0.6–0.7 µs per rule;
-   - `style(--x)` without a value (true when a registered property differs from its initial value) costs 0.4 µs;
-   - range queries such as `style(--x > 5)` work, at about 1.6 µs.
+   - a present name with a false `style()` costs 0.8 µs per rule;
+   - `style(--x)` without a value (true when a registered property differs from its initial value) costs 0.5 µs;
+   - range queries such as `style(--x > 5)` work, at about 1.7 µs.
 3. **Query order.** `and` evaluates left to right and stops at the first false test, and nested
    `@container` rules evaluate the innermost query first. js-minus-js dispatches with
    `style(--vh: m) and style(--tcq: tc)`, so whichever test rejects more variants should come first. The

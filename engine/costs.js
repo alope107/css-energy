@@ -6,7 +6,7 @@
 // mk_gating.py and part_styleform.py): one element under an animated parent, so every frame restyles it. Each page's
 // cost is the median style pass (UpdateLayoutTree) over 1.5 s, measured as tools/stylebench.js does, in interleaved
 // rounds (median of the rounds); per unit = (page − its baseline page) / units. Prints measured against documented
-// (Chromium 153, 2026-10-13) and flags DRIFT outside half the documented low to twice the high: then re-measure in
+// (Chromium 153, Ubuntu mini PC, 2026-10-17) and flags DRIFT outside half the documented low to twice the high: then re-measure in
 // the project and update its docs (css-physics BENCHMARKS.md §2; js-minus-js ENGINE_NOTES.md 7 cites it).
 // A busy machine inflates everything: run it with no other browser jobs.
 const fs = require('fs'), os = require('os'), path = require('path');
@@ -44,13 +44,13 @@ const sf = rule => {
 const CASES = [
   ['cq0', 'empty page (baseline)', cq0, null],
   ['sf0', 'container page with no rules (baseline)', () => sf(null), null],
-  ['prop-reg-const', 'registered <number> prop, constant', () => mk2(i => `--b${i}:${i}`), 'cq0', M, [1.57, 1.57], 'BENCHMARKS §2 mk2 r_const'],
-  ['prop-reg-calc', 'registered prop, calc(var(--t) * k)', () => mk2(i => `--b${i}:calc(var(--t) * ${i})`), 'cq0', M, [2.15, 2.15], 'BENCHMARKS §2 mk2 r_var1'],
-  ['prop-unreg-const', 'unregistered prop, constant', () => mk2(i => `--b${i}:${i}`, false), 'cq0', M, [0.49, 0.49], 'BENCHMARKS §2 mk2 u_const'],
-  ['rule-name', 'rule gated by a present container name, no style()', () => sf('@container pres{#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [0.07, 0.16], 'BENCHMARKS §2 rule matching'],
-  ['rule-style-eq', 'present name + false style(--g: 1)', () => sf('@container pres style(--g0: 1){#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [0.56, 0.74], 'BENCHMARKS §2; CLAUDE.md 0.7'],
-  ['rule-style-bool', 'present name + false style(--g) (no value)', () => sf('@container pres style(--g0){#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [0.40, 0.41], 'BENCHMARKS §2; CLAUDE.md 0.4'],
-  ['rule-range', 'present name + false range style(--h > 9)', () => sf('@container pres style(--h > 9){#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [1.57, 1.57], 'BENCHMARKS §2; CLAUDE.md 1.6'],
+  ['prop-reg-const', 'registered <number> prop, constant', () => mk2(i => `--b${i}:${i}`), 'cq0', M, [1.27, 1.27], 'BENCHMARKS §2 mk2 r_const'],
+  ['prop-reg-calc', 'registered prop, calc(var(--t) * k)', () => mk2(i => `--b${i}:calc(var(--t) * ${i})`), 'cq0', M, [2.61, 2.61], 'BENCHMARKS §2 mk2 r_var1'],
+  ['prop-unreg-const', 'unregistered prop, constant', () => mk2(i => `--b${i}:${i}`, false), 'cq0', M, [0.50, 0.50], 'BENCHMARKS §2 mk2 u_const'],
+  ['rule-name', 'rule gated by a present container name, no style()', () => sf('@container pres{#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [0.21, 0.21], 'BENCHMARKS §2 rule matching'],
+  ['rule-style-eq', 'present name + false style(--g: 1)', () => sf('@container pres style(--g0: 1){#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [0.80, 0.86], 'BENCHMARKS §2; CLAUDE.md 0.8'],
+  ['rule-style-bool', 'present name + false style(--g) (no value)', () => sf('@container pres style(--g0){#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [0.49, 0.50], 'BENCHMARKS §2; CLAUDE.md 0.5'],
+  ['rule-range', 'present name + false range style(--h > 9)', () => sf('@container pres style(--h > 9){#b{--o:calc(var(--t) * {k})}}'), 'sf0', R, [1.68, 1.68], 'BENCHMARKS §2; CLAUDE.md 1.7'],
 ];
 
 async function measure(B, b, file) {

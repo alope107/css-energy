@@ -40,9 +40,9 @@ that relies on it or records it.
 7. **Rules selected by container query only cost where they match.** That makes specialising code per
    (mode, token) a big win: a level evaluates only its own variant. *(measured)*
    - Each container rule still costs time on every element it's tested against. An earlier, undated measurement
-     here gave roughly 1.6–4 µs. css-physics measured Chromium 153 on 2026-10-13 (its `docs/BENCHMARKS.md` §2):
-     a false `style(--x: v)` costs 0.6–0.7 µs per rule, `style(--x)` without a value 0.4 µs, a range query
-     such as `style(--x > 5)` 1.6 µs.
+     here gave roughly 1.6–4 µs. css-physics measured Chromium 153 on 2026-10-17 on the Ubuntu mini PC (its
+     `docs/BENCHMARKS.md` §2): a false `style(--x: v)` costs 0.8 µs per rule, `style(--x)` without a value 0.5 µs,
+     a range query such as `style(--x > 5)` 1.7 µs.
    - `and` is evaluated left to right and stops at the first false test; nested `@container` rules evaluate the
      innermost query first (same source). Put the test that rejects most variants first.
    - Over-specialising to 46 MB of CSS was slower (`archive/results/compiler/cc3_*.json`).

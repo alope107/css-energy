@@ -63,3 +63,16 @@ First run, 2026-10-14 (Chromium 153.0.8010.12, physics profile), against the 202
 | present name + false `style(--g: 1)` | 0.56 | 0.56–0.74 |
 | present name + false `style(--g)` | 0.33 | 0.40–0.41 |
 | present name + false range `style(--h > 9)` | 1.56 | 1.57 |
+
+Ubuntu mini PC (Intel i5-12600H), 2026-10-17, same Chromium and profile; `make engine-check`: all facts hold. The
+documented column in `costs.js` now holds the mini PC's numbers from css-physics `docs/BENCHMARKS.md` §2:
+
+| Case | Measured | Old documented (arm64 VM) |
+|---|---|---|
+| registered `<number>`, constant | 1.28 µs per prop | 1.57 |
+| registered, `calc(var(--t) * k)` | 2.63 | 2.15 |
+| unregistered, constant | 0.48 | 0.49 |
+| rule under a present container name, no `style()` | 0.22 µs per rule | 0.07–0.16 |
+| present name + false `style(--g: 1)` | 0.83 | 0.56–0.74 |
+| present name + false `style(--g)` | 0.50 | 0.40–0.41 |
+| present name + false range `style(--h > 9)` | 1.67 | 1.57 |
