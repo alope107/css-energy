@@ -12,7 +12,7 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 **Status (2026-10-17).**
 
-- All five test levels pass. That includes 89 programs checked against Node's output and 14 programs the
+- All five test levels pass. That includes 97 programs checked against Node's output and 25 programs the
   compiler must reject.
 - On the page, compiling takes about 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
   in about 8.3 s and halts about 10.8 s after Run (headless Chromium 153 on the Ubuntu mini PC, 2026-10-17); it was
@@ -43,7 +43,7 @@ compiler/   the compiler: cc_ref.py (reference) + cc_dsl.py/dsl.py (the same ste
 machine/    the font CPU: uarch*.py (model), cpu4.py/cpugen.py/otl.py (GSUB), fvm_build.py (font),
             gen_fvm4.py (the page), memtree.py (RAM); browser harnesses (ui_seq.js, fullrun.js, trace.js, ...)
 readback/   editor text readback: ui_rb.py, mkfont2.py (AsciiProbe font)
-tests/      suite/ (89 programs + Node .out), suite_err/ (14 rejects), harnesses for levels L1-L5
+tests/      suite/ (97 programs + Node .out), suite_err/ (25 rejects), harnesses for levels L1-L5
 tools/      browser.js (launcher), traps.py (cost of a program on the CPU), vsz.py / lp.py (variant sizes)
 dist/       the built page
 docs/       ARCHITECTURE.md, HISTORY.md, BENCHMARKS.md, ENGINE_NOTES.md
@@ -53,16 +53,23 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 
 ## The language
 
-- **Declarations**: `var`, `let`, `const`, including `var a = 1, b = 2;`. `let` and `const` behave like `var`.
+- **Declarations**: `var`, `let`, `const`, including `var a = 1, b = 2;`.
+  - `let` and `const` are block-scoped: one declared in a `{ }` block, an `if` / `else` / loop body or a `for (let ...)`
+    header is gone when that ends, and shadows an outer name of the same name until then. `var` is function-scoped.
+  - Assigning to a `const` (`=`, `op=`, `++`, `--`) is a compile error, and so is a `const` without `=`. The elements
+    of a `const` array can still be assigned (`a[0] = 1`).
+  - All of this is resolved at compile time: the code is the same as for `var`.
 - **Functions**: top-level `function` declarations. They support parameters, locals, recursion, calls before
   the definition, and `return` with or without a value.
-- **Control flow**: `if` / `else` / `else if`, `while`, `for (;;)` (any part may be empty), `break`, `continue`.
+- **Control flow**: `if` / `else` / `else if`, `while`, `do … while`, `for (;;)` (any part may be empty), `break`,
+  `continue`.
   Bodies may be a block or a single statement, and a dangling `else` binds as in JavaScript.
 - **Values**: integers, `true` / `false`, strings in `"..."` or `'...'` with escapes `\n \t \r \\ \" \'`, and
   number array literals (`[1, -2, 3]`).
 - **Operators**:
   - `+ - * / %`, comparisons `< > <= >= == != === !==`, `!` and unary `-`.
   - `&&` and `||` short-circuit and return an operand's value, as in JavaScript (`0 || 7` is `7`).
+  - `c ? a : b`, nested either way (`x < 0 ? -1 : x > 0 ? 1 : 0`).
 - **Assignment**: `=`, `+= -= *= /= %=` (also on `a[i]`), and `x++ x-- ++x --x` as statements.
 - **Output**: `console.log(a, b, ...)` and `putc(code)`.
 - **Comments**: `//` and `/* */`.
@@ -103,9 +110,14 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Booleans**:
   - A boolean passed as a parameter prints as `1` / `0`.
   - So does a boolean returned by a function called before its definition.
+  - So does a boolean from `c ? a : b` whose other branch is not a boolean (`c ? false : 7`).
+- **Scoping**: redeclaring a `let` / `const` in the same scope is not an error (the later one wins), and using one
+  before its declaration in an inner block (`let x = x + 1`) is not caught.
+- **`do … while`**: `if (a) do s; while (c); else …` is rejected (write it without that `;`), and
+  `do s;; while (c)` is accepted.
 - **Not supported**:
   - objects, `.length`, `undefined` / `null`;
-  - nested functions or closures, the ternary operator, `do` / `switch`;
+  - nested functions or closures, `switch`;
   - `++` inside an expression;
   - string comparison by content.
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
@@ -130,6 +142,8 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 30, 38–39 | malformed `console.log` | 61 | a statement emits too much code at once |
 | 32–37 | malformed `if` / `while` / `for` / `function` header | 62 | program too long (more than 511 words) |
 | 40 | missing `}` at end of input | 63 | strings can only be joined in `console.log` |
+| 64 | assignment to a `const` | 65 | `const` without `=` |
+| 66 | `while` expected after a `do` body | 67 | `:` without `?` |
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.

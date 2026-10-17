@@ -7,9 +7,9 @@ no recursion, no lookahead beyond the next character. Each step may complete one
 code words. Words that need an address not known yet carry a label id; labels are resolved after the last step.
 
 Subset: var/let/const (also `var a = 1, b = 2`), function (params, locals, recursion, forward calls),
-if/else/else if, while, for(;;), break, continue, return; bodies with or without braces; integers, true/false,
+if/else/else if, while, do-while, for(;;), break, continue, return; bodies with or without braces; integers, true/false,
 string literals ("..." or '...', escapes \\n \\t \\r \\\\ \\" \\'), static array literals, a[i] read/write;
-+ - * / % < > <= >= == != === !== && || (short-circuit, JS value semantics) ! unary -; = += -= *= /= %=
++ - * / % < > <= >= == != === !== && || (short-circuit, JS value semantics) ?: ! unary -; = += -= *= /= %=
 (also on a[i]); x++ x-- ++x --x as statements; calls; putc(x); console.log(a, b, ...), where + at the top
 level of an argument concatenates when an operand is a string ("n = " + n, s + "!"); // and /* */ comments;
 statements end with ';', or a newline / '}' where JavaScript would insert one.
@@ -56,7 +56,7 @@ def h1h2(s):
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
     return a, b
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
-                           'true', 'false', 'break', 'continue']}
+                           'true', 'false', 'break', 'continue', 'do']}
 
 # punctuation codes: single chars by ASCII; two-char ops: == 1, != 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
 # += 9, -= 10, *= 11, /= 12, %= 13 (=== and !== lex as == and !=); NL 14: a newline after a token that can end a
@@ -70,21 +70,33 @@ ESC = {110: 10, 116: 9, 114: 13}
 BOOLOPS = (LT, GT, LE, GE, EQ, NE, NOT)
 NUMOPS = (PUSHI, ADD, SUB, MUL, DIV, MOD, NEG, SHL13)
 def prec(code):
-    return {MUL: 6, DIV: 6, MOD: 6, ADD: 5, M_CADD: 5, SUB: 5, LT: 4, GT: 4, LE: 4, GE: 4, EQ: 3, NE: 3, AND: 2, OR: 1, NOT: 7, NEG: 7}.get(code, 0)
+    return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, AND: 3, OR: 2, M_TELSE: 1,
+            NOT: 8, NEG: 8}.get(code, 0)
 
 # + at the top level of a console.log argument (value: the left operand's static type); precedence of +
 M_CADD = 50
+# c ? a : b is  c JZ L1  a JMP L2  L1: b  L2:. '?' pushes the marker M_TERN (value L1 + 64 * reuse); ':' replaces it with
+# the operator M_TELSE (value L2 + 64 * the then-branch's static type), lowest precedence, whose pop defines L2. In a
+# chain a ? x : b ? y : z the inner ternary reuses the outer L2 (reuse: M_TELSE was on top at '?'), so at most one
+# M_TELSE sits between markers and popops defines at most one L2.
+M_TELSE = 51
 # OPS markers (codes >= 100)
-M_PAREN, M_CALL, M_IDXG, M_IDXL, M_PUTC, M_PRINT, M_IDXA = 100, 101, 102, 103, 104, 105, 107
-# control stack kinds. Bodies: IFB / ELSEB / LOOPB (a = continue target, b = break target) / FUNCB; + BRACELESS:
-# the body is a single statement, closed when that statement completes.
-C_BLOCK, C_IFB, C_ELSEB, C_LOOPB, C_FUNCB = 1, 2, 3, 5, 6
+M_PAREN, M_CALL, M_IDXG, M_IDXL, M_PUTC, M_PRINT, M_IDXA, M_TERN = 100, 101, 102, 103, 104, 105, 107, 108
+# control stack kinds. Bodies: IFB / ELSEB / LOOPB and DOB (a = continue target, b = break target; DOB c = the loop
+# top) / FUNCB; + BRACELESS: the body is a single statement, closed when that statement completes. A DOB stays on
+# the stack through its while (cond): a ')' with a DOB on top can only end that condition.
+C_BLOCK, C_IFB, C_ELSEB, C_DOB, C_LOOPB, C_FUNCB = 1, 2, 3, 4, 5, 6
 C_IFC, C_WHILEC, C_FORINIT, C_FORCOND, C_FORSTEP, C_ASSIGN, C_EXPR, C_RETURN, C_IDXA = 10, 11, 12, 13, 14, 15, 16, 17, 18
 BRACELESS = 20
-C_IFB1, C_ELSEB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_LOOPB + BRACELESS
+C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_DOB + BRACELESS, C_LOOPB + BRACELESS
 # parser modes
 (S_STMT, S_OPND, S_OPER, S_NAMES, S_NAMEE, S_VAR, S_VARAFTER, S_LPAREN, S_LBRACE, S_ELSE, S_FNAME, S_FPAREN, S_FPARAM,
- S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_ARR, S_ARRSEP, S_ARRNEG, S_INC, S_IDXEQ, S_AFTERELSE, S_PREINC, S_ERR) = range(26)
+ S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_ARR, S_ARRSEP, S_ARRNEG, S_INC, S_IDXEQ, S_AFTERELSE, S_PREINC,
+ S_DOWHILE, S_ERR) = range(27)
+
+def tmerge(a, b):
+    """static type of a value that is one of two values of types a, b"""
+    return a if a == b else 0
 
 class Compiler:
     def __init__(self, data_base, code_base, lib):
@@ -97,8 +109,10 @@ class Compiler:
         # parser
         self.mode = S_STMT; self.pn = (0, 0)
         self.ops = [0] * OD; self.opv = [0] * OD; self.osp = 0
-        self.cs = [[0] * 5 for _ in range(CD)]; self.csp = 0
-        self.sym = [[0, 0, 0, 0, 0] for _ in range(NS)]; self.nsym = 0         # h1 h2 kind(1 g, 2 l) addr type
+        self.cs = [[0] * 6 for _ in range(CD)]; self.csp = 0                   # kind a b c d, e: nlet when pushed
+        # symbols: h1 h2 kind(1 g, 2 l) addr type const. Two regions: function- and program-level names grow up from 0
+        # (nsym), block-scoped let / const grow down from NS - 1 (nlet); closing a block restores nlet
+        self.sym = [[0, 0, 0, 0, 0, 0] for _ in range(NS)]; self.nsym = 0; self.nlet = 0
         self.fn = [[0, 0, 0, 0] for _ in range(NF)]; self.nfn = 0              # h1 h2 label type
         self.lab = [-1] * NL; self.nlab = 0
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
@@ -118,10 +132,11 @@ class Compiler:
     def here(self): return self.cb + self.cp
     def fail(self, code):
         if not self.err: self.err = code
-    def push_cs(self, *f):
+    def push_cs(self, *f, e=None):
+        """e: the block-scope mark (nlet to restore when this entry closes; default: the current nlet)"""
         if self.csp >= CD: self.fail(21); return
-        e = list(f) + [0] * (5 - len(f)); self.cs[self.csp] = e; self.csp += 1
-    def top_cs(self): return self.cs[self.csp - 1] if self.csp else [0] * 5
+        self.cs[self.csp] = list(f) + [0] * (5 - len(f)) + [self.nlet if e is None else e]; self.csp += 1
+    def top_cs(self): return self.cs[self.csp - 1] if self.csp else [0] * 6
     def pop_cs(self):
         self.csp -= 1; return self.cs[self.csp]
     def push_op(self, code, val=0):
@@ -129,6 +144,10 @@ class Compiler:
         self.ops[self.osp] = code; self.opv[self.osp] = val; self.osp += 1
     def top_op(self): return (self.ops[self.osp - 1], self.opv[self.osp - 1]) if self.osp else (0, 0)
     def lookup(self, h):
+        """the latest block-scoped let / const of that name, else the latest other name (in a valid program a visible
+        block-scoped binding is always the innermost: a var of the same name in its block would be a redeclaration)"""
+        for j in range(NS - self.nlet, NS):
+            if (self.sym[j][0], self.sym[j][1]) == h: return j
         for j in range(self.nsym - 1, -1, -1):
             if (self.sym[j][0], self.sym[j][1]) == h: return j
         return -1
@@ -139,9 +158,14 @@ class Compiler:
         if self.nfn >= NF: self.fail(23); return 0
         l = self.newlab(); self.fn[self.nfn] = [h[0], h[1], l, 0]; self.nfn += 1
         return self.nfn - 1
-    def declare(self, h, kind, addr):
-        if self.nsym >= NS: self.fail(24); return
-        self.sym[self.nsym] = [h[0], h[1], kind, addr, 0]; self.nsym += 1
+    def declare(self, h, kind, addr, cst=0, blk=0):
+        """blk: a let / const inside a block (the block-scoped region)"""
+        if self.nsym + self.nlet >= NS: self.fail(24); return
+        if blk: self.nlet += 1; self.sym[NS - self.nlet] = [h[0], h[1], kind, addr, 0, cst]
+        else: self.sym[self.nsym] = [h[0], h[1], kind, addr, 0, cst]; self.nsym += 1
+    def decl_blk(self):
+        """the declaration in progress is block-scoped: let / const (pn[0] 1 / 2) below the function or program level"""
+        return int(self.pn[0] > 0 and self.csp > self.curf)
     def load(self, j):
         k, a = self.sym[j][2], self.sym[j][3]
         self.emit(LOADL if k == 2 else LOADG, a % 8192, b=self.sym[j][4])
@@ -154,6 +178,8 @@ class Compiler:
         while self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
             self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
             if code in (AND, OR): self.deflab(val, self.here())
+            elif code == M_TELSE:                              # the value's type: both branches' if they agree
+                self.deflab(val % 64, self.here()); self.lb = tmerge(val // 64, self.lb)
             elif code == ADD:                                  # strings cannot be built
                 if val == 2 or self.lb == 2: self.fail(63)
                 self.emit(ADD)
@@ -163,7 +189,7 @@ class Compiler:
             else: self.emit(code)
     def loop_entry(self):
         for k in range(self.csp - 1, -1, -1):
-            if self.cs[k][0] in (C_LOOPB, C_LOOPB1): return self.cs[k]
+            if self.cs[k][0] in (C_LOOPB, C_LOOPB1, C_DOB, C_DOB1): return self.cs[k]
         return None
     def print_call(self, sep):
         """print (and pop) the value on the stack, then the separator sep (0 none, 32 space, 10 newline): one PRINT word.
@@ -228,6 +254,7 @@ class Compiler:
             if isP(61) or (kind == 'P' and v in COMPOUND):       # NAME = e, NAME op= e
                 j = self.lookup(h)
                 if j < 0: return self.fail(5)
+                if self.sym[j][5]: return self.fail(64)            # assignment to a constant
                 if not isP(61): self.load(j)
                 self.push_cs(C_ASSIGN, j, COMPOUND.get(v, 0) if kind == 'P' else 0); self.mode = S_OPND; return
             if isP(7) or isP(8):                          # NAME++ / NAME--
@@ -263,7 +290,14 @@ class Compiler:
                 lb = t[1] if reuse else self.newlab()
                 self.emit(JMP, 0, lb); self.deflab(self.pendLa, self.here())
                 self.pendLa = lb + 64 * reuse; self.mode = S_AFTERELSE; return
-            self.deflab(self.pendLa, self.here()); self.complete_stmt(1); m = self.mode
+            # a token no statement can start with closes no do body (an error either way: 8 rather than 66), so
+            # the CSS variants for such tokens stay pure errors and are dropped
+            dook = kind in ('ID', 'EOF') or (kind == 'P' and v in (59, 123, 125, 7, 8, 41))
+            self.deflab(self.pendLa, self.here()); self.complete_stmt(1, dook); m = self.mode
+        if m == S_DOWHILE:                                     # a do body ended: while (cond)
+            if isP(59): return                                 # the ';' of a do-while that was the body
+            if not isK('while'): return self.fail(66)
+            self.mode = S_LPAREN; return
         if m == S_AFTERELSE:                                   # else { ... } or else <statement> (including if)
             reuse = self.pendLa >= 64                          # (the enclosing else's wrapper closes this else too)
             if isP(123):
@@ -274,7 +308,7 @@ class Compiler:
             m = self.mode = S_STMT
         if m == S_LBRACE:                                      # a body: { ... } or a single statement
             if isP(123): self.mode = S_STMT; return
-            if self.top_cs()[0] not in (C_IFB, C_LOOPB): return self.fail(33)
+            if self.top_cs()[0] not in (C_IFB, C_LOOPB, C_DOB): return self.fail(33)
             self.cs[self.csp - 1][0] += BRACELESS; m = self.mode = S_STMT
         # ---- statements
         if m == S_STMT:
@@ -289,10 +323,14 @@ class Compiler:
             if isP(41) and t == C_FORSTEP: return self.end_simple_stmt(kind, v)     # for (...;...;)
             if isP(7) or isP(8): self.pn = (v, 0); self.mode = S_PREINC; return
             if kind != 'ID': return self.fail(8)
-            if isK('var') or isK('let') or isK('const'): self.mode = S_VAR; return
+            if isK('var') or isK('let') or isK('const'):          # pn[0]: the declaration kind, 0 var 1 let 2 const
+                self.pn = (int(isK('let')) + 2 * int(isK('const')), 0); self.mode = S_VAR; return
             if isK('if'): self.push_cs(C_IFC); self.mode = S_LPAREN; return
             if isK('while'):
                 lh = self.newlab(); self.deflab(lh, self.here()); self.push_cs(C_WHILEC, lh); self.mode = S_LPAREN; return
+            if isK('do'):                                      # top: body; continue: cond JNZ top; break:
+                lt, lc, lb = self.newlab(), self.newlab(), self.newlab(); self.deflab(lt, self.here())
+                self.push_cs(C_DOB, lc, lb, lt); self.mode = S_LBRACE; return
             if isK('for'):
                 l1, le, lb, l2 = self.newlab(), self.newlab(), self.newlab(), self.newlab()
                 self.push_cs(C_FORINIT, l1, le, lb, l2); self.mode = S_LPAREN; return
@@ -313,13 +351,16 @@ class Compiler:
             return self.incdec(v, self.pn[0])
         if m == S_VAR:
             if kind != 'ID': return self.fail(9)
-            if self.curf: self.nloc += 1; self.declare(v, 2, self.nloc)
+            cst, blk = int(self.pn[0] == 2), self.decl_blk()
+            if self.curf: self.nloc += 1; self.declare(v, 2, self.nloc, cst, blk)
             else:
                 if self.dp >= self.db + SDATA: return self.fail(25)            # globals would reach the strings
-                self.declare(v, 1, self.dp); self.dp += 1
+                self.declare(v, 1, self.dp, cst, blk); self.dp += 1
             self.mode = S_VARAFTER; return
         if m == S_VARAFTER:
-            if isP(61): self.push_cs(C_ASSIGN, self.nsym - 1, 0, 1); self.mode = S_OPND; return
+            if isP(61):
+                self.push_cs(C_ASSIGN, NS - self.nlet if self.decl_blk() else self.nsym - 1, 0, 1 + self.pn[0]); self.mode = S_OPND; return
+            if self.pn[0] == 2: return self.fail(65)           # const without an initialiser
             if isP(44): self.mode = S_VAR; return
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
@@ -412,6 +453,19 @@ class Compiler:
                     l = self.newlab(); self.emit(DUP); self.emit(JZ if op == AND else JNZ, 0, l); self.emit(POP)
                     self.push_op(op, l); self.mode = S_OPND; return
                 self.push_op(op); self.mode = S_OPND; return
+            if isP(63):                                        # c ? ...
+                self.popops(2); t, tv = self.top_op()
+                l = self.newlab(); self.emit(JZ, 0, l); self.push_op(M_TERN, l + 64 * int(t == M_TELSE)); self.mode = S_OPND; return
+            if isP(58):                                        # c ? a : ...
+                self.popops(1); t, tv = self.top_op()
+                if t != M_TERN: return self.fail(67)
+                self.osp -= 1; lbt = self.lb
+                if tv >= 64:                                   # reuse the enclosing M_TELSE's L2
+                    ev = self.opv[self.osp - 1]; self.emit(JMP, 0, ev % 64)
+                    self.opv[self.osp - 1] = ev % 64 + 64 * tmerge(ev // 64, lbt)
+                else:
+                    l2 = self.newlab(); self.emit(JMP, 0, l2); self.push_op(M_TELSE, l2 + 64 * lbt)
+                self.deflab(tv % 64, self.here()); self.mode = S_OPND; return
             if isP(41) or isP(44) or isP(93):
                 self.popops(1)
                 t, tv = self.top_op()
@@ -455,6 +509,7 @@ class Compiler:
     def incdec(self, h, v):
         j = self.lookup(h)
         if j < 0: return self.fail(6)
+        if self.sym[j][5]: return self.fail(64)
         k, a = self.sym[j][2], self.sym[j][3]
         if v == 7: self.emit(INCL if k == 2 else INCG, a % 8192)
         else: self.load(j); self.emit(PUSHI, 1); self.emit(SUB); self.store(j)
@@ -467,17 +522,21 @@ class Compiler:
         k = t[0]
         if k == C_IFC and isP(41):
             self.pop_cs(); la = self.newlab(); self.emit(JZ, 0, la); self.push_cs(C_IFB, la); self.mode = S_LBRACE; return
+        if k in (C_DOB, C_DOB1) and isP(41):
+            # the statement ends at ')': JavaScript inserts a ';' here even without a newline, and a ';' that follows
+            # is an empty statement (so `if (a) do s; while (c); else ...` is rejected)
+            self.pop_cs(); self.emit(JNZ, 0, t[3]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k == C_WHILEC and isP(41):
             self.pop_cs(); le = self.newlab(); self.emit(JZ, 0, le); self.push_cs(C_LOOPB, t[1], le); self.mode = S_LBRACE; return
         if k == C_FORCOND and isP(59):
             self.pop_cs()                                      # t: l1 le lb l2
             self.emit(JZ, 0, t[2]); self.emit(JMP, 0, t[3]); self.deflab(t[4], self.here())
-            self.push_cs(C_FORSTEP, t[1], t[2], t[3], t[4]); self.mode = S_STMT; return
+            self.push_cs(C_FORSTEP, t[1], t[2], t[3], t[4], e=t[5]); self.mode = S_STMT; return
         if k == C_ASSIGN:                                      # t: symbol, compound op, from a declaration
             self.pop_cs()
             if t[2]: self.emit(t[2])
             self.sym[t[1]][4] = self.lb; self.store(t[1])
-            if isP(44) and t[3]: self.mode = S_VAR; return     # var a = 1, b ...
+            if isP(44) and t[3]: self.pn = (t[3] - 1, 0); self.mode = S_VAR; return     # var a = 1, b ...
             return self.end_simple_stmt(kind, v)
         if k == C_IDXA:
             self.pop_cs()
@@ -497,37 +556,44 @@ class Compiler:
         t = self.top_cs()
         if t[0] == C_FORINIT:
             if not isP(59): return self.fail(51)
-            self.pop_cs(); self.deflab(t[1], self.here()); self.push_cs(C_FORCOND, t[1], t[2], t[3], t[4]); self.mode = S_OPND; return
+            self.pop_cs(); self.deflab(t[1], self.here()); self.push_cs(C_FORCOND, t[1], t[2], t[3], t[4], e=t[5]); self.mode = S_OPND; return
         if t[0] == C_FORSTEP:
             if not isP(41): return self.fail(52)
             self.pop_cs(); self.emit(JMP, 0, t[1]); self.deflab(t[3], self.here())
-            self.push_cs(C_LOOPB, t[4], t[2]); self.mode = S_LBRACE; return
+            self.push_cs(C_LOOPB, t[4], t[2], e=t[5]); self.mode = S_LBRACE; return
         if not (isP(59) or isP(T_NL)): return self.fail(53)
         self.complete_stmt(0)
 
-    def complete_stmt(self, nonelse):
+    def complete_stmt(self, nonelse, dook=True):
         """a statement finished: close the braceless bodies it was the body of. A braceless if body waits for the
         next token (else?) unless that token is known not to be 'else' (nonelse)."""
         self.mode = S_STMT
         while self.csp:
             k = self.top_cs()[0]
-            if k == C_ELSEB1: t = self.pop_cs(); self.deflab(t[1], self.here())
-            elif k == C_LOOPB1: t = self.pop_cs(); self.emit(JMP, 0, t[1]); self.deflab(t[2], self.here())
-            elif k == C_IFB1 and (nonelse or self.asic): t = self.pop_cs(); self.deflab(t[1], self.here())
-            elif k == C_IFB1: t = self.pop_cs(); self.pendLa = t[1]; self.mode = S_ELSE; return
-            else: return
+            if k not in (C_ELSEB1, C_LOOPB1, C_IFB1, C_DOB1) or (k == C_DOB1 and not dook): return
+            t = self.pop_cs(); self.nlet = t[5]                # the body's block scope ends
+            if k == C_DOB1: return self.do_cond(t)
+            if k == C_ELSEB1: self.deflab(t[1], self.here())
+            elif k == C_LOOPB1: self.emit(JMP, 0, t[1]); self.deflab(t[2], self.here())
+            elif nonelse or self.asic: self.deflab(t[1], self.here())
+            else: self.pendLa = t[1]; self.mode = S_ELSE; return
 
     def close_block(self):
         if not self.csp: return self.fail(54)
-        t = self.pop_cs(); k = t[0]
+        t = self.pop_cs(); k = t[0]; self.nlet = t[5]
         if k == C_BLOCK: return self.complete_stmt(0)
         if k == C_IFB: self.pendLa = t[1]; self.mode = S_ELSE; return
         if k == C_ELSEB: self.deflab(t[1], self.here()); return self.complete_stmt(0)
+        if k == C_DOB: return self.do_cond(t)
         if k == C_LOOPB: self.emit(JMP, 0, t[1]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k == C_FUNCB:
             self.emit(PUSHI, 0); self.emit(RET, self.npar); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
             self.curf = 0; self.nsym = self.fsym; self.mode = S_STMT; return
         return self.fail(55)
+
+    def do_cond(self, t):
+        """a do body (just popped) ended: the continue label; the entry stays for while (cond)"""
+        self.deflab(t[1], self.here()); self.csp += 1; self.mode = S_DOWHILE
 
     def end_params(self):
         for i in range(self.npar):                           # param k of n sits at fp - 1 - n + k
