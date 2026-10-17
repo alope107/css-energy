@@ -23,8 +23,9 @@ their techniques.
   the projects it changed. `deploy/README.md` has the setup and the trust model.
 - **Pushing a branch publishes a public preview: push only when the user asks.** Then `deploy/status.sh` waits for
   the run and prints the preview URLs; give the user the `<hash>` URL along with the local link.
-- `deploy/assemble.sh <project> <dir>` builds exactly what CI deploys; `npx wrangler pages dev <dir>` serves it with
-  Pages semantics, no credentials needed.
+- `deploy/assemble.sh <project> <dir>` builds exactly what CI deploys. `npx wrangler pages dev <dir>` emulates Pages
+  for a check, but opens ~7 ports per instance: stop it afterwards, and don't use it for hand-test links.
+- Stop every server you start except the ones you hand to the user. Stray ports make VS Code stop auto-forwarding.
 
 ## User rules (all projects)
 

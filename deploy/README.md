@@ -79,9 +79,12 @@ without that approval being available to them.
   with its URL. Exits non-zero if the run failed. `gh run view <id> --log-failed` shows why.
 - The `<hash>` URL is this commit's build and never changes; the `<branch>` URL follows the branch. Hand the user
   the `<hash>` one alongside the local link CLAUDE.md asks for.
-- To check before pushing: `deploy/assemble.sh <project> /tmp/x && npx wrangler pages dev /tmp/x --port 8770
-  --ip 127.0.0.1`. It emulates Pages locally (`_headers`, `_redirects`, the `.html` → extensionless redirect),
-  without credentials. Two at once need different `--inspector-port`s and `--persist-to` directories.
+- Hand-test links for a build: css-physics and js-minus-js through the repo-root server on 8765, paint through
+  `node paint/serve.js <dir> 8766` (paint/CLAUDE.md).
+- To check Pages behaviour itself before pushing: `npx wrangler pages dev <dir> --port 8770 --ip 127.0.0.1`. It
+  emulates `_headers`, `_redirects` and the `.html` → extensionless redirect, without credentials. Each instance opens
+  ~7 loopback ports, and VS Code's auto-forwarding gives up past ~20, so stop it when done. It isn't a hand-test
+  server.
 
 ## Pages behaviour these sites depend on
 
