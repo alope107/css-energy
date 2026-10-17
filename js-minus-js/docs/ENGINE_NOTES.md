@@ -46,6 +46,10 @@ that relies on it or records it.
    - `and` is evaluated left to right and stops at the first false test; nested `@container` rules evaluate the
      innermost query first (same source). Put the test that rejects most variants first.
    - Over-specialising to 46 MB of CSS was slower (`archive/results/compiler/cc3_*.json`).
+   - In the compile chain this is a cost per variant: every token level (400) tests every variant rule. 40 extra
+     never-matching variant rules (+13%) slowed L3 by 1.6–4.3%, about 13 ms per pass at 0.8 µs per test; merging the
+     variants of a mode that have identical CSS into one rule, `style(--vh: m) and (style(--tcq: a) or …)`, made it
+     about 3% faster (302 variants in 168 rules). *(measured 2026-10-17, BENCHMARKS.md §4c)*
 8. **The CSS `font` shorthand resets `font-variation-settings`** when it's declared after it. (Related chat.) *(probe: `font-resets-fvs`)*
 
 ## Animations and timelines

@@ -246,6 +246,10 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
     for tc in noop_tc:
         css.append(f'@container style(--tcq: {tc}) {{ .tpA, .tpB {{ ' + ' '.join(f'--q-new-{n}: var(--x-{n});' for n in pst) + ' --q-ran: 1; } }')
     progs = [(k, pg) for k, pg in progs if not (D.key_tcodes(k)[0] in noop_tc and len(D.key_tcodes(k)) == 1 and is_noop(pg))]
+    # variants of one mode whose CSS is identical (a third of them: mostly modes that treat many punctuation tokens
+    # alike) share one rule whose condition lists all their token codes. Every rule costs time on every token level
+    # whether it applies or not (docs/BENCHMARKS.md §4c), so fewer rules is faster.
+    rules = {}                                         # (mode, declarations) -> token codes, in first-seen order
     for key, pg in progs:
         X = pg.x; outs = set(pg.out)
         pool = {}
@@ -258,9 +262,10 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
         decl = [f'--{pool[n]}: {tocss(node, pref)};' for n, node in X.temps]
         decl += [f'--q-new-{n}: {tocss(X.cur[n], pref)};' for n in pst] + ['--q-ran: 1;']
         for n, _ in X.temps: N.add(pool[n], n in outs and n not in PORTS)
-        tcs = D.key_tcodes(key)
+        rules.setdefault((key[0], ' '.join(decl)), []).extend(D.key_tcodes(key))
+    for (mode, body), tcs in rules.items():
         tcond = f'style(--tcq: {tcs[0]})' if len(tcs) == 1 else '(' + ' or '.join(f'style(--tcq: {t})' for t in tcs) + ')'
-        css.append(f'@container style(--vh: {key[0]}) and {tcond} {{ .tpA, .tpB {{ ' + ' '.join(decl) + ' } }')
+        css.append(f'@container style(--vh: {mode}) and {tcond} {{ .tpA, .tpB {{ {body} }} }}')
     # code / data overlays (fixed, contained by #tcr)
     cb0 = code_base - R.LAYOUT['rom_size']          # RAM index of the first code word (--c<index> names RAM cells)
     css.append('.ov, .ovd { position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; display: none; }')
@@ -308,7 +313,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
     timelines = ([f'--ch{k}_{j}' for k in range(L) for j in range(P)]
                  + [f'--tk{t}{f}' for t in range((TMAX // G + 1) * G) for f, _ in TOKF])
     css_text = N.rename('\n'.join(N.props() + css))
-    info = dict(char_levels=NC, token_levels=TMAX + 1, variants=len(progs), noop_codes=noop_tc, lports=NLP, css_bytes=len(css_text))
+    info = dict(char_levels=NC, token_levels=TMAX + 1, variants=len(progs), rules=len(rules), noop_codes=noop_tc, lports=NLP, css_bytes=len(css_text))
     return css_text, N.rename(body), timelines, info
 
 def padded_source(text, L, P):

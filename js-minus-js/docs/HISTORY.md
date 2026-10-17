@@ -159,6 +159,10 @@ reference run passed 37 of 53 programs.
 - **Unreachable blocks**: with a known starting mode, `Prog` folds them away (`FALL`). This halved the
   generated CSS (91k → 47k temps).
 - **Do-nothing variants**: they share one pass-through rule.
+- **Identical variants** (2026-10-17): variants of one mode with the same CSS share one rule (302 variants, 168
+  rules). A probe had shown that 40 extra never-matching rules cost about 2.5% of compile time, because each token
+  level checks every rule's container query; merging made L3 about 3% faster, more than the cost of the language
+  features added with it (block scope, `const`, `do … while`, `?:`).
 - **The runtime library was tuned against the machine model** (`tools/traps.py`):
   - The string tag moved from 2^19 to 2^18. Untagging with +2^19 overflowed the 20-bit range.
   - The tag constant lives in a RAM cell instead of being built with SHL13, which traps.

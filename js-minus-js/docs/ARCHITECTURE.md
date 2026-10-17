@@ -107,20 +107,39 @@ These are in `cc_ref.py` and shared by the DSL.
 
 ### Parser structure
 
-- **Modes**: `S_STMT`, `S_OPND`, `S_OPER`, … 26 in all.
+- **Modes**: `S_STMT`, `S_OPND`, `S_OPER`, … 27 in all.
 - **Control-stack kinds**:
-  - bodies: `C_IFB`, `C_ELSEB`, `C_LOOPB`, `C_FUNCB`;
+  - bodies: `C_IFB`, `C_ELSEB`, `C_LOOPB`, `C_DOB`, `C_FUNCB`;
   - pending headers and statements: `C_IFC`, `C_WHILEC`, `C_FORINIT`, `C_FORCOND`, `C_FORSTEP`, `C_ASSIGN`,
     `C_EXPR`, `C_RETURN`, `C_IDXA`;
   - braceless bodies (`kind + BRACELESS`), closed by `complete_stmt` when their single statement ends.
-- **Packing**: control-stack entries pack as `kind × 4096 + a × 64 + b` and `c × 64 + d`. Operator-stack entries
-  pack as `code × 8192 + value`.
+- **Packing**: control-stack entries pack as `kind × 4096 + a × 64 + b` and `e × 4096 + c × 64 + d`, where `e` is
+  the block-scope mark (below). Operator-stack entries pack as `code × 8192 + value`.
 
 ### How each feature is implemented
 
 - **Short-circuit `&&` / `||`**: the compiler emits `a DUP JZ/JNZ L POP b` and defines `L` when the operator is
   popped. At most one `&&` and one `||` can pop together (precedence increases up the stack between markers), so
   the DSL defines both labels after the pops.
+- **`c ? a : b`**: emits `c JZ L1 a JMP L2 L1: b L2:`. `?` pushes the marker `M_TERN` (`L1`); `:` emits the `JMP`,
+  defines `L1` and replaces the marker with the operator `M_TELSE` (`L2`), which has the lowest precedence (1; the
+  others moved up by one) and defines `L2` when popped. A ternary in another's else branch (`a ? x : b ? y : z`)
+  jumps to the outer `L2` instead of pushing its own `M_TELSE`, like an `else if` chain, so at most one `M_TELSE`
+  sits between markers, always at the bottom of its segment. So if `popops` pops one, it was the last pop: the DSL
+  reads it once after its unrolled loop (the entry at the new `osp`) rather than in every iteration. The value's
+  static type is the branches' type if they agree, else unknown.
+- **`do … while`**: `do` defines the loop top and pushes `C_DOB` (a = continue, b = break, c = top). When the body
+  ends, the continue label is defined and the entry stays on the stack, with mode `S_DOWHILE` waiting for `while`.
+  The `)` of the condition emits `JNZ top`, defines the break label and ends the statement (JavaScript inserts a `;`
+  there even without a newline; a `;` that follows is an empty statement).
+- **Block scope (`let` / `const`)**: the symbol table has two regions. Function- and program-level names (vars,
+  params, and `let` / `const` declared directly in a function body or at the top level) grow up from 0 (`nsym`);
+  `let` / `const` inside a block grow down from `NS - 1` (`nlet`). Every control-stack entry records `nlet` when
+  pushed (`e`, carried through the `for` header entries), and closing a body restores it, which forgets that
+  block's names. A lookup prefers the latest block-scoped name, then the latest other one: in a valid program a
+  visible block-scoped name is always the innermost, since a `var` of the same name inside its block would be a
+  redeclaration. A `var` declared in a block survives the block, as in JavaScript. `const` is a bit in the symbol
+  entry, checked where a name is assigned. All of it is compile time only.
 - **Semicolon insertion**: the lexer emits token `T_NL` (14) at a newline that follows a token that can end a
   statement (identifier, number, string, `)` `]` `++` `--`). The parser treats it as `;` only where a statement
   can end and no `( [` or call is open; elsewhere it ignores it. A `}` right after an unterminated statement ends
@@ -130,7 +149,7 @@ These are in `cc_ref.py` and shared by the DSL.
   long it is.
 - **Static types**: a symbol's type is its last assignment in source order, kept in the symbol table. A
   function's type comes from its `return`s, kept in the function table. Both are 2-bit fields: `sk_j` holds
-  `type × 65536 + kind × 16384 + addr + 8192`, and `fl_k` holds `label + 64 × type`.
+  `(type + 4 × const) × 65536 + kind × 16384 + addr + 8192`, and `fl_k` holds `label + 64 × type`.
 
 ### The CSS compiler page (`compiler/ccpage5.py`)
 
@@ -158,9 +177,12 @@ These are in `cc_ref.py` and shared by the DSL.
 - **Parser variants**:
   - Level `t + 1` runs the parser on token `t`. The variant is chosen by
     `@container style(--vh: mode) and style(--tcq: tokencode)` on its parent.
-  - The page has 299 variants (`tools/vsz.py` counts 319, before the no-op variants are merged). Pure-error variants are dropped: a token no variant accepts sets `bad`, which
+  - The page has 302 variants (`tools/vsz.py` counts 323, before the no-op variants are merged). Pure-error variants are dropped: a token no variant accepts sets `bad`, which
     shows as error 99.
   - Variants that change nothing collapse into one pass-through rule per token code.
+  - Variants of one mode with identical CSS share one rule whose condition lists their token codes
+    (`style(--tcq: a) or style(--tcq: b) …`): 302 variants make 168 rules. Every rule costs time on every token
+    level whether it applies or not (BENCHMARKS.md §4c), so the rule count is a compile-time cost of its own.
   - With a known starting mode, `Prog` folds away the blocks that can't be reached (the `FALL` map). This halved
     the generated CSS.
 - **State**: state alternates between parity copies (`--p-<name>-A/B`). Temps share a small pool of names
@@ -170,7 +192,7 @@ These are in `cc_ref.py` and shared by the DSL.
 - **Code words**: up to 12 fixed overlays per level (`.ov.k<s>`, `position: fixed`, inside `contain: strict`).
   Each has `anchor-name: --c<index>` and width `word + 2^20`. A word that needs a label adds
   `anchor-size(--l<j> width)`.
-- **Labels**: in-flow anchors `.lp<k>` (22 ports per level) named `--l<j>`, with the label's value as width.
+- **Labels**: in-flow anchors `.lp<k>` (21 ports per level) named `--l<j>`, with the label's value as width.
 - **Finish**: the last live level shows `.fin`:
   - the count word;
   - the staged `STRTAG`;
@@ -322,9 +344,9 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 **Suites**
 
-- `tests/suite/` holds 89 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
+- `tests/suite/` holds 97 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
   `suite_ref.py` warns if one doesn't.
-- `tests/suite_err/` holds 14 programs the compiler must reject.
+- `tests/suite_err/` holds 25 programs the compiler must reject.
 - `tests/programs/` holds the older demo programs t1–t4 and e1–e2.
 
 **Not covered**

@@ -65,7 +65,8 @@ archive/   results/ (raw logs the docs cite). README.md indexes the removed old 
      `tests/cmp_dsl.py`.
    - `make l2` must report `ALL OK`. It compares parser state, tables, every code word, label and data word.
 4. **Check the size.** Run `python3 tools/vsz.py` and `tools/lp.py` (they count variants before the page merges
-   the no-op ones: 319, and 299 on the page). Every temp is CSS on each level, and every
+   the no-op ones: 323, and 302 on the page in 168 rules). Every temp is CSS on each level, every rule is checked
+   on each level whether it applies or not (so a new variant costs even if rarely used), and every
    label port is an element on each of 400 token levels. Note the change in variant count, temps and ports
    before and after.
 5. **Run `make l3`** to confirm the generated CSS agrees with the reference in Chrome.
