@@ -65,20 +65,23 @@ The slow checks are make targets, so make skips one while nothing it depends on 
 | paint | `make test-selftest`, `make test-e2e` | |
 | repo root | `make engine-check` | `make engine-costs` (a measurement) |
 
-**How.** A check's target is its log, `build/<check>.log` (css-physics: `out/smoke_<N>….<browser>.log`; root:
-`engine/build/`). `make/logged.sh` runs the check, shows its output, and writes the log only on a pass: exit 0, and for
+**How.** A check's target is its log, `build/<check>.<config>.log` (css-physics: `out/smoke_<N>.<gen>_….<config>.log`;
+root: `engine/build/`). `make/logged.sh` runs the check, shows its output, and writes the log only on a pass: exit 0, and for
 the L2/L3/L5 harnesses, which exit 0 whatever happens, their summary lines (`-p`/`-f`). So make re-runs a check when
 its last run failed or when any prerequisite is newer than its log. The phony target (`make l3`) then says
 `up to date: … passed <time>` and shows the end of that pass's log, or nothing extra when the check just ran.
 
 **What a check depends on** is in its rule, read from the harnesses (and checked against the files each check
 actually opened, recorded once by tracing it): the page or site it loads, its harness and the shared JS (whole
-directories, `tools/*.js`, `shared/js/*.js`, rather than single files), the suite programs, and a `.id` file for
-everything outside the repo. `js/runid.js` writes the `.id`: Node and Python versions, the Playwright version, the
-browser executable and its `--version`, and the value of every environment variable the check's scripts read by name
-(found in their source, so a new variable can't be left off). Make refreshes each `.id` while it reads the Makefile
-(`$(call id,…)`, ~50 ms) but rewrites it only when its content changes, so a Chrome upgrade or `BROWSER=firefox` makes
-it newer and the check re-runs. (A rule with `FORCE` would look remade under `make -n`, every check out of date.) Pages are
+directories, `tools/*.js`, `shared/js/*.js`, rather than single files), and the suite programs. What lives
+outside the repo is in the log's name: `<config>` is a hash of what `js/runid.js` prints, the Node and Python versions,
+the Playwright version, the browser executable and its `--version`, and the value of every environment variable the
+check's scripts read by name (found in their source, so a new variable can't be left off; set in the environment or
+on make's command line). A Chrome upgrade, `BROWSER=firefox` or `TYPEWAIT=900` is another target, so a pass under one
+configuration never stands for another, and switching back finds the old pass. `<dir>/<name>.<config>.id` says what a
+hash stands for. Make computes the hashes while it reads the Makefile (`$(call id,…)`, ~50 ms each), so `make -n` and
+`make -q` agree with `make`. The css-physics pages carry the generator's hash the same way (`NBOX_FIX=4` builds other
+pages). Pages are
 rebuilt only when their generator (or a variable it reads) changed; `make expect` rewrites an `.out` only when it
 changes.
 
@@ -89,7 +92,8 @@ changes.
 **What it can't see.** Only what the rules name. A harness that starts reading a new file outside the directories its
 rule lists, or an input that isn't a file (machine load), isn't tracked. Make compares modification times, not
 content: any edit, checkout or rebuild that touches a prerequisite re-runs the check (even when the bytes are the
-same), and a copy that keeps an old mtime (`cp -p`, `tar`) could hide a change. Each worktree has its own logs.
+same; `git checkout` of a file you'd edited counts), and a copy that keeps an old mtime (`cp -p`, `tar`) could hide a
+change. Each worktree has its own logs. Old configurations' logs stay until deleted (js-minus-js `make clean`).
 
 ## Changing shared code
 
