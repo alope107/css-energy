@@ -34,8 +34,9 @@ all: page
 
 # ---- runtime library -> ROM (jsc.js, the self-hosted subset compiler, compiles lib_src.js under Node)
 lib: $(CC)/lib.json
-$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.json
+$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.json $(CC)/rtlib.py machine/uarch.py
 	$(NODE) $(CC)/libbuild.js $@
+	$(PY) $(CC)/rtlib.py $@
 
 # ---- image (ROM = lib) -> CPU font (ROM baked into GSUB) -> page (editor + readback + CSS compiler + font CPU)
 image: $(B)/ccimg.json

@@ -14,7 +14,7 @@ SCENES  := tower rain stack
 JS      := $(wildcard tools/lib/*.js $(SHARED)/js/*.js)
 # what the pages and checks depend on outside the repo, and the environment variables their scripts read
 P  := $(O)/smoke_$(N).$(call id,$(O)/gen,-,$(wildcard src/*.py))
-C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter firefox,$(BR)),firefox,physics),tools/smoke.js tools/floatcheck.js tools/grabtest.js $(JS))
+C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter firefox,$(BR)),firefox,physics),tools/smoke.js tools/floatcheck.js tools/overlaycheck.js tools/grabtest.js $(JS))
 HARNESS := $(JS) $(RERUN_IF)
 
 $(P)_%.html: $(wildcard src/*)
@@ -27,11 +27,13 @@ $(P)_%.smoke-$(MS).$(C).log: $(P)_%.html tools/smoke.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/smoke.js $< $(MS)
 $(P).float.$(C).log: $(P)_tower.html $(P)_rain.html tools/floatcheck.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/floatcheck.js $(P)_tower.html $(P)_rain.html
+$(P).overlay.$(C).log: $(P)_tower.html tools/overlaycheck.js $(HARNESS)
+	@$(LOGGED) $@ -- node tools/overlaycheck.js $<
 $(P).grab.$(C).log: $(P)_field.html tools/grabtest.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/grabtest.js $<
 statcheck: $(SCENES:%=$(P)_%.html)                # static and quick: always runs
 	@rc=0; for f in $^; do python3 tools/statcheck.py $$f || rc=1; done; exit $$rc
 
-CHECKS := $(SCENES:%=$(P)_%.smoke-$(MS).$(C).log) $(P).float.$(C).log $(P).grab.$(C).log
+CHECKS := $(SCENES:%=$(P)_%.smoke-$(MS).$(C).log) $(P).float.$(C).log $(P).overlay.$(C).log $(P).grab.$(C).log
 smoke: $(CHECKS) statcheck
 	$(call report,$(CHECKS),20)

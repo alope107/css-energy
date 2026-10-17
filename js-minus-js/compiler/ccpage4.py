@@ -28,8 +28,8 @@ WOFF = 1 << 20
 OTH = {'A': 'B', 'B': 'A'}
 WORD = set(range(48, 58)) | set(range(65, 91)) | set(range(97, 123)) | {95, 36}
 LAST = {1: 61, 2: 61, 3: 61, 4: 61, 5: 38, 6: 124, 7: 43, 8: 45}     # last character of the two-char tokens
-DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l')) for f in ('h1', 'h2', last)}   # read by var() one level down
-PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl']
+DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v')) for f in ('h1', 'h2', last)}   # read by var() one level down
+PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
 LEX_SUF = {'o_tk', 'o_tv', 'o_th1', 'o_th2', 'o_tkany'}     # lexer outputs the next level reads by var(): parity-suffixed
 TOKIN = ['tk', 'tv', 'th1', 'th2']
 
@@ -110,7 +110,7 @@ def build(src_text, lib, prefix=None, code_base=4608, data_base=4096, short=True
     for rd in 'AB':
         wr = OTH[rd]
         decl = [f'--q-o_v{s}: 0;' for s in range(E)] + ['--q-o_dv: 0;', '--q-ran: 0;'] + [f'--q-o_lv{k}: 0;' for k in range(NLP)]
-        decl += ['--q-o_yw: 0;', '--q-o_fw: 0;'] + [f'--q-{n}-{wr}: var(--q-{n});' for n in sorted(DELAYED_V)]
+        decl += ['--q-o_yw: 0;', '--q-o_fw: 0;', '--q-o_iw: 0;'] + [f'--q-{n}-{wr}: var(--q-{n});' for n in sorted(DELAYED_V)]
         decl += [f'--s-bad-{wr}: max(var(--s-bad-{rd}), var(--l-o_tkany-{rd}) * (1 - var(--q-ran)));',
                  f'--s-perr-{wr}: if(style(--s-perr-{rd}: 0): {cur("err")}; else: var(--s-perr-{rd}));',
                  f'--l-ce: max(var(--s-bad-{wr}), min(1, var(--s-perr-{wr})));',

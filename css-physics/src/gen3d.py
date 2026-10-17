@@ -1602,13 +1602,17 @@ if FFQ and not CELLS:
 w(('#LW,' if CELLS else '') + ','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
 # Firefox only (FFQ): Gecko doesn't re-match rules that depend on a style container when the container's value
 # changed through an animation (and every state value here comes from one), so the gates would keep their first
-# result. It re-matches the whole subtree of a size container whose size changed: #LM's size follows the clock
+# result. It re-matches the whole subtree of a size container whose size changed: #LM's content box follows the clock
 # while anything is awake (two incommensurate periods, so it changes every frame) and stays put once all sleep.
-# Chrome never sees it: a size container there would move the subtree's style recalc into layout.
+# (Changing only its padding, i.e. its content box, doesn't trigger the re-match: the frame's size must change.) #LW
+# then takes the arena's size again (--u is the arena's width / VW), so the grab overlay on #L0, positioned in
+# percentages of it, stays put. Chrome never sees it: a size container there would move the subtree's style recalc
+# into layout.
 if FFQ:
     w('@supports (-moz-appearance: none){#LT{--ffk:calc(var(--any) * var(--now))}'
       '#LM{container-type:size;right:auto;bottom:auto;width:calc(1000px + mod(var(--ffk) * 6000, 600) * 1px);'
-      'height:calc(1000px + mod(var(--ffk) * 6000, 583) * 1px)}}')
+      'height:calc(1000px + mod(var(--ffk) * 6000, 583) * 1px)}'
+      f'#LW{{right:auto;bottom:auto;width:calc({VIEW_W} * var(--u));height:calc({VIEW_H} * var(--u))}}}}')
 
 
 def _canon(st):
@@ -1759,7 +1763,8 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
 ENG_CSS = (PHYS_CSS + '\n' + '\n'.join(render_css)).replace('__NP1__', str(N + 1)).replace('__HVW__', f(VIEW_W / 2)).replace('__HVH__', f(VIEW_H / 2))
 # Firefox negates hypot() by negating its arguments, which leaves it unchanged: x - hypot(3, 4) is x + 5, also
 # inside a subtracted min/max/sign/sum and through var(). A product stops the negation there (hypot(..) * 1 is
-# folded away, 1 * hypot(..) is not), so every hypot is written 1 * hypot (after simp.py, which would drop it).
+# folded away, 1 * hypot(..) of numbers is not: of lengths it is too), so every hypot is written 1 * hypot (after
+# simp.py, which would drop it). An unreported Firefox bug: ../../bugs/firefox-hypot-negation.html.
 if os.environ.get('HYPOT1', '1') == '1':
     ENG_CSS = re.sub(r'(?<![\w-])hypot\(', '1 * hypot(', ENG_CSS)
 

@@ -26,6 +26,17 @@ their techniques.
   Use it for a suspected flake too. When you paste an `up to date` result while iterating, say it wasn't re-run.
 - `shared/README.md#checks-in-make` says what each check depends on and what make can't see.
 
+## Browser bugs
+
+The projects lean on corners of the engines, so they run into browser bugs. Don't go looking for them, but when one
+turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec violation, in any browser):
+- Research it: the spec text, the browser's tracker (bugzilla.mozilla.org's REST API, issues.chromium.org,
+  bugs.webkit.org), WPT coverage, and the engine source if that helps.
+- If it's already reported, note the report in `bugs/README.md`. If not, write a minimal reproduction in `bugs/`: one
+  self-contained HTML file, pass/fail visible without script, the observed results and spec text in a closing comment
+  (`bugs/README.md` has the conventions), and list it there.
+- Don't file reports: the user reviews the MREs and files them.
+
 ## User rules (all projects)
 
 - Be terse and direct.

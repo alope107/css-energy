@@ -52,6 +52,16 @@ class DA:
     op in ('SET', value) ('ADD', x) ('ADDM', x) ('P16', x) ('P256', x) ('PRAM',)."""
     def __init__(self, name, items, keys, fn): self.name, self.items, self.keys, self.fn = name, items, keys, fn
 
+class _TypedKeys:
+    """a DA spec's keys, where a role's key function may be one function or {type name: function}: .of(role, type name)"""
+    def __init__(self, keys): self.k = keys
+    def of(self, r, tn):
+        f = self.k[r]
+        return f[tn] if isinstance(f, dict) else f
+    def get(self, r, d=None): return self.k.get(r, d)
+    def __getitem__(self, r): return self.k[r]
+    def __contains__(self, r): return r in self.k
+
 class Program:
     def __init__(self):
         self.types = {}; self.cells = []; self.stages = []; self.pre_stages = []; self.post_stages = []
@@ -132,6 +142,9 @@ class Program:
         return self.lib[op]
 
     def _compile_DA(self, s, view, vidx):
+        # a key may be a function of the value, or {type name: function} (one spec dispatching from several cell types)
+        from types import SimpleNamespace
+        s = SimpleNamespace(name=s.name, items=s.items, fn=s.fn, keys=_TypedKeys(s.keys))
         groups = {}
         for it in s.items:
             i0 = vidx[it['src'].pos]
@@ -147,15 +160,16 @@ class Program:
             for (stn, shape), its in items:
                 it = its[0]; st = self.types[stn]
                 last = max([o for o, kd, _, _ in shape if kd == 'T'] + [0])
-                tkf = s.keys.get('tgt')
                 roles = []          # (offset, rolekind, name, type, keyfn)
                 for o, kd, r, tn in shape:
-                    kf = (tkf or (lambda v: None)) if kd == 'T' else s.keys[r]
-                    if kd == 'T' and tn == stn: kf = s.keys['src']     # one class mapping per type
+                    kf = (s.keys.of('tgt', tn) if 'tgt' in s.keys else (lambda v: None)) if kd == 'T' else s.keys.of(r, tn)
+                    if kd == 'T' and tn == stn: kf = s.keys.of('src', tn)     # one class mapping per type
                     roles.append((o, kd, r, self.types[tn], kf))
-                doms = [sorted(set(kf(v) for v in T_.values), key=repr) for (_, _, _, T_, kf) in roles]
-                skf = s.keys['src']
+                skf = s.keys.of('src', stn)
                 for sk in sorted(set(skf(v) for v in st.values), key=repr):
+                    # a target at offset 0 is the source glyph itself: its key is the source's, not enumerated (that made
+                    # 16 identical copies of every rule of a self-update like PC := PC + 1, all tried when none applies)
+                    doms = [[sk] if o == 0 else sorted(set(kf(v) for v in T_.values), key=repr) for (o, _, _, T_, kf) in roles]
                     for combo in itertools.product(*doms):
                         k = {'src': sk}
                         for (o, kd, r, T_, kf), kv in zip(roles, combo):
@@ -191,9 +205,9 @@ class Program:
             # class defs: key functions per type (src, targets, gates)
             kfs = {}
             for (stn, shape), its in items:
-                kfs.setdefault(stn, s.keys['src'])
+                kfs.setdefault(stn, s.keys.of('src', stn))
                 for o, kd, r, tn in shape:
-                    kfs.setdefault(tn, s.keys['src'] if (kd == 'T' and tn == stn) else (s.keys.get('tgt') or (lambda v: None)) if kd == 'T' else s.keys[r])
+                    kfs.setdefault(tn, s.keys.of('src', tn) if (kd == 'T' and tn == stn) else (s.keys.of('tgt', tn) if 'tgt' in s.keys else (lambda v: None)) if kd == 'T' else s.keys.of(r, tn))
             def mk(cls):
                 m = {}
                 for (tn, key), ci in cls.items():

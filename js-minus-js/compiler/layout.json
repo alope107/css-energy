@@ -7,5 +7,10 @@
  "ram_size": 16384,
  "cols": 8,
  "rows": 16,
- "_doc": "The memory map (words; addresses are 15-bit). ROM 0..rom_size-1 holds the lib; RAM starts at rom_size (= data_base: globals, then strings at +256, code at code_base, the staged-data count at init-1, staging at init, the stack from sp0 up); the console is the last cols*rows words of RAM. Read by cc_ref.py (LAYOUT), libbuild.js, uarch.py and the page generator."
+ "rt_base": 2304,
+ "vec_base": 1020,
+ "heap_lo": 11136,
+ "heap_size": 3072,
+ "objtag": 491520,
+ "_doc": "The memory map (words; addresses are 15-bit). ROM 0..rom_size-1 holds the lib; RAM starts at rom_size (= data_base: globals, then strings at +256, code at code_base, the staged-data count at init-1, staging at init, the stack from sp0 up); the console is the last cols*rows words of RAM. Read by cc_ref.py (LAYOUT), libbuild.js, uarch.py and the page generator. Objects (cc_ref.py): rt_base.. holds the runtime cells (HP, GCLIM, GCSP, then the ROM routines' scratch); vec_base.. is a jump table into the ROM routines that new instructions call (GC, append, dynamic put); the heap is two semi-spaces of heap_size words from heap_lo, below the console; an object value is its address - objtag."
 }

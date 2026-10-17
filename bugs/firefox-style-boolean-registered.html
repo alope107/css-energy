@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>@container style(--x) is true for a registered property at its initial value</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  @property --a { syntax: '<number>'; inherits: true; initial-value: 0; }
+  .box { width: 200px; height: 30px; margin: 6px 0; background: green; }
+  /* css-conditional-5: a style feature without a value is true iff the computed value differs from the initial value */
+  @container style(--a) { .t .box { background: red; } }
+  #set-zero { --a: 0; }
+  #set-one { --a: 1; }
+  #set-one .box { background: red; }
+  @container style(--a) { #set-one .box { background: green; } }
+</style>
+<p>All three boxes should be green.</p>
+<div class="t"><div class="box"></div></div>              <!-- --a not set: initial value 0 -->
+<div class="t" id="set-zero"><div class="box"></div></div> <!-- --a: 0, equal to the initial value -->
+<div id="set-one"><div class="box"></div></div>          <!-- --a: 1, differs: the query is true -->
+<!--
+Observed (Linux, 2026-10-17: Playwright's Firefox 157, stock 158 and Nightly 160): the first two boxes are red, the third green. Chrome 153: all green.
+Spec (https://drafts.csswg.org/css-conditional-5/#style-container): "A style feature without a value
+(<style-feature-boolean>) evaluates to true if the computed value is different from the initial value for the given
+property." For an unregistered property both browsers agree (true iff it's set).
+Likely cause: servo/components/style/queries/condition.rs, StyleFeaturePlain::matches, has
+`StyleFeatureValue::Value(None) => current_value.is_some()`, and a registered property always has a value.
+-->
