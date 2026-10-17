@@ -278,6 +278,36 @@ gated block 9.4. Owner names off (`OWNSET=`) changes nothing with everything awa
 broadphase would keep 108 of 118 sphere-near pairs (`tools/bpcount.js out/p64.html 64 3000`); 37 touch. The old
 face- and internals-hiding measurements (8 and 12 ms per live pass at 64) were not re-measured.
 
+### Firefox support (2026-10-17)
+
+Chrome cost of the Firefox changes (ARCHITECTURE.md §6), frozen 48-body pile (`freeze3.js out/m48.html 4000`),
+`ab.js -p bigmed 'node tools/tr.js {} 1500 1500'`, median ratio to the old build (IQR):
+
+| Variant | Ratio |
+|---|---|
+| A-vs-A control (10 rounds) | 1.037 (1.002–1.162) |
+| everything (`BOOLQ=0`, `1 * hypot`, Firefox-only blocks), 10 rounds | 1.057 (1.035–1.093) |
+| `BOOLQ=0` only (8 rounds) | 1.033 (1.021–1.071) |
+| `1 * hypot` only / Firefox-only blocks only (6 rounds) | 0.980 / 0.987 |
+| (dead end) names from a wrapper #LN, gates inherited (8 rounds) | 1.065 (0.992–1.649) |
+| (dead end) #LN + `BOOLQ=0` (10 rounds) | 1.112 (1.027–1.126) |
+
+The control's own spread was +4% that day; the shipped variant is within it. 32 bodies frozen at 4 s: 1.019
+(0.997–1.045), control 1.002. At the time, with these off (`BOOLQ=1 HYPOT1=0 FFQ=0`) the output was byte-identical to the old
+generator's; the later rendering-only changes (shadow first, `tan(atan2())` scale, a hidden notice) weren't timed
+(the shadow order changed 39 pixels of a Chrome screenshot).
+
+Firefox 157 (Playwright's, `BROWSER=firefox`, scroll-driven animations pref on), same machine:
+
+| | Chrome | Firefox |
+|---|---|---|
+| `perf3.js` 32 bodies: chaos fps (6 × 1 s) | 25 22 24 35 62 62 | 28 28 34 57 62 62 |
+| idle / drag / hold fps | 61 / 31 / 26 | 61 / 29 / 31 |
+| simulated seconds per second (free fall, rain 16) | 0.91 | 0.44–0.59 |
+| `smoke.js` frames in 12 s, tower 16 | 640 | 552 |
+
+Firefox runs one step per frame (Chrome two), so at similar frame rates its simulation runs at about half speed.
+
 ## 2. Style engine cost model (microbenchmarks)
 
 Pages: `experiments/costs/mk*.py`, generated in a scratch directory, then `node tools/stylebench.js <pages> 500 1500`

@@ -93,6 +93,16 @@ Goal: cut the N² costs so that more bodies run smoothly. The session measured t
 - **Rejected:** cell-based presence (below), unnamed deep rules, AABB broadphase, per-body readback elements.
 - **Found that in the sparse regime the pass is contact work**: dragging one body through a dense 64-body pile costs 45–55 ms per pass, of which the awake cluster's narrowphase and solves are 20 ms, its per-body blocks 10–25 ms and the base 5–12 ms; the near tests and digests are a few ms. The N² floor of the design is the rule visits: about 3 rules per pair at 0.2–0.7 µs each (4 ms at 64, growing like N² × depth because absent names walk the chain). With 96 bodies asleep and 4 awake a pass costs 40 ms.
 
+## Phase 5: Firefox, Oct 17
+
+The goal: run in Firefox with tweaks that don't cost Chrome. Firefox 158 (release) lacks scroll-driven animations (a pref), 159 DevEdition and 160 Nightly have them on. Found by probing each feature, then by diffing every computed property on every level between the browsers on a baked static state, and by forcing restyles from the harness. In order:
+1. **Gates always open.** `style(--x)` is true for any registered property in Firefox: `BOOLQ` off by default.
+2. **The tower fell through itself** in a static state too: Firefox negates `hypot()` by its arguments (`100 - hypot(3,4)` = 105). `1 * hypot`.
+3. **Frozen from the first frame:** style-query rules aren't re-matched when an animation changes the container's value. A size container whose size follows the clock forces a subtree re-match each frame (`FFQ`, Firefox only).
+4. **The names (`if()`)**: first a portable wrapper (below, a dead end), then a Firefox-only "always named" block.
+5. Rendering: no typed division (the view scale), shadows drawn over their bodies (document order).
+ARCHITECTURE.md §6 has the result. The full smoke suite passes in both browsers.
+
 ---
 
 ## Regressions found by the user (2026-10-14), now covered by `tools/smoke.sh`
@@ -149,6 +159,12 @@ Each entry gives what was tried, what happened, and why.
 - **Hypothesis rejected: Blink copies the inherited custom-property map at every level below the root.** 6,000 inherited properties declared at level 1 cost the same at 8, 66 and 130 levels deep (7.1 ms).
 - **Freeze-based attribution overstates the base.** `freeze3.js` wobbles every register, so "every gated block removed" measured 12.5 ms at 64 bodies; with static registers it is 5.1 ms. Read frozen bases with that in mind.
 - **Alternatives considered, not built:** contact slots with dynamically bound partners (no dynamic indexing: selecting a partner's state costs O(N) terms per input, or an `if()` chain, per slot; ranking the nearest partners is O(N²) terms), Jacobi-style rounds with several pairs per body per level (per-body sums cost more than the aliases they remove, and stacks need the Gauss–Seidel order), per-pair container names (the name list would have N²/2 idents on every level), K rules per pair under per-cell names (K × 0.1 µs per pair, no better than today), content-visibility or display:none subtrees per pair (the rules must inherit into the chain).
+
+### Firefox (Phase 5, 2026-10-17)
+
+- **Container names from rules on a wrapper `#LN` between #L0 and #L1** (`@container style(--ac{i}: 1){#LN{--A{i}:b{i}}}`, the same for `nb`), portable instead of `if()`. Correct, but #L1's rules then read their gates on #LN, so every gate declared on #L0 had to become inherited (the "minimal inheritance" pass had made them non-inherited: a rule reads its parent), N² near flags among them. Chrome, frozen 48-body pile: +6% (+11% with `BOOLQ=0`). Replaced by a Firefox-only block naming every body; Firefox's frame rate was the same either way (it re-matches everything each frame anyway).
+- **Shrinking boxes 2–4% in Firefox** so that resting faces stop intersecting: Firefox still drew a resting box over the one above it. Its 3D compositing orders whole bodies by document order even with every face in one preserve-3d context (headless, software WebRender).
+- **A second step per frame in Firefox:** not found. It samples view timelines once per refresh tick; the re-match restyle after layout recomputes the same step.
 
 ### Alternative compute substrates (Phase 3)
 

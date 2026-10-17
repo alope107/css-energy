@@ -92,7 +92,7 @@ A body can be touched by any round. Instead of summing over every possible partn
 
 ### Gating: what makes a sleeping or sparse scene cheap
 
-- **Gates.** Each declaration's gate is a style() condition on a flag computed at L0/L1. A 0/1 flag is tested as `style(--flag)` (true iff the registered value differs from its initial 0), which costs about 0.4 µs per rule against 0.7 µs for `style(--flag: 1)` (`BOOLQ`). Examples: `ac{i}` (body awake and this pass advances time), `np{a}_{b}` (pair near), `tcp…` (touching), `p{a}_{b}uA/uB` (which reference face), `nw{i}{F|C|X|Z}` (near a plane).
+- **Gates.** Each declaration's gate is a style() condition on a flag computed at L0/L1. A flag is tested as `style(--flag: 1)`. In Chrome `style(--flag)` (true iff the registered value differs from its initial 0) is about 0.3 µs per rule cheaper (`BOOLQ=1`), within the noise in the engine, but in Firefox it is always true (§6), so it is off by default. Examples: `ac{i}` (body awake and this pass advances time), `np{a}_{b}` (pair near), `tcp…` (touching), `p{a}_{b}uA/uB` (which reference face), `nw{i}{F|C|X|Z}` (near a plane).
 - **Named containers.** A rule whose container name is absent from every ancestor is skipped without evaluating its style() query: about 0.1 µs per rule at shallow depth in Chromium 153 (free in 141), against 0.4–0.7 µs for a present name with a false style() (2.5–3.5 µs in 141).
   - So every rule owned by body i, or by a pair whose lower index is i, is written `@container b{i} style(--gate){…}` at every level from L1 down (`OWNLEV`; L0's rules query the plain wrapper, which has no names).
   - L0 computes `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`: `b{i}` while body i is awake or near an awake body (with `CELLS=1` an awake body also gets `w{i}`).
@@ -163,7 +163,8 @@ The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't 
 | `PATCHC` | 1.0 | patch weighting constant |
 | `SCENE`, `SCENE_LIST` | tower | first scene and the scene list (tower, rain, stack; also calm, pair, field) |
 | `CELLS`, `CELL` | 0, 120 | spatial cells for presence and near tests (an evaluated dead end; 1 builds it for comparison) |
-| `BOOLQ` | 1 | gate 0/1 flags with `style(--flag)` instead of `style(--flag: 1)` |
+| `BOOLQ` | 0 | gate 0/1 flags with `style(--flag)` instead of `style(--flag: 1)` (Chrome only: always true in Firefox) |
+| `HYPOT1`, `FFQ` | 1, 1 | Firefox: `1 * hypot(…)`; the Firefox-only names and #LM re-match clock (§6) |
 | `OWNLEV` | 999 | owner-named container rules only at levels ≤ this (1 was measured slower: see Gating) |
 | `TRAY`, `FIELD_GAP` | 1, 6 | tray scale (benchmarks only: the camera doesn't follow) and the spacing of the field scene |
 | `SIMPLIFY` | 1 | `simp.py` calc() simplifier |
@@ -196,3 +197,23 @@ The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't 
   - Together that is about 17% of a step, and it grows with N².
 - **Registers.** About 2–8 µs per register element (2 values) per pass in a microbenchmark, rising with the register count (BENCHMARKS.md §2, `mk_regs.py`).
 - **An idle scene** (32 bodies, all asleep) costs about 2 ms per style pass, 2 passes per frame.
+
+---
+
+## 6. Firefox
+
+The same page runs in Firefox 159+ (in 158 the scroll-driven animations the registers depend on are behind `layout.css.scroll-driven-animations.enabled`; the page says so when they are missing). Measured in Firefox 157 (Playwright's) with the pref, and in stock 158 (pref), 159 DevEdition and 160 Nightly, 2026-10-17. Everything the engine evaluates is identical to Chrome on a static state (every property on every level, to float noise), after these changes:
+
+| Firefox behaviour | Workaround | Chrome cost |
+|---|---|---|
+| `style(--x)` (no value) is true whenever a registered property has a value, i.e. always (Chrome: iff it differs from the initial value) | `BOOLQ=0` by default: 0/1 gates are `style(--x: 1)` | within the noise at 48 bodies (BENCHMARKS.md) |
+| Negating `hypot()` negates its arguments, which leaves it unchanged: `100 - hypot(3, 4)` is 105, also inside a subtracted `min`/`max`/`sign`/sum and through `var()`. Every other math function is right. | every `hypot(` is written `1 * hypot(` after `simp.py` (`hypot(…) * 1` is folded away again; `HYPOT1=0` turns it off) | none measured |
+| No `if()` (the container names `--A{i}`) | `@supports (-moz-appearance: none)`: every body always named on #L0. Names only skip rules unevaluated; with all present each rule evaluates its own gate. | none (Chrome drops the block) |
+| Rules that depend on a style container are **not re-matched** when the container's value changed through an animation, and every state value here arrives through one (the register timelines, the clock). The gates kept their first result: bodies fell through each other. A class or inline-style change re-matches correctly. | Firefox re-matches the whole subtree of a size container whose size changed. Firefox only, #LM is one, sized from `--ffk = any × now` on two incommensurate periods, so it changes every frame while anything is awake and stays put once all sleep (idle stays at 60 fps). `FFQ=0` drops it. | none (Chrome drops the block; a size container there would move the subtree's style recalc into layout) |
+| No typed division: `scale(calc(100cqw / 900px))` is invalid | `scale(tan(atan2(100cqw, 900px)))` | none |
+| Intersecting 3D planes aren't split; they draw in document order (a body's shadow cut through its lower faces and drew on top) | the shadow comes first in each body | 39 pixels of antialiasing differ in Chrome |
+
+**Left as they are:**
+- **One step per frame.** Firefox samples view timelines once per refresh tick; Chrome re-samples stale timelines after layout and runs a second pass. So Firefox runs 60 steps per second on a 60 Hz display against `RATE` 90: the simulation runs at about half speed under load (free fall: 0.44–0.59 sim seconds per second, Chrome 0.91). Frame rates are close to Chrome's.
+- **3D sorting across bodies.** Even with all faces in one preserve-3d context, Firefox (headless, software WebRender) composites whole bodies in document order: a box resting on another can draw behind it, and a sphere's rings draw in full over its disc (Chrome hides their back halves).
+- **Touch** (`scroll-initial-target` is unsupported) is untested.
