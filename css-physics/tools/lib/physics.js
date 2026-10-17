@@ -7,6 +7,12 @@ const {countFrames,vars,pollUntil}=require('../../../shared/js/page.js');
 const trace=require('../../../shared/js/trace.js');
 const {CLOCK_CSS,CLOCK_ANIMATION,wobble,constant}=require('../../../shared/js/freeze.js');
 const [PERSP,TILT,TY,DIST,VW]=[1500,-28,95,-260,900];
+// BROWSER=firefox: Playwright's Firefox instead (Chromium flags dropped). Firefox before 159 needs the scroll-driven
+// animations pref, which the registers depend on; FIREFOX=/path picks another Playwright-compatible build.
+const FF_PREFS={'layout.css.scroll-driven-animations.enabled':true};
+const launch=process.env.BROWSER==='firefox'
+ ?async(o={})=>{const {args,extraArgs,...rest}=o;return require(require.resolve('playwright',{paths:[require.main.path,__dirname]})).firefox.launch({...rest,executablePath:process.env.FIREFOX||undefined,firefoxUserPrefs:FF_PREFS})}
+ :B.launch;
 
 // world point -> page coordinates of its screen projection, for the arena's bounding box `ar` (yaw: the view's default)
 const projector=ar=>{const sc=ar.width/VW;
@@ -32,4 +38,4 @@ s=s.replace(/(#LS\{animation:clk2[^}]*)\}/,`$1;${consts}}`);
 s=s.replace('<style>','<style>'+CLOCK_CSS);
 return s.replace(/(#w\d+\{)animation-name:[^;]*;animation-timeline:[^;]*;/g,'$1')}
 
-module.exports={launch:B.launch,open:B.open,profile:B,fileUrl,envArgs,countFrames,vars,pollUntil,...trace,CAM:{PERSP,TILT,TY,DIST,VW},projector,arena,bodyInfo,registerNames,bakeRegisters};
+module.exports={launch,open:B.open,profile:B,fileUrl,envArgs,countFrames,vars,pollUntil,...trace,CAM:{PERSP,TILT,TY,DIST,VW},projector,arena,bodyInfo,registerNames,bakeRegisters};

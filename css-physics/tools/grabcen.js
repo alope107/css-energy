@@ -13,7 +13,7 @@ const agg=aggregate(ev);console.log(Object.entries(agg).sort((a,b)=>b[1].t-a[1].
 console.log('frames',fr,'passes',u.length,'median',u[u.length>>1].toFixed(1),'max',u[u.length-1].toFixed(1),'sum/frame',(u.reduce((a,b)=>a+b,0)/fr).toFixed(1));
 const q={};for(const x of blocks){(q[x.l]=q[x.l]||new Set()).add(x.g)}
 const act=await p.evaluate(q=>{const o={};for(const [l,gs] of Object.entries(q)){const el=(document.getElementById(+l?'L'+(l-1):'LT')||document.getElementById('LS'));const c=getComputedStyle(el);for(const g of gs)o[g+'|'+l]=+c.getPropertyValue('--'+g)}
- const ls=getComputedStyle(document.getElementById('LS'));let aw=0;for(let i=0;i<64;i++)if(+ls.getPropertyValue('--aw'+i)==1)aw++;o.__aw=aw;o.__cn=getComputedStyle(document.getElementById('L0')).containerName;return o},Object.fromEntries(Object.entries(q).map(([k,v])=>[k,[...v]])));
+ const ls=getComputedStyle(document.getElementById('LS'));let aw=0;for(let i=0;i<64;i++)if(+ls.getPropertyValue('--aw'+i)==1)aw++;o.__aw=aw;o.__cn=getComputedStyle(document.getElementById('LN')||document.getElementById('L0')).containerName;return o},Object.fromEntries(Object.entries(q).map(([k,v])=>[k,[...v]])));
 const cat={};let nb=0;
 for(const x of blocks){if(act[x.g+'|'+x.l]!==x.v)continue;nb++;const lc=x.l<2?'L'+x.l:'B';const k=(x.g.replace(/\d+/g,'#')+'@'+lc);const c=cat[k]=cat[k]||{n:0,p:0,t:0};c.n++;c.p+=x.n;c.t+=x.t}
 const ms=c=>(c.p*2+c.t*0.4)/1000;let tot=0;
