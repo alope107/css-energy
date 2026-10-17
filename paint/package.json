@@ -1,0 +1,12 @@
+{
+  "name": "dictionary-paint",
+  "private": true,
+  "description": "A canvas stored in Chrome's compression-dictionary store, in pure HTML+CSS. Node is used only for the local server and the test harnesses; the pages run no script.",
+  "scripts": {
+    "serve": "node serve.js site",
+    "test": "node tools/selftest.js && node tools/e2e.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}
