@@ -286,6 +286,68 @@ live group's path). 32K is the ceiling of 15-bit addresses with the 1K ROM; beyo
 
 ---
 
+### Phase 11: objects and garbage collection (2026-10-17, branch `js-objects`)
+
+**The request.** JavaScript objects with nested objects and mixed key types, and a garbage collector, with care for
+speed. Prototypes were out of scope.
+
+**Shape of the solution** (ARCHITECTURE.md §3.5): 8-word chunks of three pairs and a link, tagged pointers that the
+15-bit address registers untag, keys stored as value + 2^18 so a string key is its interned address, a self-looping
+probe instruction (`SCANI` / `SCAN`) for the hot path, ROM routines for the slow paths (append, dynamic keys, the GC),
+and a Cheney copying collector over two 3,072-word semi-spaces.
+
+**Why microcode and not lib calls.** A probe per key costs 3 micro-cycles as an instruction and about 20 as a jsc loop
+(LOADL, LOADI, compare, branch, add). A lib call adds about 15 more. Property reads are the commonest object operation,
+so they got instructions. Appends, dynamic keys and the GC are rare enough for ROM routines (hand-written in
+`compiler/rtlib.py`; jsc has no short-circuit and no way to address a frame without one).
+
+**Why copying GC.** On this machine every cache line touched costs a shaping or two (MISS, WFAIL). Mark-sweep must sweep
+the whole heap, about one MISS per 4 words, so ~770 shapings for a 3K-word space whatever is live. Cheney touches only the
+live chunks, and allocation is a pointer bump. Roots are scanned exactly as words. The object band (−480,384 …
+−474,241) is unlikely as a number; the string band has the same compromise. The stack can hold a SCANI cursor (a pointer
+into a chunk), so roots are forwarded with their offset.
+
+**The font budget was the hard constraint.**
+
+- The first version (12 instructions, 3-way selectors) needed 531 subtables per cycle. The sanitizer caps S × subtables
+  at 16,384, so 512 at S = 32: HarfBuzz silently dropped the last lookups (the export), and the decoded SP read 0.
+- One gated control value in an expression group made every member enumerate the gate's values. Gated members now get
+  rule groups of their own (`cpu4.lin`).
+- The address and data stages put each expression's digits in one subtable (`merge_digits`; the digits' rules start at
+  different glyph types, so they cannot collide). 531 → 339 subtables. Merging the commit stages too was slower, so only
+  K2 merges.
+- **A pre-existing bug, found on the way**: a rule whose target is its own source cell (PC := PC + 1) enumerated the
+  target's value separately from the source's, so every self-update rule existed 16 times. All copies are tried in
+  every cycle in which the rule does not apply. Collapsing them made the existing machine 6% faster in HarfBuzz
+  (19.6 → 18.4 ms per shaping on FizzBuzz).
+- Classing control values per digit (SP − 1 and SP − 2 share digits 1 … 3) saved a little more.
+- Measured per instruction family, the most expensive were dynamic-key dispatch in microcode (KEYV / PUTX, +1.2 ms per
+  shaping) and an 8-word zero-fill in NEW. Both went: x[k] dispatches in ROM through a 2-cycle `JNEG` that shares JNZ's
+  rules, and NEW zeroes nothing (`ENDK` writes the end of a literal's keys).
+- Result: 28 more control values, 392 subtables, HarfBuzz about 1.5% slower per shaping than the machine before this
+  work, and FizzBuzz on the page within 1% (BENCHMARKS.md §10).
+
+**Bugs the levels caught.**
+
+- **A pre-existing bug in the font's comparisons**: LT GT LE GE took the sign of the 20-bit difference T2 − T1, which
+  overflows when the operands are 2^19 or more apart, so `300000 < -300000` printed `true` on the shipped page (the
+  models compare exactly). The GC compares words with the heap's (negative) bounds and hit it. SD is now the exact
+  T2 < T1: with operands of different signs, T2's sign. `tests/suite/cmp_far.js`.
+
+- The model masked memory addresses to 20 bits; the font's address registers are 15. No address had ever been wider
+  until tagged pointers. L4 passed (the model was consistent with itself), and hbtest showed different cache tags.
+- Two temp loads in one cycle (SCANI's T3 := MDR and T1 := IMM) cannot share a lookup: a GSUB rule consumes its input
+  span (MDR_j … T3_j covers IMM_j and T1_j), so the second rule never started. On the page every program read keys as
+  missing. Non-MDR loads have their own lookup now.
+- Compiling got slower when every identifier wrote its bytes to the string area (each byte is an anchored overlay, alive
+  on every later layout pass). Only identifiers after `.`, `{` or `,` write them now.
+
+**Measured but not changed.** A tight allocation loop (`obj_gc.js`) runs about 18 shapings per iteration, 14 of them
+cache misses: three fresh heap lines per iteration in a 16-line ring cache evict the loop's own code. The GC is 2% of
+its time. LRU replacement or a separate heap path would help. Both are changes to the cache in the font.
+
+---
+
 ## Dead ends and superseded approaches
 
 | # | Tried | What happened | Replaced by |
@@ -326,6 +388,10 @@ live group's path). 32K is the ceiling of 15-bit addresses with the 1K ROM; beyo
 | 34 | A code / data cache partition (model) | the suite's shapings +5% | the FIFO ring |
 | 35 | Read-decoded anchors (the read block down the decode trees, four read anchors) | every pass restyled the whole trees: 38,000 style resolutions, 90 ms per recalc at 16K | sparse RAM: groups rendered on first write |
 | 36 | 13-bit addresses with the ROM at 0 … 4095 for a 93-word lib | RAM capped at 4K words | 15-bit addresses, ROM 1K, the map in `compiler/layout.json` |
+| 37 | Object instructions with 3-way selectors in every expression group | 531 subtables per cycle: past the sanitizer's 512, the export lookup was dropped | gated rule groups of their own, digits merged in K2 |
+| 38 | Array / object dispatch of `x[k]` in microcode (KEYV, PUTX), and DUP2 | +1.2 ms per shaping for every program | dispatch in ROM with JNEG; OVER OVER |
+| 39 | NEW zero-filling its 8-word chunk | 12 micro-cycles, two cache lines per object, and 8 address classes in the font | NEW zeroes nothing; ENDK ends a literal's keys |
+| 40 | Every identifier writing its bytes to the string area (in case it is a property name) | FizzBuzz compiled about 7% slower: every byte is an anchored overlay | only after `.`, `{` or `,` |
 
 ---
 
@@ -376,6 +442,10 @@ These were measured in [CSS JavaScript interpreters speedup](https://claude.ai/c
 ### Language
 
 - **Widen the console.** It is 8 columns, and output RAM costs per cell.
-- **Strings**: building and comparing them needs a heap.
+- **Strings**: building them needs a heap (there is one now, for objects). Literals compare by content since they are interned.
+- **Objects**: printing them (Node's `{ a: 1 }`), `undefined` for a missing key (a falsy value that is not 0 needs a
+  second zero test in the machine), `in` / `delete`, prototypes and methods (functions as values).
+- **Allocation-heavy loops**: the ring cache evicts code for fresh heap lines (Phase 11). LRU, or writes to fresh
+  lines that bypass the cache.
 - **Booleans as parameters.**
 - **Specific error codes on the page**, instead of 99.
