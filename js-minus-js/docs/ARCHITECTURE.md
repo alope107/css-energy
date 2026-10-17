@@ -177,9 +177,12 @@ These are in `cc_ref.py` and shared by the DSL.
 - **Parser variants**:
   - Level `t + 1` runs the parser on token `t`. The variant is chosen by
     `@container style(--vh: mode) and style(--tcq: tokencode)` on its parent.
-  - The page has 299 variants (`tools/vsz.py` counts 319, before the no-op variants are merged). Pure-error variants are dropped: a token no variant accepts sets `bad`, which
+  - The page has 302 variants (`tools/vsz.py` counts 323, before the no-op variants are merged). Pure-error variants are dropped: a token no variant accepts sets `bad`, which
     shows as error 99.
   - Variants that change nothing collapse into one pass-through rule per token code.
+  - Variants of one mode with identical CSS share one rule whose condition lists their token codes
+    (`style(--tcq: a) or style(--tcq: b) …`): 302 variants make 168 rules. Every rule costs time on every token
+    level whether it applies or not (BENCHMARKS.md §4c), so the rule count is a compile-time cost of its own.
   - With a known starting mode, `Prog` folds away the blocks that can't be reached (the `FALL` map). This halved
     the generated CSS.
 - **State**: state alternates between parity copies (`--p-<name>-A/B`). Temps share a small pool of names
@@ -189,7 +192,7 @@ These are in `cc_ref.py` and shared by the DSL.
 - **Code words**: up to 12 fixed overlays per level (`.ov.k<s>`, `position: fixed`, inside `contain: strict`).
   Each has `anchor-name: --c<index>` and width `word + 2^20`. A word that needs a label adds
   `anchor-size(--l<j> width)`.
-- **Labels**: in-flow anchors `.lp<k>` (22 ports per level) named `--l<j>`, with the label's value as width.
+- **Labels**: in-flow anchors `.lp<k>` (21 ports per level) named `--l<j>`, with the label's value as width.
 - **Finish**: the last live level shows `.fin`:
   - the count word;
   - the staged `STRTAG`;

@@ -124,14 +124,15 @@ Source: `tools/vsz.py`, `tools/lp.py`, the `make page` build line, and `make tes
 
 | Measure | Value |
 |---|---|
-| Parser variants | 319 before the no-op merge; 299 + 1 pass-through on the page |
-| Temps, all variants | 56,505 (56,673 before the PRINT family) |
-| Label ports per level | 22 |
+| Parser variants | 323 before the no-op merge; 302 + 1 pass-through on the page, in 168 rules (identical variants of a mode share one, §4c) [319; 299 rules before the language features of §4c] |
+| Temps, all variants | 62,756 [56,505 before §4c; 56,673 before the PRINT family] |
+| Largest variant | 1,380 temps (`S_NAMES '}'`) [1,253] |
+| Label ports per level | 21 [22] |
 | Levels | 1,561 character levels, 401 token levels |
-| Compile-chain CSS | 7.4 MB (7,407,608 bytes; 7,515,752 before) |
-| Page | 11.9 MB (11,857,709 bytes; the 3K page 9,514,312, before 9,612,666) |
-| `make page` | 26 s, reproducible [25 s] |
-| L2 DSL evaluation (suite, 4,970 parser steps) | 291 temps per step with the specialised variants; 3,795 with the generic parser (not re-run) |
+| Compile-chain CSS | 7.7 MB (7,666,557 bytes) [7,407,608; 7,515,752 before the PRINT family] |
+| Page | 12.1 MB (12,107,435 bytes) [11,857,709; the 3K page 9,514,312, before 9,612,666] |
+| `make page` | 28 s, reproducible [26 s] |
+| L2 DSL evaluation (suite of 97 + 25 programs, 6,373 parser steps) | 336 temps per step with the specialised variants [291 per step on the 90 + 14 programs before §4c]; 3,795 with the generic parser (not re-run) |
 
 ## 3. HarfBuzz alone (uharfbuzz 0.56.3, no browser)
 
@@ -176,6 +177,54 @@ is pressed, and the harness times Run → the chain's done anchor and checks eve
 anchor), two runs:
 `{"loadMs":177,"doneMs":642,"recalcMs":599,"layoutMs":9,"recalcs":2,"done":1,"err":0,"words":45,"ok":1}` and
 `{"loadMs":177,"doneMs":600,"recalcMs":558,"layoutMs":8,…}` [old: done 486 ms, recalc 451 ms, load 140 ms].
+
+### 4c. Language features: block scope, `const`, `do … while`, `?:` (branch `js-lang-basics`, 2026-10-17)
+
+The goal was no run-time cost and as little compile-time cost as possible. Each step was measured on the L3 page
+against the baseline L3 page (`234a0ca`), in interleaved rounds (baseline, new, baseline, new, …; `node
+tests/suite_css.js page.xhtml`). The ratio is new / baseline for each of the 90 programs common to both, and the
+table gives its median per round. Run to run, a program's ratio spreads by about ±7% (IQR), so read the medians
+across rounds.
+
+**Run time.** Compile time only, by construction:
+
+- Every program the old compiler compiled correctly (95 of 97 suite programs + t1–t4) compiles to identical code and
+  data words, so steps and shapings are unchanged. The other two (`let_block`, `let_shadow_fn`) printed wrong values
+  before: `let` was `var`.
+- `do … while` costs one `JNZ` per iteration where `while` costs a `JZ` and a `JMP`. A 40-iteration sum takes 432
+  steps and 46 shapings, against 476 and 50 for the same loop as `while` (model, `tools/traps.py`).
+- `c ? a : b` costs the same as `if / else`: a 30-iteration loop takes 586 steps and 73 shapings as a ternary, against 576 and 73 as
+  `if / else` (27 against 29 code words).
+- Real page, FizzBuzz (`machine/ui_seq.js`, 6 interleaved rounds against the baseline page): HALT ratio 1.000 (range
+  0.92–1.05), compiled ratio 0.970 (0.89–1.03). The machine was noisier than in the A-vs-A table at the top: the
+  baseline's HALT ranged 10.9–12.8 s.
+
+**Compile time, step by step** (L3; sizes from `tools/vsz.py` and `tools/lp.py`):
+
+| Build | Temps | Variants (rules on the page) | Max label ports | Largest variant | L3 ratio per round |
+|---|---|---|---|---|---|
+| Baseline | 56,505 | 319 (299) | 22 | 1,253 | 1 |
+| + block-scoped `let` / `const`, `const` checks | 58,324 | 319 | 22 | 1,323 | 0.997, 0.978 |
+| + `do … while` | 60,766 | 322 | 22 | 1,380 | 1.003, 1.003 |
+| + `?:`, first version | 66,816 | 336 | 23 | 1,423 | 1.002, 1.041, 1.042, 1.038 |
+| `?:` trimmed: one check after `popops`' loop, `close_block` shares one label port | 64,542 | 336 | 21 | 1,380 | 1.029, 1.048, 1.025 |
+| `?` and `:` out of `PUNCT` (14 → 3 new variants) | 62,756 | 323 | 21 | 1,380 | 1.011, 1.000, 1.021 |
+| + identical variants share one rule | 62,756 | 323 (168) | 21 | 1,380 | 0.977, 0.970, 0.950 |
+
+- Block scope uses a two-region symbol table. The lookup's extra comparison per symbol adds 5% to the largest
+  variant, with no measurable compile-time cost.
+- `do … while`: a first version with a mode after the `)` for the optional `;` (`S_DOEND`) doubled the total
+  temps (112,279) and raised the ports to 29, and it was replaced. With it, a do body that stopped the
+  `complete_stmt` chain made the mode dynamic, so `S_ELSE`'s pure-error variants no longer folded to a constant
+  error and weren't dropped (9 → 37 variants), until those tokens stopped closing do bodies.
+- **Every rule costs time whether it applies or not.** Each token level checks every variant's container query.
+  40 never-matching copies of variant rules added to the `?:` build (+13% rules) cost +4.3%, +2.0% and +1.6% (3
+  rounds against the same page without them). That is why the ternary's 14 new variants cost more than their
+  temps, and why merging the 115 duplicate variants (36% of them: mostly `S_LBRACE`, `S_INC`, `S_AFTERELSE`,
+  `S_VARAFTER` on punctuation tokens) into shared rules made the compiler about 3% faster than the baseline.
+
+L3 itself: **122/122 pass** in every round (97 valid programs, 25 error programs with the intended codes 64–67, 3, 4
+and 47). L1 97/97, L2 ALL OK, L4 97/97, `make l5-smoke` 9/9.
 
 ---
 
