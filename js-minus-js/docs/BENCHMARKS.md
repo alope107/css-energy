@@ -443,6 +443,33 @@ unread or wrong cells.
 The scan advances one column per frame over P = 64 columns, so one sweep is ≥ 64 frames; *(derived)* ~18 ms per
 column. [old: 1,178 / 1,178 / 1,206 ms.]
 
+### 7a. Scan only after Run, and the editor's line structure (branch `editor-input`, 2026-10-17)
+
+Before, the scan ran all the time; now it runs only after Run (one sweep, as before Run always added), and the editor's
+lines are all divs (`docs/ARCHITECTURE.md` §4). Same machine and session, `node ../shared/js/ab.js -r 6`, FizzBuzz via
+`machine/ui_seq.js`, ratio to `before` (median, IQR):
+
+| Run | Variant | haltMs | compiledMs |
+|---|---|---|---|
+| 1 | before (A-vs-A) | 1.016 (0.981–1.021) | 1.009 (0.986–1.012) |
+| 1 | scan after Run only | 1.011 (0.973–1.029) | **0.938 (0.916–0.946)**: 2,527 → 2,331 ms |
+| 2 | before (A-vs-A) | 0.996 (0.938–0.998) | 0.999 (0.913–1.087) |
+| 2 | final (scan + lines) | 0.972 (0.944–0.991) | 0.973 (0.879–1.000) |
+
+*(derived)* No change to HALT. Compiling is about 6% faster (run 1; run 2 was too noisy to resolve it). The editor is no
+longer reshaped every frame during the compile.
+
+Idle while editing (no Run), 3 s of CDP `Performance.getMetrics` after load, 3 loads each:
+
+| Page | main-thread task | style | layout | layouts/s |
+|---|---|---|---|---|
+| before | 993–1,003 ms/s | 499–508 ms/s | 286–303 ms/s | 121–126 |
+| final | 344–350 ms/s | 55–59 ms/s | 162–169 ms/s | 60 |
+
+The page used to keep the main thread busy the whole time it sat idle. About 60 layouts/s remain, from what is still
+animated per frame (the scan clock). A selection's highlight now changes in 0 of the screencast frames while editing,
+against 14–19 of about 105 before (`make l5-input`, case `highlight while editing`).
+
 ## 8. RAM size
 
 **Group size of the sparse RAM** (`MEMGROUP=n UI=1 python3 machine/gen_fvm4.py build/ccimg.json build/f4cc_16 out.xhtml`;

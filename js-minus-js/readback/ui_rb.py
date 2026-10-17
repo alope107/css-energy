@@ -8,12 +8,13 @@ Changes from the original:
     counter (--rbsc), so it advances exactly one column per frame at any frame rate (a time-driven scan skips
     columns when frames are slow). The range is fixed at P columns: a range derived from the editor's width
     flickers, because the trailing sentinel glyph's width is the code being read.
-  - Run (#run, the first element of body; its state is read with sibling selectors, not :has()) makes the editor
-    read-only; the scan does one more full sweep (--rbsr counts frames since Run), then stops and raises --rbrd,
-    which shows the compiler. Edit lowers it again.
+  - the scan runs only after Run (#run, the first element of body; its state is read with sibling selectors, not
+    :has()), which makes the editor read-only: one full sweep (--rbsr counts frames since Run), then it stops and raises
+    --rbrd, which shows the compiler. Edit lowers it again. While the user edits, the editor's font axis stays at 0
+    (scanning reshapes the text every frame, which made a selection's highlight jump) and the registers are frozen.
 XHTML-safe output.
 """
-import base64, html, subprocess, os
+import base64, html, subprocess, os, re
 import sys; sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'compiler'))
 import ccpage5 as C
 
@@ -35,7 +36,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
                           for n in REGS) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
-                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet'))
+                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz'))
     regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS)
     ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
     g = []
@@ -57,7 +58,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
 {regkeys}
 /* scan driver, frame-locked: a register holds last frame's clock, so --rbfresh is 1 on the first pass of each frame and
    the scan counter advances exactly one column per frame (columns 1..R, R = the columns the editor is wide).
-   Run: the scan finishes one more full sweep (--rbsr counts frames since Run), then stops and raises --rbrd, which
+   It runs only after Run: one full sweep (--rbsr counts frames since Run), then it stops and raises --rbrd, which
    lets the compiler see the text. The latches keep their values. */
 #app {{
   container-name: rbscan;
@@ -74,9 +75,11 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
   /* the counter register already shows next frame's value in the later passes of a frame (Chrome re-runs style and layout
      while view timelines are stale); --rbfresh is 0 exactly then, so sc - 1 + fresh keeps the column the same for every
      pass of a frame. A column that changed mid-frame would lose its latch (the hold transition starts from last frame). */
-  --rbscan: calc((1 - var(--rbrun) * var(--rbready)) * (mod(round(down, var(--rbsc) / {DWELL}), var(--rbR)) + 1));
-  /* once the compiler has the text (--rbdet), the registers stop changing: no layout or timeline work per frame */
-  --rbn-tp: calc(var(--rbclk) + var(--rbdet) * (var(--rbtp) - var(--rbclk))); --rbn-sc: mod(var(--rbsc) + var(--rbfresh) * (1 - var(--rbdet)), 4096);
+  --rbscan: calc(var(--rbrun) * (1 - var(--rbready)) * (mod(round(down, var(--rbsc) / {DWELL}), var(--rbR)) + 1));
+  /* while editing, and once the compiler has the text (--rbdet), the registers stop changing: no layout or timeline
+     work per frame */
+  --rbfrz: calc(1 - var(--rbrun) * (1 - var(--rbdet)));
+  --rbn-tp: calc(var(--rbclk) + var(--rbfrz) * (var(--rbtp) - var(--rbclk))); --rbn-sc: mod(var(--rbsc) + var(--rbfresh) * (1 - var(--rbfrz)), 4096);
   --rbn-sr: calc(var(--rbrun) * min(var(--rbsr) + var(--rbfresh) * (1 - var(--rbdet)), 4000)); --rbn-rd: calc(var(--rbrun) * var(--rbready));
   --rbdet: calc(var(--rbrun) * clamp(0, var(--rbsr) - {SWEEPS * DWELL} * var(--rbR) - 7, 1));    /* a few frames after the compiler took the text */
 }}
@@ -89,12 +92,22 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
 #ed {{
   anchor-name: --rbed; font: 16px/24px "AsciiProbe", monospace;
   font-kerning: normal; font-feature-settings: normal; letter-spacing: 0; word-spacing: 0;
-  white-space: pre; tab-size: 4; width: max-content; min-width: 100%; box-sizing: border-box; min-height: {L * 24 + 24}px;
+  /* nowrap, not pre: where newlines are preserved, Chrome pastes plain text and inserts Shift+Enter as '\n' inside one
+     line div, and only the last row of it is read. Spaces stay visible as &nbsp; (Chrome's editor writes them where a
+     space would collapse; the font maps U+00A0 to the space glyph). */
+  white-space: nowrap; width: max-content; min-width: 100%; box-sizing: border-box; min-height: {L * 24 + 24}px;
   padding: 12px 14px; outline: none; caret-color: var(--accent); color: var(--ink);
 }}
-#ed * {{ all: unset; display: inline; }}
-#ed > div {{ display: block; }}
-#ed br {{ all: revert; }}
+/* No rule may match the line divs: Chrome copies the properties of matched rules into style="" on every copied line,
+   and pasting such lines nests them inside the line at the caret. Pasted rich text (p, b, span, ...) shows inline and
+   unstyled; a div nested in a line (Chrome makes one on Enter in a line typed straight into the empty editor, or when
+   lines are pasted into an empty line) shows inline too, so the line looks the way the scan reads it (.nested says so). */
+#ed :not(div, br) {{ all: unset; display: inline; }}
+#ed div div {{ display: inline; unicode-bidi: normal; }}   /* a div isolates (UA style): its own shaping run, unread */
+/* a <br> in a line would start a second row that the scan doesn't read (the line's sentinel is on its last row): Chrome's
+   placeholder in an empty line made it two rows tall and put everything below one row off, Shift+Enter inserts one,
+   and so does a nest. The sentinel gives an empty line its height. */
+#ed div br {{ display: none; }}
 #ed::before, #ed > div::after {{ content: "\\2058"; }}
 .rbout {{ anchor-name: --rbout; height: 0; visibility: hidden; }}
 .probe {{ position: absolute; top: calc(anchor(--rbout top) + var(--rbk) * 24px); left: anchor(--rbout left);
@@ -118,11 +131,13 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
     for k in range(1, L):
         g.append(f'#app:not(:has(#ed > div:nth-of-type({k}))) .probe:nth-child({k + 1}) {{ display: none; }}')
     g.append(f'#app:has(#ed > div:nth-of-type({L})) .limit {{ display: block; }}')
+    g.append('#app:has(#ed div div) .nested { display: block; }')
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1
         g.append(f'@container rbscan style(--rbscan: {k}) {{ #ed {{ font-variation-settings: "SCAN" {k}; }} .row > b:nth-child({G}) {{ --rbgj: {j}; }} .scanpos {{ --rbcol: {k}; }} }}')
     g.append('@property --rbcol { syntax: "<integer>"; inherits: false; initial-value: 0; }')
-    g.append('.scanpos { counter-reset: rbcol var(--rbcol); } .scanpos::before { content: "scan column " counter(rbcol); }')
+    g.append('.scanpos { counter-reset: rbcol var(--rbcol); } .scanpos::before { content: "reading column " counter(rbcol); }'
+             ' @container rbscan style(--rbscan: 0) { .scanpos { visibility: hidden; } }')
     g.append(C.cell_css())
     return '\n'.join(g)
 
@@ -132,9 +147,15 @@ def regs_html():
                    for n in REGS)
 
 def editor_html(text):
-    lines = text.rstrip('\n').split('\n')
-    first = html.escape(lines[0]) if lines[0] else ''
-    return first + ''.join(f'<div>{html.escape(s) if s else "<br/>"}</div>' for s in lines[1:])
+    """every line in its own div. Text typed straight into the editor (line 0, after #ed::before) is read too, but
+    Enter in it, with lines below, makes Chrome nest all of them in one new div; so the initial program starts at line 1
+    and line 0 shows empty (Backspace at the start of line 1 deletes it)."""
+    return ''.join(f'<div>{nbsp(html.escape(s)) if s else "<br/>"}</div>' for s in text.rstrip('\n').split('\n'))
+
+def nbsp(s):
+    """the spaces of a line as Chrome's editor writes them under white-space: nowrap: a run at either end of the line,
+    and all but the last space of a run inside it, become U+00A0, so none collapses"""
+    return re.sub(' +', lambda m: '\u00a0' * len(m.group()) if m.start() == 0 or m.end() == len(s) else '\u00a0' * (len(m.group()) - 1) + ' ', s)
 
 def probes_html(L, P, GS):
     NG = P // GS

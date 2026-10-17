@@ -172,3 +172,28 @@ that relies on it or records it.
 43. **The top hex digit of a readback span is limited by the glyph advance**: an advance is at most 32,767 font units,
     so a 4-digit span (weights 1, 16, 256, 4096) carries 15 bits. 16-bit addresses would need a second span per
     register (as T1 / T2 have).
+44. **Enter in text that sits directly in a contenteditable host nests every later line.** With blocks after the caret,
+    Chrome's paragraph split treats the host as the enclosing block. It appends one new div to the host and moves all
+    later siblings into it: `a<div>b</div>` becomes `a<div><br/><div>b</div></div>`. No CSS on the host or the lines
+    changed this (block, flex, grid, flow-root, list-item). Enter at the start of that line puts the new empty div
+    *before* the bare text. So the editor's initial program is all divs (`readback/ui_rb.py`, `tests/editor_input.js`).
+45. **Select-all, then Delete, Backspace or Cut, empties the host.** Text typed next goes straight into the host
+    (`a<div>b</div>`). Select-all and then typing keeps the first div. In a random-edit fuzz (60 sequences of 30 edits),
+    no guard element kept the host from emptying without breaking something else: a trailing `user-select: none`
+    block, `contenteditable="false"`, or a trailing `<br>`.
+46. **Copying from a contenteditable writes every matched author rule into `style=""` on the copied elements.** With
+    `#ed * { all: unset }` that was about 300 properties per line. Pasting those lines nests them inside the line at the
+    caret. With no author rule matching the line divs, Chrome merges pasted lines flat, except when pasting into an
+    empty line (`<div><br></div>`), which still nests. `contenteditable="plaintext-only"` makes paste plain, but Enter
+    then inserts `\n` instead of a div, and the readback needs an element per line.
+47. **Selected text is painted with the GPOS-adjusted positions.** While the scan ran, line 0's leading sentinel took
+    a width and a kern pulled the next glyph back over it. A selection covering line 0 then painted its text shifted,
+    or not at all, in 14–19 of about 105 frames. The trailing sentinels of the other lines only moved the end of the
+    highlight. The scan now runs only after Run. *(measured with a screencast, `tests/editor_input.js`)*
+48. **Where newlines are preserved (`white-space: pre`), Chrome pastes plain text with its `\n`s inside the line at the
+    caret,** and Shift+Enter inserts `\n`. Elsewhere it splits pasted plain text into one div per line, and Shift+Enter
+    inserts `<br>`. `white-space-collapse: preserve-spaces` would keep spaces and drop newlines, but Chromium 153 doesn't
+    support it. So the editor uses `nowrap`, and spaces that would collapse are `&nbsp;`.
+49. **An inline `div` is a separate shaping run.** The UA stylesheet gives `div` `unicode-bidi: isolate`, so a div
+    displayed inline is shaped on its own, and the scan's GSUB chain can't carry a character across it to the line's
+    sentinel. `unicode-bidi: normal` (or `all: unset`) puts it back in the line's run (`readback/ui_rb.py`).

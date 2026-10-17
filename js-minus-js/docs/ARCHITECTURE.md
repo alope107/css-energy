@@ -322,9 +322,30 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 **Run**
 
-- After Run, the editor goes read-only. The scan makes one more full sweep, then raises `--rbrd`. The compile
+- The scan runs only after Run. While the user edits, the `SCAN` axis stays at 0 and the scan registers are frozen
+  (`--rbfrz`). Scanning reshapes the editor's text every frame, which made a selection's highlight jump.
+- After Run, the editor goes read-only. The scan makes one full sweep, then raises `--rbrd`. The compile
   chain shows only once `--ccgo` is 1, and `--ccgo` is driven from the `--rbrdT` timeline.
 - A few frames later `--rbdet` freezes the scan registers.
+
+**Lines**
+
+- Line 0 is text typed straight into `#ed`, after its `::before` sentinel; line `k` is the `k`-th `#ed > div`, with a
+  trailing sentinel (`::after`). Chrome puts typed text straight into `#ed` only when the editor is empty (after
+  select-all and Delete).
+- Enter in such a line, with lines below it, makes Chrome nest all of the lines below in one new div. So the initial
+  program is all divs and starts at line 1; line 0 shows empty. Pasting lines into an empty line nests them too.
+- A nested div shows inline (and without the UA's `unicode-bidi: isolate`, which would shape it as a separate run the
+  scan can't cross), so the merged line looks the way the scan reads it. `.nested` tells the user to undo.
+- A `<br>` inside a line is hidden. A line is one row, and its sentinel is on its last row, so a visible `<br>` would show
+  a row that isn't read. That covers Chrome's placeholder in an empty line, which made every blank line two rows tall,
+  and Shift+Enter.
+- `white-space: nowrap`, not `pre`. Where newlines are preserved, Chrome pastes plain text and inserts Shift+Enter as
+  `\n` inside one line div. Spaces stay visible as `&nbsp;`, which Chrome's editor writes where a space would
+  collapse and the font reads as a space. `editor_html` writes the initial program the same way.
+- No CSS rule may match the line divs. Chrome copies the properties of matched rules into `style=""` on every copied
+  line, and pasting those lines nests them. `tests/editor_input.js` (`make l5-input`) checks that the scan reads
+  what the editor shows after typical edits.
 
 ---
 

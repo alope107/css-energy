@@ -450,7 +450,6 @@ if UI:
   .bar {{ display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }}
   .label {{ font: 600 .72rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }}
   .scanpos {{ font: .8rem ui-monospace, monospace; color: var(--muted); }}
-  #run:checked ~ #app .scanpos {{ visibility: hidden; }}
   .frame {{ background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }}
   .frame:focus-within {{ border-color: var(--accent); }}
   #ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
@@ -461,7 +460,8 @@ if UI:
   .runbtn span::before {{ content: "\\25B6  Run"; }}
   #run:checked ~ #app .runbtn {{ background: #5b6875; }}
   #run:checked ~ #app .runbtn span::before {{ content: "\\270E  Edit"; }}
-  .limit {{ display: none; margin: 0; font-size: .85rem; color: var(--muted); }}
+  .limit, .nested {{ display: none; margin: 0; font-size: .85rem; color: var(--muted); }}
+  .nested {{ color: #b00; }}
   .notes {{ color: var(--muted); font-size: .9rem; display: grid; gap: .5rem; }}
   .notes p {{ margin: 0; }}
   .notes code {{ font: .82rem ui-monospace, monospace; color: var(--ink); }}
@@ -494,16 +494,16 @@ if UI:
                 '#clkw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; } #clk { display: if(style(--ccgo: 1): block; else: none); }'] + \
                [f'@property --{n} {{ syntax: "<integer>"; inherits: true; initial-value: 0; }}' for n in ('csi', 'csd', 'cse', 'csn')]
     editor = ui_rb.editor_html(image.get('source', ''))
-    notes = (f"<p>Everything below the editor happens in CSS. A font reads your text back: a variable axis makes HarfBuzz copy the code of one "
-             f"column into an invisible glyph's width, and a scan sweeps the columns, one per frame, latching each character into a "
-             f"custom property. When you press Run, the compiler (a stylesheet) runs over those characters: a lexer on a chain of one "
+    notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back: a variable axis makes HarfBuzz copy the "
+             f"code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame, latching each character into a "
+             f"custom property. Then the compiler (a stylesheet) runs over those characters: a lexer on a chain of one "
              f"element per character, then a parser on a chain of one element per token, with each parser rule picked by a container query. "
              f"Every bytecode word it emits is an element named after its RAM cell. Then the CPU, which is another font, runs the program: each "
              f"layout pass shapes the machine state as text and HarfBuzz executes {S} micro-cycles in GSUB. Output appears in the console on the left.</p>"
              f"<p>The language is a small JavaScript subset: <code>var</code>, <code>function</code>, <code>if</code>/<code>else</code>, "
              f"<code>while</code>, <code>for</code>, <code>return</code>, integer arithmetic, string literals, array literals, "
              f"<code>console.log(x)</code> and <code>putc(c)</code>. Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
-             f"paste as plain text. Run waits for one more scan of the editor, then compiles; Edit clears the machine.</p>")
+             f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine.</p>")
     page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -531,6 +531,7 @@ if UI:
 <div class="frame"><div id="ed" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{editor}</div></div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
+<p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>
 </section>
 <section class="notes">{notes}</section>
 {ui_rb.probes_html(UIL, UIP, GS)}

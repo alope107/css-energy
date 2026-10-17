@@ -9,7 +9,7 @@ export PYTHONHASHSEED := 0
 export SOURCE_DATE_EPOCH := 0
 
 .PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l4 l5 l5-smoke clean
+        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
@@ -64,6 +64,8 @@ l5: page                                  # the real page, typed like a user; co
 	ARGS="$$($(PY) tests/suite_ui.py 1500)"; EXP1=$(B)/ui_exp/fizzbuzz.grid $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$ARGS
 l5-smoke: page
 	ARGS="$$($(PY) tests/suite_ui.py 400 6)"; EXP1=$(B)/ui_exp/fizzbuzz.grid $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$ARGS
+l5-input: page                            # the editor under user input: what the scan reads is what the editor shows
+	$(PY) tests/suite_ui.py 400 0 > /dev/null; EXP=$(B)/ui_exp/fizzbuzz.grid $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
 
 test: expect l1 l2 l4
 test-browser: l3
