@@ -6,10 +6,15 @@
   },
   "remoteUser": "pwuser",
   "init": true,
-  "runArgs": ["--ipc=host"],
+  "runArgs": ["--ipc=host", "--env-file", "${localEnv:HOME}/.config/agent-tokens/css-energy.env"],
   "mounts": ["source=claude-code-config-${devcontainerId},target=/home/pwuser/.claude,type=volume"],
   "containerEnv": {
     "CHROME": "/usr/local/bin/chromium",
     "CLAUDE_CONFIG_DIR": "/home/pwuser/.claude"
+  },
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": "",
+    "GIT_ASKPASS": "",
+    "VSCODE_GIT_IPC_HANDLE": ""
   }
 }
