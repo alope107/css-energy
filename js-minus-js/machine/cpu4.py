@@ -18,7 +18,7 @@ Semantics = uarch.py (victim-pointer ring, no evict buffer).
 """
 import re
 from cpugen import Program, A, RA, MAP, DA, Op
-from uarch import OPN, UCODE, ROM, MASK, s20, PRINTOPS
+from uarch import OPN, UCODE, ROM, MASK, s20, PRINTOPS, SEL
 # the 4-digit registers' top digit is masked: addresses (PC, SP, FP, MAR) to 3 bits (15-bit addresses: ROM + RAM up to 32K words),
 # the immediate to 1 bit (an instruction word is op * 8192 + a 13-bit immediate)
 TOPMASK = {'IMM3': 1}
@@ -51,6 +51,11 @@ LINEV = {'BOP': ['N', 'R', 'W'], 'VF': [0, 1, 2, 3], 'VD': [0, 1, 2], 'MB': [0, 
 NIB = [f'VAL{w}_{j}' for j in range(5) for w in range(WB)]          # nibble order along the line (readback)
 
 def digits(v, n): v &= (1 << (4 * n)) - 1; return [(v >> (4 * j)) & 15 for j in range(n)]
+def terms_of(gk): return list(gk)
+def choices_of(cv, e, z=None):
+    """{(cv, z): expr} for an expression that may be a selector dict ({ZSEL value: expr})"""
+    if isinstance(e, dict): return {(cv, zz): x for zz, x in e.items()}
+    return {(cv, z): e}
 
 def parse(e):
     """-> (terms [(sign, reg)], K) or ('BOOL', name)."""
@@ -77,12 +82,13 @@ class CPU:
         for h, w in self.HDR:
             for j in range(w): t(f'{h}{j}', D16)
         for j in range(5):
-            t(f'CJ{j}', CVALS); t(f'ZJ{j}', BIT); t(f'OKJ{j}', OKV)
+            t(f'CJ{j}', CVALS); t(f'ZJ{j}', [0, 1, 2]); t(f'OKJ{j}', OKV)
             for b in range(4): t(f'MDRB{4*j+b}', BIT)
             for r in BLOCK:
                 if j < width(r): t(f'{r}{j}', D48)
         t('BF', list(range(16)))
-        for f in ['ZT1', 'ZT2', 'ZD', 'SD', 'HIT', 'FAIL', 'VANY', 'MBC', 'FAIL0']: t(f, BIT)
+        for f in ['ZT1', 'ZT2', 'ZD', 'SD', 'ST2', 'HIT', 'FAIL', 'VANY', 'MBC', 'FAIL0']: t(f, BIT)
+        t('ZSEL', [0, 1, 2])
         t('MOP', ['N', 'R', 'W']); t('OK1', OKV[:3]); t('OK', OKV)
         for f in LINEF:
             t(f'L.{f}', LINEV.get(f, BAV if f.startswith('BA') else BIT if f[0] in 'GM' else D16))
@@ -96,7 +102,7 @@ class CPU:
                 if j < width(r):
                     if r == 'MAR' and j == 0: put('BF')
                     put(f'{r}{j}')
-        for n in ['ZT1', 'ZT2', 'ZD', 'SD', 'OK1', 'OK', 'FAIL', 'MBC', 'FAIL0', 'HIT', 'VANY', 'MOP']: put(n)
+        for n in ['ZT1', 'ZT2', 'ZD', 'SD', 'ST2', 'ZSEL', 'OK1', 'OK', 'FAIL', 'MBC', 'FAIL0', 'HIT', 'VANY', 'MOP']: put(n)
         self.lines = [{f: P.cell(P.types[f'L.{f}'], 'L', k, f) for f in LINEF} for k in range(N)]
         # ---- readback: export twins (base glyphs) whose advances encode values; spans are contiguous cell ranges
         self.weights = {'C': lambda v: CVALS.index(v), 'RESV': lambda v: 256 * v, 'NI': lambda v: v, 'L.VF': lambda v: 8192 * (v == 1)}   # tag < 8192
@@ -141,23 +147,32 @@ class CPU:
     def before(self, a, b): return self.core[a].pos < self.core[b].pos
 
     # ------------------------------------------------------------ arithmetic: target := expr chosen by C
-    def lin(self, target, choices, commit=False):
+    def lin(self, target, choices, commit=False, merge=False):
         """choices: {(cv, zreq): expr}; zreq None/0/1. Returns (R1, R2, R3) spec lists."""
         tw = width(target)
         groups = {}
+        zcv = {cv for (cv, z) in choices if z is not None}
         for (cv, z), e in choices.items():
             p = parse(e)
             gk = ('BOOL',) if p[0] == 'BOOL' else tuple(sorted(p[0]))
-            groups.setdefault(gk, {})[(cv, z)] = p
+            # control values gated by ZJ get rules of their own: in a shared group every member would enumerate ZJ's values
+            groups.setdefault((gk, cv in zcv), {})[(cv, z)] = p
         R1, R2, R3 = [], [], []
         ungated = list(choices) == [('*', None)]
         any_carry = False
-        for gk, mem in groups.items():
+        marks = []                                    # where each group's specs start (merge_digits merges within a group)
+        for (gk, _), mem in groups.items():
+            marks.append((len(R1), len(R2)))
             sems = {}
             for (cv, z), p in mem.items(): sems.setdefault(cv, []).append((z, p))
-            canon = {}
-            for cv, lst in sems.items(): canon.setdefault(repr(sorted(lst, key=repr)), cv)
-            ckey = {cv: canon[repr(sorted(lst, key=repr))] for cv, lst in sems.items()}
+            def dkey(f, sems=sems):
+                """the control-copy key for rules that depend on a member's expression only through f(p): members alike in f share
+                a class (per digit: SP-1 and SP-2 differ only in digit 0, so digits 1-3 share their rules)"""
+                canon, ck = {}, {}
+                for cv, lst in sems.items():
+                    sig = repr(sorted(((z, f(p)) for z, p in lst), key=repr))
+                    ck[cv] = canon.setdefault(sig, cv)
+                return lambda v, ck=ck: ck.get(v)
             usez = any(z is not None for (_, z) in mem)
             def semof(k, sems=sems, ungated=ungated):
                 if ungated: return sems['*'][0][1]
@@ -173,7 +188,8 @@ class CPU:
                 if usez: g['zj'] = self.c(f'ZJ{j}')
                 if commit: g['okj'] = self.c(f'OKJ{j}')
                 return g
-            gkeys = {'cj': (lambda ck: lambda v: ck.get(v))(ckey), 'zj': lambda v: v, 'okj': lambda v: v}
+            gkeys = {'cj': dkey(lambda p: repr(p)), 'zj': lambda v: v, 'okj': lambda v: v}
+            def gk_(f): return {**gkeys, 'cj': dkey(f)}
             if gk == ('BOOL',):
                 # digit 0 from BF, other digits 0; BF sits right before MAR0 in block 0
                 def fn0(it, k, semof=semof):
@@ -184,11 +200,25 @@ class CPU:
                          'AND': (not z2) and (not z1), 'OR': not (z2 and z1), 'Z': z1}[p[1]]
                     return [(0, ('SET', (int(bool(b)), 0)))]
                 R1.append(DA(f'{target}0<-BOOL', [dict(src=self.c('BF'), targets=[self.c(f'{target}0')], gates=gates(0))],
-                             {'src': lambda v: v, **gkeys}, fn0))
+                             {'src': lambda v: v, **gk_(lambda p: p[1])}, fn0))
                 items = [dict(src=self.c(f'CJ{j}'), targets=[self.c(f'{target}{j}')], gates={k_: v_ for k_, v_ in gates(j).items() if k_ != 'cj'})
                          for j in range(1, tw)]
-                R1.append(DA(f'{target}<-BOOL0', items, {'src': gkeys['cj'], 'zj': gkeys['zj'], 'okj': gkeys['okj']},
+                R1.append(DA(f'{target}<-BOOL0', items, {'src': dkey(lambda p: 0), 'zj': gkeys['zj'], 'okj': gkeys['okj']},
                              lambda it, k, semof=semof: [(0, ('SET', (0, 0)))] if semof({**k, 'cj': k['src']}) else None))
+                continue
+            if not terms_of(gk):
+                # a constant: every digit from the control copy (gated like the narrower-operand digits below)
+                any_carry = True
+                for j in range(tw):
+                    tgt = self.c(f'{target}{j}')
+                    mask = tw == 4 and j == 3
+                    def fnk(it, k, semof=semof, j=j, mask=mask, tm=topmask(f'{target}3')):
+                        p = semof({**k, 'cj': k['src']})
+                        if p is None: return None
+                        d = digits(p[1] & MASK, 5)[j]
+                        return [(0, ('SET', ((d & tm) if mask else d, 0)))]
+                    R1.append(DA(f'{target}{j}<-C', [dict(src=self.c(f'CJ{j}'), targets=[tgt], gates={x: y for x, y in gates(j).items() if x != 'cj'})],
+                                 {'src': dkey(lambda p, j=j: digits(p[1] & MASK, 5)[j]), 'zj': gkeys['zj'], 'okj': gkeys['okj']}, fnk))
                 continue
             terms = sorted(gk, key=lambda t: t[1] != target)     # a self-term must be read before it is overwritten
             neg = sum(1 for sg, _ in terms if sg < 0)
@@ -207,7 +237,7 @@ class CPU:
                         a = srcdigit(ra, j, k['src']) if sa > 0 else 15 - k['src']
                         return [(0, setop(a + kd(p, j)))]
                     R1.append(DA(f'{target}{j}<-{ra}', [dict(src=self.c(f'{regcell(ra)}{j}'), targets=[tgt], gates=gates(j))],
-                                 {'src': lambda v: v[0], **gkeys}, fn))
+                                 {'src': lambda v: v[0], **gk_(lambda p, j=j, kd=kd: kd(p, j))}, fn))
                 elif j < width(ra):
                     # source sits after the target: backtrack-style copy (16 rules, gated by the local control copy)
                     assert len(terms) == 1 and sa > 0 and ra != 'SIM', (target, gk)
@@ -216,7 +246,7 @@ class CPU:
                         if p is None: return None
                         return setop(k['src'] + kd(p, j))[1]
                     R1.append(A(f'{target}{j}<-{ra}(la)', [tgt], (lambda g, s_: lambda c: {**g, 'src': s_})(gates(j), self.c(f'{ra}{j}')),
-                                {'src': lambda v: v[0], **gkeys}, fna))
+                                {'src': lambda v: v[0], **gk_(lambda p, j=j, kd=kd: kd(p, j))}, fna))
                 else:
                     # narrower operand: the digit is a constant (complemented if negated)
                     if ungated: continue
@@ -225,7 +255,7 @@ class CPU:
                         if p is None: return None
                         return [(0, setop((15 if sa < 0 else 0) + kd(p, j)))]
                     R1.append(DA(f'{target}{j}<-K', [dict(src=self.c(f'CJ{j}'), targets=[tgt], gates={x: y for x, y in gates(j).items() if x != 'cj'})],
-                                 {'src': gkeys['cj'], 'zj': gkeys['zj'], 'okj': gkeys['okj']}, fnc))
+                                 {'src': dkey(lambda p, j=j, kd=kd: kd(p, j)), 'zj': gkeys['zj'], 'okj': gkeys['okj']}, fnc))
                 if len(terms) > 1:
                     (sb, rb) = terms[1]
                     if j < width(rb):
@@ -235,11 +265,15 @@ class CPU:
                             b = srcdigit(rb, j, k['src']) if sb > 0 else 15 - k['src']
                             return [(0, ('ADD', b))] if b else None
                         R2.append(DA(f'{target}{j}+={rb}', [dict(src=self.c(f'{regcell(rb)}{j}'), targets=[tgt], gates=gates(j))],
-                                     {'src': lambda v: v[0], **gkeys}, fnb))
+                                     {'src': lambda v: v[0], **gk_(lambda p: 0)}, fnb))
                     elif sb < 0 and not ungated:
                         R2.append(DA(f'{target}{j}+=15', [dict(src=self.c(f'CJ{j}'), targets=[tgt], gates={x: y for x, y in gates(j).items() if x != 'cj'})],
-                                     {'src': gkeys['cj'], 'zj': gkeys['zj'], 'okj': gkeys['okj']},
+                                     {'src': dkey(lambda p: 0), 'zj': gkeys['zj'], 'okj': gkeys['okj']},
                                      lambda it, k, semof=semof: [(0, ('ADD', 15))] if semof({**k, 'cj': k['src']}) else None))
+        marks.append((len(R1), len(R2)))
+        if merge:
+            R1 = [x for i in range(len(marks) - 1) for x in self.merge_digits(target, R1[marks[i][0]:marks[i + 1][0]])]
+            R2 = [x for i in range(len(marks) - 1) for x in self.merge_digits(target, R2[marks[i][1]:marks[i + 1][1]])]
         if any_carry:
             for j in range(1, tw):
                 top = tw == 4 and j == 3
@@ -247,6 +281,23 @@ class CPU:
                             {'cy': lambda v: v[1]},
                             (lambda top: lambda cell, k: Op('ADDM', k['cy']) if top else (Op('ADD', k['cy']) if k['cy'] else None))(top)))
         return R1, R2, R3
+
+    def merge_digits(self, target, specs):
+        """One dispatch spec per expression group instead of one per digit: the digits' rules start at different glyph types,
+        so they share a subtable (the subtable count per cycle is capped: S x subtables <= 16,384)."""
+        out, by = [], {}
+        for s_ in specs:
+            m = re.fullmatch(re.escape(target) + r'(\d)(<-.*|\+=.*)', s_.name)
+            if not isinstance(s_, DA) or not m: out.append(s_); continue
+            key = m.group(2)
+            if key not in by:
+                by[key] = DA(target + key, [], {r: {} for r in s_.keys}, lambda it, k: it['fn'](it, k)); out.append(by[key])
+            for it in s_.items:
+                cells = {'src': [it['src']], 'tgt': it['targets'], **{r: [c] for r, c in it['gates'].items()}}
+                for r, f in s_.keys.items():
+                    for c in cells.get(r, []): by[key].keys[r][c.type.name] = f
+            by[key].items += [dict(it, fn=s_.fn) for it in s_.items]
+        return out
 
     def split_stage(self, name, specs, group=None):
         """One lookup per group of specs (group(spec) -> key; default: one per spec). A lookup with many
@@ -292,13 +343,28 @@ class CPU:
         P.stage('K0 lut', [DA('LUT', [dict(src=core['P'], targets=[C] + self.reg('IMM'), gates={})],
                                {'src': pkey, 'tgt': lambda v: v == ('S',) if isinstance(v, tuple) and isinstance(v[0], str) else None}, lut)])
         # ---- K1: D = T2-T1, zero/sign flags, BF, local control copies, MOP
-        P.stage('K1 init', [MAP('finit', [P.types[n] for n in ['ZT1', 'ZT2', 'ZD', 'SD']], lambda t, v: 0 if t.name == 'SD' else 1)])
+        P.stage('K1 init', [MAP('finit', [P.types[n] for n in ['ZT1', 'ZT2', 'ZD', 'SD', 'ST2', 'ZSEL']], lambda t, v: 0 if t.name in ('SD', 'ST2', 'ZSEL') else 1)])
         self.stage3('K1 D', self.lin('D', {('*', None): 'T2-T1'}))
         for flag, r in [('ZT1', 'T1'), ('ZT2', 'T2'), ('ZD', 'D')]:
             P.stage(f'K1 {flag}', [DA(flag, [dict(src=core[f'{r}{j}'], targets=[core[flag]], gates={}) for j in range(5)],
                                       {'src': lambda v: v[0] != 0}, lambda it, k: [(0, ('SET', 0))] if k['src'] else None)])
         P.stage('K1 SD', [DA('SD', [dict(src=core['D4'], targets=[core['SD']], gates={})], {'src': lambda v: v[0] >= 8},
                              lambda it, k: [(0, ('SET', 1))] if k['src'] else None)])
+        P.stage('K1 ST2', [DA('ST2', [dict(src=core['T24'], targets=[core['ST2']], gates={})], {'src': lambda v: v[0] >= 8},
+                              lambda it, k: [(0, ('SET', 1))] if k['src'] else None)])
+        # ZSEL: the gate the cycle's choices use (uarch.SEL): Z(T1) by default (JZ / JNZ), else the cycle's selector. One small
+        # rule set per selector, each with only the flags it reads (ZSEL is 0 from K1 init)
+        selof = {cv: cyc.get('sel', 'z1') for cv, cyc in uc.items()}
+        def zrule(name, flags, f):
+            ctx = {'c': C, **{x: core[x] for x in flags}}
+            return A(f'ZSEL.{name}', [core['ZSEL']], lambda cell, ctx=ctx: ctx,
+                     {'c': lambda v, name=name: name if selof.get(v) == name else None, **{x: (lambda v: v) for x in flags}},
+                     lambda cell, k, name=name, f=f: (f(k) or None) if k['c'] == name else None)
+        P.stage('K1 zsel', [zrule('z1', ['ZT1'], lambda k: k['ZT1']),
+                            zrule('scan', ['ZD', 'ZT2', 'ST2'], lambda k: 1 if (k['ZD'] or k['ZT2']) else 2 if k['ST2'] else 0),
+                            zrule('nst2', ['ST2'], lambda k: 1 - k['ST2']), zrule('nzt2', ['ZT2'], lambda k: 1 - k['ZT2']),
+                            zrule('sd', ['SD'], lambda k: k['SD'])])
+        assert set(selof.values()) <= {'z1', 'scan', 'nst2', 'nzt2', 'sd'} and set(SEL) == {'scan', 'nst2', 'nzt2', 'sd'}
         ctlmop = {}
         for cv, cyc in uc.items():
             m = cyc.get('mem'); ctlmop[cv] = ('R' if m[0] == 'R' else 'W' + ('?' if cyc.get('ext') else '')) if m else 'N'
@@ -311,7 +377,7 @@ class CPU:
             A('BF', [core['BF']], lambda c: {'sd': core['SD'], 'zd': core['ZD'], 'z1': core['ZT1'], 'z2': core['ZT2']},
               {'sd': lambda v: v, 'zd': lambda v: v, 'z1': lambda v: v, 'z2': lambda v: v},
               lambda cell, k: 8 * k['sd'] + 4 * k['zd'] + 2 * k['z1'] + k['z2']),
-            *[A(f'ZJ{j}', [core[f'ZJ{j}']], lambda c: {'z': core['ZT1']}, {'z': lambda v: v}, lambda cell, k: k['z']) for j in range(5)],
+            *[A(f'ZJ{j}', [core[f'ZJ{j}']], lambda c: {'z': core['ZSEL']}, {'z': lambda v: v}, lambda cell, k: k['z']) for j in range(5)],
             A('MOP', [core['MOP']], lambda c: {'c': C, 'resv': core['RESV']}, {'c': lambda v: ctlmop.get(v, 'N'), 'resv': lambda v: v}, mopf)])
         P.stage('K1 cj', [DA('CJ', [dict(src=C, targets=[core[f'CJ{j}'] for j in range(5)], gates={})], {'src': lambda v: v},
                              lambda it, k: [(j, ('SET', k['src'])) for j in range(5)])])
@@ -320,11 +386,11 @@ class CPU:
         for cv, cyc in uc.items():
             m = cyc.get('mem')
             if m:
-                mar[(cv, None)] = m[1]
-                if m[0] == 'W': mdw[(cv, None)] = m[2]
+                mar.update(choices_of(cv, m[1]))
+                if m[0] == 'W': mdw.update(choices_of(cv, m[2]))
         mar[(('F', 0), None)] = 'PC'
-        self.stage3('K2 MAR', self.lin('MAR', mar))
-        self.stage3('K2 MDW', self.lin('MDW', mdw))
+        self.stage3('K2 MAR', self.lin('MAR', mar, merge=True))
+        self.stage3('K2 MDW', self.lin('MDW', mdw, merge=True))
         # ---- K3: memory (ring cache)
         Lt = lambda f: P.types[f'L.{f}']
         P.stage('K3 init', [MAP('minit', [Lt(f) for f in [f'G{b}' for b in range(20)] + ['GH', 'GF', 'VS', 'WH', 'WE', 'GS0']] +
@@ -425,17 +491,26 @@ class CPU:
                             {'o': lambda v: v, 'c': lambda v: v in waitc, 'resv': lambda v: v},
                             lambda cell, k: 'wait' if (k['o'] == 'ok' and k['c'] and not k['resv']) else k['o'])])
         P.stage('K5 okj', [A(f'OKJ{j}', [core[f'OKJ{j}']], lambda c: {'o': core['OK']}, {'o': lambda v: v}, lambda cell, k: k['o']) for j in range(5)])
-        loads = []
+        loads, loadsx = [], []
         for tr in ['T1', 'T2', 'T3']:
-            loads += self.lin(tr, {(cv, None): 'MDR' for cv, cyc in uc.items() if tr in cyc.get('t', {})})[0]
+            # loads from MDR, and plain copies of another register (SCANI: T1 := IMM) in a lookup of their own: a rule consumes
+            # its input span (MDR_j .. T3_j covers IMM_j and T1_j), so two loads in one cycle cannot share a lookup
+            for src, out in (('MDR', loads), (None, loadsx)):
+                ch = {(cv, None): e for cv, cyc in uc.items() for t_, e in cyc.get('t', {}).items() if t_ == tr and (e == 'MDR') == (src == 'MDR')}
+                if not ch: continue
+                r1, r2, r3 = self.lin(tr, ch)
+                assert not r2 and not r3, ('a temp load must be a plain copy', tr)
+                out += r1
         loads += self.lin('IMM', {(('F', 0), None): 'MDR'}, commit=True)[0]
         P.stage('K5 loads', loads)
+        if loadsx: P.stage('K5 loadsx', loadsx)
         commit = {cv: cyc.get('commit', {}) for cv, cyc in uc.items() if last[cv]}
         def chooser(reg, pred):
             out = {}
             for cv, cm in commit.items():
-                if reg not in cm or not pred(cm[reg]): continue
+                if reg not in cm or not pred(str(cm[reg])): continue
                 e = cm[reg]
+                if isinstance(e, dict): out.update(choices_of(cv, e)); continue
                 m = re.fullmatch(r'Z\(T1\)\?(.*):(.*)', e)
                 if m: out[(cv, 1)] = m.group(1); out[(cv, 0)] = m.group(2)
                 else: out[(cv, None)] = e

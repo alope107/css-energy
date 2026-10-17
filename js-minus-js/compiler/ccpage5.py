@@ -191,7 +191,8 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
         css.append(f'.gs{gp} {{ animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both;'
                    f' animation-name: {", ".join(f"k{f}{gp}_{i}" for i in range(G) for f, _ in TOKF)};'
                    + ''.join(f' --k{f}{gp}_{i}: 0;' for i in range(G) for f, _ in TOKF) +
-                   f' --vh: inherit; --q-o_yw: inherit; --q-o_yi: inherit; --q-o_fw: inherit; --q-o_fi: inherit; --tcq: var(--kc{1 - int(gp)}_{G - 1}); }}')
+                   f' --vh: inherit; --q-o_yw: inherit; --q-o_yi: inherit; --q-o_fw: inherit; --q-o_fi: inherit; --q-o_iw: inherit; --q-o_ii: inherit;'
+                   f' --tcq: var(--kc{1 - int(gp)}_{G - 1}); }}')
     tref = lambda f, t: f'var(--k{f}{(t // G) % 2}_{t % G})'
     css.append('.tlA, .tlB {'
                ' --tlive: clamp(0, var(--ntf) - var(--ti) + 1, 1); --tlast: calc(1 - min(1, abs(var(--ntf) - var(--ti))));'
@@ -207,7 +208,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
         decl = [f'--x-{n}: var(--p-{n}-{yp});' for n in pst] + ['--x-tk: 0;']
         decl += [f'--p-{n}-{y}: var(--q-new-{n});' for n in pst]
         decl += [f'--q-o_v{s}: 0;' for s in range(E)] + ['--q-o_dv: 0;', '--q-ran: 0;'] + [f'--q-o_lv{k}: 0;' for k in range(NLP)]
-        decl += ['--q-o_yw: 0;', '--q-o_fw: 0;'] + [f'--q-{n}-{y}: var(--q-{n});' for n in sorted(DELAYED_V)]
+        decl += ['--q-o_yw: 0;', '--q-o_fw: 0;', '--q-o_iw: 0;'] + [f'--q-{n}-{y}: var(--q-{n});' for n in sorted(DELAYED_V)]
         has = 'var(--has)'
         decl += [f'--s-bad-{y}: max(var(--s-bad-{yp}), {has} * (1 - var(--q-ran)));',
                  f'--s-nr-{y}: max(var(--s-nr-{yp}), 1 - {has});',
@@ -227,7 +228,8 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
     # delayed table writes
     for y in 'AB':
         yp = OTH[y]
-        for pre, nm, fl, cnt in (('y', ('sh1_', 'sh2_', 'sk_'), ('h1', 'h2', 'k'), R.NS), ('f', ('fh1_', 'fh2_', 'fl_'), ('h1', 'h2', 'l'), R.NF)):
+        for pre, nm, fl, cnt in (('y', ('sh1_', 'sh2_', 'sk_'), ('h1', 'h2', 'k'), R.NS), ('f', ('fh1_', 'fh2_', 'fl_'), ('h1', 'h2', 'l'), R.NF),
+                                 ('i', ('ih1_', 'ih2_', 'iv_'), ('h1', 'h2', 'v'), R.NI)):
             for j in range(cnt):
                 css.append(f'@container style(--q-o_{pre}w: 1) and style(--q-o_{pre}i: {j}) {{ .tp{y} {{ '
                            + ' '.join(f'--t-{a}{j}: var(--q-o_{pre}{b}-{yp});' for a, b in zip(nm, fl)) + ' } }')

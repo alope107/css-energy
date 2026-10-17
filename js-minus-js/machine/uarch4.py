@@ -48,8 +48,7 @@ class Machine4(Machine):
                 self.wb(vic)
                 if k == 'WFAIL': return
             if k == 'MISS':
-                b = t[1] // self.B
-                assert t[1] >= ROM
+                b = t[1] // self.B                     # below RAM (a property of a non-object): reads 0, like the page
                 self.lines[self.vp] = [b, [self.ram.get(b * self.B + j, 0) for j in range(self.B)], [0] * self.B]
                 self.vp = (self.vp + 1) % self.N
         else:
