@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>@container style() isn't re-evaluated when an animation changes the container's value</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  @property --f { syntax: '<integer>'; inherits: true; initial-value: 0; }
+  /* after 0.5 s the animation sets --f to 1 on the container, and keeps it there */
+  @keyframes on { from, to { --f: 1; } }
+  .anim { animation: on 1s 0.5s forwards; }
+  .container { counter-reset: f var(--f); margin: 8px 0; }
+  .container::before { content: "container --f = " counter(f); }
+  .child { width: 200px; height: 30px; background: red; }
+  @container style(--f: 1) { .child { background: green; } }
+  /* the same, with the flag computed from the animated value one element further down */
+  @property --t { syntax: '<number>'; inherits: true; initial-value: 0; }
+  @keyframes t { from, to { --t: 1; } }
+  .anim2 { animation: t 1s 0.5s forwards; }
+  .derived { --f: calc(var(--t)); counter-reset: f var(--f); }
+  .derived::before { content: "derived --f = " counter(f); }
+</style>
+<p>After half a second each box should turn green, as its container's <code>--f</code> (printed above it) becomes 1.</p>
+<div class="container anim"><div class="child"></div></div>
+<div class="anim2"><div class="derived"><div class="child"></div></div></div>
+<p>Control (no animation; a script sets <code>--f: 1</code> inline after 0.5 s):</p>
+<div class="container" id="ctl"><div class="child"></div></div>
+<script>setTimeout(() => ctl.style.setProperty('--f', '1'), 500);</script>
+<!--
+Observed (Linux, 2026-10-17: Playwright's Firefox 157, stock 158 and Nightly 160): the containers print --f = 1 but both animated boxes stay red; the
+control turns green. Chrome 153: all three turn green. Any restyle that isn't animation-only (adding a stylesheet, a
+class change on an ancestor) turns them green. A size container ancestor whose size changes also does (Firefox
+re-matches its subtree after layout), which is the workaround css-physics uses.
+Spec: css-conditional-5 evaluates style() against the container's computed value, which includes animations.
+Likely cause (from reading the code, untested): accumulate_damage_for adds RESTYLE_IF_AFFECTED_BY_STYLE_QUERIES, but the
+animation-only traversal only visits elements with animation or recascade hints, so children are recascaded and never
+selector-matched again.
+-->

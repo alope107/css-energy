@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>calc(): a subtracted hypot() is added instead</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  .row { position: relative; height: 20px; margin: 6px 0; }
+  .row > div { position: absolute; left: 0; top: 0; height: 20px; }
+  /* the test is red; a green 50px reference covers it exactly when the test is 50px wide */
+  .test { background: red; }
+  .ref { background: green; width: 50px; }
+  #a .test { width: calc(100px - hypot(30px, 40px)); }               /* 100 - 50 = 50 */
+  #b .test { width: calc(100px - max(hypot(30px, 40px), 1px)); }     /* 100 - 50 = 50 */
+  #c .test { width: calc(130px - (30px + hypot(30px, 40px))); }      /* 130 - 80 = 50 */
+  #d { --h: hypot(30px, 40px); }
+  #d .test { width: calc(100px - var(--h)); }                         /* 100 - 50 = 50 */
+  #e .test { width: calc(100px - 1 * hypot(30px, 40px)); }           /* 100 - 50 = 50 */
+  #f .test { width: calc(100px + -1 * hypot(30px, 40px)); }          /* control: correct in Firefox */
+</style>
+<p>Each row should be one green 50px bar. Red to the right of it means the subtracted <code>hypot()</code> was added.</p>
+<div class="row" id="a"><div class="test"></div><div class="ref"></div></div> <code>calc(100px - hypot(30px, 40px))</code>
+<div class="row" id="b"><div class="test"></div><div class="ref"></div></div> <code>calc(100px - max(hypot(30px, 40px), 1px))</code>
+<div class="row" id="c"><div class="test"></div><div class="ref"></div></div> <code>calc(130px - (30px + hypot(30px, 40px)))</code>
+<div class="row" id="d"><div class="test"></div><div class="ref"></div></div> <code>--h: hypot(30px, 40px); calc(100px - var(--h))</code>
+<div class="row" id="e"><div class="test"></div><div class="ref"></div></div> <code>calc(100px - 1 * hypot(30px, 40px))</code>
+<div class="row" id="f"><div class="test"></div><div class="ref"></div></div> <code>calc(100px + -1 * hypot(30px, 40px))</code> (control)
+<pre id="out"></pre>
+<script>
+  // optional readout; the bars above don't need script
+  out.textContent = [...document.querySelectorAll('.test')].map(e => e.parentNode.id + ': ' + getComputedStyle(e).width + ' (expected 50px)').join('\n');
+</script>
+<!--
+Observed (Linux, 2026-10-17: Playwright's Firefox 157, stock 158 and Nightly 160, the same values): rows a-e are 150px, 99px,
+150px, 150px and 150px wide; the control f is 50px. Chrome 153: all 50px. With plain numbers the same holds
+(calc(100 - hypot(3, 4)) = 105), except that 1 * hypot(3, 4) is safe there; with lengths the 1 is folded away.
+Every other math function (sqrt, pow, abs, sign, min, max, clamp, round, mod, rem, exp, log, sin, cos, tan) is right in
+the same positions.
+Likely cause: servo/components/style/values/generics/calc.rs, CalcNode::negate(), negates a Hypot node by negating
+its children, and hypot(-a, -b) = hypot(a, b); Sqrt, Pow and Abs are wrapped in a Negate node instead. MinMax, Clamp,
+Sign and Sum push the negation into their arguments, so a hypot() inside them flips too; a Product wraps itself,
+which is why -1 * hypot() is safe (1 * hypot(30px, 40px) and hypot() * 1 are folded to hypot() first and aren't).
+-->
