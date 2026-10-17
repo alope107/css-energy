@@ -29,6 +29,10 @@ make dist            # copy the built page to dist/
 python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
 ```
 
+`l2`, `l3` and the `l5` targets are logs in `build/` that make keeps while nothing they depend on changed (the built
+page, the harness, the suite, Chrome): such a check prints `up to date` instead of running. `RERUN=1 make l3` runs it
+anyway (`../shared/README.md#checks-in-make`).
+
 - **Browser**: harnesses launch Chromium through `tools/browser.js`. `CHROME=/path` overrides; otherwise the npm
   package `@sparticuz/chromium` is used on Linux x64 (its only build), and elsewhere Playwright's own Chromium, falling
   back to the devcontainer image's `/usr/local/bin/chromium`. The launcher is shared with css-physics (`../shared/`, profile
