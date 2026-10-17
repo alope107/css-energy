@@ -1,0 +1,30 @@
+<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>Dictionary RAM Self-Test · 4/4</title>
+<style>
+:root{--bg:#f4f1ea;--ink:#1b1a17;--mute:#77716a;--line:#dcd6ca;--ok:#2f7a4f;--bad:#c8372d;--wait:#a8a39a}
+@media (prefers-color-scheme:dark){:root{--bg:#121110;--ink:#ece7dc;--mute:#8c857a;--line:#2b2925;--ok:#5cc28a;--bad:#ff6b5e;--wait:#5b5853}}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font:14px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace;padding:32px 16px}
+main{max-width:720px;margin:0 auto}
+h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0 0 6px}
+.lede{color:var(--mute);margin:0 0 24px}
+.t{display:grid;grid-template-columns:96px 1fr;gap:4px 16px;padding:16px 0;border-top:1px solid var(--line);
+  position:relative;anchor-scope:--row}
+.t:last-of-type{border-bottom:1px solid var(--line)}
+.t h2{grid-column:2;font-size:14px;margin:0}
+.t p{grid-column:2;margin:0;color:var(--mute);font-size:13px}
+/* probes: decoded widths add up; a failed or pending probe is 0 wide */
+.row{position:absolute;left:0;top:0;display:flex;anchor-name:--row;opacity:0;pointer-events:none}
+.row i{display:block;flex:none}
+.light{grid-row:1/span 3;height:28px}
+.v{position:absolute;left:0;top:16px;height:28px;width:anchor-size(--row width);container-type:inline-size}
+.v b{position:absolute;left:0;top:0;width:96px;height:28px;box-sizing:border-box;border-radius:4px;
+  display:grid;place-items:center;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--bg);background:var(--wait)}
+.v b::after{content:"WAIT"}
+a{color:inherit}
+ol{margin:24px 0 0;padding-left:20px;color:var(--mute);font-size:13px}
+.w{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+</style><main><h1>Test D · result</h1>
+<p class=lede>The stored value should be 0, written last by page 3.</p>
+<style>@container (width:10px){#td .v b{background:var(--ok)}#td .v b::after{content:"PASS"}}@container (width:20px){#td .v b{background:var(--bad)}#td .v b::after{content:"STALE"}}@container (width:30px){#td .v b{background:var(--bad)}#td .v b::after{content:"BOTH?"}}</style><section class=t id=td><span class=row><i style="content:url(/v/r/r0.png?d)"></i><i style="content:url(/v/r/r1.png?d)"></i></span><div class=light><div class=v><b></b></div></div><h2>D · Vary: * survives</h2><p>PASS: page 3's reused URL re-registered value 0. STALE: value 1 is still stored, so page 3's write came from Chrome's memory cache; the host dropped or changed <code>Vary: *</code>. Writes in your app must then never reuse a URL in one tab.</p></section>
+<p><a href="/">← back to the tests</a></p></main></html>

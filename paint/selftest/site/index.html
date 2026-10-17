@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Dictionary RAM Self-Test</title>
+<!-- No JavaScript. See build.py for what each test means. -->
+<style>
+:root{--bg:#f4f1ea;--ink:#1b1a17;--mute:#77716a;--line:#dcd6ca;--ok:#2f7a4f;--bad:#c8372d;--wait:#a8a39a}
+@media (prefers-color-scheme:dark){:root{--bg:#121110;--ink:#ece7dc;--mute:#8c857a;--line:#2b2925;--ok:#5cc28a;--bad:#ff6b5e;--wait:#5b5853}}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font:14px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace;padding:32px 16px}
+main{max-width:720px;margin:0 auto}
+h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0 0 6px}
+.lede{color:var(--mute);margin:0 0 24px}
+.t{display:grid;grid-template-columns:96px 1fr;gap:4px 16px;padding:16px 0;border-top:1px solid var(--line);
+  position:relative;anchor-scope:--row}
+.t:last-of-type{border-bottom:1px solid var(--line)}
+.t h2{grid-column:2;font-size:14px;margin:0}
+.t p{grid-column:2;margin:0;color:var(--mute);font-size:13px}
+/* probes: decoded widths add up; a failed or pending probe is 0 wide */
+.row{position:absolute;left:0;top:0;display:flex;anchor-name:--row;opacity:0;pointer-events:none}
+.row i{display:block;flex:none}
+.light{grid-row:1/span 3;height:28px}
+.v{position:absolute;left:0;top:16px;height:28px;width:anchor-size(--row width);container-type:inline-size}
+.v b{position:absolute;left:0;top:0;width:96px;height:28px;box-sizing:border-box;border-radius:4px;
+  display:grid;place-items:center;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--bg);background:var(--wait)}
+.v b::after{content:"WAIT"}
+a{color:inherit}
+ol{margin:24px 0 0;padding-left:20px;color:var(--mute);font-size:13px}
+.w{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+</style>
+<main>
+<h1>Dictionary RAM self-test</h1>
+<p class=lede>Chrome only. Load this page, wait a few seconds, then <b>reload once</b>: the first load
+writes the dictionaries, the reload reads them. WAIT means a probe never decoded.</p>
+<i class=w style="mask-image:url(/t0/d.png)"></i>
+<i class=w style="mask-image:url(/t1/a/d.png)"></i>
+<i class=w style="mask-image:url(/t2/a/d.png)"></i>
+<style>@container (width:1px){#ta .v b{background:var(--bad)}#ta .v b::after{content:"NO DCZ"}}@container (width:11px){#ta .v b{background:var(--ok)}#ta .v b::after{content:"PASS"}}</style><section class=t id=ta><span class=row><i style="content:url(/ctl.png)"></i><i style="content:url(/t0/r/p.png)"></i></span><div class=light><div class=v><b></b></div></div><h2>A · dcz decoding works on this host</h2><p>A dictionary with a literal match pattern, and a probe compressed against it. NO DCZ is normal on the first load. Still NO DCZ after a reload means the host strips <code>Use-As-Dictionary</code> or <code>Content-Encoding: dcz</code> (e.g. Cloudflare's Shared dictionaries setting is not on passthrough). Nothing else can work.</p></section>
+<style>@container (width:10px){#tb .v b{background:var(--ok)}#tb .v b::after{content:"PASS"}}</style><section class=t id=tb><span class=row><i style="content:url(/t1/a/r/p.png)"></i></span><div class=light><div class=v><b></b></div></div><h2>B · placeholders in header values</h2><p>The dictionary's match pattern is <code>/t1/:k/r/*</code>, filled in from its own path.</p></section>
+<style>@container (width:10px){#tc .v b{background:var(--ok)}#tc .v b::after{content:"PASS"}}@container (width:20px){#tc .v b{background:var(--bad)}#tc .v b::after{content:"LEAK"}}@container (width:30px){#tc .v b{background:var(--bad)}#tc .v b::after{content:"LEAK"}}</style><section class=t id=tc><span class=row><i style="content:url(/t2/a/r/r10.png)"></i><i style="content:url(/t2/b/r/r20.png)"></i></span><div class=light><div class=v><b></b></div></div><h2>C · headers follow the request path of a 200 rewrite</h2><p>Dictionary and probes live in <code>/shared/</code> but are requested as <code>/t2/a/…</code> and <code>/t2/b/…</code>. PASS: cell a decodes, never-written cell b does not. LEAK: both decode, so the namespaces collapsed. FAIL/WAIT: the rewrite lost the headers; you would need one file per cell and value.</p></section>
+<section class=t><div class=light></div><h2>D · Vary: * survives</h2>
+<p>A reused write URL must still re-register a dictionary, which needs <code>Vary: *</code> to reach Chrome.
+This one takes four pages: <a href="/chain/1">start the chain</a>, and click "next" on each, waiting a
+second on each page.</p></section>
+<ol><li>Run it on <code>*.pages.dev</code> and on your custom domain; compare.</li>
+<li>Run it in a fresh profile (or Incognito) to rule out dictionaries left over from an earlier run.</li></ol>
+</main></html>

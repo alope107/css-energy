@@ -1,13 +1,16 @@
 # engine/
 
-Checks of the Chrome behaviour both projects are built on. Several of these facts may be bugs rather than specified
-behaviour, and the projects only work while they hold. Run both checks after every Chrome upgrade (the devcontainer's
-Playwright image tag).
+Checks of the Chrome behaviour css-physics and js-minus-js are built on. Several of these facts may be bugs rather
+than specified behaviour, and the projects only work while they hold. Run both checks after every Chrome upgrade (the
+devcontainer's Playwright image tag).
 
 ```bash
 make engine-check     # node engine/check.js: facts, pass/fail, both browser profiles (~20 s)
 make engine-costs     # node engine/costs.js: the style-engine cost table against the docs (~2 min, no other browser jobs)
 ```
+
+paint relies on different facts (which loads register a compression dictionary, history traversal serving CSS fetches
+from cache, about 1,000 frames per page). Its own `make test` exercises them end to end; `paint/CLAUDE.md` lists them.
 
 ## Facts (`check.js`)
 

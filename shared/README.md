@@ -1,16 +1,16 @@
 # shared/
 
-Harness code used by both projects: launching Chromium, tracing, page probes, A/B timing, motion checks, freezing and
-ablation. Only the tools use it. The product pages never run script.
+Harness code used by the projects' tools: launching Chromium, tracing, page probes, A/B timing, motion checks, freezing
+and ablation. Only the tools use it. The product pages never run script.
 
 Each project still has its own commands, unchanged (`node tools/tr.js …` in css-physics, `node machine/halttime.js …`
-in js-minus-js). They now import what they share from here. This directory has no npm dependencies: `browser.js`
+in js-minus-js, `node tools/e2e.js` in paint). They now import what they share from here. This directory has no npm dependencies: `browser.js`
 loads `playwright` / `playwright-core` from the project of the tool that runs, so each project keeps its own
 `node_modules`.
 
 | File | What it is | Used by |
 |---|---|---|
-| `js/browser.js` | `profile('physics' \| 'fontcpu')`: `launch()`, `open(browser, file, pageOpts, gotoOpts)`, `fileUrl()`, `envArgs()` | every browser tool. css-physics through `tools/lib/physics.js`, js-minus-js through `tools/browser.js` |
+| `js/browser.js` | `profile('physics' \| 'fontcpu')`: `launch()`, `open(browser, file, pageOpts, gotoOpts)`, `fileUrl()`, `envArgs()` | every browser tool. css-physics through `tools/lib/physics.js`, js-minus-js through `tools/browser.js`, paint through `tools/lib.js` (profile `physics`, persistent contexts via `.chromium` and `.executablePath()`) |
 | `js/page.js` | `countFrames(page, ms)`, `vars(page, sel, names)`, `pollUntil()` | css-physics tools |
 | `js/trace.js` | `record(page, {categories, browser}, during)`; `durations`, `median`, `bigmed`, `aggregate`, `selfTime`, `saveTrace`; category presets `CATS` | css-physics `tr`, `stylebench`, `sparse`, `grabcen`, `traceagg`, `compframes`; js-minus-js `machine/trace.js` |
 | `js/ab.js` | A/B timing: interleaved, rotated rounds of any measurement command, ratios to the first variant with their spread | both (command line) |
@@ -55,10 +55,11 @@ lines) or the first number after `name` in text output.
 
 ## Changing shared code
 
-Both projects depend on it, so check both:
+The projects depend on it, so check each:
 
 - `make test-shared` (unit tests, no browser);
 - css-physics `bash tools/smoke.sh 16`;
 - js-minus-js `make test`, `make l3` and `make l5-smoke`;
+- paint `make test`, for a change in `browser.js` (the only shared file it uses);
 - for a change in measurement code (`trace.js`, `page.js`, the profiles): old against new on the same pages, with
   `ab.js`.

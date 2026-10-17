@@ -1,0 +1,14 @@
+/c/:k/d/*
+  Use-As-Dictionary: match="/c/:k/r/*"
+  Cache-Control: public, max-age=31536000
+  Vary: *
+/c/:k/r/*
+  Content-Encoding: dcz
+  Cache-Control: no-store
+  Vary: accept-encoding, available-dictionary
+/c/:k/x
+  Cache-Control: no-cache
+/c/:k/p/*
+  Cache-Control: no-store
+/
+  Cache-Control: no-cache

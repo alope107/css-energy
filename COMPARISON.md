@@ -1,11 +1,14 @@
-# css-physics vs js-minus-js: techniques compared
+# css-physics, js-minus-js and paint: techniques compared
 
-Both projects compute inside Chrome's rendering pipeline with no script on the page. css-physics (rigid3d.css)
-runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js compiles
-JavaScript with CSS and executes the bytecode in a GSUB "CPU" font while Chrome shapes a line of text. This report
-lists what they share, where they differ, and which techniques could move from one to the other. Numbers are from
-each project's `docs/BENCHMARKS.md` (Chromium 153, the same devcontainer; css-energy's numbers were re-measured on the
-Ubuntu mini PC on 2026-10-17) unless marked *(estimate)*.
+css-physics and js-minus-js compute inside Chrome's rendering pipeline with no script on the page. css-physics
+(rigid3d.css) runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js
+compiles JavaScript with CSS and executes the bytecode in a GSUB "CPU" font while Chrome shapes a line of text.
+This report lists what they share, where they differ, and which techniques could move from one to the other.
+Numbers are from each project's `docs/BENCHMARKS.md` (Chromium 153, the same devcontainer; css-energy's numbers were
+re-measured on the Ubuntu mini PC on 2026-10-17) unless marked *(estimate)*.
+
+paint, the third project, stores state instead of computing it. Most of this report compares the first two;
+[paint](#paint) at the end lists where it overlaps with them.
 
 ## What both rely on
 
@@ -124,6 +127,40 @@ Not transferable, with reasons:
 - **Spatial partitioning.** css-physics measured it and it lost (its HISTORY.md, Phase 4). It has no analogue in
   js-minus-js.
 
+## paint
+
+paint keeps a canvas in Chrome's compression-dictionary store: a cell is written by loading a dictionary file and read
+by 16 probe images, of which only the one compressed against the stored dictionary decodes
+([paint/docs/ARCHITECTURE.md](paint/docs/ARCHITECTURE.md)). Its state lives in the network stack and on disk, so it
+survives reloads and restarts, arrives asynchronously, and is measured in requests, not passes. Its numbers come from
+a cloud sandbox, not the mini PC (paint/docs/BENCHMARKS.md).
+
+| Technique | paint | css-physics / js-minus-js |
+|---|---|---|
+| A layout size read back as a number | probe row width → `anchor-size()` reader → `calc(100cqw / 1px)` → registered `<integer>` | js-minus-js read ports read `anchor-size()`; css-physics reads registers through view timelines |
+| Transition latch | the paint colour, `transition: --c 0s 1e9s` (its single-document canvas) | js-minus-js editor latches; css-physics measured restart costs |
+| `if()` selection | colour lookup; a write URL chosen by value | js-minus-js `display: if(…)`, read ports |
+| A child document's viewport as an input | the palette colour reaches each cell `<object>` through its width, read with `@media` | — |
+
+### From paint, useful in the others
+
+1. **A save area for js-minus-js.** 480 entries of 4–8 bits that survive reloads: read once at boot into RAM, write
+   back. Too slow to be RAM itself (a read is K requests). paint/docs/ARCHITECTURE.md, "Feeding a CSS machine", has
+   the read port.
+2. **Frame limits, for anything that splits work across frames** (css-physics `experiments/iframes`). Chrome allows
+   about 1,000 frames per page and every `<iframe>` takes one, even hidden and `loading=lazy`; a hidden `<object>`
+   takes none and loads nothing. Many frames loading at once can also exceed Chrome's in-flight request limit, and
+   the rejected requests are never retried.
+3. **One fetch per URL per document, and history traversal from cache.** Both decide when a CSS-initiated load
+   reaches the network, which matters to any design that signals through loads.
+
+### From the others, useful in paint
+
+1. **Engine probes.** paint's facts (which loads register a dictionary, the frame limit, history from cache) are
+   checked only by its 6-minute end-to-end test. Minimal pages in the `engine/check.js` style would flag a Chrome
+   change in seconds.
+2. **`shared/js/ab.js`** for load-time changes such as staggered reads.
+
 ## Suggested next steps
 
 | Project | Step | Effort | Expected value |
@@ -134,3 +171,5 @@ Not transferable, with reasons:
 | css-physics | Microbenchmark anchor-name partner reads for contact slots | small, then large to build | could remove the N² pair rules |
 | js-minus-js | Freeze-and-ablate the trap service | medium | attributes 100 ms per frame |
 | js-minus-js | Reorder the dispatch test (ENGINE_NOTES.md already has the new costs) | small | small |
+| paint | Engine probes for its Chrome facts | small | a Chrome change caught in seconds |
+| js-minus-js | A save area on paint's dictionary store | medium | programs and data that survive a reload |

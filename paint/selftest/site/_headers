@@ -1,0 +1,32 @@
+/t0/d.png
+  Use-As-Dictionary: match="/t0/r/*"
+  Cache-Control: public, max-age=31536000
+  Vary: *
+/t0/r/*
+  Content-Encoding: dcz
+  Cache-Control: no-store
+  Vary: accept-encoding, available-dictionary
+/t1/:k/d.png
+  Use-As-Dictionary: match="/t1/:k/r/*"
+  Cache-Control: public, max-age=31536000
+  Vary: *
+/t1/:k/r/*
+  Content-Encoding: dcz
+  Cache-Control: no-store
+  Vary: accept-encoding, available-dictionary
+/t2/:k/d.png
+  Use-As-Dictionary: match="/t2/:k/r/*"
+  Cache-Control: public, max-age=31536000
+  Vary: *
+/t2/:k/r/*
+  Content-Encoding: dcz
+  Cache-Control: no-store
+  Vary: accept-encoding, available-dictionary
+/v/d*
+  Use-As-Dictionary: match="/v/r/*"
+  Cache-Control: public, max-age=31536000
+  Vary: *
+/v/r/*
+  Content-Encoding: dcz
+  Cache-Control: no-store
+  Vary: accept-encoding, available-dictionary
