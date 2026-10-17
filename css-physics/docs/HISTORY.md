@@ -100,7 +100,8 @@ The goal: run in Firefox with tweaks that don't cost Chrome. Firefox 158 (releas
 2. **The tower fell through itself** in a static state too: Firefox negates `hypot()` by its arguments (`100 - hypot(3,4)` = 105). `1 * hypot`.
 3. **Frozen from the first frame:** style-query rules aren't re-matched when an animation changes the container's value. A size container whose size follows the clock forces a subtree re-match each frame (`FFQ`, Firefox only).
 4. **The names (`if()`)**: first a portable wrapper (below, a dead end), then a Firefox-only "always named" block.
-5. Rendering: no typed division (the view scale), shadows drawn over their bodies (document order).
+5. Rendering: no typed division in 157 (the view scale), shadows drawn over their bodies (document order).
+6. The grab overlay jumped around in Firefox (found by the user): its unregistered `--u` resolved `100cqw` against #LM, the re-match clock's size container, and its percentages followed #LM's box. `--u` registered, #LW back to the arena's size, `tools/overlaycheck.js` in `smoke.sh`. Moving the clock into #LM's padding kept the box still but stopped the re-match (the tower fell through itself again).
 ARCHITECTURE.md §6 has the result. The full smoke suite passes in both browsers.
 
 ---
