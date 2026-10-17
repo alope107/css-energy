@@ -8,7 +8,10 @@ Each MRE is one self-contained HTML file: no dependencies, pass/fail visible wit
 optional script readout, and a closing comment with the observed results, the spec text and the likely cause.
 Serve the repo root (`python3 -m http.server 8765 --bind 127.0.0.1`) and open `bugs/<file>`.
 
-## Unreported: MREs
+## Now reported:
+[calc and hypot issue](https://bugzilla.mozilla.org/show_bug.cgi?id=2083404)
+
+## Previously Unreported: MREs
 
 | Bug | Browser | Spec | MRE |
 |---|---|---|---|
