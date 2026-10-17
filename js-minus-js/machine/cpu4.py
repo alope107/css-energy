@@ -348,8 +348,11 @@ class CPU:
         for flag, r in [('ZT1', 'T1'), ('ZT2', 'T2'), ('ZD', 'D')]:
             P.stage(f'K1 {flag}', [DA(flag, [dict(src=core[f'{r}{j}'], targets=[core[flag]], gates={}) for j in range(5)],
                                       {'src': lambda v: v[0] != 0}, lambda it, k: [(0, ('SET', 0))] if k['src'] else None)])
-        P.stage('K1 SD', [DA('SD', [dict(src=core['D4'], targets=[core['SD']], gates={})], {'src': lambda v: v[0] >= 8},
-                             lambda it, k: [(0, ('SET', 1))] if k['src'] else None)])
+        # SD: T2 < T1, exactly. The sign of the 20-bit difference D = T2 - T1 overflows when the operands' signs differ, and
+        # then T2 < T1 just when T2 is the negative one (LT GT LE GE and the 'sd' selector compare exactly, as uarch.py does)
+        P.stage('K1 SD', [A('SD', [core['SD']], lambda c: {'d': core['D4'], 'a': core['T14'], 'b': core['T24']},
+                            {'d': lambda v: v[0] >= 8, 'a': lambda v: v[0] >= 8, 'b': lambda v: v[0] >= 8},
+                            lambda cell, k: (1 if (k['b'] if k['a'] != k['b'] else k['d']) else None))])
         P.stage('K1 ST2', [DA('ST2', [dict(src=core['T24'], targets=[core['ST2']], gates={})], {'src': lambda v: v[0] >= 8},
                               lambda it, k: [(0, ('SET', 1))] if k['src'] else None)])
         # ZSEL: the gate the cycle's choices use (uarch.SEL): Z(T1) by default (JZ / JNZ), else the cycle's selector. One small

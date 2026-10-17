@@ -47,6 +47,7 @@ because a running page keeps its core busy.
 | FizzBuzz in uharfbuzz alone (no browser) | – | 20.6 ms per shaping, 103 shapings | 18.1 ms | §3 |
 | Self-compile in uharfbuzz alone | – | 9.55 ms per shaping (N16 S16; the image no longer halts, see §3) | 9.9 ms | §3 |
 | Editor readback sweep | – | 1.12–1.21 s, 0 misses | 1.18–1.21 s | §7 |
+| Objects (branch `js-objects`), FizzBuzz against `main` | – | Run → HALT ×1.006, Run → compiled ×1.045, HarfBuzz ×1.015 per shaping | – | §10 |
 
 **The new machine against the old one** *(derived)*: HarfBuzz shaping is about 13% slower here (20.6 against 18.1 ms
 per shaping), and the mid-run frame is about 8% slower (148 against 137 ms). FizzBuzz on the current page halts about
@@ -515,3 +516,56 @@ The real page with 16K sparse RAM against 3K dense is in §5a (HALT 10.9 against
 - The harness's own mouse moves show up in traces as hit testing (§6).
 - Run comparisons back to back on one machine. The old-machine numbers in brackets come from an arm64 VM; earlier logs
   in `archive/results/` come from yet another sandbox.
+
+## 10. Objects (2026-10-17, branch `js-objects`)
+
+Measured on the mini PC while another session ran css-physics benchmarks, so page runs were pinned to the E-cores
+(`taskset -c 12-15`: slower, steady; read the ratios) and HarfBuzz runs to one P-core with CPU time instead of wall time.
+"Before" is `main`'s `dist/js_in_css.xhtml` (commit `8349991`).
+
+**Programs without objects.**
+
+| Measure | Before | After | Ratio (median, IQR) |
+|---|---|---|---|
+| FizzBuzz, uharfbuzz ms per shaping (`machine/hbtest.py`, pinned, CPU time, 6 rounds) | 21.4–21.6 | 21.7–21.9 | ≈ 1.015 (three unloaded rounds 1.012–1.017) |
+| Subtables per cycle (sanitizer cap 512 at S = 32) | 432 | 392 | |
+| Control values | 120 | 148 | |
+| FizzBuzz Run → HALT on the page (`ab.js`, 6 rounds, E-cores) | 19.96 s (19.74–20.12) | 20.16 s (19.84–20.45) | 1.006 (1.003–1.019) |
+| FizzBuzz Run → compiled on the page (same) | 4,523 ms (4,363–4,546) | 4,642 ms (4,560–4,733) | 1.045 (1.024–1.066) |
+| Parser variants (`tools/vsz.py`) / on the page / rules | 323 / 302 / 168 | 346 / 322 / 188 | |
+| Parser temps (`tools/vsz.py`) | 62,756 | 67,451 | 1.075 |
+| Label ports per level | 21 | 21 | |
+
+- The new instructions alone cost about 7% per shaping (measured against the fixed generator). Most of it was paid back by a fix to the font generator:
+  self-update rules (PC := PC + 1) had existed 16 times each (`docs/HISTORY.md` phase 11). Without the object
+  instructions, that fix alone takes FizzBuzz from 19.6 to 18.4 ms per shaping (−6%, measured the same way).
+- Compile time grew with the parser's 20 more rules, the 16-entry intern table (16 more container rules per token level),
+  and 4 lexer and 2 parser state variables on every level.
+
+**Object programs** (model, `tools/traps.py`):
+
+| Program | Code words | Steps | Shapings | MISS | WFAIL | EXT |
+|---|---|---|---|---|---|---|
+| obj_basic | 136 | 365 | 77 | 47 | 5 | 5 |
+| obj_nested | 239 | 434 | 136 | 102 | 10 | 3 |
+| obj_keys | 164 | 929 | 163 | 73 | 10 | 14 |
+| obj_func | 149 | 537 | 107 | 68 | 7 | 2 |
+| obj_list | 91 | 462 | 88 | 49 | 8 | 1 |
+| obj_tree | 113 | 2,085 | 444 | 289 | 38 | 1 |
+| obj_grow | 135 | 1,598 | 241 | 99 | 15 | 29 |
+| obj_gc_small | 39 | 12,432 | 2,068 | 935 | 357 | 7 |
+| obj_gc | 78 | 40,443 | 16,607 | 12,848 | 1,786 | 1,825 |
+| fizzbuzz (for scale) | 45 | 476 | 103 | 26 | 1 | 39 |
+
+- 4–5 steps per shaping for object code, like the rest of the suite, except in tight allocation loops: `obj_gc` takes
+  18 shapings per iteration, 14 of them cache misses, because three fresh heap lines per iteration evict the loop's code
+  from the 16-line ring cache.
+- The GC's share (shapings with the PC in its ROM code): `obj_gc` 330 of 16,607 (2%) over about five collections,
+  `obj_gc_small` 36 of 2,068 for one.
+- On the page (L5, typed in, Run → HALT, machine loaded; FizzBuzz took 12.6 s in the same run): obj_basic 13.8 s,
+  obj_array 13.8 s, obj_list 15.0 s, obj_func 18.0 s, obj_nested 24.1 s, obj_keys 24.4 s, obj_count 30.8 s.
+  `obj_gc_small` (500 objects through the 384-chunk heap, one collection) halted 216 s after Run, output correct, its step
+  count exactly the model's.
+
+**How to re-run.** `python3 tools/traps.py tests/suite/obj_*.js`; the font against the model:
+`python3 tools/mkimg.py tests/suite/obj_gc_small.js img.json && CPUMOD=cpu4 python3 machine/hbtest.py img.json 16 32`.

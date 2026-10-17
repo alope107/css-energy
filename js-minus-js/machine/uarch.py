@@ -49,7 +49,7 @@ VEC = LAYOUT['vec_base']; GCVEC, PUTVEC, SETXVEC, GETXVEC = range(VEC, VEC + 4) 
 # selectors: a micro-cycle with 'sel' picks its address, data and commit expressions ({value: expr}) by a flag of T1 / T2
 SEL = {'scan': lambda r: 1 if r['T2'] in (r['T1'], 0) else 2 if r['T2'] < 0 else 0,   # found / free or end: stop; a link: follow
        'nst2': lambda r: int(r['T2'] >= 0), 'nzt2': lambda r: int(r['T2'] != 0),
-       'sd': lambda r: int(s20(r['T2'] - r['T1']) < 0)}
+       'sd': lambda r: int(r['T2'] < r['T1'])}
 FETCH = 39                                  # pseudo-op: fetch an instruction word from RAM
 
 def tdiv(a, b): return 0 if b == 0 else int(a / b)

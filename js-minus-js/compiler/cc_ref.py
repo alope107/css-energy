@@ -12,7 +12,8 @@ string literals ("..." or '...', escapes \\n \\t \\r \\\\ \\" \\'), static array
 + - * / % < > <= >= == != === !== && || (short-circuit, JS value semantics) ?: ! unary -; = += -= *= /= %=
 (also on a[i]); x++ x-- ++x --x as statements; calls; putc(x); console.log(a, b, ...), where + at the top
 level of an argument concatenates when an operand is a string ("n = " + n, s + "!"); // and /* */ comments;
-statements end with ';', or a newline / '}' where JavaScript would insert one.
+statements end with ';', or a newline / '}' where JavaScript would insert one. Objects: literals {a: 1, "b": 2, 3: x},
+o.x and x[k] reads, o.x / x[k] assignment statements (=, op=, ++, --), null; strings are interned (see OBJTAG below).
 
 Strings cannot be built: + on a string anywhere but the top level of a console.log argument is a compile error
 (when the compiler knows the operand is a string). Inside console.log, + whose operands are known strings prints
@@ -121,10 +122,11 @@ class Compiler:
         """lib: the runtime library's entry addresses (lib.json)"""
         self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
         self.getx_fn, self.setx_fn = lib['getx'], lib['setx']
-        # lexer. An identifier's bytes go to the string area at sdp (not committed); the level after it writes the NUL at inul. A
-        # property name is committed (sdp moves past it): after '.' (kdot) at once, before ':' when the ':' comes (icm: its length)
+        # lexer. An identifier that may be a property name (after '.', '{' or ','; kpos 2 / 1 / 1) writes its bytes to the
+        # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
+        # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
-        self.inul = 0; self.icm = 0; self.kdot = 0; self.lcon = 0; self.tid = 0
+        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0
         self.dp = data_base + 1             # globals and array literals (parser); data_base holds STRTAG
         self.sdp = data_base + SDATA        # string literals (lexer)
         # parser
@@ -278,13 +280,15 @@ class Compiler:
             self.h1 = self.h2 = 0
         elif isal(c) or (isdg(c) and self.tkc == 1):      # an identifier: hashed; its bytes at sdp (acc: its length so far)
             if self.tkc != 1: self.h1 = self.h2 = 0; self.acc = 0
-            self.shash(c); self.tkc = 1; self.sbyte(self.sdp + self.acc, c); self.acc += 1
+            self.shash(c); self.tkc = 1
+            if self.kpos: self.sbyte(self.sdp + self.acc, c)
+            self.acc += 1
             if not (isal(cn) or isdg(cn)):
                 tok = ('ID', (self.h1, self.h2)); self.tkc = 0
                 self.tid = self.sdp + 4096 * int(self.sdp + self.acc >= self.db + 2 * SDATA)    # its address (+ 4096: no room)
-                self.inul = self.sdp + self.acc
-                if self.kdot: self.sdp += self.acc + 1; self.icm = 0
-                else: self.icm = self.acc + 1
+                if self.kpos: self.inul = self.sdp + self.acc
+                if self.kpos == 2: self.sdp += self.acc + 1
+                self.icm = self.acc + 1 if self.kpos == 1 else 0
         elif isdg(c):
             self.acc = (self.acc * 10 if self.tkc == 2 else 0) + c - 48; self.tkc = 2
             if not isdg(cn): tok = ('NUM', self.acc); self.tkc = 0
@@ -294,7 +298,8 @@ class Compiler:
             if tok == ('P', 58) and self.icm: self.sdp += self.icm            # an object literal's key: commit its string
             if tok[0] != 'ID' and tok != ('P', T_NL): self.icm = 0
             if tok != ('P', T_NL):                             # (console.log's log is not a property name)
-                self.kdot = int(tok == ('P', 46) and not self.lcon); self.lcon = int(tok == ('ID', KW['console']))
+                self.kpos = 2 if tok == ('P', 46) and not self.lcon else int(tok in (('P', 123), ('P', 44)))
+                self.lcon = int(tok == ('ID', KW['console']))
             self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 7, 8)))
             cp0 = self.cp; self.token(*tok)
             if self.cp - cp0 > EMAX: self.fail(61)

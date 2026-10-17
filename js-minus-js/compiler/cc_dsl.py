@@ -17,7 +17,7 @@ OD, CD, NS, NF, NL, NI = R.OD, R.CD, R.NS, R.NF, R.NL, R.NI
 H1M, H2M = R.H1M, R.H2M
 KW = R.KW
 
-LEX_STATE = ['lx', 'q', 'lt', 'tkc', 'acc', 'h1', 'h2', 'p2', 'sstart', 'sdp', 'pp', 'inul', 'icm', 'kdot', 'lcon']
+LEX_STATE = ['lx', 'q', 'lt', 'tkc', 'acc', 'h1', 'h2', 'p2', 'sstart', 'sdp', 'pp', 'inul', 'icm', 'kpos', 'lcon']
 
 def parse_state_names():
     s = ['dp', 'mode', 'pn1', 'pn2', 'osp', 'csp', 'nsym', 'nlet', 'nfn', 'nlab', 'cp', 'curf', 'cfn', 'nfdef', 'nloc', 'npar', 'fsym', 'pendLa',
@@ -355,14 +355,14 @@ class Prog(Base):
                     nh2 = self.m(mod(add(mul(mul(keep, self.v('h2')), 37), c), H2M), 'nh2')
                     self.set('h1', nh1); self.set('h2', nh2); self.set('tkc', 1)
                     sdp = self.m(self.v('sdp'), 'sdp1'); ln = self.m(mul(keep, self.v('acc')), 'iln')
-                    with self.when(lt(add(sdp, ln), SEND)): self.datum(add(sdp, ln), c)
+                    kp = self.m(self.v('kpos'), 'kpos')        # maybe a property name: its bytes (cc_ref.char)
+                    with self.when(and_(ne(kp, 0), lt(add(sdp, ln), SEND))): self.datum(add(sdp, ln), c)
                     self.set('acc', ln + 1)
                     with self.when(not_(or_(alcn, dgcn))):
                         tok(2, add(sdp, mul(ge(add(sdp, ln + 1), SEND), 4096)), nh1, nh2); self.set('tkc', 0)
-                        self.set('inul', add(sdp, ln + 1))
-                        kd = self.m(self.v('kdot'), 'kdot')
-                        with self.when(kd): self.set('sdp', add(sdp, ln + 2)); self.set('icm', 0)
-                        with self.when(not_(kd)): self.set('icm', ln + 2)
+                        with self.when(ne(kp, 0)): self.set('inul', add(sdp, ln + 1))
+                        with self.when(eq(kp, 2)): self.set('sdp', add(sdp, ln + 2))
+                        self.set('icm', mul(eq(kp, 1), ln + 2))
                 with self.when(cJ):
                     nacc = self.m(add(mul(mul(eq(tkc, 2), self.v('acc')), 10), sub(c, 48)), 'nacc')
                     self.set('acc', nacc); self.set('tkc', 2)
@@ -999,7 +999,7 @@ class LexProg(Prog):
         with self.when(and_(eq(tk, 4), eq(tv, 58), ne(icm, 0))): self.set('sdp', add(self.v('sdp'), icm))
         with self.when(and_(ne(tk, 0), ne(tk, 2), not_(nl))): self.set('icm', 0)
         with self.when(and_(ne(tk, 0), not_(nl))):
-            self.set('kdot', and_(eq(tk, 4), eq(tv, 46), not_(self.v('lcon'))))
+            self.set('kpos', add(mul(and_(eq(tk, 4), eq(tv, 46), not_(self.v('lcon'))), 2), and_(eq(tk, 4), or_(eq(tv, 123), eq(tv, 44)))))
             self.set('lcon', and_(eq(tk, 2), eq(self.v('th1'), KW['console'][0]), eq(self.v('th2'), KW['console'][1])))
         self.set('lt', ite(ne(tk, 0), or_(inrange(tk, 1, 3), and_(eq(tk, 4), anyeq(tv, (41, 93, 7, 8)))), self.v('lt')))
         self.set('pp', mod(add(self.v('pp'), I('ptk')), 2))
