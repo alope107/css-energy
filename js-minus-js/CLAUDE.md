@@ -24,6 +24,7 @@ make test            # fast gate, no browser (~5 s): Node oracle, L1, L2, L4
 make l3              # the generated CSS compiler in Chrome vs the reference (~1.5 min)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~1 min)
 make l5              # every program under 1,500 steps (~10 min; run in the background)
+make l5-input        # the editor under user input: edits, pastes, selection; the scan reads what it shows (~1.5 min)
 make dist            # copy the built page to dist/
 python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
 ```
@@ -84,7 +85,7 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
 
 ### Machine or page change (`machine/`, `readback/`)
 
-- Run `make l5-smoke`.
+- Run `make l5-smoke`, and `make l5-input` for anything that touches the editor or the scan.
 - For speed claims, time FizzBuzz to HALT with `machine/ui_seq.js` (initial program) or `machine/ui_run.js`, before
   and after, back to back in one session. Both press Run. Run-to-run noise is about ±0.05 s on ~10.8 s (Ubuntu
   mini PC). For a ratio with its spread, interleave them: `EXP1=build/ui_exp/fizzbuzz.grid node ../shared/js/ab.js -p haltMs 'node
