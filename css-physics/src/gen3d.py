@@ -379,10 +379,7 @@ for _n in ('raw', 'avail', 'consE', 'NTP', 'NDB'):
     g.reg(_n, inherits=False)
 live = g.reg('live', inherits=False, syntax='<integer>')   # used on #LS only: the levels see ac/as
 g.reg('any', syntax='<integer>')
-FFQ = os.environ.get('FFQ', '1') == '1'   # the Firefox re-match clock (see #LM below)
-# where the container names come from: 'rules' (an extra wrapper #LN, portable) or 'if' (if() on #L0, Chrome only)
-NAMES = os.environ.get('NAMES', 'rules')
-LN_EL = not CELLS and NAMES != 'if'
+FFQ = os.environ.get('FFQ', '1') == '1'   # Firefox-only rules: the re-match clock (see #LM below) and the names
 if FFQ:
     g.reg('ffk')
 g.reg('mix', syntax='<integer>')
@@ -1420,8 +1417,7 @@ for lev, gate, name, expr in g.decl:
         if ref in decl_level and decl_level[ref] < lev:
             need.add(ref)
     gname = gate[0] if isinstance(gate, tuple) else gate
-    # (a rule's gate is read on its parent; #LN sits between #L0 and #L1, so #L1's rules read #L0's gates there)
-    if gname is not None and decl_level.get(gname, -1) < lev - 1 + (LN_EL and lev == 1):
+    if gname is not None and decl_level.get(gname, -1) < lev - 1:
         need.add(gname)
 for name in decl_level:
     if name.startswith('N'):
@@ -1532,7 +1528,9 @@ _OWN = [re.compile(p) for i_, p in enumerate((r'^np(\d+)_\d+$', r'^tcp(\d+)_\d+$
 
 
 OWNLEV = int(os.environ.get('OWNLEV', 999))
-BOOLQ = os.environ.get('BOOLQ', '1') == '1'
+# (off by default: Firefox's style(--flag) is true whenever a registered flag has a value, i.e. always; Chrome's
+# style(--flag: 1) costs within the noise at 48 bodies)
+BOOLQ = os.environ.get('BOOLQ', '0') == '1'
 
 
 def owner(gn):
@@ -1593,18 +1591,15 @@ def _digit(S, NW_, hv):
 for i in range(N if CELLS else 0):
     w(f'@container style(--as{i}: 1){{#LW{{--nb{i}:calc(sign({_digit("SX", NWX, f"var(--hx{i})")}) * sign({_digit("SZ", NWZ, f"var(--hz{i})")}))}}}}')
 _names = ' '.join(f'var(--A{i})' for i in range(N))
-if CELLS or NAMES == 'if':
-    # (without cells the presence digest is computed on #L0, so the names are too, as before)
-    w(('#LW{' if CELLS else '#L0{') + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}{" w" + str(i) if CELLS else ""}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
-else:
-    # #LN, a plain wrapper between #L0 and #L1, takes the names from rules that query #L0's flags: the same
-    # names, without if() (Firefox has none). #L0 itself carries none; only #L1's rules looked at it.
-    w('#LN{' + ''.join(f'--A{i}: ;' for i in range(N)) + f'--AN:q {_names}}}')
-    w(''.join(f'@container style(--{fl}{i}: 1){{#LN{{--A{i}:b{i}}}}}' for i in range(N) for fl in ('ac', 'nb')))
+# (without cells the presence digest is computed on #L0, so the names are too, as before)
+w(('#LW{' if CELLS else '#L0{') + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}{" w" + str(i) if CELLS else ""}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
+if FFQ and not CELLS:
+    # Firefox has no if(): there every body is always named. The names only let a sleeping neighbourhood's rules be
+    # skipped unevaluated; with all of them present every rule evaluates its own gate, with the same result.
+    w('@supports (-moz-appearance: none){#L0{' + ''.join(f'--A{i}:b{i};' for i in range(N)) + '}}')
 # every level carries the names, so a named rule always resolves to its parent (Chrome only forces
 # a re-match of rules that depend on a style container for that container's children)
-_named = [f'#L{l}' for l in range(NLEV)] if CELLS or NAMES == 'if' else ['#LN'] + [f'#L{l}' for l in range(1, NLEV)]
-w(('#LW,' if CELLS else '') + ','.join(_named) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
+w(('#LW,' if CELLS else '') + ','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
 # Firefox only (FFQ): Gecko doesn't re-match rules that depend on a style container when the container's value
 # changed through an animation (and every state value here comes from one), so the gates would keep their first
 # result. It re-matches the whole subtree of a size container whose size changed: #LM's size follows the clock
@@ -1721,7 +1716,9 @@ for i, b in enumerate(BODIES):
         inner = f'<i class="disc"></i><div class="bd sp" id="b{i}"><i class="eq"></i><i class="eq eq2"></i></div>'
     R_ = b['R'] if b['k'] == 'sph' else max(b['h'][0], b['h'][2]) * 1.1
     render_css.append(f'#s{i}{{width:{f(2 * R_)}px;height:{f(2 * R_)}px;margin:{f(-R_)}px 0 0 {f(-R_)}px}}')
-    render_html.append(f'<div class="bw" id="w{i}">{inner}<i class="sh" id="s{i}"></i></div>')
+    # (the shadow comes first: it cuts through its own body's lower faces, and Firefox doesn't split intersecting
+    # planes as Chrome does but draws them in document order)
+    render_html.append(f'<div class="bw" id="w{i}"><i class="sh" id="s{i}"></i>{inner}</div>')
 # box face lighting: world normal of face (axis k, sign) is sign * column k of R (generic rules,
 # the same for every engine)
 LIT = []
@@ -1752,10 +1749,10 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
             # for everything below, so a pointer move alone restyles nothing past L1)
             # (two wrappers; with CELLS=1, #LM holds the cell marks of awake bodies and the cells of sleeping
             # ones, #LW the cell words, the presence of sleepers and the container names that #L0's rules query)
-            '<div class="lv" id="LM"><div class="lv" id="LW">' + ''.join(f'<div class="lv" id="L{l}">' + ('<i class="tether"></i><i class="pin"></i><i class="ring"></i>' if l == 0 else '') +
-                                         ('<div class="lv" id="LN">' if l == 0 and LN_EL else '') for l in range(NLEV)) +
+            '<div class="lv" id="LM"><div class="lv" id="LW">' + ''.join(f'<div class="lv" id="L{l}">' + ('<i class="tether"></i><i class="pin"></i><i class="ring"></i>' if l == 0 else '')
+                                         for l in range(NLEV)) +
             '<div class="regs"><div class="sc">' + reg_html + '</div></div>' +
-            '</div>' * (NLEV + 5 + LN_EL) +
+            '</div>' * (NLEV + 5) +
             '<div class="view"><div class="cam"><i class="floor"></i><i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i>'
             '<i class="rail rn"></i>' + ''.join(render_html) + '</div></div></div>' + '</div>' * NTS + '</div></div></div>')
@@ -1787,7 +1784,7 @@ if PFX or MINIFY:
     for n in eng_names:
         if n not in ren:
             ren[n] = f'{PFX}{b36(len(ren))}' if MINIFY else f'{PFX}{n}'
-    ids = r'(RB|LS|LT|LN|L\d+|r\d+|ts\d+|w\d+|b\d+|s\d+|ENG|INI)'
+    ids = r'(RB|LS|LT|LM|LW|L\d+|r\d+|ts\d+|w\d+|b\d+|s\d+|ENG|INI)'
     for b_ in BODIES:
         assert not re.fullmatch(r'#[rwbs]\d+', b_['col']), b_['col']
     def rename_css(t):

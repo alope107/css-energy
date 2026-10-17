@@ -5,7 +5,7 @@ for(const f of process.argv.slice(2)){
 const p=await open(b,f,{viewport:{width:1000,height:900}});
 const fpsFor=ms=>countFrames(p,ms).then(n=>n*1000/ms);
 const chaos=[];for(let i=0;i<6;i++)chaos.push((await fpsFor(1000)).toFixed(0));
-let settle=-1;for(let i=0;i<40;i++){const cn=await p.evaluate(()=>getComputedStyle((document.querySelector('[id$=LN]')||document.querySelector('[id$=L0]'))).containerName);if(cn==='q'){settle=6+i*0.5;break}await p.waitForTimeout(500)}
+let settle=-1;for(let i=0;i<40;i++){const cn=await p.evaluate(()=>getComputedStyle(document.querySelector('[id$=L0]')).containerName);if(cn==='q'){settle=6+i*0.5;break}await p.waitForTimeout(500)}
 const idle=(await fpsFor(1500)).toFixed(0);
 const {proj}=await arena(p);
 const [bx,by]=proj([70,-145,10]);await p.mouse.move(bx,by);await p.mouse.down();

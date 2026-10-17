@@ -7,12 +7,20 @@ const {countFrames,vars,pollUntil}=require('../../../shared/js/page.js');
 const trace=require('../../../shared/js/trace.js');
 const {CLOCK_CSS,CLOCK_ANIMATION,wobble,constant}=require('../../../shared/js/freeze.js');
 const [PERSP,TILT,TY,DIST,VW]=[1500,-28,95,-260,900];
-// BROWSER=firefox: Playwright's Firefox instead (Chromium flags dropped). Firefox before 159 needs the scroll-driven
-// animations pref, which the registers depend on; FIREFOX=/path picks another Playwright-compatible build.
+// BROWSER=firefox: Playwright's patched Firefox instead (the Chromium flags are dropped), with the scroll-driven
+// animations pref the registers need before Firefox 159. FIREFOX=/path picks the build; without it, if Playwright's own
+// isn't installed, the newest one in the devcontainer image's /ms-playwright (don't `npx playwright install` there:
+// it garbage-collects the image's other browsers, /usr/local/bin/chromium's included). Evaluate-based tools only:
+// the tracing ones (tr.js, …) need Chrome's DevTools protocol.
 const FF_PREFS={'layout.css.scroll-driven-animations.enabled':true};
-const launch=process.env.BROWSER==='firefox'
- ?async(o={})=>{const {args,extraArgs,...rest}=o;return require(require.resolve('playwright',{paths:[require.main.path,__dirname]})).firefox.launch({...rest,executablePath:process.env.FIREFOX||undefined,firefoxUserPrefs:FF_PREFS})}
- :B.launch;
+const imageFirefox=()=>{const fs=require('fs');try{return fs.readdirSync('/ms-playwright').filter(d=>/^firefox-\d+$/.test(d))
+ .sort((a,b)=>b.split('-')[1]-a.split('-')[1]).map(d=>`/ms-playwright/${d}/firefox/firefox`).find(f=>fs.existsSync(f))}catch(e){return undefined}};
+async function launchFirefox(o={}){const {args,extraArgs,...rest}=o;
+ const ff=require(require.resolve('playwright',{paths:[require.main.path,__dirname]})).firefox;
+ const opts={...rest,executablePath:process.env.FIREFOX||undefined,firefoxUserPrefs:FF_PREFS};
+ try{return await ff.launch(opts)}catch(e){const alt=imageFirefox();if(opts.executablePath||!/Executable doesn't exist/.test(e.message)||!alt)throw e;
+  console.error(`physics.js: Playwright's own Firefox isn't installed; using ${alt} (set FIREFOX to choose)`);return ff.launch({...opts,executablePath:alt})}}
+const launch=process.env.BROWSER==='firefox'?launchFirefox:B.launch;
 
 // world point -> page coordinates of its screen projection, for the arena's bounding box `ar` (yaw: the view's default)
 const projector=ar=>{const sc=ar.width/VW;
