@@ -10,12 +10,13 @@ editor and press Run. The program then goes through four stages:
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-13).**
+**Status (2026-10-17).**
 
 - All five test levels pass. That includes 89 programs checked against Node's output and 14 programs the
   compiler must reject.
-- On the page, compiling takes about 1.6–4.8 s from Run (median 1.75 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
-  in about 6 s and halts about 8.5 s after Run (headless Chromium 153, 2026-10-13); it was 14 s before printing
+- On the page, compiling takes about 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
+  in about 8.3 s and halts about 10.8 s after Run (headless Chromium 153 on the Ubuntu mini PC, 2026-10-17); it was
+  18.3 s on the same machine before printing
   moved into the machine (one trap per output chunk instead of one per character).
 - See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the numbers and [docs/HISTORY.md](docs/HISTORY.md) for
   how the design got here.

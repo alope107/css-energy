@@ -32,10 +32,10 @@ Open a built page in Chrome; for 48 and 64, serve or open the folder, because th
 
 | Bodies | Performance |
 |---|---|
-| 16 | 60 fps throughout |
-| 48 | chaos 12–17 fps, drag 14 fps; settles in about 10 s |
-| 48 (4 boxes, 44 spheres) | chaos about 20 fps until it settles at 6 s, drag 31 fps |
-| 64 | chaos 8–10 fps, drag 7 fps; dragging one body through a sleeping field about 25 fps |
-| 96 | about 3 fps while everything is awake, about 10 fps with 4 bodies awake |
+| 16 | about 50 fps in the first 3 s of chaos, then 60 fps |
+| 48 | chaos 10–13 fps, drag 12 fps; settles in about 11 s |
+| 48 (4 boxes, 44 spheres) | chaos 16–48 fps until it settles at 6 s, drag 25 fps |
+| 64 | chaos 7–9 fps, drag 7 fps; dragging one body through a sleeping field about 24 fps |
+| 96 | about 3.5 fps while everything is awake, about 12 fps with 4 bodies awake |
 
-Measured in an 8-vCPU devcontainer, headless Chromium 153 (docs/BENCHMARKS.md, 2026-10-13); a desktop is faster. Idle scenes cost about 1 ms of style per frame. Spatial partitioning of the broadphase was built and measured (2026-10-13) and does not pay in this design: the all-pairs digest charges only awake bodies, and the N² floor is the static per-pair rules (docs/HISTORY.md).
+Measured on the Ubuntu mini PC (Intel i5-12600H), headless Chromium 153 (docs/BENCHMARKS.md, 2026-10-17); a desktop with a GPU is faster. Idle scenes cost about 1 ms of style per frame. Spatial partitioning of the broadphase was built and measured (2026-10-13) and does not pay in this design: the all-pairs digest charges only awake bodies, and the N² floor is the static per-pair rules (docs/HISTORY.md).

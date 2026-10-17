@@ -4,41 +4,61 @@ Every performance measurement of the current code, with how to re-run it.
 
 **Conventions**
 
-- Everything here was measured on **2026-10-13** in **headless Chromium 153.0.8010.12** (Chrome for Testing, from the
-  Playwright 1.63 image), launched by `tools/browser.js` with `CHROME=/usr/local/bin/chromium`, in the project
-  devcontainer: **arm64, 8 vCPUs** (Docker Desktop, linuxkit kernel), no GPU. Desktop Chrome will differ; the user's
-  machine has not been measured.
-- **"Before"** is the page as of commit `6f1d92e` (printing by lib routines, PUTC per character); **"after"** is
-  the `worktree-js-optimize` branch (the PRINT instruction family, slim readback readers, the editor pane on its
-  own compositor layer). Both were measured in the same session, back to back, the before numbers from
-  `dist/js_in_css.xhtml` of that commit.
+- Everything here was measured on **2026-10-17** on the **Ubuntu mini PC**: Intel Core i5-12600H (4 P-cores with 2
+  threads each and 8 E-cores, 16 threads), 30 GB RAM, host kernel Linux 7.0, no GPU, cpufreq governor `powersave` with
+  energy preference `balance_performance`. The browser is **headless Chromium 153.0.8010.12** (Chrome for Testing),
+  launched by `tools/browser.js` with `CHROME=/usr/local/bin/chromium` in the project devcontainer (profile
+  `fontcpu`). That is the same Chromium build as the previous numbers. Nothing else was running. Desktop Chrome will
+  differ.
+- The previous version of this file was measured on 2026-10-13 on an **arm64 Docker Desktop VM with 8 vCPUs**. Old
+  numbers that help read the new ones are given in brackets or as "(old: …)".
+- **Pages.** "Before" is the page as of commit `6f1d92e` (printing by lib routines, PUTC per character), shipped in
+  this repo as `dist/js_in_css.xhtml` of commit `9319bc0`. "3K" is the first optimised page (the PRINT instruction
+  family, slim readback readers, the editor pane on its own compositor layer; 3K-word dense RAM): `dist/` of
+  `a01eb0c`. "Current" is the shipped page (16K-word RAM with sparse rendering, 15-bit addresses): `dist/` of
+  `50de8fc`, identical to what `make page` builds today. All three were re-measured back to back in the same session.
 - *(derived)* marks a value computed from logged data.
 - "Self-compile" means the self-hosted jsc (`tests/programs/jsc_self.json`) compiles FizzBuzz on the CPU, then runs it.
-- Earlier versions of this file recorded measurements of pages, generators and fonts that no longer exist (the
-  pure-CSS VM, cpu2, the fixed-program compile pages) and numbers from other chats. Those were removed on 2026-10-13
-  because they can't be reproduced. [HISTORY.md](HISTORY.md) still tells that story, and the raw logs are in
-  `archive/results/`. The earlier numbers came from a different sandbox and aren't comparable with these.
+- Measurements of pages, generators and fonts that no longer exist were removed on 2026-10-13; [HISTORY.md](HISTORY.md)
+  tells that story, and the raw logs are in `archive/results/`.
+
+**Noise on this machine (A-vs-A, 2026-10-17).** `ab.js` with the same page as both variants, each run a fresh browser:
+
+| Measure | Runs | Median (min–max) | Ratio B/A, median (IQR) |
+|---|---|---|---|
+| Real page, FizzBuzz Run → HALT (`ui_seq.js`, 4 rounds) | 8 | 10.79 s (10.75–10.85) | 1.007 (0.998–1.009) |
+| CPU-only FizzBuzz, load → HALT (`halttime.js`, 6 rounds) | 12 | 6.33 s (6.25–7.27) | 0.993 (0.980–0.998) |
+
+The page timings are steadier than on the old VM (±0.5% on the real page, against about ±2% there). The CPU-only page
+had one outlier in 12 runs (7.27 s, +15%), so take a median of at least three runs. The Chromium harnesses here are
+not much affected by the P-core/E-core split or by frequency scaling (css-physics `docs/BENCHMARKS.md` describes both),
+because a running page keeps its core busy.
 
 ## Headline numbers
 
-| What | Before | After | Section |
-|---|---|---|---|
-| FizzBuzz 1–15 on the page | 1,329 steps, 193 shapings; compiled ~2.3 s after Run, HALT at 14.0–14.7 s (run ≈ 12 s) | 476 steps, 103 shapings; compiled ~2.35 s, HALT at 8.5–8.6 s (run ≈ 6.2 s) | §5 |
-| FizzBuzz on the CPU alone (no editor, no compile chain) | HALT 8.8–10.1 s after load | 4.8–4.9 s | §5c |
-| Suite shapings (model, 89 programs) | 5,967 (traps: 1,478 MISS, 1,083 EXT, 1,342 PUTC) | 4,147 (1,309 MISS, 1,104 EXT, ~230 PRINT) | §1 |
-| Font CPU on the page, L5 fit | ~112 steps/s (8.93 ms per step, r = 0.979, 84 programs) | 85 steps/s (11.7 ms per step, r = 0.797, 87 programs; a step now does more) | §5 |
-| One CPU frame of the page (mid-run trace) | 3 passes, 115 ms style+layout, 34 ms shaping, 143 ms frame | 3 passes, 100–102 ms style+layout, 34 ms shaping, 125–128 ms frame | §6 |
-| CSS compiler alone (L3 harness, no readback) | median 325 ms per program; ≈ 166 ms + 6.0 ms per code word | median 318 ms per program; ≈ 158 ms + 6.4 ms per code word | §4 |
-| FizzBuzz in uharfbuzz alone (no browser) | 19.2 ms per shaping, 193 shapings (N16 S32) | 19.0 ms per shaping, 103 shapings | §3 |
-| Self-compile in uharfbuzz alone | 9.9 ms per shaping, 2,919 shapings, 5.1 steps per shaping (N16 S16) | (not re-run) | §3 |
-| Editor readback sweep | 1.18–1.21 s, 0 misses | unchanged | §7 |
+| What | Before | Current | [Old machine, current] | Section |
+|---|---|---|---|---|
+| FizzBuzz 1–15 on the page | 1,329 steps, 193 shapings; compiled 2.94–2.97 s after Run, HALT at 18.2–18.3 s (run ≈ 15.3 s) | 476 steps, 103 shapings; compiled 2.51–2.58 s, HALT at 10.75–10.90 s (run ≈ 8.3 s) | compiled 2.4–2.6 s, HALT 9.7–10.4 s | §5 |
+| FizzBuzz on the CPU alone (no editor, no compile chain) | – | HALT 6.25–6.48 s after load | 5.4 s | §5c |
+| Suite shapings (model, 89 programs) | 5,967 (traps: 1,478 MISS, 1,083 EXT, 1,342 PUTC) | 4,147 (1,309 MISS, 1,104 EXT, ~230 PRINT) | same (model) | §1 |
+| Font CPU on the page, L5 fit | – | 63 steps/s (15.8 ms per step, r = 0.809, 87 programs) | 85 steps/s (3K page) | §5 |
+| One CPU frame of the page (mid-run trace) | 3 passes, 115 ms style+layout, 45 ms shaping, 141 ms frame | 3 passes, 124 ms style+layout, 43 ms shaping, 148 ms frame | 108 / 35 / 137 ms | §6 |
+| CSS compiler alone (L3 harness, no readback) | – | median 380 ms per program; ≈ 189 ms + 7.6 ms per code word | median 318 ms per program | §4 |
+| FizzBuzz in uharfbuzz alone (no browser) | – | 20.6 ms per shaping, 103 shapings | 18.1 ms | §3 |
+| Self-compile in uharfbuzz alone | – | 9.55 ms per shaping (N16 S16; the image no longer halts, see §3) | 9.9 ms | §3 |
+| Editor readback sweep | – | 1.12–1.21 s, 0 misses | 1.18–1.21 s | §7 |
+
+**The new machine against the old one** *(derived)*: HarfBuzz shaping is about 13% slower here (20.6 against 18.1 ms
+per shaping), and the mid-run frame is about 8% slower (148 against 137 ms). FizzBuzz on the current page halts about
+6% later (10.8 against 9.7–10.4 s), and on the CPU-only page about 17% later. The before page slowed more (HALT 18.3
+against 14.0–14.7 s), so the speed-up from before to current reads larger here: 1.7× in HALT time and 1.8× in run time.
 
 **Where the time goes**
 
 - **Run time.** It is set by shapings, because each shaping is a layout pass and a frame holds at most 2. Traps
   (cache misses, write-backs, EXT ops, PRINT chunks, PUTC) end shapings early.
-- **Per pass** (mid-run trace, after): about 17 ms of HarfBuzz shaping, 5 ms restyling `#cpu`, and layout with the
-  readers' container-query restyles inside it; plus a third, settle pass without a shaping every frame (§6).
+- **Per pass** (mid-run trace): about 21 ms of HarfBuzz shaping in each of the two shaping passes, plus restyling `#cpu` and layout with the
+  readers' container-query restyles inside it; and a third settle pass without a shaping every frame (§6).
 - **Predicting it.** `tools/traps.py prog.js` gives a program's shapings from the model without a browser.
 - **Compile time on the page.** It is mostly the readback sweep after Run, plus the chain (§5 vs §4).
 
@@ -53,7 +73,7 @@ Every performance measurement of the current code, with how to re-run it.
 | Typed-input chain alone | `python3 tests/ui_test.py tests/fizz.js out.xhtml && node tests/uitest.js out.xhtml` | Fake latch cells, no editor. |
 | The real page | `make l5` / `make l5-smoke`, or `EXP1=build/ui_exp/fizzbuzz.grid node machine/ui_seq.js build/js_in_css.xhtml` | `compiledMs` includes the readback sweep; `haltMs` is Run → HALT (the page's `--isHALT`). `machine/ui_run.js page` also reports the first step. |
 | The CPU alone | a RAM image with the program (as `tests/suite_machine.py` builds it; `expected` = the console grid), `python3 machine/gen_fvm4.py img.json build/f4cc_16 out.html`, `IMG=img.json node machine/halttime.js out.html` | No editor, no compile chain: the CPU starts at load. |
-| Where a frame goes | `RUN=1 RUNWAIT=3500 node machine/trace.js build/js_in_css.xhtml 4 && python3 machine/passprof.py trace.json` | Without `RUN=1` it traces the idle editor scan. The window must sit inside the run (FizzBuzz halts ~8.5 s after Run). `WAIT` (ms after load, default 3000) for CPU-only pages. Writes `trace.json` in the cwd. |
+| Where a frame goes | `RUN=1 RUNWAIT=3500 node machine/trace.js build/js_in_css.xhtml 4 && python3 machine/passprof.py trace.json` | Without `RUN=1` it traces the idle editor scan. The window must sit inside the run (FizzBuzz halts ~10.8 s after Run). `WAIT` (ms after load, default 3000) for CPU-only pages. Writes `trace.json` in the cwd. |
 | Readback sweep | `python3 readback/rb_only2.py rb.xhtml && node readback/rbsweep.js rb.xhtml tests/fizz.js 3` | |
 
 `machine/halttime.js`, `fullrun.js` and `bench2.js` never press Run; they are for CPU-only (fixed-program) pages. `readback/rbtest.js page prog.js` types the file, sets Run, waits for `--rbready` and prints what the latches read, line
@@ -64,7 +84,8 @@ by line (`match true` when it equals the file); `rbsweep.js` repeats that and co
 ## 1. Machine model (no browser)
 
 `python3 tools/traps.py <files>` (uarch4, N16 S32), and the reference simulator's `steps` from `compiler/mkimage.py`.
-After (PRINT family; EXT is MUL / DIV / MOD / SHL13, PRINT a console-output chunk, PUTC a `putc()` call):
+The model is deterministic: re-run on 2026-10-17, every count matches. Current (PRINT family; EXT is MUL / DIV / MOD /
+SHL13, PRINT a console-output chunk, PUTC a `putc()` call):
 
 | Program | Code words | Steps | Shapings | MISS | EXT | PRINT | PUTC | WFAIL |
 |---|---|---|---|---|---|---|---|---|
@@ -93,13 +114,13 @@ Before (lib printing, PUTC per character):
 The reference simulator counts one step more than the font CPU (HALT). Suite-wide (89 programs + t1–t4, model):
 46,458 → 26,682 steps and 5,967 → 4,147 shapings.
 
-**Configurations that were modelled and not built** (suite shapings, after): N = 24 lines 3,888; N = 32 3,858;
+**Configurations that were modelled and not built** (suite shapings, current): N = 24 lines 3,888; N = 32 3,858;
 S = 48 cycles 3,427; S = 64 3,161; N32 S64 2,848. The sanitizer caps S × 432 subtables at 16,384 (S ≤ 37), and
 HarfBuzz time grows with cells × lookups × S. A code / data partition of the 16 lines: 4,368–4,713 (worse).
 
 ## 2. The CSS compiler's size
 
-Source: `tools/vsz.py`, `tools/lp.py`, the `make page` build line, and `make l2` / `make l2-generic`.
+Source: `tools/vsz.py`, `tools/lp.py`, the `make page` build line, and `make test` (L2). Re-run 2026-10-17.
 
 | Measure | Value |
 |---|---|
@@ -108,26 +129,28 @@ Source: `tools/vsz.py`, `tools/lp.py`, the `make page` build line, and `make l2`
 | Label ports per level | 22 |
 | Levels | 1,561 character levels, 401 token levels |
 | Compile-chain CSS | 7.4 MB (7,407,608 bytes; 7,515,752 before) |
-| Page | 9.5 MB (9,514,312 bytes; 9,612,666 before) |
-| `make page` | 25 s, reproducible |
-| L2 DSL evaluation (FizzBuzz suite, 4,931 parser steps) | 292 temps per step with the specialised variants; 3,795 with the generic parser |
+| Page | 11.9 MB (11,857,709 bytes; the 3K page 9,514,312, before 9,612,666) |
+| `make page` | 26 s, reproducible [25 s] |
+| L2 DSL evaluation (suite, 4,970 parser steps) | 291 temps per step with the specialised variants; 3,795 with the generic parser (not re-run) |
 
 ## 3. HarfBuzz alone (uharfbuzz 0.56.3, no browser)
 
-`machine/hbtest.py` shapes the real cpu4 font in HarfBuzz and checks every shaping against `uarch4`. The font build
-line reads `9875 glyphs, 1274 cells, 111 lookups/cycle, 432 subtables/cycle, 217 lib` (before the PRINT family:
-9749 glyphs, 199 lib).
+`machine/hbtest.py` shapes the real cpu4 font in HarfBuzz and checks every shaping against `uarch4`. The current font
+build line reads `6803 glyphs, 1274 cells, 111 lookups/cycle, 432 subtables/cycle, 205 lib` (1K ROM). RAM images are
+built as `tests/suite_machine.py` builds them (code and data in RAM).
 
 | Workload | N, S | Shapings | Steps | Result | HarfBuzz time |
 |---|---|---|---|---|---|
-| FizzBuzz, after (RAM image built as in `tests/suite_machine.py`) | 16, 32 | 103 | 476 | halted, every shaping matches the model | 19.02 ms per shaping |
-| FizzBuzz, before | 16, 32 | 193 | 1329 | halted, output ok | 19.15 ms per shaping |
-| Self-compile (`tests/programs/jsc_self.json`, before) | 16, 16 | 2,919 | 14,985 | halted, output ok | 9.88 ms per shaping |
+| FizzBuzz | 16, 32 | 103 | 476 | halted, output ok | 20.56 ms per shaping [18.1] |
+| `bubble_sort_print` | 16, 32 | 167 | 901 | halted, output ok | 20.48 ms [17.9] |
+| `array_sort` | 16, 32 | 77 | 635 | halted, output ok | 21.07 ms [18.3] |
+| `str_table` | 16, 32 | 40 | 168 | halted, output ok | 20.37 ms [18.3] |
+| Self-compile (`tests/programs/jsc_self.json`) | 16, 16 | 158,800+ | 636,754+ | every shaping matches the model, but it never halts | 9.55 ms per shaping [9.88] |
 
-*(derived)* FizzBuzz after: 4.6 steps per shaping, 2.0 s of HarfBuzz time; before: 6.9 steps per shaping, 3.7 s. Self-compile: 5.1 steps per
-shaping, 28.8 s of HarfBuzz time, ~520 steps/s. The self-compile's shaping and step counts are identical to the
-2026-10-09 log `archive/results/machine/hb4_img.log`, which recorded 34.13 ms per shaping in the old sandbox; that
-also shows the log's unrecorded S was 16.
+*(derived)* FizzBuzz: 4.6 steps per shaping, 2.1 s of HarfBuzz time. The self-compile image predates the 16K memory
+map: it holds a 3K RAM and a 2,298-word ROM, so on the current CPU it runs without halting. Its per-shaping time is
+still a fair measure of the N16 S16 font. Before the memory-map change it halted after 2,919 shapings and 14,985
+steps (5.1 steps per shaping; old machine, 28.8 s of HarfBuzz time).
 
 ## 4. The CSS compiler in Chrome
 
@@ -136,172 +159,188 @@ also shows the log's unrecorded S was 16.
 `make l3` (`tests/suite_css.py` + `tests/suite_css.js`): one page; each program is written into the latch cells, Run
 is pressed, and the harness times Run → the chain's done anchor and checks every word against `cc_ref`.
 
-- After (2026-10-13, this branch): **103/103 pass** (`load 184 ms`). Valid programs: min 194 / median 318 / max 1037 ms;
-  the fit is ms ≈ 158 + 6.4 × words (r = 0.90) *(derived)*. Error programs: median 184 ms.
-  FizzBuzz: 427 ms, 45 words. The compiler change (one PRINT word per `console.log` argument instead of
-  CALL / POP / PUSHI / PUTC) left compile time where it was.
-- Before (2026-10-13 morning): `load 145 ms`. **103/103 pass** (89 valid programs, 14 error programs). `make l3` took 1 min 13 s.
-- Valid programs: min 190 / median 325 / max 1,072 ms (`else_if_long`, 140 words) *(derived)*. A linear fit gives
-  ms ≈ 166 + 6.0 × words (r = 0.89) *(derived)*.
-- Error programs: 170–477 ms, median 215 *(derived)*. Two report err 99 where the reference has a specific code
+2026-10-17: **104/104 pass** (90 valid programs, 14 error programs; `load 180 ms`; the whole run 79 s).
+
+- Valid programs: min 229 / median 380 / max 1,488 ms (`else_if_long`, 137 words). The fit is ms ≈ 189 + 7.6 ×
+  words (r = 0.90) *(derived)*. [old machine: min 194 / median 318 / max 1,037; ≈ 158 + 6.4 × words.]
+- Error programs: 187–522 ms, median 220 *(derived)*. Two report err 99 where the reference has a specific code
   (`bad_char` wants 48, `unterminated_str` wants 3); L3 counts any nonzero error as ok.
-- Slowest valid programs: else_if_long 1072 ms/140 w, asi_control 835/58, print_unknown 793/115, array_sort 788/65,
-  asi_brace 698/72, bubble_sort_print 622/78, asi_continuation 598/42, compare 587/47. FizzBuzz: 478 ms, 45 words.
+- Slowest valid programs: else_if_long 1488 ms/137 w, print_unknown 900/90, array_sort 817/65, asi_brace 753/72,
+  bubble_sort_print 692/75, nested_loops 672/32, and_or_chain 652/86, asi_continuation 644/39. FizzBuzz: 580 ms, 45
+  words [427].
+- *(derived)* The compiler runs about 20% slower here than on the old machine.
 
 ### 4b. The typed-input chain driven by fake latch cells
 
 `python3 tests/ui_test.py tests/fizz.js out.xhtml && node tests/uitest.js out.xhtml` (times Run → the chain's done
-anchor):
-`{"loadMs":140,"doneMs":486,"recalcMs":451,"layoutMs":8,"recalcs":2,"done":1,"err":0,"words":45,"ok":1}`
+anchor), two runs:
+`{"loadMs":177,"doneMs":642,"recalcMs":599,"layoutMs":9,"recalcs":2,"done":1,"err":0,"words":45,"ok":1}` and
+`{"loadMs":177,"doneMs":600,"recalcMs":558,"layoutMs":8,…}` [old: done 486 ms, recalc 451 ms, load 140 ms].
 
 ---
 
 ## 5. Full page end-to-end (editor → CSS compiler → font CPU): L5 suite
 
-### 5a. FizzBuzz alone, before and after (`machine/ui_seq.js`, initial program, nothing else running)
+### 5a. FizzBuzz alone (`machine/ui_seq.js`, initial program, nothing else running)
 
-| Build | compiledMs | haltMs | run (haltMs − compiledMs) |
-|---|---|---|---|
-| Before (`6f1d92e`), two runs | 2,519 / 2,201 | 14,659 / 13,987 | 12,140 / 11,786 |
-| PRINT family | 2,448 / 2,468 | 9,539 / 9,775 | 7,091 / 7,307 |
-| + slim readers | 2,753 / 2,655 | 9,698 / 9,335 | 6,945 / 6,680 |
-| + `#app` on its own layer (after) | 2,373 / 2,336 | 8,600 / 8,477 | 6,227 / 6,141 |
+Two interleaved rounds per page, plus the A-vs-A runs of the current page (top of this file):
 
-Run-to-run noise is about ±0.2 s. *(derived)* execution 12.0 s → 6.2 s (1.9×); 476 steps in 6.2 s is 77 steps/s
-of a program that used to need 1,329 steps, i.e. the same work in half the time.
+| Build | load | compiledMs | haltMs | run (haltMs − compiledMs) |
+|---|---|---|---|---|
+| Before (`9319bc0`) | 334 / 343 ms | 2,969 / 2,938 | 18,204 / 18,328 | 15,235 / 15,390 |
+| 3K (`a01eb0c`) | 339 / 335 ms | 2,976 / 2,974 | 10,648 / 10,804 | 7,672 / 7,830 |
+| Current (16K sparse) | 329–356 ms | 2,513–2,582 | 10,855–10,899 (A-vs-A: 10,746–10,851) | 8,290–8,350 |
+
+*(derived)* Before → current: HALT 18.3 → 10.8 s (1.7×), run 15.3 → 8.3 s (1.8×). The 16K page compiles 0.4 s faster
+than the 3K page but runs 0.6 s longer, so the two halt within 2% of each other. [old machine: before HALT 14.0–14.7 s,
+3K 8.5–8.6 s, 16K 9.7–10.4 s.]
 
 ### 5c. The CPU alone (`machine/halttime.js` on CPU-only pages, from load to HALT)
 
-| Program | Before | After |
-|---|---|---|
-| FizzBuzz (`tests/fizz.js`) | 10,060 / 8,784 ms (1,329 steps) | 5,908 → 4,831 (slim readers) → 4,858 ms (476 steps) |
-| `str_table.js` | – | 2,722 → 2,158 ms (168 steps) |
-| `bool_print.js` | – | correct output, 48 steps |
+CPU-only pages of the current machine (16K sparse RAM), `python3 machine/gen_fvm4.py img.json build/f4cc_16 out.html`
+on a RAM image built as `tests/suite_machine.py` builds it. Two runs each:
 
-### 5b. The L5 suite, after
+| Program | Steps | HALT after load | [old, 16K sparse] |
+|---|---|---|---|
+| FizzBuzz | 476 | 6,401 / 6,267 ms (A-vs-A median 6,333) | 5,421 ms |
+| `str_table.js` | 168 | 2,744 / 2,731 ms | 2,436 ms |
+| `bool_print.js` | 48 | 1,088 / 1,088 ms | – |
+| `bubble_sort_print.js` | 901 | 10,016 / 9,547 ms | 8,133 ms |
+| `array_sort.js` | 635 | 4,336 / 4,531 ms | 3,747 ms |
+
+Every page halted with the exact step count; the output matched (`bubble_sort_print` prints 8-character lines, which
+wrap a blank row in the 8-column console, so its grid differs only from the harness's expected layout).
+
+### 5b. The L5 suite
 
 `make l5` (`machine/ui_seq.js` with `tests/suite_ui.py 1500`). It acts as a user: it waits for the scan, then for each
 program it clicks Edit, retypes the editor, clicks Run, and polls every 100 ms. `compiledMs` is the time from the Run
 click until the status shows compiled or error. `haltMs` is the time from the Run click until the page's `--isHALT`
-is 1 or an error shows. Font = `f4cc_16` (N16 S32 B4). Viewport 1300×950. Nothing else was running.
+is 1 or an error shows. Font = `f4cc_16` (N16 S32 B4). Viewport 1300×950. Current page (16K sparse RAM), 2026-10-17,
+nothing else running; the whole run took 11.4 min.
 
 Summary *(derived)*:
-- `load ms 303`. 101 runs: the initial program plus 100 suite entries (87 run to HALT, 14 compile errors). **101 of 101 ok.**
-- Compile (Run → compiled), valid programs: min 1,598 / median 1,750 / max 4,817 ms.
-  The fit is compiledMs ≈ 1,356 + 18.5 × words (r = 0.86).
-- Error detection: 1,632–1,999 ms, median 1,657.
-- Execution (haltMs − compiledMs): min 448 / median 1,128 / max 17,856 ms. The fit is ≈ 99 + **11.74 ms per step**
-  (r = 0.797), which is about **85 steps/s**. Per program the rate ranges from 30.1 to 169.4 steps/s, median 86.3.
-  (Steps are not comparable with the before numbers: a PRINT step does the work of a dozen old ones.)
-- FizzBuzz (476 steps, 45 words): compiled 2,254 ms, HALT at 8,629 ms, run ≈ 6.4 s. The first
-  ("initial") FizzBuzz run took 2,346 / 8,716 ms.
-- The whole suite took Σ haltMs = 353 s (before: 401 s for 98 runs).
+- `load ms 343`. 101 runs: the initial program plus 100 suite entries (87 run to HALT, 14 compile errors). **101 of 101 ok.**
+- Compile (Run → compiled), valid programs: min 1,708 / median 2,199 / max 5,847 ms.
+  The fit is compiledMs ≈ 1,562 + 26.0 × words (r = 0.90).
+- Error detection: 1,662–2,502 ms, median 1,720.
+- Execution (haltMs − compiledMs): min 563 / median 1,542 / max 22,765 ms. The fit is ≈ 188 + **15.77 ms per step**
+  (r = 0.809), which is about **63 steps/s**. Per program the rate ranges from 22.3 to 140.7 steps/s, median 61.6.
+- FizzBuzz (476 steps, 45 words): the initial run compiled at 2,600 ms and halted at 11,171 ms; the same program
+  mid-suite took 2,776 / 13,224 ms (run 10.4 s against 8.6 s). On the old 3K page the two agreed (8,716 / 8,629 ms).
+  *(inferred)* The sparse RAM keeps every group a program has written, so later programs run on a page with more
+  live cells; a fresh page (§5a) is the fair comparison.
+- The whole suite took Σ haltMs = 454 s.
+- [old machine, on the 3K page (the 16K page's L5 timings weren't recorded there): compile median 1,750 ms, ≈ 1,356 +
+  18.5 × words; 11.74 ms per step, 85 steps/s; Σ haltMs 353 s.] Part of the gap is the machine (§5a: the 3K page halts
+  FizzBuzz 1.2× later here) and part is the 16K page's longer runs (§5a, §8).
 
-Full table (generated from the log with `l5table.py`):
+Full table (generated from the `ui_seq.js` log; `steps/s` = steps / run time):
 
 | program | words | steps | compiledMs | haltMs | run ms | steps/s | status |
 |---|---|---|---|---|---|---|---|
-| initial | 45 | 476 | 2346 | 8716 | 6370 | 74.7 | ok |
-| user_report.js | 6 | 54 | 1639 | 2193 | 554 | 97.5 | ok |
-| and_or_chain.js | 86 | 134 | 2041 | 4363 | 2322 | 57.7 | ok |
-| and_or_value.js | 22 | 52 | 1635 | 2483 | 848 | 61.3 | ok |
-| array_basic.js | 17 | 129 | 1721 | 2807 | 1086 | 118.8 | ok |
-| array_loop.js | 23 | 210 | 1721 | 2961 | 1240 | 169.4 | ok |
-| array_neg.js | 13 | 173 | 1638 | 2676 | 1038 | 166.7 | ok |
-| array_param.js | 31 | 184 | 1991 | 3398 | 1407 | 130.8 | ok |
-| array_sort.js | 65 | 635 | 2458 | 7058 | 4600 | 138.0 | ok |
-| array_write.js | 25 | 121 | 1683 | 2773 | 1090 | 111.0 | ok |
-| asi_basic.js | 31 | 93 | 2173 | 3627 | 1454 | 64.0 | ok |
-| asi_brace.js | 72 | 268 | 2957 | 6010 | 3053 | 87.8 | ok |
-| asi_continuation.js | 39 | 167 | 2553 | 4541 | 1988 | 84.0 | ok |
-| asi_control.js | 58 | 234 | 2834 | 5740 | 2906 | 80.5 | ok |
-| asi_mixed.js | 39 | 134 | 2114 | 3534 | 1420 | 94.4 | ok |
-| big.js | 27 | 59 | 1646 | 3051 | 1405 | 42.0 | ok |
-| bool_fn.js | 25 | 69 | 1703 | 3059 | 1356 | 50.9 | ok |
-| bool_literal.js | 18 | 79 | 1791 | 2645 | 854 | 92.5 | ok |
-| bool_print.js | 16 | 48 | 1620 | 2356 | 736 | 65.2 | ok |
-| bool_var.js | 24 | 88 | 1802 | 2917 | 1115 | 78.9 | ok |
-| braceless_loops.js | 52 | 269 | 1894 | 4414 | 2520 | 106.7 | ok |
-| break_nested.js | 36 | 341 | 1945 | 4423 | 2478 | 137.6 | ok |
-| bubble_sort_print.js | 75 | 901 | 2438 | 12847 | 10409 | 86.6 | ok |
-| comments.js | 6 | 54 | 1847 | 2306 | 459 | 117.6 | ok |
-| comments_block.js | 13 | 61 | 1993 | 2654 | 661 | 92.3 | ok |
-| compare.js | 47 | 102 | 2252 | 3735 | 1483 | 68.8 | ok |
-| compound.js | 18 | 66 | 1861 | 2642 | 781 | 84.5 | ok |
-| compound_array.js | 48 | 196 | 2073 | 3981 | 1908 | 102.7 | ok |
-| compound_ops.js | 33 | 143 | 1854 | 3511 | 1657 | 86.3 | ok |
-| cond_logic.js | 65 | 796 | 2468 | 7483 | 5015 | 158.7 | ok |
-| continue_for.js | 19 | 190 | 1728 | 3682 | 1954 | 97.2 | ok |
-| continue_while.js | 25 | 224 | 2069 | 4151 | 2082 | 107.6 | ok |
-| dangling_else.js | 30 | 81 | 1915 | 2871 | 956 | 84.7 | ok |
-| div_exact.js | 17 | 49 | 1639 | 2605 | 966 | 50.7 | ok |
-| else_chain.js | 38 | 138 | 2236 | 4028 | 1792 | 77.0 | ok |
-| else_if_braceless.js | 38 | 138 | 2180 | 4467 | 2287 | 60.3 | ok |
-| else_if_long.js | 137 | 565 | 4817 | 22673 | 17856 | 31.6 | ok |
-| else_if_mixed.js | 33 | 70 | 2414 | 4155 | 1741 | 40.2 | ok |
-| escapes_more.js | 13 | 45 | 1716 | 2924 | 1208 | 37.3 | ok |
-| expr_stmt_call.js | 21 | 83 | 1668 | 2511 | 843 | 98.5 | ok |
-| fizzbuzz.js | 45 | 476 | 2254 | 8629 | 6375 | 74.7 | ok |
-| for.js | 16 | 107 | 1617 | 2711 | 1094 | 97.8 | ok |
-| for_dec.js | 17 | 97 | 1665 | 2542 | 877 | 110.6 | ok |
-| for_empty.js | 28 | 116 | 1708 | 2836 | 1128 | 102.8 | ok |
-| func_basic.js | 23 | 68 | 1817 | 2679 | 862 | 78.9 | ok |
-| func_forward.js | 13 | 43 | 1677 | 2125 | 448 | 96.0 | ok |
-| func_globals.js | 18 | 73 | 1757 | 2471 | 714 | 102.2 | ok |
-| func_locals.js | 24 | 65 | 1712 | 2593 | 881 | 73.8 | ok |
-| func_many_args.js | 20 | 50 | 1638 | 2305 | 667 | 75.0 | ok |
-| func_noreturn.js | 12 | 50 | 1750 | 2264 | 514 | 97.3 | ok |
-| func_shadow.js | 20 | 66 | 1739 | 2443 | 704 | 93.8 | ok |
-| gcd.js | 30 | 123 | 1843 | 3324 | 1481 | 83.1 | ok |
-| if_no_braces.js | 14 | 59 | 1669 | 2130 | 461 | 128.0 | ok |
-| inc_dec.js | 12 | 60 | 1665 | 2129 | 464 | 129.3 | ok |
-| is_prime.js | 49 | 503 | 1995 | 7439 | 5444 | 92.4 | ok |
-| let_const.js | 23 | 118 | 1725 | 2751 | 1026 | 115.0 | ok |
-| logic.js | 43 | 97 | 1847 | 2976 | 1129 | 85.9 | ok |
-| mod.js | 18 | 50 | 1598 | 2480 | 882 | 56.7 | ok |
-| multi_args.js | 33 | 81 | 1828 | 3794 | 1966 | 41.2 | ok |
-| neg.js | 19 | 67 | 1672 | 2562 | 890 | 75.3 | ok |
-| nested_calls_args.js | 26 | 59 | 1734 | 2563 | 829 | 71.2 | ok |
-| nested_fn_calls_bool.js | 32 | 84 | 1722 | 2663 | 941 | 89.3 | ok |
-| nested_loops.js | 32 | 242 | 1767 | 3689 | 1922 | 125.9 | ok |
-| num_print.js | 14 | 46 | 1666 | 2309 | 643 | 71.5 | ok |
-| precedence.js | 35 | 67 | 1751 | 3062 | 1311 | 51.1 | ok |
-| prefix_inc.js | 28 | 118 | 1704 | 2848 | 1144 | 103.1 | ok |
-| print_unknown.js | 90 | 371 | 3551 | 10658 | 7107 | 52.2 | ok |
-| putc.js | 13 | 45 | 1689 | 2314 | 625 | 72.0 | ok |
-| return_early.js | 34 | 200 | 1902 | 3792 | 1890 | 105.8 | ok |
-| short_circuit.js | 28 | 63 | 1727 | 2407 | 680 | 92.6 | ok |
-| short_circuit_side.js | 57 | 142 | 1996 | 4326 | 2330 | 60.9 | ok |
-| single_quote.js | 12 | 60 | 1694 | 2590 | 896 | 67.0 | ok |
-| str_concat.js | 38 | 86 | 1838 | 4084 | 2246 | 38.3 | ok |
-| str_escape.js | 13 | 45 | 1612 | 3107 | 1495 | 30.1 | ok |
-| str_literal.js | 10 | 42 | 1706 | 2569 | 863 | 48.7 | ok |
-| str_mixed.js | 16 | 80 | 1675 | 2591 | 916 | 87.3 | ok |
-| str_param.js | 14 | 52 | 1695 | 2377 | 682 | 76.2 | ok |
-| str_return.js | 19 | 52 | 1666 | 2524 | 858 | 60.6 | ok |
-| str_table.js | 45 | 168 | 1907 | 4572 | 2665 | 63.0 | ok |
-| str_var.js | 6 | 54 | 1656 | 2111 | 455 | 118.7 | ok |
-| strict_eq.js | 17 | 65 | 1603 | 2279 | 676 | 96.2 | ok |
-| strict_ops.js | 33 | 81 | 1709 | 3112 | 1403 | 57.7 | ok |
-| unary_not.js | 9 | 41 | 1640 | 2133 | 493 | 83.2 | ok |
-| var_multi.js | 51 | 197 | 1907 | 4038 | 2131 | 92.4 | ok |
-| while.js | 15 | 115 | 1694 | 2589 | 895 | 128.5 | ok |
-| while_break.js | 15 | 86 | 1632 | 2270 | 638 | 134.8 | ok |
-| while_true_return.js | 23 | 131 | 1916 | 3362 | 1446 | 90.6 | ok |
-| assign_undef.js | 0 | 0 | 1607 | 1657 | 50 | – | error: undefined variable |
-| bad_char.js | 0 | 0 | 1607 | 1657 | 50 | – | syntax error ( counter(cse) ) |
-| break_outside.js | 0 | 0 | 1611 | 1664 | 53 | – | error: break outside a loop |
-| extra_brace.js | 0 | 0 | 1582 | 1634 | 52 | – | error: unexpected } |
-| fn_in_block.js | 0 | 0 | 1597 | 1652 | 55 | – | error: nested function |
-| missing_brace.js | 5 | 0 | 1586 | 1636 | 50 | – | error: missing } |
-| nested_function.js | 0 | 0 | 1608 | 1663 | 55 | – | error: nested function |
-| return_outside.js | 0 | 0 | 1616 | 1670 | 54 | – | error: return outside a function |
-| str_build.js | 0 | 0 | 1579 | 1634 | 55 | – | error: strings can only be joined in console.log |
-| too_much_string.js | 0 | 0 | 1935 | 1999 | 64 | – | error: too much string data |
-| unclosed_paren.js | 0 | 0 | 1581 | 1634 | 53 | – | syntax error ( counter(cse) ) |
-| undef_fn.js | 13 | 0 | 1641 | 1697 | 56 | – | error: undefined function |
-| undef_var.js | 0 | 0 | 1586 | 1632 | 46 | – | error: undefined variable |
-| unterminated_str.js | 0 | 0 | 1805 | 1857 | 52 | – | syntax error ( counter(cse) ) |
+| initial | 45 | 476 | 2600 | 11171 | 8571 | 55.5 | ok |
+| user_report.js | 6 | 54 | 1777 | 2409 | 632 | 85.4 | ok |
+| and_or_chain.js | 86 | 134 | 2764 | 6044 | 3280 | 40.9 | ok |
+| and_or_value.js | 22 | 52 | 1866 | 3047 | 1181 | 44.0 | ok |
+| array_basic.js | 17 | 129 | 2135 | 3527 | 1392 | 92.7 | ok |
+| array_loop.js | 23 | 210 | 2124 | 3901 | 1777 | 118.2 | ok |
+| array_neg.js | 13 | 181 | 1784 | 3070 | 1286 | 140.7 | ok |
+| array_param.js | 31 | 184 | 2519 | 4447 | 1928 | 95.4 | ok |
+| array_sort.js | 65 | 635 | 3071 | 9243 | 6172 | 102.9 | ok |
+| array_write.js | 25 | 121 | 2117 | 3489 | 1372 | 88.2 | ok |
+| asi_basic.js | 31 | 93 | 2773 | 4763 | 1990 | 46.7 | ok |
+| asi_brace.js | 72 | 268 | 4049 | 8242 | 4193 | 63.9 | ok |
+| asi_continuation.js | 39 | 167 | 3203 | 5990 | 2787 | 59.9 | ok |
+| asi_control.js | 58 | 234 | 3790 | 7518 | 3728 | 62.8 | ok |
+| asi_mixed.js | 39 | 134 | 2868 | 4759 | 1891 | 70.9 | ok |
+| big.js | 27 | 59 | 2041 | 3917 | 1876 | 31.4 | ok |
+| bool_fn.js | 25 | 69 | 2199 | 4009 | 1810 | 38.1 | ok |
+| bool_literal.js | 18 | 79 | 2243 | 3478 | 1235 | 64.0 | ok |
+| bool_print.js | 16 | 48 | 1828 | 2829 | 1001 | 48.0 | ok |
+| bool_var.js | 24 | 88 | 2398 | 3936 | 1538 | 57.2 | ok |
+| braceless_loops.js | 52 | 269 | 2467 | 5990 | 3523 | 76.4 | ok |
+| break_nested.js | 36 | 341 | 2502 | 5921 | 3419 | 99.7 | ok |
+| bubble_sort_print.js | 75 | 901 | 3276 | 17995 | 14719 | 61.2 | ok |
+| comments.js | 6 | 54 | 2179 | 2742 | 563 | 95.9 | ok |
+| comments_block.js | 13 | 61 | 2275 | 3282 | 1007 | 60.6 | ok |
+| compare.js | 47 | 102 | 2794 | 4846 | 2052 | 49.7 | ok |
+| compound.js | 18 | 66 | 2026 | 3000 | 974 | 67.8 | ok |
+| compound_array.js | 48 | 196 | 2398 | 4692 | 2294 | 85.4 | ok |
+| compound_ops.js | 33 | 143 | 2774 | 4888 | 2114 | 67.6 | ok |
+| cond_logic.js | 65 | 796 | 2657 | 8986 | 6329 | 125.8 | ok |
+| continue_for.js | 19 | 190 | 1925 | 4526 | 2601 | 73.0 | ok |
+| continue_while.js | 25 | 224 | 2347 | 4863 | 2516 | 89.0 | ok |
+| dangling_else.js | 30 | 81 | 2322 | 3467 | 1145 | 70.7 | ok |
+| div_exact.js | 17 | 49 | 1985 | 3150 | 1165 | 42.1 | ok |
+| else_chain.js | 38 | 138 | 2545 | 4449 | 1904 | 72.5 | ok |
+| else_if_braceless.js | 38 | 138 | 2325 | 5280 | 2955 | 46.7 | ok |
+| else_if_long.js | 137 | 565 | 5847 | 28612 | 22765 | 24.8 | ok |
+| else_if_mixed.js | 33 | 70 | 2887 | 4903 | 2016 | 34.7 | ok |
+| escapes_more.js | 13 | 45 | 2041 | 3701 | 1660 | 27.1 | ok |
+| expr_stmt_call.js | 21 | 83 | 2087 | 3233 | 1146 | 72.4 | ok |
+| fizzbuzz.js | 45 | 476 | 2776 | 13224 | 10448 | 45.6 | ok |
+| for.js | 16 | 107 | 1801 | 3333 | 1532 | 69.8 | ok |
+| for_dec.js | 17 | 97 | 1708 | 2959 | 1251 | 77.5 | ok |
+| for_empty.js | 28 | 116 | 2183 | 3738 | 1555 | 74.6 | ok |
+| func_basic.js | 23 | 68 | 2401 | 3585 | 1184 | 57.4 | ok |
+| func_forward.js | 13 | 43 | 1768 | 2568 | 800 | 53.8 | ok |
+| func_globals.js | 18 | 73 | 2168 | 3211 | 1043 | 70.0 | ok |
+| func_locals.js | 24 | 65 | 2086 | 3260 | 1174 | 55.4 | ok |
+| func_many_args.js | 20 | 50 | 1901 | 2867 | 966 | 51.8 | ok |
+| func_noreturn.js | 12 | 50 | 1752 | 2535 | 783 | 63.9 | ok |
+| func_shadow.js | 20 | 66 | 2060 | 3043 | 983 | 67.1 | ok |
+| gcd.js | 30 | 123 | 2615 | 4897 | 2282 | 53.9 | ok |
+| if_no_braces.js | 14 | 59 | 1863 | 2756 | 893 | 66.1 | ok |
+| inc_dec.js | 12 | 60 | 1893 | 2686 | 793 | 75.7 | ok |
+| is_prime.js | 49 | 503 | 2703 | 10336 | 7633 | 65.9 | ok |
+| let_const.js | 23 | 118 | 2205 | 3721 | 1516 | 77.8 | ok |
+| logic.js | 43 | 97 | 2442 | 4154 | 1712 | 56.7 | ok |
+| mod.js | 18 | 50 | 1897 | 3253 | 1356 | 36.9 | ok |
+| multi_args.js | 33 | 81 | 2304 | 5200 | 2896 | 28.0 | ok |
+| neg.js | 19 | 67 | 2068 | 3289 | 1221 | 54.9 | ok |
+| nested_calls_args.js | 26 | 59 | 2211 | 3753 | 1542 | 38.3 | ok |
+| nested_fn_calls_bool.js | 32 | 84 | 2084 | 3391 | 1307 | 64.3 | ok |
+| nested_loops.js | 32 | 242 | 2208 | 4671 | 2463 | 98.3 | ok |
+| num_print.js | 14 | 46 | 1925 | 2963 | 1038 | 44.3 | ok |
+| precedence.js | 35 | 67 | 2540 | 4322 | 1782 | 37.6 | ok |
+| prefix_inc.js | 28 | 118 | 2180 | 3559 | 1379 | 85.6 | ok |
+| print_unknown.js | 90 | 393 | 4108 | 13041 | 8933 | 44.0 | ok |
+| putc.js | 13 | 45 | 1830 | 2824 | 994 | 45.3 | ok |
+| return_early.js | 34 | 200 | 2592 | 5363 | 2771 | 72.2 | ok |
+| short_circuit.js | 28 | 63 | 2323 | 3355 | 1032 | 61.0 | ok |
+| short_circuit_side.js | 57 | 142 | 2663 | 5977 | 3314 | 42.8 | ok |
+| single_quote.js | 12 | 60 | 1964 | 3505 | 1541 | 38.9 | ok |
+| str_concat.js | 38 | 86 | 2775 | 6174 | 3399 | 25.3 | ok |
+| str_escape.js | 13 | 45 | 2033 | 4052 | 2019 | 22.3 | ok |
+| str_literal.js | 10 | 42 | 1886 | 3127 | 1241 | 33.8 | ok |
+| str_mixed.js | 16 | 80 | 2115 | 3255 | 1140 | 70.2 | ok |
+| str_param.js | 14 | 52 | 1880 | 3026 | 1146 | 45.4 | ok |
+| str_return.js | 19 | 52 | 1926 | 3069 | 1143 | 45.5 | ok |
+| str_table.js | 45 | 168 | 2729 | 6755 | 4026 | 41.7 | ok |
+| str_var.js | 6 | 54 | 1747 | 2549 | 802 | 67.3 | ok |
+| strict_eq.js | 17 | 65 | 1983 | 2961 | 978 | 66.5 | ok |
+| strict_ops.js | 33 | 81 | 2048 | 4209 | 2161 | 37.5 | ok |
+| unary_not.js | 9 | 41 | 1824 | 2559 | 735 | 55.8 | ok |
+| var_multi.js | 51 | 197 | 2588 | 5754 | 3166 | 62.2 | ok |
+| while.js | 15 | 115 | 1783 | 3272 | 1489 | 77.2 | ok |
+| while_break.js | 15 | 86 | 1978 | 2921 | 943 | 91.2 | ok |
+| while_true_return.js | 23 | 131 | 2410 | 4535 | 2125 | 61.6 | ok |
+| assign_undef.js | 0 | 0 | 1662 | 1731 | 69 | – | error: undefined variable |
+| bad_char.js | 0 | 0 | 1697 | 1771 | 74 | – | syntax error ( counter(cse) ) |
+| break_outside.js | 0 | 0 | 1828 | 1915 | 87 | – | error: break outside a loop |
+| extra_brace.js | 0 | 0 | 1742 | 1818 | 76 | – | error: unexpected } |
+| fn_in_block.js | 0 | 0 | 1718 | 1787 | 69 | – | error: nested function |
+| missing_brace.js | 5 | 0 | 1721 | 1792 | 71 | – | error: missing } |
+| nested_function.js | 0 | 0 | 1712 | 1784 | 72 | – | error: nested function |
+| return_outside.js | 0 | 0 | 1795 | 1871 | 76 | – | error: return outside a function |
+| str_build.js | 0 | 0 | 1675 | 1745 | 70 | – | error: strings can only be joined in console.log |
+| too_much_string.js | 0 | 0 | 2502 | 2592 | 90 | – | error: too much string data |
+| unclosed_paren.js | 0 | 0 | 1704 | 1798 | 94 | – | syntax error ( counter(cse) ) |
+| undef_fn.js | 13 | 0 | 1843 | 1922 | 79 | – | error: undefined function |
+| undef_var.js | 0 | 0 | 1708 | 1783 | 75 | – | error: undefined variable |
+| unterminated_str.js | 0 | 0 | 1917 | 1994 | 77 | – | syntax error ( counter(cse) ) |
+
 
 ---
 
@@ -309,38 +348,35 @@ Full table (generated from the log with `l5table.py`):
 
 `RUN=1 RUNWAIT=3500 node machine/trace.js <page> 4`, then `python3 machine/passprof.py trace.json`. `passprof`
 counts `LocalFrameView::UpdateStyleAndLayout` events over 1 ms and `InlineNode::ShapeTextIncludingFirstLine` events
-over 2 ms between `Commit`s. The window (3.5–7.5 s after Run) sits inside every run; the earlier 8–14 s window
-was fine for the 14 s "before" run but covers idle frames after HALT for the 8.5 s "after" run (shaping 17 ms per
-frame there instead of 34), so those traces were discarded.
+over 2 ms between `Commit`s. The window (3.5–7.5 s after Run) sits inside every run.
 
-| Trace (FizzBuzz, mid-run) | Frames | Passes per frame | Style+layout per frame | Shaping per frame | Frame |
+| Trace (FizzBuzz, mid-run, 2026-10-17) | Frames | Passes per frame | Style+layout per frame | Shaping per frame | Frame |
 |---|---|---|---|---|---|
-| Before (`dist/js_in_css.xhtml` of `6f1d92e`) | 27 | 3.00 | 115 ms | 34 ms | 143 ms |
-| PRINT family + slim readers | 31 | 3.00 | 100 ms | 34 ms | 125 ms |
-| + `#app` on its own layer (after) | 30 | 3.00 | 102 ms | 34 ms | 128 ms |
-| Before, 8–14 s window (2026-10-13 morning) | 47 | 3.00 | 101–103 ms | 34 ms | 125–128 ms |
-| Idle editor scan (no Run) | 296 | 2.00 | 16 ms | 0 ms | 20 ms |
+| Before (`9319bc0`) | 26 | 3.00 | 115 ms | 45 ms | 141 ms |
+| 3K (`a01eb0c`) | 26 | 3.00 | 115 ms | 46 ms | 142 ms |
+| Current (16K sparse) | 25 | 3.00 | 124 ms | 43 ms | 148 ms |
+| Idle editor scan (no Run) | 177 | 2.00 | 19 ms | 0 ms | 23 ms |
+| CPU-only FizzBuzz, 16K (`WAIT=700`, 3 s) | 26 | 2.46 | 105 ms | 43 ms | 112 ms |
 
-The paint change shows in run time (§5: 9.3–9.7 → 8.5–8.6 s) rather than here: `passprof` sums style and layout,
-and paint recording is outside both.
+[old machine: before 115 / 34 / 143 ms; 3K 102 / 34 / 128 ms; 16K 108 / 35 / 137 ms; idle 16 / 0 / 20 ms; CPU-only
+3K 93 / 36 / 97 ms.] Shaping takes about 30% longer per frame here than on the old machine; style and layout 0–15%.
+The before and 3K pages now trace the same per frame. The 3K page's gain shows in run time instead (§5a: 476
+steps instead of 1,329), and its paint change is outside `passprof`'s style+layout sum.
 
-**Inside a pass** (invalidation-tracking trace of the before page, 2 s, 15 frames). `StyleResolver::ResolveStyle`
-instants: 100,307, of which 97,931 inside `Layout` and 2,242 inside `Document::recalcStyle`, i.e. about 1,300 per
-layout from the readers' container queries (`div.rb.rb2`, `div.sp`, their children) and about 48 per recalc
-(`#cpu` and its ancestors; `recalcStyle` still takes 5.5 ms, almost all of it `#cpu`'s ~900 custom properties).
-Layout invalidations per 15 frames: `.rb.rb2` 3,008 "Style changed" + 1,920 "Anchor positioning", `.sp` 2,063,
-the ~200 state-line spans 186–403 each ("Text changed" / "Style changed"). Per frame: pass 1 ≈ 40 ms (17 ms
-shaping), pass 2 ≈ 38 ms (17 ms shaping), pass 3 ≈ 22–25 ms (no shaping): the settle pass.
+**Inside a pass** (old machine, 2026-10-13: invalidation-tracking trace of the before page, 2 s, 15 frames).
+`StyleResolver::ResolveStyle` instants: 100,307, of which 97,931 inside `Layout` and 2,242 inside
+`Document::recalcStyle`, i.e. about 1,300 per layout from the readers' container queries (`div.rb.rb2`, `div.sp`,
+their children) and about 48 per recalc (`#cpu` and its ancestors; `recalcStyle` still takes 5.5 ms, almost all of
+it `#cpu`'s ~900 custom properties). Layout invalidations per 15 frames: `.rb.rb2` 3,008 "Style changed" + 1,920
+"Anchor positioning", `.sp` 2,063, the ~200 state-line spans 186–403 each ("Text changed" / "Style changed"). Per
+frame: pass 1 ≈ 40 ms (17 ms shaping), pass 2 ≈ 38 ms (17 ms shaping), pass 3 ≈ 22–25 ms (no shaping): the settle
+pass. These counts depend on the page, not the machine.
 
-**The same CPU without the editor and compile chain** (CPU-only FizzBuzz page, `machine/gen_fvm4.py` without
-`UI=1`, trace 0.7–3.7 s after load, after): 2.46 passes per frame, 93 ms style+layout, 36 ms shaping, 97 ms frame;
-over the whole run it halts 4.8 s after load (before: 8.8–10.1 s, 2.25 passes per frame, 66 ms frames in a late
-window). Experiments on that page (each a 3 s trace): a time-driven infinite animation added nothing (2.48 passes,
-103 ms); 1,536 extra active view-timeline animations (the latch registers' worth) *removed* the third pass
-(2.00 passes, 93 ms). Why the full page always settles and the CPU-only page mostly doesn't is not understood.
+**The CPU-only page and the third pass** (old machine): a time-driven infinite animation added nothing (2.48 passes);
+1,536 extra active view-timeline animations *removed* the third pass (2.00 passes). Why the full page always settles
+and the CPU-only page mostly doesn't is not understood.
 
-*(derived)* About 7.8 CPU frames per second on the full page; shaping is a third of style+layout time; the settle
-pass is about 18% of a frame.
+*(derived)* About 6.8 CPU frames per second on the full page; shaping is a third of style+layout time.
 
 ## 7. Editor text readback (scan)
 
@@ -350,19 +386,32 @@ unread or wrong cells.
 
 | Rep | Sweep | Misses |
 |---|---|---|
-| 0 | 1,178 ms | 0 |
-| 1 | 1,178 ms | 0 |
-| 2 | 1,206 ms | 0 |
+| 0 | 1,115 ms | 0 |
+| 1 | 1,214 ms | 0 |
+| 2 | 1,172 ms | 0 |
 
-The scan advances one column per frame over P = 64 columns, so one sweep is ≥ 64 frames; *(derived)* ~18 ms per column.
+The scan advances one column per frame over P = 64 columns, so one sweep is ≥ 64 frames; *(derived)* ~18 ms per
+column. [old: 1,178 / 1,178 / 1,206 ms.]
 
-## 8. RAM size (2026-10-13, branch `worktree-ram-expand`)
+## 8. RAM size
 
-CPU-only FizzBuzz pages (`machine/gen_fvm4.py` without `UI=1`, `machine/halttime.js`: HALT measured from load; frames
-from a 3 s trace starting 0.7 s after load, a heavier window than §6's). "Dense" is the RAM as it was (every cell
-rendered and anchored); "sparse" renders a group of cells only once a write has reached it (HISTORY phase 10; 64-cell
-groups in this table, 256 in the shipped page: real-page FizzBuzz 9.8 / 10.7 s with 256, 10.5 / 11.9 s with 64,
-10.3 / 11.5 s with 16, measured with another session loading the machine).
+**Group size of the sparse RAM** (`MEMGROUP=n UI=1 python3 machine/gen_fvm4.py build/ccimg.json build/f4cc_16 out.xhtml`;
+real page, initial FizzBuzz, two interleaved rounds, 2026-10-17):
+
+| Cells per group | compiledMs | haltMs |
+|---|---|---|
+| 16 | 2,491 / 2,498 | 10,251 / 10,220 |
+| 64 | 2,433 / 2,423 | 10,206 / 10,295 |
+| 256 (shipped) | 2,561 / 2,582 | 10,899 / 10,875 |
+
+**On this machine 16 and 64 halt about 6% sooner than the shipped 256**, well beyond the ±0.5% A-vs-A noise. The old
+measurement that chose 256 (real-page FizzBuzz 9.8 / 10.7 s with 256, 10.5 / 11.9 s with 64, 10.3 / 11.5 s with 16)
+ran with another session loading the machine. This is a lead, not yet a change: re-check with `ab.js` and the L5
+suite before switching.
+
+**Dense against sparse** (old machine, 2026-10-13, branch `worktree-ram-expand`). The dense rendering (every cell
+rendered and anchored) no longer exists in the generator, so this table can't be re-measured. CPU-only FizzBuzz
+pages, HALT measured from load; frames from a 3 s trace starting 0.7 s after load:
 
 | RAM words | page bytes (dense / sparse) | load, dense | HALT, dense | frame, dense | load, sparse | HALT, sparse | frame, sparse |
 |---|---|---|---|---|---|---|---|
@@ -374,25 +423,18 @@ groups in this table, 256 in the shipped page: real-page FizzBuzz 9.8 / 10.7 s w
 
 *(derived)* Dense: about 2.4 ms per pass per 1,000 cells, for cells the program never touches. The same pages with the
 unused cells' `anchor-name` removed: 16K 114 ms, 32K 137 ms frames (HALT 6.2 / 8.6 s), so anchors are two thirds of it;
-with the decode-tree nodes as blocks another ~5% (16K 106 ms, 32K 131 ms). Sparse: flat to within noise.
+with the decode-tree nodes as blocks another ~5% (16K 106 ms, 32K 131 ms). Sparse: flat to within noise. The current
+16K sparse CPU-only page on the mini PC: load 268–278 ms, HALT 6.27–6.40 s, frame 112 ms (§5c, §6).
 
-Sparse pages at 16K with programs that re-read evicted data (exact step counts, correct output): `bubble_sort_print`
-8,133 ms (901 steps), `array_sort` 3,747 ms (635), `str_table` 2,436 ms (168).
-
-Dead end, measured: pushing the read block down the decode trees so that only four cells carry anchors made every
+Dead end, measured on the old machine: pushing the read block down the decode trees so that only four cells carry anchors made every
 pass restyle the whole trees (16K: 38,000 `ResolveStyle` per pass, 90 ms per recalc; 3K HALT 9.6 s, 16K 15.9 s).
 
-The real page with 16K sparse RAM (`machine/ui_seq.js`, initial FizzBuzz): compiled 2,413 / 2,602 ms, HALT 10,359 /
-9,712 ms (run ≈ 7.5 s; 3K dense: 8,600 / 8,477 ms, run ≈ 6.2 s). Mid-run trace: 3 passes, 108 ms style+layout, 35 ms
-shaping, 137 ms frame (3K dense: 128 ms). Page 11.9 MB (9.5 MB). L3 104/104, l5-smoke 9/9, full L5 **101/101** (14.5 min
-with another session's benchmarks running on the same machine, so its timings are not recorded here).
-
-HarfBuzz alone with the 1K ROM (6,803 glyphs): FizzBuzz 18.1 ms per shaping (103 shapings), bubble sort 17.9 ms
-(167), array_sort 18.3 ms (77), str_table 18.3 ms (40); every shaping matches the model.
+The real page with 16K sparse RAM against 3K dense is in §5a (HALT 10.9 against 10.6–10.8 s) and §6 (148 against
+142 ms per frame). Page 11.9 MB (9.5 MB).
 
 ## 9. Caveats
 
 - The headless runs have no GPU, so desktop Chrome timings will differ.
 - The harness's own mouse moves show up in traces as hit testing (§6).
-- Run comparisons back to back on one machine; these numbers came from a different sandbox than the earlier logs in
-  `archive/results/`.
+- Run comparisons back to back on one machine. The old-machine numbers in brackets come from an arm64 VM; earlier logs
+  in `archive/results/` come from yet another sandbox.
