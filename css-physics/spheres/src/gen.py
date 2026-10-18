@@ -132,7 +132,31 @@ RIDX = {rn: ri for ri, (rn, lo, hi) in enumerate(REGS)}
 NREGEL = (len(REGS) + 1) // 2
 NTS = -(-NREGEL // TS_NAMES)
 FIELDS = 'XYZUVWT'
-INIT = {c: f'i{c.lower()}' for c in FIELDS}   # the scene's start values: --ix0 ...
+INIT = {c: f'i{c.lower()}' for c in FIELDS}   # (the scene's start values as properties: RENDER=anim's wrappers)
+
+
+def start_values(sn):
+    out_ = {}
+    for s_, (x, y, z, vx, vy, vz, ty) in enumerate(SCENES[sn]):
+        if vx == vy == vz == 0 and y < -RADII[ty] - 0.5:
+            vy = 1.0     # (a sphere at rest in mid-air would not be moving, so nothing would ever compute its fall)
+        h_ = 1 / RATE
+        for F_, v in zip(FIELDS, (x, y, z, x - vx * h_, y - vy * h_, z - vz * h_, ty + 1)):
+            out_[(F_, s_)] = v
+    return out_
+
+
+START = {sn: start_values(sn) for sn in SCENE_NAMES}
+
+
+def start(F_, s_):
+    """slot s_'s start value of field F_ in the scene picked (--scn, the scene's index): an if() over the scenes,
+    evaluated only where it's used (the static base-value wrapper, the registers' reset rules), instead of 7 inherited
+    properties per sphere that every restyled element would carry"""
+    vs = [f(START[sn][(F_, s_)]) for sn in SCENE_NAMES]
+    if len(set(vs)) == 1:
+        return vs[0]
+    return 'if(' + ' '.join(f'style(--scn: {i}): {v};' for i, v in enumerate(vs[:-1])) + f' else: {vs[-1]})'
 
 props = {}   # name -> (syntax, inherits, initial)
 
@@ -341,7 +365,7 @@ for t_ in range(NTS):
 base = {'GT': '0', 'GQ': 'var(--gy)', 'TX': '0', 'AM': '1', 'AX': '0'}
 for s in range(N):
     for F in FIELDS:
-        base[f'{F}{s}'] = f'var(--{INIT[F]}{s})'
+        base[f'{F}{s}'] = start(F, s)
 ris = list(range(2, len(REGS)))
 groups = [ris[k:k + RBG] for k in range(0, len(ris), RBG)]
 if FROZEN:
@@ -455,7 +479,7 @@ def nxt(o_t):
 def init(ri):
     rn = REGS[ri][0]
     F, s = slot_field(rn)
-    return V(f'{INIT[F]}{s}') if F else {'GT': V('GT'), 'AM': '1'}.get(rn, '0')
+    return start(F, s) if F else {'GT': V('GT'), 'AM': '1'}.get(rn, '0')
 
 
 w(''.join(regrule(k + 1, a, b, hold) for k, (a, b) in enumerate(pairs)))
@@ -593,11 +617,14 @@ def scene_decls(sn):
     return ';'.join(out_)
 
 
-SC_CSS = [f'#INI{{{scene_decls(SCENE_NAMES[0])}}}']
+reg('scn', '<integer>')
+scene_props = (lambda sn: f'--scn:{SCENE_NAMES.index(sn)};' + scene_decls(sn)) if 'classic' in LOOKS else \
+              (lambda sn: f'--scn:{SCENE_NAMES.index(sn)}')
+SC_CSS = [f'#INI{{{scene_props(SCENE_NAMES[0])}}}']
 for sn in SCENE_NAMES[1:]:
-    SC_CSS.append(f'#app:has(#sc-{sn}:checked) #INI{{{scene_decls(sn)}}}')
+    SC_CSS.append(f'#app:has(#sc-{sn}:checked) #INI{{{scene_props(sn)}}}')
 for sn in SCENE_NAMES:
-    SC_CSS.append(f'#app:has(#lb-{sn}:active) #INI{{{scene_decls(sn)}}}')
+    SC_CSS.append(f'#app:has(#lb-{sn}:active) #INI{{{scene_props(sn)}}}')
 ENG_CSS += '\n' + '\n'.join(SC_CSS)
 
 PFX = E_('PFX', '')

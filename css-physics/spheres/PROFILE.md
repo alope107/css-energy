@@ -24,7 +24,7 @@ slots); they only exist in the sparse regime.
 | Part | ms | How measured |
 |---|---|---|
 | render: 128 wrappers reading X/Y/Z/T with their own animations (512), 384 elements | ~10 | sphere markup removed |
-| readback base values (`--X0: var(--ix0)` on the readback groups, only needed until the timelines resolve) | 6.5 | declarations removed (1.5 with the render also removed: the two interact) |
+| readback base values (`--X0: var(--ix0)` on the readback groups, only needed until the timelines resolve) | ~0 | (an earlier "6.5 ms" came from a page whose render had stopped painting; moved to a static wrapper they measure 0.99) |
 | readback animations (900, groups of 32), the 29-element chain, 450 register holds, #LT/#LA/#LC | ~11.5 | residual |
 
 Readback group size barely matters (16: +2%, 128: −3%). Rendering from the readback chain (`RENDER=inh`) instead of
@@ -71,3 +71,44 @@ now hold pairs up to two big radii apart: in the plain-JS model 1.15× the spher
 192 and 256, 1.3× didn't, so K is 9 / 16 / 23 / 31 at 64 / 128 / 192 / 256 (was 6 / 10 / 15 / 19). At 128 in gas chaos
 the step pass grew from ~36 to ~52 ms: classic 11–12 fps, neon 13 fps (+20%, hold pass 26 → 20 ms). No missed contacts,
 no floor penetration; overlaps up to 8 px while 128 spheres pile up, under 1 px once settled.
+
+## Readback and register writes (2026-10-18)
+
+**What a hold pass is made of** (frozen-hold pages: a wobbling snapshot read back on every pass, nothing stepping;
+`FROZEN_HOLD=1`; 128 spheres, one-element render, 16.1 ms):
+
+| Removed | ms | Implied |
+|---|---|---|
+| render (128 billboards + shadow canvas) | 9.8 | ~6 |
+| the register elements (their timelines with them) | 9.8 | ~6 (≈13 µs per register element per pass, also just holding) |
+| the registers' `var()` references (constant positions) | 12.0 | ~4 of those |
+| the registers' gated rules (write, held flag, reset) | 15.1 | ~1.5 |
+| #LC's gate rules (all false in a hold pass) | 14.1 | ~2 |
+| the "anything moving" sum on #LT (3N `abs`) | 14.6 | ~1.5 |
+
+**The readback animations themselves are cheap** (`experiments/mk_readback.py`: 450 register elements moved by a clock,
+their 900 values read back): 2.2 ms over the 2.2 ms the moving registers cost alone, 2.4 µs per value. Groups of 8 are
++27%, all 900 on one element +16%, 32–128 per group best; `<integer>` or `<length>` instead of `<number>`, one
+`timeline-scope` list or `timeline-scope: all` make no difference. No other channel beats this: the survey's grid ports
+and size-container readers cost ~15 µs per value. The cost is in what restyles because a value changed.
+
+**Every restyled element pays for the inherited custom properties it carries**: 2,000 set inherited registered
+properties on an ancestor make the readback page 35% slower, 6,000 double it (that page restyles ~480 elements per
+pass). The engine's lower elements carried ~3,500 at 128 spheres (readback, scene start values, solver outputs,
+activity flags).
+
+**Changes, measured end to end** (gas chaos, `frame.js`, 5 rotated rounds, against 9fe8106's classic render):
+
+| Change | Effect |
+|---|---|
+| render: one billboard per sphere reading the readback chain, floor shadows on one box-shadow canvas (was a wrapper + 2 children reading 4 registers with their own animations) | together with the next three: **+16% fps at 128, +19% at 64**; hold pass 24.7 → 15.7 ms, step 51.7 → 47.4 ms |
+| activity flags (C, ac, in, GH, wake) not inherited: only #LC's gates read them, on #LA | |
+| a one-value "anything moved" register (AM) replaces the 384-term moving sum on #LT | |
+| pairs and sort values in the active and copy blocks: two gate rules per slot instead of four | |
+| scene start values as `if()` on one inherited scene number instead of 7 inherited properties per sphere | ±0 (1.00) |
+| readback base values on a static wrapper (#LB) | ±0 (0.99) |
+
+What remains of the machinery at 128: the 450 register elements (~6 ms per pass, twice per frame: they restyle on the
+step pass to write and on the hold pass because the readback they inherit changed), the render (~6 ms), the sort
+and register write expressions (~9 ms), #LC's gates (~2 ms per pass). The register elements can't skip the hold pass
+while they sit under the readback chain, and they must, to read the solver's outputs.
