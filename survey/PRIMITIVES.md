@@ -24,13 +24,15 @@ session), **researched** (Chromium/HarfBuzz source, M153 branch 8010), **unteste
 4. **Grid placement is dynamic indexing.** `grid-row: var(--addr)` on a size-container item stretched to its row reads
    the value of row `addr`. At 4,096 cells with 32 ports, a frame costs 5.2 ms against 23.8 ms for js-minus-js's
    `if()`-mux + `anchor-size()` port, which is about 15 µs per port against ~200–600 µs. *(measured)*
-5. **css-physics: inlining multi-use temps saves ~8%.** `INL_ONLY1=0 INL_DEPTH=3` removes 4% of the props, and the
-   frozen 48-body step drops to a ratio of 0.921 (IQR 0.886–0.960, 6 rounds). `smoke.sh 16` passes with it
-   (Chromium). A temp is worth inlining up to about 5 uses (microbenchmark). *(measured)*
+5. **css-physics: inlining multi-use temps does *not* pay in the engine.** `INL_ONLY1=0` removes 4% of the props but
+   the frozen 48-body step is unchanged (12 rounds: 0.991, IQR 0.933–1.035, against an A-vs-A of 1.020). A first
+   6-round run without a control showed 0.92: noise. Inlining more (threshold 17 or 30) is 15–18% slower, though a
+   microbenchmark says a temp is worth inlining up to ~5 uses. *(measured; css-physics HISTORY)*
 6. **paint: CSS can tell a pending probe from a failed one.** An `<img alt>` probe is 0×0 while pending, the alt
    text's box (here 64×20) after a miss of any kind, and (v+1)×1 on a hit. That makes staged, frequency-ordered
-   probing and an immediate per-cell retry possible: 39–64% fewer requests on typical canvases. *(measured; savings
-   derived)*
+   probing and an immediate per-cell retry possible. It saves 15 requests per cell *written* with the first-probed
+   colour. A never-written cell still pays its 16 probes and the retry, so a mostly blank canvas saves little.
+   *(measured tri-state; savings derived)*
 7. **Dead ends confirmed:**
    - AAT `morx` is 4.5× faster than equivalent GSUB in HarfBuzz but stripped by Blink's OTS config.
    - `@function` still costs +1.3–1.6 µs per call in 153.
@@ -237,11 +239,13 @@ because 16 channels multiply the RAM trees' per-pass properties (90 ms recalcs).
   - URL fragment: one id at a time, written by the user.
 - **paint's reads:** the new primitive is the `<img alt>` tri-state (finding 6). How it changes reads:
 
-| Canvas (480 cells) | Today | Staged: most common colour first, others on a miss | Saving |
+| Canvas (480 cells) | Today | Staged: one likely colour first, the other 15 on a miss | Saving |
 |---|---|---|---|
-| 50% background, 30% other colours, 20% never written | 7,680 + 1,536 retry = 9,216 | 240 + 2,304 + 3,072 = 5,616 | 39% |
-| fully written, 60% background | 7,680 | 288 + 3,072 = 3,360 | 56% |
-| fully written, 80% background | 7,680 | 384 + 1,536 = 1,920 | 75% |
+| 20% written (10% with the first-probed colour), 80% never written | 7,680 + 6,144 retry = 13,824 | 13,824 − 48 × 15 = 13,104 | 5% |
+| fully written, 60% with the first-probed colour | 7,680 | 288 + 3,072 = 3,360 | 56% |
+
+A never-written cell misses every probe and pays the retry, whatever the order, so the saving is 15 requests per cell
+written with the first-probed colour. Real canvases are mostly never-written paper.
 
 Completion is visible per cell: every probe is non-zero once it has finished. So the retry can start the moment a
 cell's probes have all missed, instead of after the two-sentinel timer, and loads fall under Cloudflare's 10,000
@@ -279,10 +283,8 @@ tri-state)*
 
 ### css-physics
 
-1. **Ship multi-use inlining** (`INL_ONLY1=0 INL_DEPTH=3`): ~8% on the frozen 48-body step, Chromium smoke passes.
-   Still to do: `BROWSER=firefox smoke.sh`, live `perf3.js`, and an `ab.js` A-vs-A on the same day.
-   - The inliner only crosses props within one (level, gate) block; most temps cross levels or gates. A cost-model
-     inliner that duplicates cheap temps *across* gates (U × tokens × 0.1 µs < ~1.7 µs) is the next step.
+1. ~~Ship multi-use inlining~~: no effect on re-measurement with an A-vs-A control, and more inlining is slower
+   (finding 5; HISTORY).
 2. **`progress()`** in register positions: trivial, a fraction of a millisecond.
 3. **Close the contact-slot idea** for ≤ 96 bodies (P7 numbers): reading a partner's value costs ~15 µs per value even
    with grid ports.
@@ -293,8 +295,9 @@ tri-state)*
 
 ### paint
 
-1. **Staged probing with `<img alt>` probes** (finding 6). Probe the static most common colour first, show the other 15
-   only on a miss, retry per cell on all-miss, and drop the sentinel chain. 39–75% fewer requests on typical canvases.
+1. **Staged probing with `<img alt>` probes** (finding 6). Probe one likely colour first, show the other 15 only on a
+   miss, retry per cell on all-miss, and drop the sentinel chain. It saves 15 requests per cell written with that colour
+   and the 3 s retry wait. Never-written cells cost the same as today, so the gain on mostly blank canvases is small.
    - Check that the alt box is the same size everywhere: pin its font and box with CSS, or use a fixed-size inline
      box.
 2. Early Hints won't help: Chrome ignores `rel=compression-dictionary` in a 103. *(researched)*

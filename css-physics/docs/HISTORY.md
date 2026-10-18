@@ -47,6 +47,11 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
     snap-back cells per 1000 against 1.5. An unregistered copy failed the same way; a minimal page didn't reproduce it.
   - Halves the physics rate: restarts cost ∝ registered properties, which are page-global (BENCHMARKS §4).
   - Screenshots and 60/s draw counts looked perfect; only frame-by-frame checks showed it.
+- **Inlining multi-use props** (`INL_ONLY1=0`, 2026-10-18): 4% fewer props at 48 bodies (`INL_DEPTH` 2–6 makes no
+  difference), but the frozen 48 pile is unchanged: `ab.js` 12 rounds 0.991 (IQR 0.933–1.035) against an A-vs-A of 1.020
+  (0.969–1.065). A first 6-round run without the control said 0.92: noise. Inlining more by raising the cost model's
+  threshold (8.3 → 17 or 30, 7% or 13% fewer props) made the step 15% and 18% *slower*: a microbenchmark of one temp
+  with U consumers says inlining pays up to U ≈ 5 (`../../survey/exp/fn/mkfn.py`), but the engine's temps don't follow it.
 - **Hypothesis rejected: inherited custom properties are copied per level.** Inherited and non-inherited cost the same
   over 50 levels; 6,000 declared at level 1 cost 7.0–7.4 ms at 8, 66 and 130 levels deep.
 
