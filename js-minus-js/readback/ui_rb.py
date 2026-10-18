@@ -17,6 +17,8 @@ XHTML-safe output.
 import base64, html, subprocess, os, re
 import sys; sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'compiler'))
 import ccpage5 as C
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
+import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -39,7 +41,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
                                                            for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz'))
     regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS)
     ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
-    g = []
+    g = [lbl.group('Probe font, scan clock and latches', 'the readback font, the scan\'s driver state and the per-row latches')]
     g.append(f"""
 @font-face {{ font-family: "AsciiProbe"; src: url(data:font/woff2;base64,{font_b64(P)}) format("woff2"); font-display: block; }}
 @counter-style rbblank {{ system: cyclic; symbols: ""; }}
@@ -123,6 +125,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
 }}
 .row i::before {{ content: counter(rbch, rbascii); }}
 """)
+    g.append(lbl.group('Line probes: one per editor line', 'each line\'s end is an anchor; its probe is as tall as the line is long'))
     g.append('#ed::before { anchor-name: --rbs0; }')
     for k in range(1, L):
         g.append(f'#ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}')
@@ -132,12 +135,14 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
         g.append(f'#app:not(:has(#ed > div:nth-of-type({k}))) .probe:nth-child({k + 1}) {{ display: none; }}')
     g.append(f'#app:has(#ed > div:nth-of-type({L})) .limit {{ display: block; }}')
     g.append('#app:has(#ed div div) .nested { display: block; }')
+    g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1
         g.append(f'@container rbscan style(--rbscan: {k}) {{ #ed {{ font-variation-settings: "SCAN" {k}; }} .row > b:nth-child({G}) {{ --rbgj: {j}; }} .scanpos {{ --rbcol: {k}; }} }}')
     g.append('@property --rbcol { syntax: "<integer>"; inherits: false; initial-value: 0; }')
     g.append('.scanpos { counter-reset: rbcol var(--rbcol); } .scanpos::before { content: "reading column " counter(rbcol); }'
              ' @container rbscan style(--rbscan: 0) { .scanpos { visibility: hidden; } }')
+    g.append(lbl.group('Character cells: the registers the compiler reads'))
     g.append(C.cell_css())
     return '\n'.join(g)
 

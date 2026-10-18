@@ -41,6 +41,8 @@ usage: python3 build.py [W] [H]      (pip install zstandard)
 """
 import os, sys, struct, zlib, hashlib
 import zstandard
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared", "py"))
+import csslabel as lbl     # section and group comments in the output (../shared/README.md#labels-in-generated-css)
 
 W = int(sys.argv[1]) if len(sys.argv) > 1 else 24
 H = int(sys.argv[2]) if len(sys.argv) > 2 else 20
@@ -106,31 +108,37 @@ open(f"{OUT}/_headers", "w").write("""/c/:k/d/*
 lookup = lambda var: "if(" + "".join(f"style({var}:{v}):var(--p{v});" for v in range(K)) + "else:transparent)"
 
 # ------------------------------------------------------------------ shared cell CSS
-cell_css = ":root{" + "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + "}" + f"""
+# (short labels, no notes: every cell loads one of these documents)
+cell_css = lbl.header("paint/build.py", "paint/docs/ARCHITECTURE.md") + "\n" + lbl.section("Cell document") + "\n:root{" + "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + "}" + f"""
 @property --bv{{syntax:'<integer>';inherits:false;initial-value:-1}}
 html,body{{margin:0;height:100%;overflow:hidden;background:transparent}}
 .px{{position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px}}
 a{{display:none;position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px;z-index:2;cursor:crosshair}}
 a:hover{{box-shadow:inset 0 0 0 2px var(--pc),inset 0 0 0 3px #fff8}}
+{lbl.group("INPUT: the paint link for the picked colour")}
 """ + "".join(f"@media (width:{CELL + 1 + v}px){{:root{{--pc:var(--p{v})}}a.a{v}{{display:block}}}}" for v in range(K))
 links = lambda prefix: "".join(f'<a class=a{v} href="{prefix}{v}" aria-label="paint colour {v}"></a>' for v in range(K))
 
 # cell.html: a cell that was never written: transparent, paint links only, writes nothing
 cell = f"""<!doctype html><meta charset=utf-8><title>cell</title><style>{cell_css}</style>{links('p/')}
 """
+lbl.check(cell, "cell.html")
 open(f"{OUT}/cell.html", "w").write(cell)
 
 # p/<v>.html: write v, show v, offer paint links
 for v in range(K):
-    open(f"{OUT}/p/{v}.html", "w").write(f"""<!doctype html><meta charset=utf-8><title>cell</title><style>{cell_css}
+    open(f"{OUT}/p/{v}.html", "w").write(lbl.check(f"""<!doctype html><meta charset=utf-8><title>cell</title><style>{cell_css}
+{lbl.section(f"WRITE: dictionary {v}")}
 .px{{background:var(--p{v})}}
 .w{{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;mask-image:url(../d/{v}.png)}}
 </style><link rel=compression-dictionary href="../d/{v}.png">
 <b class=px></b><i class=w></i>{links('')}
-""")
+""", f"p/{v}.html"))
 
 # ------------------------------------------------------------------ the page
-page_css = ":root{" + "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + "}" + f"""
+page_css = (lbl.header("paint/build.py", "paint/docs/ARCHITECTURE.md") + "\n" +
+            lbl.section("Palette, registered properties and page layout") + "\n:root{" +
+            "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + "}") + f"""
 @property --pal{{syntax:'<integer>';inherits:true;initial-value:1}}
 @property --s{{syntax:'<number>';inherits:true;initial-value:1}}
 @property --bv{{syntax:'<integer>';inherits:false;initial-value:-1}}
@@ -145,8 +153,9 @@ header{{display:flex;justify-content:space-between;align-items:baseline;gap:12px
 h1{{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;margin:0}}
 header span{{color:var(--mute);font-size:12px;text-align:right}}
 .stage{{height:calc({H * CELL}px * var(--s))}}
-/* RETRY: each .gd narrows by SENT px once its sentinel loads. /s.png follows the first pass of probes; /s.png?2
-   is requested only then, so it also queues behind the probes Chrome re-sent after a GOAWAY */
+{lbl.section("RETRY: the sentinels", "each .gd narrows by SENT px once its sentinel loads")}
+/* /s.png follows the first pass of probes; /s.png?2 is requested only then, so it also queues behind the probes
+   Chrome re-sent after a GOAWAY */
 .sig{{display:flex}}
 .stage>.sig{{width:{W * CELL + SENT}px;transform-origin:0 0;scale:var(--s)}}
 .gd{{flex:1 1 0;min-width:0;container:s1/inline-size}}
@@ -154,10 +163,11 @@ header span{{color:var(--mute);font-size:12px;text-align:right}}
 .sig>i{{display:block;flex:none;opacity:0}}
 .sig>i.s2{{display:none}}
 @container s1 (width<{W * CELL + SENT // 2}px){{.sig>i.s2{{display:block}}}}
+{lbl.section("The canvas: one .c per cell")}
 .grid{{display:grid;grid-template-columns:repeat({W},{CELL}px);width:var(--gw);background:var(--p0);outline:1px solid var(--frame);
   box-shadow:0 12px 30px -18px rgba(0,0,0,.35)}}
 .c{{position:relative;width:{CELL}px;height:{CELL}px;overflow:hidden;anchor-scope:--rd,--rt}}
-/* READ: the probe row is (stored value + 1) px wide; 0 = never written */
+{lbl.section("READ: the probe rows", "the probe row is (stored value + 1) px wide; 0 = never written")}
 .rd{{position:absolute;left:0;top:0;display:flex;anchor-name:--rd;opacity:0;pointer-events:none}}
 .rd i{{display:block;flex:none}}
 .v{{position:absolute;left:0;top:0;height:0;width:anchor-size(--rd width);container-type:inline-size;
@@ -171,12 +181,14 @@ header span{{color:var(--mute);font-size:12px;text-align:right}}
 @container (width:0px){{.rt{{display:if(style(--go:1):flex;else:none)}}}}
 .w{{position:absolute;left:0;top:0;height:0;width:max(100cqw,anchor-size(--rt width,0px));container-type:inline-size}}
 .px{{position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px;--bv:calc(100cqw / 1px - 1);background:{lookup('--bv')}}}
+{lbl.section("START: the cell documents", "one object per value; only the one for the value read is shown")}
 /* the cell document's width carries the palette colour; only the object for the value read is
    shown, and a hidden <object> never loads */
 .c object{{position:absolute;left:0;top:0;display:none;border:0;color-scheme:normal;
   width:calc({CELL + 1}px + var(--pal) * 1px);height:{CELL}px}}
 @container (width:0px){{.c object.x{{display:block}}}}
 """ + "".join(f"@container (width:{v + 1}px){{.c object.f{v}{{display:block}}}}" for v in range(K)) + f"""
+{lbl.section("Palette picker and notes")}
 .pal{{display:grid;grid-template-columns:repeat(16,1fr);gap:4px;margin:14px 0 0}}
 .pal input{{position:absolute;opacity:0;pointer-events:none}}
 .pal label{{aspect-ratio:1;border-radius:3px;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}}
@@ -212,5 +224,6 @@ The browser's Back button is undo, Forward is redo.</p>
 </main>
 </html>
 """
+lbl.check(html, "index.html")
 open(f"{OUT}/index.html", "w").write(html)
 print(f"{W}x{H}: index.html {len(html)/1e3:.0f} KB, cell.html {len(cell)} B, data files {2*K}, pages {K+1}")

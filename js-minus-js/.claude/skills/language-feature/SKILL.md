@@ -14,7 +14,10 @@ CSS). Both change together, in this order.
 2. **Change the reference** (`cc_ref.py`): lexer `char()`; parser `token()` and its helpers `end_expr_stmt`,
    `end_simple_stmt`, `complete_stmt`, `close_block`; limits and codes at the top. Keep one step per character,
    fixed-size state, no lookahead past the next character. A new failure code goes in the README's error table.
-   Iterate on `make l1`.
+   Iterate on `make l1` (its simulator is strict: a statement that leaves the stack unbalanced fails). Add the feature
+   to the program generator `tests/fuzz/progen.py`, within what the language guarantees, and run `python3
+   tests/fuzz/fuzz.py gen -n 2000`, `fmt` and `mut -n 2000`. A failure is in `build/fuzz/` (`tests/fuzz/show.py`
+   replays it); each real one becomes a `tests/suite` test.
 3. **Mirror it in the DSL** (`cc_dsl.py`):
    - Same effects in the same order, predicated with `with self.when(...)`. Call `done()` wherever the reference
      `return`s; not where it falls through (`m = self.mode = X`).
@@ -27,7 +30,9 @@ CSS). Both change together, in this order.
    label ports before and after. Ports are elements on all 400 levels, temps are CSS per level, and every rule is
    tested on every level: a jump needs a reason or a fix (fold constants, collect labels, prune unreachable blocks,
    keep tokens out of shared classes that multiply variants).
-5. **`make l3`** (~1.5 min, in the background): every program must match the reference word for word.
+5. **`make fuzz`** (~10 min: the DSL against the reference on generated, reformatted and mutated programs, rejected
+   ones included) and **`make l3`** (~1.5 min, in the background): every program must match the reference word for
+   word. If the lexer or the page's chain changed, **`make fuzz-l3`** too (L3 on 300 fuzz programs).
 6. **If `lib_src.js` changed**, compare `python3 tools/traps.py tests/suite/fizzbuzz.js tests/programs/t*.js` before
    and after.
 7. **Rebuild and check the page**: `make page && make l5-smoke`, then `make dist`.

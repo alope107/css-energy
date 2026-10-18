@@ -12,7 +12,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 **Status (2026-10-17).**
 
-- All five test levels pass: 109 programs checked against Node's output and 31 the compiler must reject.
+- All five test levels pass: 120 programs checked against Node's output and 46 the compiler must reject, plus
+  differential tests that check thousands of generated, reformatted and mutated programs against Node (`make fuzz`).
 - On the page, compiling takes 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15
   then runs in about 8.3 s and halts about 10.8 s after Run (18.3 s before printing moved into the machine). Objects
   and garbage collection left FizzBuzz's run time unchanged and compile time about 4% slower.
@@ -24,7 +25,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 npm install                       # playwright-core + @sparticuz/chromium (Linux x64), for the harnesses only
 pip install -r requirements.txt   # fontTools, brotli (uharfbuzz optional)
 make page                         # -> build/js_in_css.xhtml (about 25 s; reproducible)
-make test                         # fast tests, no browser (about 5 s)
+make test                         # fast tests, no browser (about 15 s)
+make fuzz                         # differential tests against Node, no browser (about 10 min)
 make l3                           # the CSS compiler in Chrome (about 1.5 min)
 make l5-smoke                     # the real page, typed like a user (about 1 min)
 ```
@@ -40,11 +42,13 @@ Open `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome. Elsewhere th
   Assigning to a `const` (`=`, `op=`, `++`, `--`) or declaring one without `=` is a compile error; its array elements
   can still be assigned. All of this is compile time only.
 - **Functions**: top-level `function` declarations with parameters, locals, recursion, calls before the definition,
-  and `return` with or without a value.
-- **Control flow**: `if` / `else` / `else if`, `while`, `do … while`, `for (;;)` (any part may be empty), `break`,
-  `continue`. Bodies may be a block or a single statement; a dangling `else` binds as in JavaScript.
+  and `return` with or without a value. A call passes exactly as many arguments as the function has parameters.
+- **Control flow**: `if` / `else` / `else if`, `while`, `do … while`, `for (;;)` (any part may be empty), `switch`
+  with `case` / `default`, `break`, `continue`. Bodies may be a block or a single statement; a dangling `else` binds
+  as in JavaScript. `switch` compares with `===` in order; a `case` value can be any expression, `default` can stand
+  anywhere, and bodies fall through until `break`.
 - **Values**: integers, `true` / `false`, `null`, strings in `"..."` or `'...'` with escapes `\n \t \r \\ \" \'`,
-  number array literals (`[1, -2, 3]`), and objects.
+  number array literals (`[1, -2, 3]`) with `.length`, and objects.
 - **Objects**:
   - Literals `{a: 1, "b c": 2, 3: x, d: {e: 4}}`: identifier, string or number keys, values of any type nested to any
     depth, `{}`, a trailing comma.
@@ -58,12 +62,15 @@ Open `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome. Elsewhere th
   - A copying garbage collector reclaims memory when the heap is full.
 - **Operators**: `+ - * / %`, `< > <= >= == != === !==`, `!`, unary `-`; `&&` / `||` short-circuit and return an
   operand (`0 || 7` is `7`); `c ? a : b`, nested either way.
-- **Assignment**: `=`, `+= -= *= /= %=` (also on `a[i]`), and `x++ x-- ++x --x` as statements.
+- **Assignment**: `=`, `+= -= *= /= %=` and `++ --` (also on `a[i]`) as statements; `x++ x-- ++x --x` also inside
+  expressions (`a[i++]`, `while (n--)`).
 - **Output**: `console.log(a, b, ...)` and `putc(code)`.
 - **Comments**: `//` and `/* */`.
 - **Strings are interned**: equal literals are one value, so `===` compares them by content.
 - **Semicolons**: optional where JavaScript inserts them. A newline after a complete statement ends it unless it is
-  inside `( [` or a call; a `}` also ends one (`{ x++ }`).
+  inside `( [`, a call or a `for (…)` header, or the next line continues it (starts with `.` `[` `(` `?` `:` `,` or a
+  binary operator; `++x` on a new line is a new statement). After `return` a newline always ends the statement. A `}`
+  also ends one (`{ x++ }`).
 
 ### How values print
 
@@ -85,24 +92,32 @@ costs time per live object. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md
 ### Limits
 
 - **Program size**: 24 lines of 64 columns, 400 tokens, 511 code words; 256 words of string data (including one tag
-  word per string and the property names) and 255 words of globals and arrays; 64 labels, 32 variables in scope, 16
-  functions; 16 distinct strings and property names (one interning table); blocks and expressions nest 8 deep (a long
+  word per string, and the name's length + 1 for every `.name` in the program) and 255 words of globals and arrays
+  (an array literal takes one more, for its length); 64 labels (a `switch` takes 2, plus 2 per `case` and 1 for a
+  `default`), 32 variables in scope, 16 functions; 16 distinct strings and property names (one interning table); blocks and expressions nest 8 deep (a long
   `else if` chain counts as one level).
 - **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has about 14,700 words, so recursion can go a few
   thousand calls deep. About 384 object chunks (3 pairs each) can be live at once; more halts with `out of memory`.
 - **Numbers**: 20-bit integers (−524288 … 524287) that wrap; `/` truncates. −257792 … −257537 don't print as numbers
   (string tags). −480384 … −474241 look like object pointers to the GC, which would move them. Number keys must lie
   in −262143 … 262143.
-- **Booleans** print as `1` / `0` when passed as a parameter, returned by a function called before its definition, or
-  from `c ? a : b` whose other branch isn't boolean.
+- **Booleans** print as `1` / `0` when passed as a parameter or returned by a function called before its definition.
+  A value of `c ? a : b`, `a && b` or `a || b` mixing a boolean and a number prints as a boolean if it is `0` or `1`.
+- **`console.log`** prints each argument (and each piece of a `+` join) as soon as it is computed, where JavaScript
+  computes them all first: `console.log("a", f())` prints what `f` prints after `a `. It is a statement, not a value,
+  and takes no trailing comma.
+- **Strings and numbers**: comparing a string with a number (`"s" < 5`, `"5" == 5`) compares the pointer, and so does
+  `+` / `+=` on a string the compiler can't see is one (a parameter, a property).
+- **Arrays**: `.length` is the literal's length (writing past the end doesn't change it); on an object or a string it
+  reads a meaningless number. `++` / `--` inside an expression work on variables only.
 - **Scoping**: redeclaring a `let` / `const` in the same scope isn't an error (the later wins), and use before
   declaration in an inner block (`let x = x + 1`) isn't caught.
 - **`do … while`**: `if (a) do s; while (c); else …` is rejected (drop that `;`); `do s;; while (c)` is accepted.
 - **Objects**: a missing property and `null` read as 0 and print `0`; `console.log(o)` prints the pointer; duplicate
   keys in a literal keep the first value; no properties on arrays or other non-objects; no prototypes, methods,
   `delete`, `in`, `for … in`, `Object.keys`; a property assignment is a statement, not an expression.
-- **Not supported**: `.length`, `undefined`, nested functions or closures, `switch`, `++` inside an expression,
-  string comparison by content.
+- **Not supported**: `undefined`, nested functions or closures, string comparison by content, expression statements
+  starting with a literal or `(`.
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
 
 ### Error codes
@@ -122,14 +137,16 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 24 | too many variables (32) | 56 | `break` / `continue` outside a loop |
 | 25 | too many globals / array elements | 57 | `return` outside a function |
 | 26 | too much string data | 60 | undefined function |
-| 30, 38–39 | malformed `console.log` | 61 | a statement emits too much code at once |
+| 30, 38–39 | malformed `console.log`, or used as a value | 61 | a statement emits too much code at once |
 | 32–37 | malformed `if` / `while` / `for` / `function` header | 62 | program too long (more than 511 words) |
 | 40 | missing `}` at end of input | 63 | strings can only be joined in `console.log` |
 | 64 | assignment to a `const` | 65 | `const` without `=` |
 | 66 | `while` expected after a `do` body | 67 | `:` without `?` |
 | 68 | too many strings and property names (16) | 69 | property name expected after `.` |
 | 70 | a property assignment must be a statement | 71 | object literal: key expected |
-| 72 | object literal: `:` expected | | |
+| 72 | `:` expected after an object key or `default` | 73 | `case` / `default` outside a `switch` |
+| 74 | a `switch` body must start with `case` / `default` | 75 | a second `default` |
+| 76 | a call passes a different number of arguments than another call or the definition | | |
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.

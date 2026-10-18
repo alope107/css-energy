@@ -7,7 +7,8 @@ Slots: L lines x (P columns + newline), then one NUL; a column past the end of i
 
 Character chain (#cc inside #ccw; shown once the editor's scan says the text is complete, i.e. one sweep after Run):
   - one source element per line (.ls) animates the line's P codes into --lc<j> (names reused by every line); each
-    level reads --c / --cn from its line's source and computes --ncl, the class of the next character.
+    level reads --c / --cn from its line's source and computes --ncl, the class of the next character. A line's source
+    opens at the previous line's newline level, so that level's --cn is the line's first character.
   - the lexer is specialised per character class and picked by the parent's --ncl (9 small rules, class selectors).
   - a level that completes a token shows its token register .tr: a scroller whose four subjects are named
     --tk<t>c/v/h/g (t = tokens so far, chosen with an if() mux) and placed at tc / tv / th1 / th2 px.
@@ -25,6 +26,8 @@ Token chain (#tcr, nested inside the deepest character level; levels past the to
 import sys, json, re, os
 from dsl import css2 as tocss, isK, S
 import cc_dsl as D, cc_ref as R
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
+import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 
 WOFF = 1 << 20
 OTH = {'A': 'B', 'B': 'A'}
@@ -117,6 +120,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # (an animation on each level made every timeline update restyle the chain: ~3 ms per level)
     # one source element per line, nested in the chain just before the line's first level; it animates the line's
     # P codes and classes into --lc<j> / --ll<j> (names reused by every line, so each level inherits only one line's)
+    css.append(lbl.group('Character chain: line sources', f'each line\'s source animates its {P} character codes from the editor scan\'s registers'))
     for j in range(P):
         css.append(f'@keyframes ka{j} {{ from {{ --lc{j}: {HC}; }} to {{ --lc{j}: -1; }} }}'
                    )
@@ -133,12 +137,14 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # (the sources keep running: an animation created paused does not reliably take its timeline's value, and a pause
     # driven by an animated flag is ignored, since Blink reads animation-play-state from the base style)
     # (a pause driven by an animated flag does not work: Blink reads animation-play-state from the base style)
+    css.append(lbl.group('Chain switch', 'the chain exists only once the editor scan is complete'))
     css.append('@property --ccgo { syntax: "<integer>"; inherits: true; initial-value: 0; } @keyframes kccgo { from { --ccgo: 4096; } to { --ccgo: -1; } }'
                ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; }'
                ' #cc { display: if(style(--ccgo: 1): block; else: none); contain: strict; position: relative; height: 0; }'
                ' .ls, .lvA, .lvB, .gs0, .gs1 { display: contents; }'
                )
     # lexer variants per class (picked by the parent's --ncl), per parity
+    css.append(lbl.group('Lexer: one rule per character class and level parity', 'picked by the class of the level\'s character'))
     lex_sel = {}
     for ci, lp in enumerate(lexes):
         lout = set(lp.out)
@@ -164,18 +170,21 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
             else: css.append(f'@container style(--ncl: {ci}) {{ .kc{rd} {{ {body} }} }}')
     for n in lst + ['nt']:
         for x in 'AB': N.add(f's-{n}-{x}', True)
+    css.append(lbl.group('Character levels: token count and index'))
     for rd in 'AB':
         wr = OTH[rd]
         css.append(f'.lv{rd} {{ --s-nt-{wr}: calc(var(--s-nt-{rd}) + var(--l-o_tkany)); --l-tix: var(--s-nt-{rd});'
                    f' --l-tix-h: round(down, var(--s-nt-{rd}) / 32); }}')
     N.add('l-tix', True); N.add('l-tix-h', True)
     # token registers
+    css.append(lbl.group('Token registers', 'each finished token is written into view-timeline registers the token chain reads'))
     css.append(f'.tr {{ display: none; position: absolute; top: 0; left: 0; width: 1px; height: {HT}px; overflow: hidden; visibility: hidden; }}'
                f' .tr > b {{ position: absolute; left: 0; width: 1px; height: 1px; display: block; }} .tr > .tp {{ position: static; height: {HT}px; }}'
                ' @container style(--l-o_tkany: 1) { .tr { display: block; } }')
     for f, src in TOKF:
         css.append(f'.tr > .t{f} {{ top: calc(var(--l-o_{src}) * 1px); view-timeline-name: {mux_name("l-tix", TMAX, lambda t, f=f: f"--tk{t}{f}")}; }}')
     # string bytes: in-flow words
+    css.append(lbl.group('String bytes: in-flow words'))
     N.add('l-o_sa-h', False)
     css.append(f'.ovs {{ display: none; height: 0; }} @container style(--l-o_sv: 1) {{ .ovs {{ display: block; --l-o_sa-h: round(down, (var(--l-o_sa) - {data_cells}) / 32);'
                f' anchor-name: {mux_shift("l-o_sa", data_cells, data_cells)}; width: calc((var(--l-o_sw) + {WOFF}) * 1px); }} }}')
@@ -194,14 +203,19 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         else: st.append(f'--c: {10 if sl[0] == "nl" else 0}')
         if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]})')
         else: st.append(f'--cn: {10 if nxt[0] == "nl" else 0}; --ncl: {CL_NL if nxt[0] == "nl" else CL_NUL}')
-        if sl[0] == 'col' and sl[2] == 0:
-            ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{sl[1]}_{j}" for j in range(P))}">')
+        # a line's source opens just before the previous line's newline level, whose --cn must be this line's first
+        # character (the lexer's lookahead at a newline decides semicolon insertion; that level's own --c is 10)
+        nk = 0 if sl == ('col', 0, 0) else sl[1] + 1 if sl[0] == 'nl' and sl[1] + 1 < L else None
+        if nk is not None:
+            ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{nk}_{j}" for j in range(P))}">')
         ch_html.append(f'<div class="lv{x} {kcls}" style="{"; ".join(st)}"><b class="ovs"></b>'
                        f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
     root_st = ''
     fo = OTH['A' if (NC - 1) % 2 == 0 else 'B']      # suffix written by the deepest character level
+    css.append(lbl.group('Lexer start state (#cc)'))
     css.append('#cc { ' + ' '.join(f'--{n}: {v};' for n, v in init.items()) + ' }')
     # ================= token chain
+    css.append(lbl.group('Token chain: group sources', 'one source per group of 32 tokens animates their fields from the token registers'))
     css.append(f'#tcr {{ contain: strict; position: relative; height: 0; --ntf: var(--s-nt-{fo}); }}')
     N.add('ntf', True)
     # one source element per group of G tokens (names alternate by group parity, so the previous group's last
@@ -225,6 +239,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
 
     for n, i in (('ti', False), ('tlive', False), ('tlast', True), ('tcq', False), ('vh', False), ('has', False)): N.add(n, i)
     # level 0: initial parser state
+    css.append(lbl.group('Parser: start state and the step on every token level'))
     css.append('.t0 { ' + ' '.join(f'--p-{n}-A: {v};' for n, v in D.initial_parse(data_base).items())
                + ' --s-bad-A: 0; --s-perr-A: 0; --s-nr-A: 0; --vh: 0; }')
     TOKIN = ['tv', 'th1', 'th2']
@@ -251,6 +266,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         for x in 'AB': N.add(f'p-{n}-{x}', True)
     for n in TOKIN + ['tk']: N.add(f'x-{n}', False)
     # delayed table writes
+    css.append(lbl.group('Parser: delayed table writes (names, functions, identifiers)'))
     for y in 'AB':
         yp = OTH[y]
         for pre, nm, fl, cnt in (('y', ('sh1_', 'sh2_', 'sk_'), ('h1', 'h2', 'k'), R.NS), ('f', ('fh1_', 'fh2_', 'fl_'), ('h1', 'h2', 'l'), R.NF),
@@ -270,6 +286,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for tc in sorted({c for k, _ in progs for c in D.key_tcodes(k)}):
         ks = [(k, pg) for k, pg in progs if D.key_tcodes(k) == [tc]]
         if {k[0] for k, _ in ks} >= allm and any(is_noop(pg) for _, pg in ks): noop_tc.append(tc)
+    css.append(lbl.group('Parser variants', 'one rule per parser mode and set of token codes; the first rules are the tokens that change nothing'))
     for tc in noop_tc:
         css.append(f'@container style(--tcq: {tc}) {{ .tpA, .tpB {{ ' + ' '.join(f'--q-new-{n}: var(--x-{n});' for n in pst) + ' --q-ran: 1; } }')
     progs = [(k, pg) for k, pg in progs if not (D.key_tcodes(k)[0] in noop_tc and len(D.key_tcodes(k)) == 1 and is_noop(pg))]
@@ -294,6 +311,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         tcond = f'style(--tcq: {tcs[0]})' if len(tcs) == 1 else '(' + ' or '.join(f'style(--tcq: {t})' for t in tcs) + ')'
         css.append(f'@container style(--vh: {mode}) and {tcond} {{ .tpA, .tpB {{ {body} }} }}')
     # code / data overlays (fixed, contained by #tcr)
+    css.append(lbl.group('Code and data overlays', 'each emitted word is an element anchored as its RAM cell'))
     cb0 = code_base - R.LAYOUT['rom_size']          # RAM index of the first code word (--c<index> names RAM cells)
     css.append('.ov, .ovd { position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; display: none; }')
     for s in range(E):
@@ -310,6 +328,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         css.append(f'@container style(--q-o_lv{k}: 1) {{ .lp{k} {{ display: block; anchor-name: {mux_lab(f"q-o_lj{k}", R.NL)};'
                    f' width: calc(max(0, var(--q-o_lx{k})) * 1px); }} }}')
     # final group on the last live level
+    css.append(lbl.group('Result: error code, word count, done flag'))
     css.append('.fin { display: if(style(--tlast: 1): block; else: none); }')
     for y in 'AB':
         err = (f'if(style(--s-perr-{y}: 0): max(var(--s-bad-{y}) * 99, clamp(0, var(--p-cp-{y}) - {code_cells}, 1) * 62);'
@@ -339,7 +358,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     body = f'<div id="ccw"><div id="cc" style="{root_st}">{"".join(ch_html)}{tok}{"</div>" * (NC + L)}</div></div>'
     timelines = ([f'--ch{k}_{j}' for k in range(L) for j in range(P)]
                  + [f'--tk{t}{f}' for t in range((TMAX // G + 1) * G) for f, _ in TOKF])
-    css_text = N.rename('\n'.join(N.props() + css))
+    css_text = N.rename('\n'.join([lbl.group('Registered properties')] + N.props() + css))
     info = dict(char_levels=NC, token_levels=TMAX + 1, variants=len(progs), rules=len(rules), noop_codes=noop_tc, lports=NLP, css_bytes=len(css_text))
     return css_text, N.rename(body), timelines, info
 

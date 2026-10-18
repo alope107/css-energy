@@ -85,13 +85,16 @@ Numbers for superseded code come from raw logs and earlier chats on other machin
   chained 8 shapings in one layout).
 - **Allocation loops** (`obj_gc.js`: 18 shapings per iteration, 14 misses evicting the loop's code): LRU, or writes to
   fresh heap lines that bypass the cache.
-- **RAM group size 16 or 64** instead of 256 (BENCHMARKS §8).
+- **RAM group size 16 or 64** instead of 256: measured, not adopted. Both halted ~6% sooner in two rounds (BENCHMARKS §8);
+  re-check with `ab.js` and the L5 suite before switching.
 - **More shapings per frame**: chain dependent shapings in one lifecycle update with container-query
   layout → style → layout loops ([JS-in-CSS multicore](https://claude.ai/chat/91b25db5-fef0-4893-9055-42e5003ad7e5)).
   N16 S64 (needs fewer subtables per cycle).
 - **Per-program CPU fonts**: hot blocks compiled to GSUB, or superinstructions from traces.
 - **Compile time** (the sweep is ~1.2 s): several columns per frame; parallel lexing by prefix scan over the DFA.
 - **Other compute surfaces** ([CSS JavaScript interpreters speedup](https://claude.ai/chat/427a6452-26e2-4ff6-8289-3177eab3cabc)):
-  `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33).
+  `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
+  measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
+  new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
 - **Language**: a wider console; built strings; printing objects, `undefined`, `in` / `delete`, prototypes; booleans
   as parameters; specific error codes on the page.

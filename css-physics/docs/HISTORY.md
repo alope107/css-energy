@@ -28,8 +28,8 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 
 - **Unnamed `@container style()` gates:** each rule evaluates its style() every pass, matching or not (2.5–3.5 µs in
   141, 0.8 µs now), which dominated sparse scenes. Replaced by owner-named containers.
-- **Container names on L0/L1 only:** named rules deeper down didn't re-match (Chrome re-matches style-container rules
-  only for direct children). Names are on every level.
+- **Container names on L0/L1 only:** named rules deeper down didn't re-match (Chrome 141; not reproduced in 153,
+  `../../bugs/README.md`). Names are on every level, which is also the cheap lookup.
 - **`@function`:** about 2–3× slower than the same math inline (141).
 - **`if()` selection inside hot properties:** about 4.2 µs per property against 2 µs for calc (141). The 153
   microbenchmark (BENCHMARKS §2) shows 2.70 against 2.61 µs, so this may no longer hold: re-check before relying on it.
@@ -47,6 +47,11 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
     snap-back cells per 1000 against 1.5. An unregistered copy failed the same way; a minimal page didn't reproduce it.
   - Halves the physics rate: restarts cost ∝ registered properties, which are page-global (BENCHMARKS §4).
   - Screenshots and 60/s draw counts looked perfect; only frame-by-frame checks showed it.
+- **Inlining multi-use props** (`INL_ONLY1=0`, 2026-10-18): 4% fewer props at 48 bodies (`INL_DEPTH` 2–6 makes no
+  difference), but the frozen 48 pile is unchanged: `ab.js` 12 rounds 0.991 (IQR 0.933–1.035) against an A-vs-A of 1.020
+  (0.969–1.065). A first 6-round run without the control said 0.92: noise. Inlining more by raising the cost model's
+  threshold (8.3 → 17 or 30, 7% or 13% fewer props) made the step 15% and 18% *slower*: a microbenchmark of one temp
+  with U consumers says inlining pays up to U ≈ 5 (`../../survey/exp/fn/mkfn.py`), but the engine's temps don't follow it.
 - **Hypothesis rejected: inherited custom properties are copied per level.** Inherited and non-inherited cost the same
   over 50 levels; 6,000 declared at level 1 cost 7.0–7.4 ms at 8, 66 and 130 levels deep.
 
@@ -118,7 +123,9 @@ recognizer, no show-press) and the software-emulated Android emulator (`../../sh
 - **Contact slots read by anchor name** (from js-minus-js; `../../COMPARISON.md`): pick a partner's anchor name with a
   two-level `if()` and read it with one `anchor-size()`, so K slots per body make pair rules O(N·K). Caveats: the value
   arrives in layout (the solver must sit under a size-container reader); anchor-positioned registers once cost about
-  5 ms of layout per frame; choosing partners still needs the broadphase. First: a microbenchmark against the per-pair
+  5 ms of layout per frame; choosing partners still needs the broadphase. js-minus-js measured the layout side: a size
+  container restyles its subtree inside layout every dirty pass, and each rendered anchor costs ~1.5 µs per layout pass
+  (its ENGINE_NOTES 34, 40). First: a microbenchmark against the per-pair
   rules at 64 bodies.
 - **AVBD** (Giles, Diaz and Yuksel, SIGGRAPH 2025): body-centric gather, stable stacks at few iterations; but a
   per-body 6×6 Hessian with LDLᵀ is costly in calc, and warm starting needs per-contact registers. Prototype in JS
