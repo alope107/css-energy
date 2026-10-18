@@ -71,6 +71,9 @@ def page(sel, dst):
                        f'element, no rule per pair, no JavaScript.'),
     }
     html = TPL
+    if len(e.get('looks', [])) < 2:     # one look: no look radios
+        import re as _re
+        html = _re.sub(r'\s*<div class="grp look">.*?</div>', '', html, flags=_re.S)
     for k_, v in rep.items():
         html = html.replace(k_, v)
     # the constants the tools need (radii from the type registers)

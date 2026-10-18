@@ -5,10 +5,11 @@
 const {launch,open,countFrames}=require('../../tools/lib/physics');
 const page=process.argv[2],SEC=+(process.argv[3]||6),SHOT=process.argv[4];
 (async()=>{const b=await launch();const p=await open(b,page,{viewport:{width:1000,height:900}});
-const N=await p.evaluate(()=>document.querySelectorAll('.eng[style],.eng').length&&[...document.querySelectorAll('.sp')].filter(e=>e.offsetParent!==null||getComputedStyle(e).display!=='none').length);
+
 let fail=[];let worstOv=0,worstMiss=0,worstPen=0;
 const C=JSON.parse(require('fs').readFileSync(page,'utf8').match(/<!--SPHERES (.*?)-->/)[1]);
 const K=+(process.env.K||0)||C.K;
+const N=C.N;
 const RATE=+(process.env.RATE||60);
 for(let t=0;t<SEC*2;t++){
  const fr=await countFrames(p,500);

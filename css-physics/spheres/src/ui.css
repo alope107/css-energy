@@ -58,7 +58,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 .rr{transform:translate3d(calc((__WX__ + 2) * 1px),calc(-14 * 1px),0) rotateY(90deg)}
 
 /* spheres: a billboard disc per slot (its colour from the sphere's type), a soft shadow on the floor */
-.sp{width:calc(__2RMAX__ * 1px);height:calc(__2RMAX__ * 1px);margin:calc(-__RMAX__ * 1px) 0 0 calc(-__RMAX__ * 1px);border-radius:50%;
+.bs,.sp{width:calc(__2RMAX__ * 1px);height:calc(__2RMAX__ * 1px);margin:calc(-__RMAX__ * 1px) 0 0 calc(-__RMAX__ * 1px);border-radius:50%;
   background:
     radial-gradient(circle at 36% 30%,rgb(255 255 255/.6),rgb(255 255 255/0) 30%),
     radial-gradient(circle at 42% 38%,color-mix(in oklab,var(--c) 100%,#fff 6%),color-mix(in oklab,var(--c) 55%,#07080a) 76%,color-mix(in oklab,var(--c) 28%,#07080a));

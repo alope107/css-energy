@@ -53,6 +53,7 @@ HS = 1_000_000                       # register scroller size (px)
 RBG = int(E_('RBG', 32))             # readback animations per element (more on one element cost quadratically)
 TS_NAMES = 24                        # timeline names per timeline-scope wrapper
 ABL = E_('ABL', '').split(',')       # cost bisection: nok (no contacts), nosort
+BASEUP = E_('BASEUP', '1') == '1'   # base values on a static wrapper (#LB), not on every readback group
 FROZEN = E_('FROZEN')                # benchmark: a register snapshot (tools/snap.js) as constants with a wobble
 VIEW_W, VIEW_H = 900, 560            # camera (must match .cam in ui.css; the pick unprojects through it)
 PERSP, TILT, CAM_TY, CAM_DIST = 1500.0, -28.0, 95.0, -260.0
@@ -120,7 +121,8 @@ SCENES = {k: sorted(v, key=lambda t: t[0]) for k, v in SCENES.items()}
 # A value v is stored as top = (hi - v) (HS + 1) / (hi - lo) - 1 px in an HS-tall scroller (the element is 1 px tall);
 # its view timeline gives the progress (v - lo) / (hi - lo) back, and @keyframes q<k> {from {--v: lo} to {--v: hi}} turns it into v (out of range
 # clamps at the ends).
-REGS = [('TP', 0, 100), ('DB', 0, 0.1), ('GT', 0, 4), ('GQ', -2000, 2000)]   # GQ: the last step's gravity
+REGS = [('TP', 0, 100), ('DB', 0, 0.1), ('GT', 0, 4), ('GQ', -2000, 2000), ('AM', 0, 1), ('AX', 0, 1)]
+# (GQ: the last step's gravity; AM: whether anything moved in the last step (the clock only advances while it did))
 XR, YR, ZR = (-WX - 60, WX + 60), (-CEIL - 200, 60), (-WZ - 60, WZ + 60)
 for s in range(N):
     REGS += [(f'X{s}', *XR), (f'Y{s}', *YR), (f'Z{s}', *ZR), (f'U{s}', *XR), (f'V{s}', *YR), (f'W{s}', *ZR)]
@@ -165,6 +167,18 @@ LC, LC_ATT, LC_KICK, LC_PICK = [], [], [], []   # ungated; replacing LC while th
 ACT = E_('ACT', '1') == '1'
 BLK = {}
 G = lambda kind, s: BLK.setdefault((kind, s), []) if ACT else LC
+
+
+class G2(list):
+    """declarations that go into both the active and the copy block of slot s (pairs and sort values: needed within
+    [s-K, s+2K] resp. K+4 slots of a mover, both inside the 2K that 'ac' or 'in' covers; the copy blocks compute a few
+    more than needed, two gate rules per slot instead of four)"""
+    def __init__(self, s):
+        self.s = s
+    def append(self, d):
+        G('ac', self.s).append(d)
+        if ACT:
+            G('in', self.s).append(d)
 
 
 def P(name, expr, where=LC, syntax='<number>', inherits=False):
@@ -223,7 +237,7 @@ for a, b in PAIRS:
     # (1 * hypot: Firefox negates hypot() by negating its arguments, so x - hypot(..) would be x + hypot(..))
     d = f'max(1 * hypot({PV("x", a)} - {PV("x", b)}, {PV("y", a)} - {PV("y", b)}, {PV("z", a)} - {PV("z", b)}), 0.01)'
     # the overlap factor over the pair's total mass: sphere a moves by k m_b (p_a - p_b), sphere b by k m_a (p_b - p_a)
-    P(f'k{a}_{b}', f'max(0, ({R(a)} + {R(b)}) / {d} - 1) / (var(--m{a}) + var(--m{b}))', G('pa', a))
+    P(f'k{a}_{b}', f'max(0, ({R(a)} + {R(b)}) / {d} - 1) / (var(--m{a}) + var(--m{b}))', G2(a))
 NB = {s: [] if ('nok' in ABL or 'noq' in ABL) else [t for t in range(max(0, s - K), min(N, s + K + 1)) if t != s] for s in range(N)}
 KK = lambda s, t: f'var(--k{min(s, t)}_{max(s, t)})'
 wgt = f(OMEGA)
@@ -277,14 +291,14 @@ OUT = {'X': lambda s: V(f'nx{s}'), 'Y': lambda s: V(f'ny{s}'), 'Z': lambda s: V(
 OUT_ATT_T = lambda s: f'(abs(var(--T{s})) * (1 - 2 * max(var(--gp{s}), {HD(s)})))'
 OUT_REL_T = lambda s: f'abs(var(--T{s}))'
 for s in range(0, N - 1, 2):
-    P(f'sa{s}', f'sign(max(0, var(--nx{s}) - var(--nx{s + 1})))', G('ws', s), '<integer>', True)
+    P(f'sa{s}', f'sign(max(0, var(--nx{s}) - var(--nx{s + 1})))', G2(s), '<integer>', True)
 for s in range(N):
     o = OUT['X']
     e = (o(s) if s + 1 >= N else f'{o(s)} + var(--sa{s}) * ({o(s + 1)} - {o(s)})') if s % 2 == 0 else \
         f'{o(s)} + var(--sa{s - 1}) * ({o(s - 1)} - {o(s)})'
-    P(f'ax{s}', e, G('ws', s), inherits=True)
+    P(f'ax{s}', e, G2(s), inherits=True)
 for s in range(1, N - 1, 2):
-    P(f'sb{s}', f'sign(max(0, var(--ax{s}) - var(--ax{s + 1})))', G('ws', s), '<integer>', True)
+    P(f'sb{s}', f'sign(max(0, var(--ax{s}) - var(--ax{s + 1})))', G2(s), '<integer>', True)
 
 
 def sorted_out(o, s, is_x=False):
@@ -324,7 +338,7 @@ for t_ in range(NTS):
     ks = range(t_ * TS_NAMES, min(NREGEL, t_ * TS_NAMES + TS_NAMES))
     w(f'#ts{t_}{{timeline-scope:' + ','.join(f'--t{ri}' for k in ks for ri in (2 * k, 2 * k + 1) if ri < len(REGS)) + '}')
 # readback: nested elements of RBG animations each, each also declaring its registers' base values
-base = {'GT': '0', 'GQ': 'var(--gy)', 'TX': '0'}
+base = {'GT': '0', 'GQ': 'var(--gy)', 'TX': '0', 'AM': '1', 'AX': '0'}
 for s in range(N):
     for F in FIELDS:
         base[f'{F}{s}'] = f'var(--{INIT[F]}{s})'
@@ -347,7 +361,11 @@ else:
     for gi, gr in enumerate(groups):
         w(f'#LS{gi}{{animation-name:{",".join(f"q{ri}" for ri in gr)};animation-duration:{",".join(["auto"] * len(gr))};'
           f'animation-timing-function:linear;animation-fill-mode:both;animation-timeline:{",".join(f"--t{ri}" for ri in gr)};'
-          + ''.join(f'--{REGS[ri][0]}:{base[REGS[ri][0]]};' for ri in gr) + '}')
+          + ('' if BASEUP else ''.join(f'--{REGS[ri][0]}:{base[REGS[ri][0]]};' for ri in gr)) + '}')
+    if BASEUP:
+        # the base values (in force until the timelines resolve) declared once, on a wrapper above the readback chain
+        # that no pass restyles: declared on each readback group they were recomputed every pass (~7 us each)
+        w('#LB{' + ''.join(f'--{REGS[ri][0]}:{base[REGS[ri][0]]};' for ri in ris) + '}')
 NLS = len(groups)
 w('#RB{--sxg:calc(var(--sx) * var(--att));--syg:calc(var(--sy) * var(--att));--yawg:calc(var(--yaw) * var(--att))}')
 w('.rz{--sx:0;--sy:0}')
@@ -355,9 +373,9 @@ held = 'sign(' + ' + '.join(HD(s) for s in range(N)) + ')'
 # the clock: one step per frame (the frame's second pass sees TP = now); slow frames run in slow motion. TP only
 # advances while anything moves (or is pressed, shaken, reset, or gravity changed): in a static scene nothing changes
 # from pass to pass, so nothing below #LT is restyled at all
-live = '1' if FROZEN else 'sign(max(0, var(--now) - var(--TP)))'
-moving = ' + '.join(f'abs(var(--X{s_}) - var(--U{s_})) + abs(var(--Y{s_}) - var(--V{s_})) + abs(var(--Z{s_}) - var(--W{s_}))' for s_ in range(N))
-anyv = f'sign(max(0, {moving} - 0.0001) + var(--att) + var(--kick) + var(--rst) + abs(var(--gy) - var(--GQ)))'
+live = ('0' if E_('FROZEN_HOLD') == '1' else '1') if FROZEN else 'sign(max(0, var(--now) - var(--TP)))'
+# (FROZEN_HOLD=1: every pass is a hold pass: the wobbling snapshot is read back, nothing steps)
+anyv = f'sign(var(--AM) + var(--att) + var(--kick) + var(--rst) + abs(var(--gy) - var(--GQ)))'
 w(f'#LT{{animation-name:clk,q0,q1;animation-duration:100s,auto,auto;animation-iteration-count:infinite,1,1;'
   f'animation-timing-function:linear;animation-fill-mode:both;animation-timeline:auto,--t0,--t1;--TP:var(--now);--DB:0;'
   f'--live:calc({live});--liv:var(--live);--NTP:calc(var(--TP) + {anyv} * (var(--now) - var(--TP)));--NDB:0;'
@@ -369,12 +387,17 @@ w('.rt,.rt *{--NTP:inherit;--NDB:inherit}')
 # (wr: within K+2; beyond that a slot can't move or be swapped), declares its sort values (ws: within K+4, what a
 # writing slot reads two slots away).
 # A shake, a pick or a gravity change (GQ holds the last step's gravity) wakes every slot. GH: the held slot + 1.
-for n_ in ('C', 'ac', 'in', 'pa', 'ws', 'wr'):
+# (only #LC's gate rules read these, on #LA itself: not inherited, so the elements below don't carry them. wr is
+# read by the register elements' gates: inherited)
+for n_ in ('C', 'ac', 'in'):
     for s_ in range(N):
-        reg(f'{n_}{s_}', '<integer>')
-reg('wake', '<integer>')
-reg('GH', '<integer>')
-la = ['--wake:calc(sign(var(--kick) + abs(var(--gy) - var(--GQ)) + var(--pick)))',
+        reg(f'{n_}{s_}', '<integer>', False)
+for s_ in range(N):
+    reg(f'wr{s_}', '<integer>')
+reg('wake', '<integer>', False)
+reg('GH', '<integer>', False)
+reg('anym', '<integer>')
+la = ['--wake:calc(sign(var(--kick) + abs(var(--gy) - var(--GQ)) + var(--pick)))', f'--anym:calc(sign(var(--C{N - 1}) + var(--wake)))',
       '--GH:calc(var(--att) * (' + ' + '.join(f'{s_ + 1} * {HD(s_)}' for s_ in range(N)) + '))']
 for s_ in range(N):
     mo = (f'sign(max(0, abs(var(--X{s_}) - var(--U{s_})) + abs(var(--Y{s_}) - var(--V{s_})) + abs(var(--Z{s_}) - var(--W{s_}))'
@@ -390,8 +413,6 @@ def win(s_, lo, hi):
 for s_ in range(N):
     la.append(f'--ac{s_}:calc(sign({win(s_, -K, K)}))')
     la.append(f'--in{s_}:calc(sign({win(s_, -2 * K, 2 * K)}) - var(--ac{s_}))')
-    la.append(f'--pa{s_}:calc(sign({win(s_, -K, 2 * K)}))')
-    la.append(f'--ws{s_}:calc(sign({win(s_, -K - 4, K + 4)}))')
     la.append(f'--wr{s_}:calc(sign({win(s_, -K - 2, K + 2)}))')
 w('@container style(--live: 1){#LA{' + ';'.join(la) + '}}')
 w('@container style(--liv: 1){#LC{' + ';'.join(LC) + '}}')
@@ -400,7 +421,7 @@ if 'nophys' in ABL:     # cost bisection: active slots run no physics, they copy
         BLK[('ac', s_)] = list(BLK.get(('in', s_), []))
         BLK[('pa', s_)] = []
 for s_ in range(N):
-        for kind in ('in', 'ac', 'GH', 'pa', 'ws'):
+        for kind in ('in', 'ac', 'GH'):
             if BLK.get((kind, s_)):
                 q_ = f'style(--GH: {s_ + 1})' if kind == 'GH' else f'style(--{kind}{s_}: 1)'
                 w(f'@container {q_}{{#LC{{' + ';'.join(BLK[(kind, s_)]) + '}}')
@@ -426,7 +447,7 @@ def nxt(o_t):
         rn = REGS[ri][0]
         F, s = slot_field(rn)
         if F is None:
-            return {'GT': V('NGT'), 'GQ': V('gy')}.get(rn, '0')
+            return {'GT': V('NGT'), 'GQ': V('gy'), 'AM': V('anym')}.get(rn, '0')
         return sorted_out(o_t if F == 'T' else OUT[F], s, F == 'X')
     return v
 
@@ -434,7 +455,7 @@ def nxt(o_t):
 def init(ri):
     rn = REGS[ri][0]
     F, s = slot_field(rn)
-    return V(f'{INIT[F]}{s}') if F else ('0' if rn != 'GT' else V('GT'))
+    return V(f'{INIT[F]}{s}') if F else {'GT': V('GT'), 'AM': '1'}.get(rn, '0')
 
 
 w(''.join(regrule(k + 1, a, b, hold) for k, (a, b) in enumerate(pairs)))
@@ -464,12 +485,14 @@ for ri, (rn, lo, hi) in enumerate(REGS):
     F, s = slot_field(rn)
     if F in RCOMP:
         w(f'@keyframes v{ri}{{from{{--{RCOMP[F]}:{f(lo)}}}to{{--{RCOMP[F]}:{f(hi)}}}}}')
-RENDER = E_('RENDER', 'looks')  # looks: both looks on the page, picked by the page's "look" radios (the unpicked
-                                # ones are display:none, so they cost nothing) | anim: only the classic billboards, read
-                                # with the wrappers' own animations | inh: classic, copying the solver's values | neon
+RENDER = E_('RENDER', 'lite')   # lite: one billboard element per sphere, reading the readback chain, and the floor
+                                # shadows on one canvas | anim: billboard + shadow children in a wrapper that reads its
+                                # registers with its own animations | inh: the same, copying the solver's values |
+                                # neon: a canvas render (no depth order) | looks: neon and anim on one page, radios
 LOOKS = ['neon', 'classic'] if RENDER == 'looks' else [{'anim': 'classic', 'inh': 'classic'}.get(RENDER, RENDER)]
-CANVAS = [l_ for l_ in LOOKS if l_ != 'classic']
-INCHAIN = RENDER == 'inh' or bool(CANVAS)
+CANVAS = [l_ for l_ in LOOKS if l_ not in ('classic', 'lite')]
+SHADOWS = CANVAS + (['lite'] if 'lite' in LOOKS else [])      # looks with a floor-shadow canvas
+INCHAIN = RENDER == 'inh' or bool(SHADOWS)
 for s in (range(N) if 'classic' in LOOKS else []):
     rr = [RIDX[f'{c}{s}'] for c in 'XYZT']
     if RENDER == 'inh':
@@ -484,6 +507,19 @@ w('.bw{animation-duration:auto;animation-timing-function:linear;animation-fill-m
   '--c:hsl(calc(abs(var(--Rt)) * 61 + 10) 72% 56%);--hl:max(0, -1 * sign(var(--Rt)))}'
   f'.bw .sh{{transform:translateY(calc(var(--Ry) * -1px - 0.5px)) rotateX(90deg) scale(calc({sc} * (1 + var(--Ry) / -900)));'
   'opacity:calc(0.55 + var(--Ry) / 700)}')
+if 'lite' in LOOKS:
+    # one element per sphere: its transform reads the readback chain directly (it restyles on the pass that reads the
+    # registers back anyway); the floor shadows are entries of one box-shadow list in the floor plane (#FSlite)
+    rad = lambda s_: f'({f(RMIN)} + (abs(var(--T{s_})) - 1) * {f((RMAX - RMIN) / (NTYPE - 1))})'
+    for s_ in range(N):
+        sc_ = f'({rad(s_)} / {f(RMAX)})'
+        w(f'#b{s_}{{transform:translate3d(calc(var(--X{s_}) * 1px),calc(var(--Y{s_}) * 1px),calc(var(--Z{s_}) * 1px)) '
+          f'rotateY(calc(var(--yaw) * -1rad)) rotateX({f(-TILT)}deg) translateZ(calc({f(RMAX * 0.6)}px * {sc_})) scale(calc{sc_});'
+          f'--c:hsl(calc(abs(var(--T{s_})) * 61 + 10) 72% 56%);--hl:{HD(s_)}}}')
+    px_ = lambda e: f'calc(({e}) * 1px)'
+    w('#FSlite{box-shadow:' + ','.join(
+        f'{px_(f"var(--X{s_})")} {px_(f"var(--Z{s_})")} {px_(f"{rad(s_)} * 0.7 - var(--Y{s_}) * 0.1")} '
+        f'{px_(f"{rad(s_)} * 0.55")} rgb(0 0 0 / calc(0.6 + var(--Y{s_}) / 500))' for s_ in range(N)) + '}')
 if CANVAS:
     # Canvas renders: every sphere is a few entries in ONE box-shadow list on one element (#CV<look>, a 2 px disc at the
     # view's centre), at its screen position projected through the camera in calc() (the same transform as .cam), and
@@ -533,17 +569,18 @@ ENG_CSS = '\n'.join(out).replace('/*PROPS*/', '\n'.join(
     for n_, (syn, inh, init_) in props.items()))
 
 ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr">' + ''.join(f'<div class="lv" id="ts{t_}">' for t_ in range(NTS)) +
-            '<div class="lv" id="RB"><div class="lv rz">' + ''.join(f'<div class="lv" id="LS{gi}">' for gi in range(NLS)) +
+            '<div class="lv" id="RB"><div class="lv rz"><div class="lv" id="LB">' + ''.join(f'<div class="lv" id="LS{gi}">' for gi in range(NLS)) +
             '<div class="lv" id="LT"><div class="regs rt"><div class="sc"><i id="r0"></i></div></div>'
             '<div class="lv" id="LA"><div class="lv" id="LC"><div class="regs"><div class="sc">' + ''.join(f'<i id="r{k}"></i>' for k in range(1, NREGEL)) +
-            '</div></div></div></div></div>' + ('' if INCHAIN else '</div>' * NLS + '</div></div>') +
-            '<div class="view"><div class="cam"><i class="floor"></i>' + ''.join(f'<div class="lk lk-{l_}"><i class="fs" id="FS{l_}"></i></div>' for l_ in CANVAS) +
+            '</div></div></div></div></div>' + ('' if INCHAIN else '</div>' * NLS + '</div></div></div>') +
+            '<div class="view"><div class="cam"><i class="floor"></i>' + ''.join(f'<div class="lk lk-{l_}"><i class="fs" id="FS{l_}"></i></div>' for l_ in SHADOWS) +
             '<i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i><i class="rail rn"></i>' +
             ('<div class="lk lk-classic">' + ''.join(f'<div class="bw" id="w{s}"><i class="sh"></i><i class="sp"></i></div>' for s in range(N)) + '</div>'
              if 'classic' in LOOKS else '') +
+            (''.join(f'<i class="bs" id="b{s}"></i>' for s in range(N)) if 'lite' in LOOKS else '') +
             '</div>' + ''.join(f'<div class="lk lk-{l_}"><i class="cv" id="CV{l_}"></i></div>' for l_ in CANVAS) + '</div>' +
-            ('</div>' * NLS + '</div></div>' if INCHAIN else '') + '</div>' * NTS + '</div></div></div>')
+            ('</div>' * NLS + '</div></div></div>' if INCHAIN else '') + '</div>' * NTS + '</div></div></div>')
 
 
 def scene_decls(sn):
@@ -565,7 +602,7 @@ ENG_CSS += '\n' + '\n'.join(SC_CSS)
 
 PFX = E_('PFX', '')
 if PFX:
-    ids = r'RB|LS\d+|LT|LA|LC|r\d+|ts\d+|w\d+|ENG|INI|CV\w+|FS\w+'
+    ids = r'RB|LB|LS\d+|LT|LA|LC|r\d+|ts\d+|w\d+|b\d+|ENG|INI|CV\w+|FS\w+'
     ENG_HTML = re.sub(r'id="(' + ids + ')"', lambda m: f'id="{PFX}{m.group(1)}"', ENG_HTML)
     ENG_CSS = re.sub(r'#(' + ids + r')\b', lambda m: f'#{PFX}{m.group(1)}', ENG_CSS)
     names = sorted((n for n in props if n not in ('gy', 'att', 'sx', 'sy', 'kick', 'rst', 'yaw')), key=len, reverse=True)
@@ -576,7 +613,7 @@ if PFX:
 else:
     ENG_ID, INI_ID = 'ENG', 'INI'
 NDECL = len(LC) + sum(len(v) for v in BLK.values())
-frag = dict(N=N, K=K, eng_id=ENG_ID, ini_id=INI_ID, css=ENG_CSS, html=ENG_HTML, scenes=SCENE_NAMES, grav=f(GRAV),
+frag = dict(N=N, K=K, looks=LOOKS, eng_id=ENG_ID, ini_id=INI_ID, css=ENG_CSS, html=ENG_HTML, scenes=SCENE_NAMES, grav=f(GRAV),
             ndecl=NDECL, nreg=len(REGS),
             consts=dict(VW=VIEW_W, VH=VIEW_H, HS=HS, PERSP=f(PERSP), TILT=f(TILT), TY=f(CAM_TY), DIST=f(CAM_DIST),
                         WX=WX, WZ=WZ, CEIL=CEIL, RMIN=RMIN, RMAX=RMAX, NTYPE=NTYPE, RATE=RATE))
