@@ -36,4 +36,4 @@ async function profileDir() {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-module.exports = { PAINT, serve, profileDir, sleep };
+module.exports = { PAINT, B, serve, profileDir, sleep };

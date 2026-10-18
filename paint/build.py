@@ -8,6 +8,12 @@ files, and relative URLs inside a cell document resolve under /c/<k>/, so one fi
          dictionary v. Only the stored value's probe decodes; it decodes to a (v+1)x1 image, so the
          probe row is value+1 wide. (Reads must live in this one document: 480 frames dispatching
          their own probes at once exceed Chrome's outstanding-request limit and lose reads.)
+  RETRY  a probe can fail outright: Cloudflare ends every connection after ~10,000 requests (HTTP/2 GOAWAY,
+         HTTP/3 close) and Chrome drops some requests it had queued (ERR_FAILED, not retried), about 30 cells
+         a load. A sentinel image after the grid, /s.png, loads once the first pass has gone out, and starts a
+         second, /s.png?2, which queues behind what Chrome re-sent; 3 s after that every cell still blank shows
+         a second probe row, /c/k/r/2/<v>.png (90 s after load if a sentinel fails).
+         A cell never written pays its 16 probes twice.
   START  each cell holds 16 <object>s, /c/k/p/<v>, all display:none except the one for the
          value just read; a hidden <object> creates no frame and loads nothing. A never-written cell
          shows /c/k/x. (Not iframes: every <iframe> element takes one of Chrome's 1000 frames
@@ -30,7 +36,7 @@ URLS   all page URLs are extensionless (/c/k/x, /c/k/p/5): Cloudflare Pages 308-
          *.html to the extensionless path, and a redirect inside a rewrite would leave the cell's
          /c/<k>/ namespace. Files on disk keep .html; Pages serves p/5.html at /p/5.
 
-Writes site/: cell.html, 16 p/*.html, 16 d/*.png, 16 r/*.png, index.html, _headers, _redirects.
+Writes site/: cell.html, 16 p/*.html, 16 d/*.png, 16 r/*.png, s.png, index.html, _headers, _redirects.
 usage: python3 build.py [W] [H]      (pip install zstandard)
 """
 import os, sys, struct, zlib, hashlib
@@ -70,8 +76,11 @@ for v in range(K):
     if not os.path.exists(f"{OUT}/d/{v}.png"):           # keep dictionaries stable across rebuilds
         open(f"{OUT}/d/{v}.png", "wb").write(png(1, 1, b"colour %d " % v + os.urandom(8).hex().encode()))
     open(f"{OUT}/r/{v}.png", "wb").write(dcz(open(f"{OUT}/d/{v}.png", "rb").read(), png(v + 1, 1)))
+SENT = 8                                                  # the sentinel's width; it narrows the `done` container
+open(f"{OUT}/s.png", "wb").write(png(SENT, 1))
 
-open(f"{OUT}/_redirects", "w").write("""/c/:k/x /cell 200
+open(f"{OUT}/_redirects", "w").write("""/c/:k/r/2/:v /r/:v 200
+/c/:k/x /cell 200
 /c/:k/p/:v /p/:v 200
 /c/:k/r/:v /r/:v 200
 /c/:k/d/:v /d/:v 200
@@ -87,6 +96,8 @@ open(f"{OUT}/_headers", "w").write("""/c/:k/d/*
 /c/:k/x
   Cache-Control: no-cache
 /c/:k/p/*
+  Cache-Control: no-store
+/s.png
   Cache-Control: no-store
 /
   Cache-Control: no-cache
@@ -123,6 +134,7 @@ page_css = ":root{" + "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + "
 @property --pal{{syntax:'<integer>';inherits:true;initial-value:1}}
 @property --s{{syntax:'<number>';inherits:true;initial-value:1}}
 @property --bv{{syntax:'<integer>';inherits:false;initial-value:-1}}
+@property --go{{syntax:'<integer>';inherits:true;initial-value:0}}
 :root{{--bg:#ebe5d8;--ink:#1d1b1a;--mute:#7c766c;--frame:#c9c1b1;--gw:{W * CELL}px}}
 @media (prefers-color-scheme:dark){{:root{{--bg:#141312;--ink:#ece6da;--mute:#8d867a;--frame:#3a3732}}}}
 html,body{{margin:0;background:var(--bg);color:var(--ink)}}
@@ -133,14 +145,31 @@ header{{display:flex;justify-content:space-between;align-items:baseline;gap:12px
 h1{{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;margin:0}}
 header span{{color:var(--mute);font-size:12px;text-align:right}}
 .stage{{height:calc({H * CELL}px * var(--s))}}
-.grid{{display:grid;grid-template-columns:repeat({W},{CELL}px);width:var(--gw);transform-origin:0 0;
-  scale:var(--s);background:var(--p0);outline:1px solid var(--frame);
+/* RETRY: each .gd narrows by SENT px once its sentinel loads. /s.png follows the first pass of probes; /s.png?2
+   is requested only then, so it also queues behind the probes Chrome re-sent after a GOAWAY */
+.sig{{display:flex}}
+.stage>.sig{{width:{W * CELL + SENT}px;transform-origin:0 0;scale:var(--s)}}
+.gd{{flex:1 1 0;min-width:0;container:s1/inline-size}}
+.gd .gd{{container-name:s2}}
+.sig>i{{display:block;flex:none;opacity:0}}
+.sig>i.s2{{display:none}}
+@container s1 (width<{W * CELL + SENT // 2}px){{.sig>i.s2{{display:block}}}}
+.grid{{display:grid;grid-template-columns:repeat({W},{CELL}px);width:var(--gw);background:var(--p0);outline:1px solid var(--frame);
   box-shadow:0 12px 30px -18px rgba(0,0,0,.35)}}
-.c{{position:relative;width:{CELL}px;height:{CELL}px;overflow:hidden;anchor-scope:--rd}}
+.c{{position:relative;width:{CELL}px;height:{CELL}px;overflow:hidden;anchor-scope:--rd,--rt}}
 /* READ: the probe row is (stored value + 1) px wide; 0 = never written */
 .rd{{position:absolute;left:0;top:0;display:flex;anchor-name:--rd;opacity:0;pointer-events:none}}
 .rd i{{display:block;flex:none}}
-.v{{position:absolute;left:0;top:0;height:0;width:anchor-size(--rd width);container-type:inline-size}}
+.v{{position:absolute;left:0;top:0;height:0;width:anchor-size(--rd width);container-type:inline-size;
+  animation:go-late 0s 90s forwards}}
+/* a cell still 0 px wide after the first pass reads again, with fresh URLs; .w takes whichever row decoded */
+@keyframes go{{from,to{{--go:1}}}}
+@keyframes go-late{{from,to{{--go:1}}}}
+@container s2 (width<{W * CELL - SENT // 2}px){{.v{{animation:go 0s 3s forwards}}}}
+.rt{{position:absolute;left:0;top:0;display:none;anchor-name:--rt;opacity:0;pointer-events:none}}
+.rt i{{display:block;flex:none}}
+@container (width:0px){{.rt{{display:if(style(--go:1):flex;else:none)}}}}
+.w{{position:absolute;left:0;top:0;height:0;width:max(100cqw,anchor-size(--rt width,0px));container-type:inline-size}}
 .px{{position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px;--bv:calc(100cqw / 1px - 1);background:{lookup('--bv')}}}
 /* the cell document's width carries the palette colour; only the object for the value read is
    shown, and a hidden <object> never loads */
@@ -159,9 +188,11 @@ kbd{{font:inherit;border:1px solid var(--frame);border-radius:3px;padding:0 4px}
 
 cells = "".join('<div class=c><span class=rd>'
                 + "".join(f'<i style="content:url(/c/{k}/r/{v}.png)"></i>' for v in range(K))
-                + f'</span><div class=v><b class=px></b><object class=x type=text/html data="/c/{k}/x" title="cell {k}"></object>'
+                + '</span><div class=v><span class=rt>'
+                + "".join(f'<i style="content:url(/c/{k}/r/2/{v}.png)"></i>' for v in range(K))
+                + f'</span><div class=w><b class=px></b><object class=x type=text/html data="/c/{k}/x" title="cell {k}"></object>'
                 + "".join(f'<object class=f{v} type=text/html data="/c/{k}/p/{v}" title="cell {k}"></object>' for v in range(K))
-                + '</div></div>'
+                + '</div></div></div>'
                 for k in range(N))
 pal = "".join(f'<input type=radio name=pal id=pc{v} autocomplete=off{" checked" if v == 1 else ""}>'
               f'<label for=pc{v} style="background:var(--p{v})" title="colour {v}"></label>' for v in range(K))
@@ -174,7 +205,7 @@ html = f"""<!doctype html>
 <style>{page_css}</style>
 <main>
 <header><h1>Dictionary Paint</h1><span>{W}×{H} · 16 colours · no JS</span></header>
-<div class=stage><div class=grid>{cells}</div></div>
+<div class=stage><div class=sig><div class=gd><div class=sig><div class=gd><div class=grid>{cells}</div></div><i class=s2 style="content:url(/s.png?2)"></i></div></div><i style="content:url(/s.png)"></i></div></div>
 <div class=pal>{pal}</div>
 <p>Pick a colour and paint. Everything is saved as you go and survives reloads and restarts.
 The browser's Back button is undo, Forward is redo.</p>
