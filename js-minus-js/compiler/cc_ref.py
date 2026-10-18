@@ -7,10 +7,10 @@ no recursion, no lookahead beyond the next character. Each step may complete one
 code words. Words that need an address not known yet carry a label id; labels are resolved after the last step.
 
 Subset: var/let/const (also `var a = 1, b = 2`), function (params, locals, recursion, forward calls),
-if/else/else if, while, do-while, for(;;), break, continue, return; bodies with or without braces; integers, true/false,
-string literals ("..." or '...', escapes \\n \\t \\r \\\\ \\" \\'), static array literals, a[i] read/write;
-+ - * / % < > <= >= == != === !== && || (short-circuit, JS value semantics) ?: ! unary -; = += -= *= /= %=
-(also on a[i]); x++ x-- ++x --x as statements; calls; putc(x); console.log(a, b, ...), where + at the top
+if/else/else if, while, do-while, for(;;), switch/case/default, break, continue, return; bodies with or without braces;
+integers, true/false, string literals ("..." or '...', escapes \\n \\t \\r \\\\ \\" \\'), static array literals (with .length),
+a[i] read/write; + - * / % < > <= >= == != === !== && || (short-circuit, JS value semantics) ?: ! unary -; = += -= *= /= %=
+++ -- (also on a[i]) as statements; x++ x-- ++x --x also in expressions; calls; putc(x); console.log(a, b, ...), where + at the top
 level of an argument concatenates when an operand is a string ("n = " + n, s + "!"); // and /* */ comments;
 statements end with ';', or a newline / '}' where JavaScript would insert one. Objects: literals {a: 1, "b": 2, 3: x},
 o.x and x[k] reads, o.x / x[k] assignment statements (=, op=, ++, --), null; strings are interned (see OBJTAG below).
@@ -67,7 +67,7 @@ def h1h2(s):
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
     return a, b
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
-                           'true', 'false', 'break', 'continue', 'do', 'null']}
+                           'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length']}
 
 # punctuation codes: single chars by ASCII; two-char ops: == 1, != 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
 # += 9, -= 10, *= 11, /= 12, %= 13 (=== and !== lex as == and !=); NL 14: a newline after a token that can end a
@@ -104,14 +104,20 @@ C_BLOCK, C_IFB, C_ELSEB, C_DOB, C_LOOPB, C_FUNCB = 1, 2, 3, 4, 5, 6
 C_IFC, C_WHILEC, C_FORINIT, C_FORCOND, C_FORSTEP, C_ASSIGN, C_EXPR, C_RETURN, C_IDXA = 10, 11, 12, 13, 14, 15, 16, 17, 18
 # a property assignment statement: a = 0 o.x (the key's string-area offset in c * 64 + d) / 1 x[k], b = the compound op
 C_PSET = 19
+# switch (e) { ... }: the header C_SWITCHC, then the body C_SWITCH (a = the pending test's label, b = the end (break) label,
+# c = default's label, d = 1 a clause seen + 2 a default seen). The value stays on the stack only while it is tested: each
+# case is  JMP Bk (the previous body falls through)  Tk: DUP <value> EQ JZ Tk+1 POP  Bk:, so the bodies run with the
+# stack as it was. C_CASE (a = Bk, b = 1 if there is a previous body) is on top while the case value is parsed.
+C_SWITCHC, C_SWITCH, C_CASE = 30, 31, 32
 BRACELESS = 20
 C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_DOB + BRACELESS, C_LOOPB + BRACELESS
 # parser modes
 (S_STMT, S_OPND, S_OPER, S_NAMES, S_NAMEE, S_VAR, S_VARAFTER, S_LPAREN, S_LBRACE, S_ELSE, S_FNAME, S_FPAREN, S_FPARAM,
  S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_ARR, S_ARRSEP, S_ARRNEG, S_INC, S_IDXEQ, S_AFTERELSE, S_PREINC,
- S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_ERR) = range(30)
+ S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_ERR) = range(31)
 # S_DOT: a property name after '.'; S_OKEY / S_OCOLON: an object literal's key / its ':'. After o.x (SCANI emitted, the key in pn)
-# or x[k] the parser is in S_OPER with pm = 1 / 2: the load is pending until the next token shows it is not assigned to
+# or x[k] the parser is in S_OPER with pm = 1 / 2: the load is pending until the next token shows it is not assigned to.
+# S_SWCASE: a switch body's first token (case, default or '}'); default's ':' is read in S_OCOLON
 
 def tmerge(a, b):
     """static type of a value that is one of two values of types a, b"""
@@ -228,9 +234,10 @@ class Compiler:
         """an assignment to o.x / x[k]: only as a statement of its own"""
         return self.osp == 0 and self.top_cs()[0] == C_EXPR
 
-    def loop_entry(self):
+    def loop_entry(self, brk):
+        """the innermost loop (or, for break, switch) entry: a = its continue label, b = its break label"""
         for k in range(self.csp - 1, -1, -1):
-            if self.cs[k][0] in (C_LOOPB, C_LOOPB1, C_DOB, C_DOB1): return self.cs[k]
+            if self.cs[k][0] in (C_LOOPB, C_LOOPB1, C_DOB, C_DOB1) or (brk and self.cs[k][0] == C_SWITCH): return self.cs[k]
         return None
     def print_call(self, sep):
         """print (and pop) the value on the stack, then the separator sep (0 none, 32 space, 10 newline): one PRINT word.
@@ -338,6 +345,7 @@ class Compiler:
                 else:
                     k = self.fnfind(h); self.push_op(M_CALL, self.fn[k][2] + 64 * self.fn[k][3])
                 self.mode = S_OPND; return
+            if isP(7) or isP(8): return self.incdec(h, v, 2)       # x++ / x-- in an expression: the old value
             j = self.lookup(h)
             if j < 0: return self.fail(4)
             if isP(91) and self.sym[j][4] == 3:              # an array literal's variable: IDX
@@ -370,9 +378,12 @@ class Compiler:
             if not reuse: self.push_cs(C_ELSEB1, self.pendLa)
             m = self.mode = S_STMT
         if m == S_LBRACE:                                      # a body: { ... } or a single statement
-            if isP(123): self.mode = S_STMT; return
+            if isP(123): self.mode = S_SWCASE if self.top_cs()[0] == C_SWITCH else S_STMT; return
             if self.top_cs()[0] not in (C_IFB, C_LOOPB, C_DOB): return self.fail(33)
             self.cs[self.csp - 1][0] += BRACELESS; m = self.mode = S_STMT
+        if m == S_SWCASE:
+            if not (isK('case') or isK('default') or isP(125)): return self.fail(74)
+            m = self.mode = S_STMT
         # ---- statements
         if m == S_STMT:
             t = self.top_cs()[0]
@@ -389,6 +400,19 @@ class Compiler:
             if isK('var') or isK('let') or isK('const'):          # pn[0]: the declaration kind, 0 var 1 let 2 const
                 self.pn = (int(isK('let')) + 2 * int(isK('const')), 0); self.mode = S_VAR; return
             if isK('if'): self.push_cs(C_IFC); self.mode = S_LPAREN; return
+            if isK('switch'): self.push_cs(C_SWITCHC); self.mode = S_LPAREN; return
+            if isK('case') or isK('default'):
+                t = self.top_cs(); seen = t[4] & 1
+                if t[0] != C_SWITCH: return self.fail(73)
+                if isK('case'):                                # [JMP Bk]  T: DUP <value> (then ':')
+                    bk = self.newlab() if seen else 0
+                    if seen: self.emit(JMP, 0, bk)
+                    self.deflab(t[1], self.here()); self.emit(DUP)
+                    self.push_cs(C_CASE, bk, seen); self.mode = S_OPND; return
+                if t[4] & 2: return self.fail(75)              # a second default
+                if not seen: self.emit(JMP, 0, t[1])           # the value goes to the tests first
+                ld = self.newlab(); self.deflab(ld, self.here())
+                t[3] = ld; t[4] = 3; self.mode = S_OCOLON; return
             if isK('while'):
                 lh = self.newlab(); self.deflab(lh, self.here()); self.push_cs(C_WHILEC, lh); self.mode = S_LPAREN; return
             if isK('do'):                                      # top: body; continue: cond JNZ top; break:
@@ -401,7 +425,7 @@ class Compiler:
                 if not self.curf: return self.fail(57)
                 self.push_cs(C_RETURN); self.mode = S_OPND; return
             if isK('break') or isK('continue'):
-                e = self.loop_entry()
+                e = self.loop_entry(isK('break'))
                 if e is None: return self.fail(56)
                 self.emit(JMP, 0, e[2] if isK('break') else e[1]); self.mode = S_INC; return
             if isK('function'):
@@ -409,9 +433,9 @@ class Compiler:
                 lo = self.newlab(); self.emit(JMP, 0, lo); self.mode = S_FNAME
                 self.push_cs(C_FUNCB, lo); return
             self.pn = v; self.mode = S_NAMES; return
-        if m == S_PREINC:                                      # ++x / --x (statement)
+        if m == S_PREINC:                                      # ++x / --x (pn[1]: in an expression)
             if kind != 'ID': return self.fail(10)
-            return self.incdec(v, self.pn[0])
+            return self.incdec(v, self.pn[0], self.pn[1])
         if m == S_VAR:
             if kind != 'ID': return self.fail(9)
             cst, blk = int(self.pn[0] == 2), self.decl_blk()
@@ -482,6 +506,9 @@ class Compiler:
             return self.fail(43)
         if m == S_IDXEQ:                                       # a[i] = e (an array)
             if isP(61): self.mode = S_OPND; return
+            if isP(7) or isP(8):                               # a[i]++: address DUP LOADI 1 ADD STOREI
+                self.emit(DUP); self.emit(LOADI); self.emit(PUSHI, 1); self.emit(ADD if isP(7) else SUB); self.emit(STOREI)
+                self.pop_cs(); self.mode = S_INC; return
             if kind == 'P' and v in COMPOUND:                  # a[i] op= e: address DUP LOADI e op STOREI
                 self.emit(DUP); self.emit(LOADI); self.cs[self.csp - 1][1] = COMPOUND[v]; self.mode = S_OPND; return
             if not (isP(46) or isP(91)): return self.fail(49)
@@ -490,6 +517,8 @@ class Compiler:
         # ---- objects
         if m == S_DOT:                                         # o . name
             if kind != 'ID': return self.fail(69)
+            if v == KW['length']:                              # an array's length: the word before its first element
+                self.emit(PUSHI, 1); self.emit(SUB); self.emit(LOADI, b=3); self.mode = S_OPER; return
             ks = self.key_name(v)
             if ks < 0: return
             self.emit(SCANI, ks); self.pn = (ks, 0); self.pm = 1; self.mode = S_OPER; return
@@ -518,7 +547,7 @@ class Compiler:
             self.mode = S_OCOLON; return
         if m == S_OCOLON:
             if not isP(58): return self.fail(72)
-            self.mode = S_OPND; return
+            self.mode = S_STMT if self.top_cs()[0] == C_SWITCH else S_OPND; return      # (default's ':')
         # ---- expressions
         if m == S_OPND:
             if kind == 'NUM':
@@ -540,7 +569,10 @@ class Compiler:
             if isP(40): self.push_op(M_PAREN); return
             if isP(33): self.push_op(NOT); return
             if isP(45): self.push_op(NEG); return
-            if isP(91): self.arrstart = self.dp; self.mode = S_ARR; return
+            if isP(7) or isP(8): self.pn = (v, 1); self.mode = S_PREINC; return      # ++x / --x in an expression
+            if isP(91):                                        # an array literal: its length, then its elements
+                if self.dp >= self.db + SDATA: return self.fail(25)
+                self.arrstart = self.dp; self.dp += 1; self.mode = S_ARR; return
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
             if isP(41) and self.top_op()[0] == M_CALL:      # f()
                 self.osp -= 1; self.emit(CALL, 0, self.opv[self.osp] % 64, b=self.opv[self.osp] // 64); self.mode = S_OPER; return
@@ -588,7 +620,9 @@ class Compiler:
                 l = self.newlab(); self.emit(JZ, 0, l); self.push_op(M_TERN, l + 64 * int(t == M_TELSE)); self.mode = S_OPND; return
             if isP(58):                                        # c ? a : ...
                 self.popops(1); t, tv = self.top_op()
-                if t != M_TERN: return self.fail(67)
+                if t != M_TERN:
+                    if self.osp == 0 and self.top_cs()[0] == C_CASE: return self.case_end()
+                    return self.fail(67)
                 self.osp -= 1; lbt = self.lb
                 if tv >= 64:                                   # reuse the enclosing M_TELSE's L2
                     ev = self.opv[self.osp - 1]; self.emit(JMP, 0, ev % 64)
@@ -643,20 +677,33 @@ class Compiler:
             self.osp -= 1; self.lb = 0; self.mode = S_OPER
         else: self.mode = S_OKEY
 
+    def case_end(self):
+        """a case value ended (':'): EQ JZ Tnext POP Bk:"""
+        c = self.pop_cs(); self.emit(EQ); tn = self.newlab(); self.emit(JZ, 0, tn); self.emit(POP)
+        if c[2]: self.deflab(c[1], self.here())
+        t = self.top_cs(); t[1] = tn; t[4] |= 1; self.mode = S_STMT
+
     def asi_close(self, f):
         """'}' right after a statement without ';': end the statement (knowing the next token is not 'else'),
         then close the block"""
         self.asic = 1; f(); self.asic = 0
         if not self.err: self.close_block()
 
-    def incdec(self, h, v):
+    def incdec(self, h, v, x=0):
+        """++ (v 7) / -- (8) of a variable. x: 0 a statement, 1 ++x in an expression (leaves the new value), 2 x++ (the old)"""
         j = self.lookup(h)
         if j < 0: return self.fail(6)
         if self.sym[j][5]: return self.fail(64)
         k, a = self.sym[j][2], self.sym[j][3]
+        if x == 2: self.load(j)
         if v == 7: self.emit(INCL if k == 2 else INCG, a % 8192)
-        else: self.load(j); self.emit(PUSHI, 1); self.emit(SUB); self.store(j)
-        self.mode = S_INC
+        else:
+            self.load(j); self.emit(PUSHI, 1); self.emit(SUB)
+            if x == 1: self.emit(DUP)
+            self.store(j)
+        if x == 1 and v == 7: self.load(j)
+        if x: self.lb = 3; self.mode = S_OPER
+        else: self.mode = S_INC
 
     # ---- an expression ended at statement level (';' or ')' or ','): what was it for?
     def end_expr_stmt(self, kind, v):
@@ -665,6 +712,8 @@ class Compiler:
         k = t[0]
         if k == C_IFC and isP(41):
             self.pop_cs(); la = self.newlab(); self.emit(JZ, 0, la); self.push_cs(C_IFB, la); self.mode = S_LBRACE; return
+        if k == C_SWITCHC and isP(41):                         # the value on the stack; the first test's label, the end label
+            self.pop_cs(); lt, le = self.newlab(), self.newlab(); self.push_cs(C_SWITCH, lt, le); self.mode = S_LBRACE; return
         if k in (C_DOB, C_DOB1) and isP(41):
             # the statement ends at ')': JavaScript inserts a ';' here even without a newline, and a ';' that follows
             # is an empty statement (so `if (a) do s; while (c); else ...` is rejected)
@@ -735,6 +784,11 @@ class Compiler:
         if k == C_ELSEB: self.deflab(t[1], self.here()); return self.complete_stmt(0)
         if k == C_DOB: return self.do_cond(t)
         if k == C_LOOPB: self.emit(JMP, 0, t[1]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
+        if k == C_SWITCH:                                      # [JMP end]  T: POP [JMP default]  end:
+            if t[4] & 1: self.emit(JMP, 0, t[2])
+            self.deflab(t[1], self.here()); self.emit(POP)
+            if t[4] & 2: self.emit(JMP, 0, t[3])
+            self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k == C_FUNCB:
             self.emit(PUSHI, 0); self.emit(RET, self.npar); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
             self.curf = 0; self.nsym = self.fsym; self.mode = S_STMT; return
@@ -750,7 +804,7 @@ class Compiler:
         self.emit(ENTER, 0, self.cs[self.csp - 1][2]); self.mode = S_LBRACE
 
     def end_array(self):
-        self.emit(PUSHI, self.arrstart); self.mode = S_OPER
+        self.data[self.arrstart] = self.dp - self.arrstart - 1; self.emit(PUSHI, self.arrstart + 1); self.mode = S_OPER
 
     # ---------------- whole program
     def compile(self, src):

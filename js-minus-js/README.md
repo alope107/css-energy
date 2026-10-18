@@ -12,7 +12,7 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 **Status (2026-10-17).**
 
-- All five test levels pass. That includes 108 programs checked against Node's output and 31 programs the
+- All five test levels pass. That includes 114 programs checked against Node's output and 38 programs the
   compiler must reject.
 - On the page, compiling takes about 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
   in about 8.3 s and halts about 10.8 s after Run (headless Chromium 153 on the Ubuntu mini PC, 2026-10-17); it was
@@ -45,7 +45,7 @@ compiler/   the compiler: cc_ref.py (reference) + cc_dsl.py/dsl.py (the same ste
 machine/    the font CPU: uarch*.py (model), cpu4.py/cpugen.py/otl.py (GSUB), fvm_build.py (font),
             gen_fvm4.py (the page), memtree.py (RAM); browser harnesses (ui_seq.js, fullrun.js, trace.js, ...)
 readback/   editor text readback: ui_rb.py, mkfont2.py (AsciiProbe font)
-tests/      suite/ (108 programs + Node .out), suite_err/ (31 rejects), harnesses for levels L1-L5
+tests/      suite/ (114 programs + Node .out), suite_err/ (38 rejects), harnesses for levels L1-L5
 tools/      browser.js (launcher), traps.py (cost of a program on the CPU), vsz.py / lp.py (variant sizes)
 dist/       the built page
 docs/       ARCHITECTURE.md, HISTORY.md, BENCHMARKS.md, ENGINE_NOTES.md
@@ -64,10 +64,12 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Functions**: top-level `function` declarations. They support parameters, locals, recursion, calls before
   the definition, and `return` with or without a value.
 - **Control flow**: `if` / `else` / `else if`, `while`, `do … while`, `for (;;)` (any part may be empty), `break`,
-  `continue`.
+  `continue`, `switch` with `case` / `default`.
+  - `switch` compares with `===` (so strings by content, as they are interned), in order; a `case` value can be
+    any expression, `default` can stand anywhere, and bodies fall through until `break`.
   Bodies may be a block or a single statement, and a dangling `else` binds as in JavaScript.
 - **Values**: integers, `true` / `false`, `null`, strings in `"..."` or `'...'` with escapes `\n \t \r \\ \" \'`,
-  number array literals (`[1, -2, 3]`), and objects.
+  number array literals (`[1, -2, 3]`) with `.length`, and objects.
 - **Objects**:
   - Literals `{a: 1, "b c": 2, 3: x, d: {e: 4}}`, with identifier, string or number keys; values of any type, nested to
     any depth; `{}`; a trailing comma.
@@ -84,7 +86,8 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
   - `+ - * / %`, comparisons `< > <= >= == != === !==`, `!` and unary `-`.
   - `&&` and `||` short-circuit and return an operand's value, as in JavaScript (`0 || 7` is `7`).
   - `c ? a : b`, nested either way (`x < 0 ? -1 : x > 0 ? 1 : 0`).
-- **Assignment**: `=`, `+= -= *= /= %=` (also on `a[i]`), and `x++ x-- ++x --x` as statements.
+- **Assignment**: `=`, `+= -= *= /= %=` and `++ --` (also on `a[i]`) as statements; `x++ x-- ++x --x` also inside
+  expressions (`a[i++]`, `while (n--)`).
 - **Output**: `console.log(a, b, ...)` and `putc(code)`.
 - **Comments**: `//` and `/* */`.
 - **Strings are interned**: equal string literals are one value, so `===` compares them by content.
@@ -131,7 +134,9 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
   - 256 words of string data, including one tag word per string, and 255 words of globals and arrays.
   - RAM is 16K words (`compiler/layout.json`); the stack has about 14,700 words, so recursion can go a few thousand
     calls deep. Before 2026-10-13 RAM was 3K words and the stack 1,408.
-  - 64 labels, 32 variables in scope, 16 functions.
+  - 64 labels, 32 variables in scope, 16 functions. A `switch` takes 2 labels, plus 2 per `case` and 1 for a
+    `default`.
+  - Each array literal takes one word of the 255 for its length, besides its elements.
   - 16 distinct strings and property names (string literals and keys share one interning table). A property name
     is stored in the string area too.
   - Objects: about 384 chunks live at once (a chunk holds 3 pairs). A program that keeps more halts with
@@ -148,6 +153,9 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
   - A boolean passed as a parameter prints as `1` / `0`.
   - So does a boolean returned by a function called before its definition.
   - So does a boolean from `c ? a : b` whose other branch is not a boolean (`c ? false : 7`).
+- **Arrays**: `.length` is the literal's length; writing past the end (`x[k] = v`) does not change it. On an
+  object or a string, `.length` reads a meaningless number (it is not a property read).
+- **`++` / `--`**: inside an expression only on a variable (`a[i]++` and `o.x++` are statements only).
 - **Scoping**: redeclaring a `let` / `const` in the same scope is not an error (the later one wins), and using one
   before its declaration in an inner block (`let x = x + 1`) is not caught.
 - **`do … while`**: `if (a) do s; while (c); else …` is rejected (write it without that `;`), and
@@ -160,9 +168,8 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
   - No prototypes, methods, `delete`, `in`, `for … in`, `Object.keys`.
   - An assignment to a property is a statement, not an expression (`a = o.x = 1` is an error).
 - **Not supported**:
-  - `.length`, `undefined`;
-  - nested functions or closures, `switch`;
-  - `++` inside an expression;
+  - `undefined`;
+  - nested functions or closures;
   - string comparison by content.
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
 
@@ -190,7 +197,8 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 66 | `while` expected after a `do` body | 67 | `:` without `?` |
 | 68 | too many strings and property names (16) | 69 | property name expected after `.` |
 | 70 | a property assignment must be a statement | 71 | object literal: key expected |
-| 72 | object literal: `:` expected | | |
+| 72 | `:` expected after an object key or `default` | 73 | `case` / `default` outside a `switch` |
+| 74 | a `switch` body must start with `case` / `default` | 75 | a second `default` |
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.

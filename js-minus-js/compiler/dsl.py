@@ -217,14 +217,15 @@ class Ctx:
         self.cur = {n: S(n) for n in self.state}
         self.g = K(1)
         self.temps = []          # (name, node) in order
-        self.memo = {}
+        self.memo = {}; self.names = set()
         self.nt = 0
     def mat(self, node, hint='t'):
         node = lift(node)
         if node.op in ('K', 'S', 'I', 'T'): return node
         if node in self.memo: return self.memo[node]
-        name = f'{hint}{self.nt}'; self.nt += 1
-        self.temps.append((name, node)); t = T(name); self.memo[node] = t
+        name = f'{hint}_{self.nt}' if hint[-1:].isdigit() else f'{hint}{self.nt}'; self.nt += 1     # (ska2 + 10 is not ska + 210)
+        assert name not in self.names, name
+        self.names.add(name); self.temps.append((name, node)); t = T(name); self.memo[node] = t
         return t
     def v(self, n): return self.cur[n]
     def set(self, n, val, hint=None):

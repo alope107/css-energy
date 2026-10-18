@@ -110,11 +110,11 @@ These are in `cc_ref.py` and shared by the DSL.
 
 ### Parser structure
 
-- **Modes**: `S_STMT`, `S_OPND`, `S_OPER`, … 27 in all.
+- **Modes**: `S_STMT`, `S_OPND`, `S_OPER`, … 31 in all.
 - **Control-stack kinds**:
-  - bodies: `C_IFB`, `C_ELSEB`, `C_LOOPB`, `C_DOB`, `C_FUNCB`;
-  - pending headers and statements: `C_IFC`, `C_WHILEC`, `C_FORINIT`, `C_FORCOND`, `C_FORSTEP`, `C_ASSIGN`,
-    `C_EXPR`, `C_RETURN`, `C_IDXA`;
+  - bodies: `C_IFB`, `C_ELSEB`, `C_LOOPB`, `C_DOB`, `C_FUNCB`, `C_SWITCH`;
+  - pending headers and statements: `C_IFC`, `C_WHILEC`, `C_SWITCHC`, `C_FORINIT`, `C_FORCOND`, `C_FORSTEP`,
+    `C_ASSIGN`, `C_EXPR`, `C_RETURN`, `C_IDXA`, `C_PSET`, `C_CASE`;
   - braceless bodies (`kind + BRACELESS`), closed by `complete_stmt` when their single statement ends.
 - **Packing**: control-stack entries pack as `kind × 4096 + a × 64 + b` and `e × 4096 + c × 64 + d`, where `e` is
   the block-scope mark (below). Operator-stack entries pack as `code × 8192 + value`.
@@ -135,6 +135,20 @@ These are in `cc_ref.py` and shared by the DSL.
   ends, the continue label is defined and the entry stays on the stack, with mode `S_DOWHILE` waiting for `while`.
   The `)` of the condition emits `JNZ top`, defines the break label and ends the statement (JavaScript inserts a `;`
   there even without a newline; a `;` that follows is an empty statement).
+- **`switch`**: the value stays on the stack only while it is being tested, so the bodies run with the stack as
+  it was, and `break`, `continue` and `return` need no cleanup. `switch (e) {` pushes `C_SWITCH` (a = the pending
+  test's label, b = the end label, c = `default`'s label, d = 1 once a clause is seen + 2 once a `default` is).
+  Each `case v:` emits `[JMP Bk] Tk: DUP v EQ JZ Tk+1 POP Bk:`: the `JMP` (from the second clause on) lets the
+  previous body fall through past the test. `default:` defines its label where it stands, after a `JMP` to the
+  first test if it is the first clause. The `}` emits `[JMP end] Tlast: POP [JMP default] end:`. `break` jumps to
+  the innermost loop or switch's b label, `continue` to the innermost loop's a label. A switch uses 2 labels, plus
+  2 per `case` (1 for the first) and 1 for a `default`. The mode `S_SWCASE` makes the body start with `case`,
+  `default` or `}`.
+- **`++` / `--` in expressions** (plain variables): `x++` is `LOAD x INC x` (`--`: `LOAD x LOAD x PUSHI 1 SUB
+  STORE x`), `++x` is `INC x LOAD x` (`--x`: `LOAD x PUSHI 1 SUB DUP STORE x`). The value's static type is number.
+- **`.length`**: an array literal's first data word is its element count, and its value (the pointer) is the
+  address of the element after it, so `x.length` is `PUSHI 1 SUB LOADI` on any array, wherever it comes from (a
+  parameter, a property). The name `length` after `.` is never a property read.
 - **Block scope (`let` / `const`)**: the symbol table has two regions. Function- and program-level names (vars,
   params, and `let` / `const` declared directly in a function body or at the top level) grow up from 0 (`nsym`);
   `let` / `const` inside a block grow down from `NS - 1` (`nlet`). Every control-stack entry records `nlet` when
@@ -431,9 +445,9 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 **Suites**
 
-- `tests/suite/` holds 108 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
+- `tests/suite/` holds 114 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
   `suite_ref.py` warns if one doesn't.
-- `tests/suite_err/` holds 31 programs the compiler must reject.
+- `tests/suite_err/` holds 38 programs the compiler must reject.
 - `tests/programs/` holds the older demo programs t1–t4 and e1–e2.
 
 **Not covered**

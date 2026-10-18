@@ -228,6 +228,51 @@ L3 itself: **122/122 pass** in every round (97 valid programs, 25 error programs
 and 47). L1 97/97, L2 ALL OK, L4 97/97, `make l5-smoke` 9/9, `make l5` 119/119 (every program under 1,500 steps,
 typed into the real page; the new ones compile in 2.5–6.7 s after Run).
 
+### 4d. Syntactic sugar: `switch`, `++` / `--` in expressions, `a[i]++`, `.length` (branch `sugar`, 2026-10-18)
+
+Compiler-only features (no change to the machine, the ROM or the font). Measured on the L3 page against `main`
+(`853bc45`).
+
+**Size** (`tools/vsz.py`, `tools/lp.py`):
+
+| Build | Temps | Variants | Max label ports | Largest variant (`S_NAMES '}'`) | `S_NAMES ')'` |
+|---|---|---|---|---|---|
+| `main` | 67,451 | 346 | 21 | 1,523 | 1,256 |
+| first version | 70,682 | 355 | 21 | 1,574 | 1,299 |
+| shared code slots and pushes (below) | 69,965 | 355 | 21 | 1,545 | 1,211 |
+
+- Each `emit` costs about 12 temps per variant (one selector per code slot), so the switch's code shares records with
+  code that was already there: the `)` of `if` / `while` / `switch` pushes its body entry once (which made the `)`
+  variants smaller than on `main`), the `}` of a loop, function or switch shares its first `JMP`, its `RET` / `POP` and one
+  label port, and `case` / `default` share one label, one `JMP` and one label port.
+- The 9 new variants are the new mode `S_SWCASE` (3) and `++` / `--` after an operand or name, which were pure errors
+  before.
+
+**Compile time** (L3, `node tests/suite_css.js`, the 140 programs both pages compile, all six runs pinned to CPUs
+12–15 in the order main, sugar, sugar, main, main, sugar; an Android emulator was using about 3 CPUs throughout,
+and unpinned rounds spread 0.90–1.10):
+
+| Pair | Ratio sugar / main, median (IQR) |
+|---|---|
+| 1 | 1.012 (0.945–1.070) |
+| 2 | 1.001 (0.936–1.050) |
+| 3 | 1.016 (0.968–1.109) |
+| main against main | 0.984 |
+
+About +1%, at the noise floor.
+
+**Run time.**
+
+- Every suite program and `tests/programs/t*.js` compiles to the same number of code words and prints the same output.
+  The 97 without array literals run in exactly the same steps.
+- An array literal has one more data word, its length, which the ROM's startup copies like any element: 16 steps
+  per array literal, once (`array_basic` 129 → 145 steps, 17 → 18 shapings; `array_sort` 77 → 79 shapings;
+  `obj_array`, 3 arrays, 83 → 96 shapings).
+- A switch tests its cases in order: `DUP <value> EQ JZ POP` per case, plus a `JMP` per fallthrough.
+
+L1 114/114, L2 ALL OK, L3 152/152, L4 114/114, `make l5-smoke` 9/9, `make l5` 145/146: `str_literal` fails the same
+way on `main`'s page (the typed editor text loses a double space and a line before the compiler sees it).
+
 ---
 
 ## 5. Full page end-to-end (editor → CSS compiler → font CPU): L5 suite
