@@ -5,16 +5,18 @@
 const {launch,open,countFrames}=require('../../tools/lib/physics');
 const page=process.argv[2],SEC=+(process.argv[3]||6),SHOT=process.argv[4];
 (async()=>{const b=await launch();const p=await open(b,page,{viewport:{width:1000,height:900}});
-const N=await p.evaluate(()=>document.querySelectorAll('.eng[style],.eng').length&&[...document.querySelectorAll('.sp')].filter(e=>e.offsetParent!==null||getComputedStyle(e).display!=='none').length);
+
 let fail=[];let worstOv=0,worstMiss=0,worstPen=0;
-const K=+(process.env.K||0)||await p.evaluate(()=>{const m=document.querySelector('footer').textContent.match(/window of (\d+) slots/);return m?+m[1]:0});
+const C=JSON.parse(require('fs').readFileSync(page,'utf8').match(/<!--SPHERES (.*?)-->/)[1]);
+const K=+(process.env.K||0)||C.K;
+const N=C.N;
 const RATE=+(process.env.RATE||60);
 for(let t=0;t<SEC*2;t++){
  const fr=await countFrames(p,500);
  const st=await p.evaluate(N=>{const e=document.querySelector('[id$=LC]')||document.getElementById('LC');const cs=getComputedStyle(e);
   const g=n=>parseFloat(cs.getPropertyValue('--'+n));const out=[];
   for(let s=0;s<N;s++)out.push([g('X'+s),g('Y'+s),g('Z'+s),g('U'+s),g('V'+s),g('W'+s),g('T'+s)]);return out},N);
- const RMIN=13,RMAX=17,NT=6,rad=T=>RMIN+(Math.abs(T)-1)*(RMAX-RMIN)/(NT-1);
+ const RMIN=C.RMIN,RMAX=C.RMAX,NT=C.NTYPE,rad=T=>RMIN+(Math.abs(T)-1)*(RMAX-RMIN)/(NT-1);
  let ov=0,miss=0,pen=0,uns=0,ke=0,nov=0;
  for(let s=0;s<N;s++){const a=st[s],ra=rad(a[6]);
   for(let u=s+1;u<N;u++){const c=st[u],d=Math.hypot(a[0]-c[0],a[1]-c[1],a[2]-c[2]),o=ra+rad(c[6])-d;

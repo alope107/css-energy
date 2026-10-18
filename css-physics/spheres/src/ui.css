@@ -31,7 +31,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 /* (tan(atan2(a, b)) is a / b as a number: Firefox before 158 has no typed division, calc(100cqw / 900px)) */
 .cam{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;
   transform:translate3d(0,calc(__TY__ * 1px),calc(__NDIST__ * 1px)) rotateX(__TILT__deg) rotateY(calc(var(--yaw) * 1rad))}
-.cam > *,.bw > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
+.cam > *,.bw > *,.cam > .lk > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
 
 .floor{width:calc(__2WX__ * 1px);height:calc(__2WZ__ * 1px);
   margin:calc(-__WZ__ * 1px) 0 0 calc(-__WX__ * 1px);
@@ -58,7 +58,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 .rr{transform:translate3d(calc((__WX__ + 2) * 1px),calc(-14 * 1px),0) rotateY(90deg)}
 
 /* spheres: a billboard disc per slot (its colour from the sphere's type), a soft shadow on the floor */
-.sp{width:calc(__2RMAX__ * 1px);height:calc(__2RMAX__ * 1px);margin:calc(-__RMAX__ * 1px) 0 0 calc(-__RMAX__ * 1px);border-radius:50%;
+.bs,.sp{width:calc(__2RMAX__ * 1px);height:calc(__2RMAX__ * 1px);margin:calc(-__RMAX__ * 1px) 0 0 calc(-__RMAX__ * 1px);border-radius:50%;
   background:
     radial-gradient(circle at 36% 30%,rgb(255 255 255/.6),rgb(255 255 255/0) 30%),
     radial-gradient(circle at 42% 38%,color-mix(in oklab,var(--c) 100%,#fff 6%),color-mix(in oklab,var(--c) 55%,#07080a) 76%,color-mix(in oklab,var(--c) 28%,#07080a));
@@ -157,3 +157,15 @@ footer code{color:var(--ink)}
 .regs{position:fixed;left:0;top:0;width:0;height:0;overflow:clip;visibility:hidden}
 .regs .sc{position:absolute;left:0;top:0;width:__HS__px;height:__HS__px;overflow:hidden}
 .regs i{position:absolute;width:1px;height:1px}
+
+/* canvas renders: one element draws every sphere (#CV, box-shadows at projected positions), one every floor shadow
+   (#FS, in the floor plane) */
+.cv,.fs{position:absolute;left:50%;top:50%;width:2px;height:2px;margin:-1px 0 0 -1px;border-radius:50%;pointer-events:none}
+.lk > .fs{left:0;top:0;transform:translateY(-0.5px) rotateX(90deg)}
+.view > .lk{position:absolute;inset:0}
+.lk-neon > .cv{mix-blend-mode:plus-lighter}
+
+#app:has(#lk-neon:checked) .floor{background:
+    linear-gradient(rgb(90 120 255/.14) 1px,transparent 1px) 0 0/calc(40 * 1px) calc(40 * 1px),
+    linear-gradient(90deg,rgb(90 120 255/.14) 1px,transparent 1px) 0 0/calc(40 * 1px) calc(40 * 1px),
+    #07080d;border-color:rgb(110 140 255/.5)}
