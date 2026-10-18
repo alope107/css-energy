@@ -15,6 +15,7 @@ and checks as make targets. The product pages never run script. No npm dependenc
 | `py/ablate.py` | copies of a page with families of `@container` blocks removed (string/comment-aware, never overwrites the source) | css-physics `tools/ablate.py`; any js-minus-js page |
 | `py/passprof.py` | passes per frame, style+layout ms and shaping ms from a saved trace | js-minus-js `machine/passprof.py`; css-physics `TRACE=… tools/tr.js` |
 | `make/checks.mk`, `make/logged.sh`, `make/report.sh`, `js/runid.js` | checks as make targets (below) | every project's Makefile |
+| `android/` | Chromium for Android on the emulator under software emulation (no KVM): setup, start/stop, kernel-level touch, a CDP client; touch semantics, not timing (`android/README.md`) | css-physics `experiments/touch/android.js` |
 | `test/` | unit tests: `make test-shared` at the repo root | |
 
 ## Browser profiles

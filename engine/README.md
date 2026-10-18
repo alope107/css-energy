@@ -30,10 +30,14 @@ fact, so a change in Chrome flips a reading.
 | `html-nesting-512` | the HTML parser stops nesting at 512; XHTML nests as deep as the markup | js-minus-js pages are XHTML (ENGINE_NOTES 19) |
 | `font-resets-fvs` | the `font` shorthand resets `font-variation-settings` declared before it | both |
 | `play-state-base` | `animation-play-state` computed from an element's own animated property doesn't pause it (read from the base style) | js-minus-js (ENGINE_NOTES 9) |
+| `touch-snap-defer` | a scroll-snap container re-snaps after a layout change at once, except while a scroll gesture is active anywhere on the page: then when it ends (`LocalFrameView::ShouldDeferLayoutSnap`) | css-physics touch: the follower `#FO` (ARCHITECTURE.md "Touch") |
+| `scroll-axis-lock` | `scroll-axis-lock: none` stops a touch drag that starts nearly horizontal from locking to that axis | css-physics touch handles |
+| `touch-3d-scroll` | a touch drag scrolls a 3D-transformed scroller by the finger's movement unprojected onto its plane (offset = screen movement / on-screen scale) | css-physics touch handles: the drag in world units |
 | `var-ident` (watch) | `var(ident("--m" var(--k)))` is unsupported; if it ships, both projects gain dynamic indexing | — |
 
 Chromium 153.0.8010.12 (2026-10-14, and on the mini PC 2026-10-17): every fact holds under both profiles; `var-ident`
-is still unsupported.
+is still unsupported. The touch facts (2026-10-18) hold under both; they drive real gestures (CDP touch on a
+touch-emulated phone viewport goes through Chromium's gesture recognizer).
 
 Not probed (they need a running engine): view-timeline and remembered-size update rates, the third style pass, the
 transition latch, restyles inside size containers (js-minus-js ENGINE_NOTES 14–16, 37–38, 23, 34, 41).

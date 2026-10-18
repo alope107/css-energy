@@ -40,10 +40,12 @@ and read back through scroll-driven animations. `src/gen3d.py` emits one *engine
 
 ### Why the wrapper stack looks the way it does
 
-`.ptr > .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
+`.ptr > #TS > #TI > (#FO) + .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
 
-- `.ptr`: pointer (`--sx/--sy`) and camera yaw. `#RB` gates the pointer by `--att` (nonzero only while grabbing);
-  `.rz` zeroes `--sx/--sy/--yaw` so hovering doesn't restyle `#LS`.
+- `.ptr`: pointer (`--sx/--sy`) and camera yaw. `#TS`, `#TI`, `#FO`: the touch input ("Touch" below), above the
+  `.ts` wrappers so a register's timeline lookup never scans `#TS`'s list; `.view` zeroes the drag. `#RB` gates the
+  pointer and the drag by `--att` (nonzero only while grabbing); `.rz` zeroes `--sx/--sy/--yaw` and the drag so
+  hovering or dragging doesn't restyle `#LS`.
 - `#LS` reads the registers; asleep, nothing in it changes. `#LT` changes every pass (the clock), but passes down only
   non-inherited or state-derived values, so the solver isn't restyled while the scene sleeps (idle at 32 bodies went
   from 13.6 to about 1 ms per frame).
@@ -126,7 +128,36 @@ next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds 
   against every sphere and box slab; the hit is latched into `GI` (index + 1, N+1 for a miss), `GT`, `GO*`. Holding
   reads only the held body, through blocks gated on `GIr = i+1`; a spring-damper pulls the grab point to the ray.
 - Mouse: hover cells get `anchor-name` on `:hover`; a zero-size marker anchored there has a view timeline giving
-  `--sx/--sy`. Touch: tap to pick up (a scrolling grid 3× the arena supplies the point), tap again to drop.
+  `--sx/--sy`. Touch (`@media (pointer: coarse)`, `--tm: 1`): touch a body and drag; let go to drop.
+
+### Touch
+
+Chrome gives a finger drag almost nothing: `:hover`/`:active` arrive only with show-press (a finger resting
+100–150 ms), `:active` clears when the finger passes the touch slop (tap-cancel), `:hover` never follows. A quick drag
+gets neither. A scroll does follow the finger, and the scroller that scrolls says where it came down.
+
+- Handles: each body's wrapper holds `.hd` (`#h<i>`), a camera-facing disc of radius R + 14, a scroller with
+  6000-unit content resting at (3000, 3000). The gesture latches to the handle under the finger; Chrome unprojects the
+  movement onto the handle's plane, so its offset is the drag in world units on the camera-facing plane through the
+  body (`touch-3d-scroll` in `engine/`). `scroll-axis-lock: none` stops axis locking; `overscroll-behavior: contain`
+  keeps the page still; everything else is `pointer-events: none`, so drags beside the bodies scroll the page.
+- `#TI`: one additive animation per handle and axis gives `--tdx/--tdy` (only the dragged handle is off rest) and,
+  through step keyframes (0 within 0.6 units of rest), `--tgi` = dragged index + 1.
+- Finger down: the follower `#FO` is a small snap container whose snap area sits at the sums, so it re-snaps after
+  every layout, except that Chrome defers layout re-snaps while a scroll gesture is active (`ShouldDeferLayoutSnap`,
+  `touch-snap-defer`) and does them in the frame it ends. `--held` = "#FO lags the sums"; `--att = held × sign(tgi)`.
+- Back to rest: while held a handle's snap area is an oversized one (`u`) following its offset (valid within ±40),
+  so lifting snaps nothing and a fling stops within 40 units; when `--held` drops the rest area (`i`) returns and the
+  handle re-snaps at once (a layout re-snap). Chrome's own end-of-gesture snap is animated and part of the gesture: it
+  kept the body held and pulled it back for 200–500 ms. A frame with the handle at rest and `#FO` lagging has
+  `tgi = 0`, so `att` stays 0.
+- Engine: the press's first pass (`--tpk`, not `--pick`) latches `GI = tgi` and the body's centre into `GO`; no ray.
+  Holding (`--tho`) pulls the centre (`grr = 0`) to `GO + tdx·ex + tdy·ey` (screen x, y on the camera-facing plane,
+  the ray's derivatives at the current yaw); the overlay shows that target projected.
+- Measured (`tools/touchcheck.js`): held from the first scroll update, dropped 16–50 ms after the lift (2–3 frames:
+  250 ms at 48 bodies), trailing the finger by the touch slop (15 px desktop, ~8 dp Android). On the Android emulator
+  (`../../shared/android/`, `experiments/touch/handles.html`) every drag that became a scroll grabbed and dropped;
+  flings ran past the 40-unit cap (~190 units). Checked on a real phone by the user, 2026-10-18.
 
 ## 3. Rendering
 
@@ -201,4 +232,5 @@ Three are unreported Firefox bugs, with reproductions in `../../bugs/` (hypot, s
 
 **Left as they are:** one step per frame (Firefox samples view timelines once per tick), so 60 steps/s against
 `RATE` 90, about half speed under load; whole bodies composited in document order (a box resting on another can draw
-behind it; sphere rings draw over the disc); touch (`scroll-initial-target` unsupported) untested.
+behind it; sphere rings draw over the disc); touch untested, and probably grabs nothing (it needs Chrome's deferred
+layout re-snap).

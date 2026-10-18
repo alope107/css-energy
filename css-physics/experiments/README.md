@@ -16,6 +16,7 @@ node ~/repo/tools/stylebench.js r_const.html,r_var1.html 500 1500     # median s
 | `costs/mk_part.py`, `part_depth.py`, `part_order.py`, `part_styleform.py` | rule matching at scale: absent-name walk, nesting order, `style()` forms, range queries, `if()` idents | §2 Rule matching |
 | `costs/mk_flags.py` | the all-pairs broadphase at 48 bodies | §1 N² costs |
 | `costs/mk_regs.py` | register readback floor, per-body readback elements | §2 Register readback |
+| `touch/handles.html`, `touch/android.js` | the touch input (handles, follower) without the engine, on the Android emulator (`../../shared/android/`) | ARCHITECTURE.md "Touch" |
 
 The dead-end experiments (variable fonts as compute, compositor interpolation, iframe processes, `ident()`, inherited
 properties, paused-animation evaluators, feature probes) were removed on 2026-10-18; their results are in BENCHMARKS

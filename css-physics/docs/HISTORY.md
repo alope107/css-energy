@@ -5,7 +5,8 @@ layout read back through view timelines, solver levels as nested elements and `@
 port followed (Oct 9–10; the pre-optimization generator is at `83d4fde:css-physics/archive/rigid3d-v3/gen3d_v3.py`, which
 `GEN=<path> python3 src/build3d.py` still builds). One optimization session (Oct 10) produced today's architecture:
 planes-first rounds, `K/J/JP` accumulators, the soft box patch, owner-named gating, the #LS/#LT split, two registers
-per element, `.ts` scope nests, digests, `SHARE`. Oct 13 tried spatial partitioning; Oct 17 added Firefox. Bugs that
+per element, `.ts` scope nests, digests, `SHARE`. Oct 13 tried spatial partitioning; Oct 17 added Firefox;
+Oct 18 replaced tap-to-pick-up touch with touch-and-drag (ARCHITECTURE.md "Touch"). Bugs that
 shipped are CLAUDE.md gotchas, guarded by `tools/smoke.sh`.
 
 Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an older 2-core VM, Chromium 141).
@@ -75,6 +76,25 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 - **Moving the #LM clock into padding** to keep its box still: stopped the re-match.
 - **Shrinking boxes 2–4%** so resting faces don't intersect: Firefox still draws whole bodies in document order.
 - **A second step per frame:** not found; Firefox samples view timelines once per tick.
+
+### Touch (Oct 18)
+
+The old touch input was a scrollable layer 3× the arena: tap a body (`:hover` on a cell gave the point), drag
+anywhere, tap again to drop; Chrome's axis lock bent diagonal drags. Behaviour was read from the Chromium source
+(`ui/events/gesture_detection`, `GestureManager::GetHitTypeForGestureType`) and tested with CDP touch (gesture
+recognizer, no show-press) and the software-emulated Android emulator (`../../shared/android/`).
+
+- **`:active`/`:hover` as the press:** set only by show-press (100–150 ms still), `:active` cleared at the slop by
+  tap-cancel. A quick drag gets neither; hence the old "tap again to drop".
+- **A range slider's `:active`:** never set for touch (`SliderContainerElement::HandleTouchEvent`); one axis anyway.
+- **`scroll-state(snapped)` as the press:** follows the would-snap target mid-gesture (`snapchanging` timing).
+- **The dragged scroller snapping itself back:** Chrome's end-of-gesture snap is animated (200 ms per 100 px, 500 ms
+  after a fling) and part of the gesture: the follower stayed frozen and the body was pulled back along the drag.
+- **A held-time snap area exactly at the offset:** a frame behind at release; Chrome animated a sub-pixel snap for
+  250 ms before ending the gesture. The area is now 80 units bigger.
+- **A grid of small scrollers as touch tiles:** bodies are 20–40 px on a phone, so ~8 px tiles, over 1,000
+  scrollers. Per-body handles name the body exactly.
+- **The touch-down point inside a handle** (to grab off-centre and swing boxes): nothing gives it on a quick drag.
 
 ### Alternative compute substrates
 
