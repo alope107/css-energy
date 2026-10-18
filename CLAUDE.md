@@ -14,8 +14,8 @@ their techniques.
   `physics` profile.
 - `engine/` checks the Chrome behaviour css-physics and js-minus-js depend on: `make engine-check` (facts,
   pass/fail, ~20 s) and `make engine-costs` (the style-engine cost table against the docs, ~2 min, no other browser
-  jobs). Run both after a Chrome upgrade; `engine/README.md` lists the facts and which notes cite them. paint's facts
-  (dictionary registration rules, the frame limit) are checked by its own `make test`.
+  jobs). Run both after a Chrome upgrade; `engine/README.md` lists the facts and which notes cite them. paint's
+  dictionary registration rules are checked by its own `make test`; its frame limit (~1,000 per page) isn't checked.
 
 ## Checks in make
 

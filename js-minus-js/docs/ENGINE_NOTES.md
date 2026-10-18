@@ -15,7 +15,7 @@ chats.
    are signed, |v| < 2^19 (`gen_fvm4.py`). *(measured 2026-10-14; probe: `var-6-digits`)*
 3. **Registered integers are stored as floats.** The DSL keeps |value| < 2^24 (`dsl.py`).
 4. **Every registered property costs time on every animated element, used or not.** Temps share a pool of names
-   (`ccpage5.py`); the page has about 3,800 `@property` rules.
+   (`ccpage5.py`); the page has 4,229 `@property` rules (2026-10-18).
 5. **Inherited properties that change every frame restyle the whole subtree.** Driver state is `inherits: false`. An
    earlier page with inherited routing properties: 167 ms per pass instead of 14. *(unverified here)*
 6. **Identical sibling elements share computed style**, so replicated "hardware" must stay textually identical.
@@ -84,7 +84,9 @@ chats.
 31. **A variable axis can switch lookup sets via GSUB FeatureVariations, and a GPOS kern can cancel a sentinel's
     width.** The readback font uses both (`mkfont2.py`).
 32. **Not in any shipping browser**: the HarfBuzz WASM shaper; multicore (one document's style, layout and shaping
-    share a thread; cross-origin iframes get processes, but the parent can't read their results). *(unverified here)*
+    share a thread; cross-origin iframes get processes, but the parent can't read their results). *(multicore: measured by css-physics,
+    `docs/BENCHMARKS.md` §5: cross-site iframes get their own processes, and the only script-free channel is the
+    iframe's size, parent to child; the WASM shaper: unverified)*
 33. **avar2 can compute arbitrary two-input lookup tables** (Chrome 148+; Fontations had a perf bug ~axes³). Unused.
     *(unverified here)*
 34. **A size container restyles its dependent subtree inside layout, every pass its size is dirty.** Trace category
