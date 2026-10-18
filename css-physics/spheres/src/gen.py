@@ -460,9 +460,13 @@ for ri, (rn, lo, hi) in enumerate(REGS):
     F, s = slot_field(rn)
     if F in RCOMP:
         w(f'@keyframes v{ri}{{from{{--{RCOMP[F]}:{f(lo)}}}to{{--{RCOMP[F]}:{f(hi)}}}}}')
-RENDER = E_('RENDER', 'anim')   # anim: the wrappers read the registers with their own animations | inh: the render sits in
-                                # the readback chain and copies the solver's values
-for s in range(N):
+RENDER = E_('RENDER', 'looks')  # looks: all three looks on the page, picked by the page's "look" radios (the unpicked
+                                # ones are display:none, so they cost nothing) | anim: only the classic billboards, read
+                                # with the wrappers' own animations | inh: classic, copying the solver's values | neon, toon
+LOOKS = ['neon', 'toon', 'classic'] if RENDER == 'looks' else [{'anim': 'classic', 'inh': 'classic'}.get(RENDER, RENDER)]
+CANVAS = [l_ for l_ in LOOKS if l_ != 'classic']
+INCHAIN = RENDER == 'inh' or bool(CANVAS)
+for s in (range(N) if 'classic' in LOOKS else []):
     rr = [RIDX[f'{c}{s}'] for c in 'XYZT']
     if RENDER == 'inh':
         w(f'#w{s}{{--Rx:var(--X{s});--Ry:var(--Y{s});--Rz:var(--Z{s});--Rt:var(--T{s})}}')
@@ -476,6 +480,56 @@ w('.bw{animation-duration:auto;animation-timing-function:linear;animation-fill-m
   '--c:hsl(calc(abs(var(--Rt)) * 61 + 10) 72% 56%);--hl:max(0, -1 * sign(var(--Rt)))}'
   f'.bw .sh{{transform:translateY(calc(var(--Ry) * -1px - 0.5px)) rotateX(90deg) scale(calc({sc} * (1 + var(--Ry) / -900)));'
   'opacity:calc(0.55 + var(--Ry) / 700)}')
+if CANVAS:
+    # Canvas renders: every sphere is a few entries in ONE box-shadow list on one element (#CV<look>, a 2 px disc at the
+    # view's centre), at its screen position projected through the camera in calc() (the same transform as .cam), and
+    # every floor shadow an entry in one box-shadow list on an element lying in the floor plane (#FS<look>: no projection
+    # needed, the 3D transform does it). Two restyles and two paints per frame instead of 384 elements and 512
+    # animations. box-shadow paints in list order (first on top), not by depth: neon blends additively, so the order
+    # never shows; toon gets it wrong where two marbles overlap at different depths.
+    ct_, st2 = f(math.cos(math.radians(TILT))), f(math.sin(math.radians(TILT)))
+    proj = ['--cy:cos(var(--yaw))', '--sw:sin(var(--yaw))']
+    for c_ in ('cy', 'sw'):
+        reg(c_, inherits=False)
+    rr_ = lambda s_: f'({f(RMIN)} + (abs(var(--T{s_})) - 1) * {f((RMAX - RMIN) / (NTYPE - 1))})'
+    for s_ in range(N):
+        X_, Y_, Z_ = (V(f'{c}{s_}') for c in 'XYZ')
+        z1 = f'({Z_} * var(--cy) - {X_} * var(--sw))'
+        proj.append(f'--k{s_}:calc({f(PERSP)} / ({f(PERSP - (-CAM_DIST))} - {Y_} * {st2} - {z1} * {ct_}))')
+        proj.append(f'--sx{s_}:calc(({X_} * var(--cy) + {Z_} * var(--sw)) * var(--k{s_}))')
+        proj.append(f'--sy{s_}:calc(({Y_} * {ct_} - {z1} * {st2} + {f(CAM_TY)}) * var(--k{s_}))')
+        for c_ in ('k', 'sx', 'sy'):
+            reg(f'{c_}{s_}', inherits=False)
+    hue = lambda s_: f'calc(abs(var(--T{s_})) * 61 + 10)'
+    px = lambda e: f'calc(({e}) * 1px)'
+    for look in CANVAS:
+        sh, fl = [], []
+        for s_ in range(N):
+            sx, sy, R_ = V(f'sx{s_}'), V(f'sy{s_}'), f'({rr_(s_)} * var(--k{s_}))'
+            hd = HD(s_)
+            if look == 'neon':
+                # a white-hot core, a coloured halo (held: a wider one); a coloured pool of light on the floor below
+                sh.append(f'{px(sx)} {px(sy)} {px(f"{R_} * 0.55")} {px(f"{R_} * 0.45")} hsl({hue(s_)} 100% 88%)')
+                sh.append(f'{px(sx)} {px(sy)} {px(f"{R_} * 1.7")} {px(f"{R_} * (0.6 + 0.5 * {hd})")} hsl({hue(s_)} 100% 55% / 0.85)')
+                fl.append(f'{px(f"var(--X{s_})")} {px(f"var(--Z{s_})")} {px(f"{rr_(s_)} * 2.2 - var(--Y{s_}) * 0.15")} '
+                          f'{px(rr_(s_))} hsl({hue(s_)} 100% 50% / calc(0.55 + var(--Y{s_}) / 600))')
+            else:
+                # toon: a highlight, a shaded flat body, a thick ink outline (held: amber outline)
+                sh.append(f'{px(f"{sx} - {R_} * 0.32")} {px(f"{sy} - {R_} * 0.36")} 0 {px(f"{R_} * 0.22")} hsl({hue(s_)} 100% 92%)')
+                sh.append(f'{px(f"{sx} + {R_} * 0.12")} {px(f"{sy} + {R_} * 0.14")} 0 {px(f"{R_} * 0.86")} hsl({hue(s_)} 70% 42%)')
+                sh.append(f'{px(sx)} {px(sy)} 0 {px(R_)} hsl({hue(s_)} 80% 60%)')
+                sh.append(f'{px(sx)} {px(sy)} 0 {px(f"{R_} + 2.5")} color-mix(in srgb, #12131a, #f2b134 calc({hd} * 100%))')
+                fl.append(f'{px(f"var(--X{s_})")} {px(f"var(--Z{s_})")} {px(f"{rr_(s_)} * 0.6 - var(--Y{s_}) * 0.1")} '
+                          f'{px(f"{rr_(s_)} * 0.7")} rgb(0 0 0 / calc(0.5 + var(--Y{s_}) / 500))')
+        w(f'#CV{look}{{' + ';'.join(proj) + ';box-shadow:' + ','.join(sh) + '}')
+        w(f'#FS{look}{{box-shadow:' + ','.join(fl) + '}')
+if len(LOOKS) > 1:
+    # the look radios (in the page): the containers of what isn't picked are display:none, so their contents are
+    # neither styled nor animated (display:none on the elements themselves still styles them every pass)
+    for look in LOOKS:
+        w(f'#app:not(:has(#lk-{look}:checked)) .lk-{look}{{display:none}}')
+else:
+    w(f'#app .lk-{LOOKS[0]}{{display:block}}')
 ENG_CSS = '\n'.join(out).replace('/*PROPS*/', '\n'.join(
     f"@property --{n_}{{syntax:'{syn}';inherits:{'true' if inh else 'false'};initial-value:{init_}}}"
     for n_, (syn, inh, init_) in props.items()))
@@ -484,11 +538,14 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
             '<div class="lv" id="RB"><div class="lv rz">' + ''.join(f'<div class="lv" id="LS{gi}">' for gi in range(NLS)) +
             '<div class="lv" id="LT"><div class="regs rt"><div class="sc"><i id="r0"></i></div></div>'
             '<div class="lv" id="LA"><div class="lv" id="LC"><div class="regs"><div class="sc">' + ''.join(f'<i id="r{k}"></i>' for k in range(1, NREGEL)) +
-            '</div></div></div></div></div>' + ('' if RENDER == 'inh' else '</div>' * NLS + '</div></div>') +
-            '<div class="view"><div class="cam"><i class="floor"></i><i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
+            '</div></div></div></div></div>' + ('' if INCHAIN else '</div>' * NLS + '</div></div>') +
+            '<div class="view"><div class="cam"><i class="floor"></i>' + ''.join(f'<div class="lk lk-{l_}"><i class="fs" id="FS{l_}"></i></div>' for l_ in CANVAS) +
+            '<i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i><i class="rail rn"></i>' +
-            ''.join(f'<div class="bw" id="w{s}"><i class="sh"></i><i class="sp"></i></div>' for s in range(N)) +
-            '</div></div>' + ('</div>' * NLS + '</div></div>' if RENDER == 'inh' else '') + '</div>' * NTS + '</div></div></div>')
+            ('<div class="lk lk-classic">' + ''.join(f'<div class="bw" id="w{s}"><i class="sh"></i><i class="sp"></i></div>' for s in range(N)) + '</div>'
+             if 'classic' in LOOKS else '') +
+            '</div>' + ''.join(f'<div class="lk lk-{l_}"><i class="cv" id="CV{l_}"></i></div>' for l_ in CANVAS) + '</div>' +
+            ('</div>' * NLS + '</div></div>' if INCHAIN else '') + '</div>' * NTS + '</div></div></div>')
 
 
 def scene_decls(sn):
@@ -510,7 +567,7 @@ ENG_CSS += '\n' + '\n'.join(SC_CSS)
 
 PFX = E_('PFX', '')
 if PFX:
-    ids = r'RB|LS\d+|LT|LA|LC|r\d+|ts\d+|w\d+|ENG|INI'
+    ids = r'RB|LS\d+|LT|LA|LC|r\d+|ts\d+|w\d+|ENG|INI|CV\w+|FS\w+'
     ENG_HTML = re.sub(r'id="(' + ids + ')"', lambda m: f'id="{PFX}{m.group(1)}"', ENG_HTML)
     ENG_CSS = re.sub(r'#(' + ids + r')\b', lambda m: f'#{PFX}{m.group(1)}', ENG_CSS)
     names = sorted((n for n in props if n not in ('gy', 'att', 'sx', 'sy', 'kick', 'rst', 'yaw')), key=len, reverse=True)

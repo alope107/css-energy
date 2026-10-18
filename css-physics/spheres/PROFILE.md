@@ -40,3 +40,27 @@ render), layout ~0.5 ms.
 
 Physics is ~19 of ~65 ms. Everything else, ~46 ms (70%), is machinery: render ~12, readback ~18, register writes and
 holds ~7, sort ~4, activity gating ~3, gate rules and the rest ~2.
+
+## Render experiments (2026-10-18)
+
+The page now has three looks (radios): **neon** (default) and **toon** are canvas renders, **classic** is the billboard
+render above. A canvas render draws every sphere as entries in one `box-shadow` list on one element, at screen
+positions projected through the camera in `calc()` (3 declarations per sphere), and every floor shadow as entries in
+one `box-shadow` list on an element in the floor plane (no projection: the 3D transform does it). Neon blends
+additively (`mix-blend-mode: plus-lighter`), so the list's paint order never shows; toon paints in slot order, which
+is wrong where two marbles overlap at different depths. Each look sits in a container that is `display: none` when not
+picked (on the elements themselves, `display: none` still styles them every pass, which made the hidden looks cost as
+much as the shown one).
+
+128 spheres, gas chaos (`frame.js`, 4–6 rotated rounds):
+
+| Render | hold pass | fps |
+|---|---|---|
+| classic (wrappers read their registers with their own animations) | 24.6 ms | 15.3 |
+| neon | 16.5 ms | 16.7–17.3 (+8 to +18%) |
+| toon | 18.0 ms | 16.7 |
+| no render at all | 13.4 ms | 18.7 |
+
+Paint + layerize + commit fall from ~2.2 to ~0.8 ms per frame. Dragging one sphere through a settled 128 pile is about
+even (classic 19–25 fps, neon 21): the canvas restyles as a whole every hold pass, the classic render only the spheres
+that moved. Rendering is no longer a large item; the readback and the register writeback are.
