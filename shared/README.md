@@ -19,6 +19,7 @@ loads `playwright` / `playwright-core` from the project of the tool that runs, s
 | `py/ablate.py` | copies of a page with families of `@container` blocks removed (string- and comment-aware; never overwrites the source, `.xhtml` included) | css-physics `tools/ablate.py`; any js-minus-js page |
 | `py/passprof.py` | per-frame passes, style+layout ms and shaping ms from a saved trace | js-minus-js `machine/passprof.py`; css-physics `TRACE=… CAT=… tools/tr.js` |
 | `make/checks.mk`, `make/logged.sh`, `make/report.sh`, `js/runid.js` | checks as make targets: skipped while nothing they depend on changed | every project's Makefile (below) |
+| `android/` | a real Chromium for Android on the emulator, under software emulation (no KVM): setup, start/stop, kernel-level touch gestures, a CDP client. Touch semantics only, not timing (`android/README.md`) | css-physics `experiments/touch/android.js` |
 | `test/` | unit tests (`make test-shared` at the repo root) | |
 
 ## Browser profiles

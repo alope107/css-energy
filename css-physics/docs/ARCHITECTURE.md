@@ -169,8 +169,13 @@ where the finger came down. So:
   (`grr = 0`) toward `GO + tdx · ex + tdy · ey`, where `ex`, `ey` are the screen's x and y on the camera-facing plane
   (the ray's derivatives, for the current yaw). The overlay's pointer end is that target projected to the screen.
 - **Timing.** In Chromium (`tools/touchcheck.js`) the body is held from the first scroll update and dropped 16–50 ms
-  after the finger lifts; it trails the finger by the touch slop (the first scroll update leaves it out: 15 px in
-  desktop Chromium, about 8 dp on Android).
+  after the finger lifts (two or three frames: at 48 bodies, 250 ms); it trails the finger by the touch slop (the
+  first scroll update leaves it out: 15 px in desktop Chromium, about 8 dp on Android).
+- **On Android** (Chromium 158 on the software-emulated emulator, `../../shared/android/`, with
+  `experiments/touch/handles.html`): slow, quick and diagonal drags, flings and press-then-drag all grab and drop. A
+  fling there ran past the 40-unit cap (about 190 units on a 100-unit drag) before the drop. Not timed: the emulator
+  delivers input late, and often enough late that a drag never becomes a scroll at all (on plain pages too, but more
+  often on this one: worth checking on a phone).
 
 ---
 

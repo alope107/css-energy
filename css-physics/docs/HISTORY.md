@@ -116,7 +116,10 @@ turned most diagonal drags into horizontal or vertical ones.
    long-press): a held finger never sets `:hover`/`:active` here, where a phone sets both after 100–150 ms. Whether a
    behaviour comes from the recognizer or Blink was read in the Chromium source (`ui/events/gesture_detection`,
    `GestureManager::GetHitTypeForGestureType`). `tools/touchcheck.js` drives the page; `engine/check.js` has the three
-   Chrome facts the result depends on. An Android emulator can't run accelerated here (no `/dev/kvm`).
+   Chrome facts the result depends on. With no `/dev/kvm`, the Android emulator runs under software emulation
+   (`../../shared/android/`): Chromium 158 for Android with touches injected at the kernel's input device. Too slow for
+   the engine (about 1 fps) and for timing, but it confirmed the mechanism on Android's input path with
+   `experiments/touch/handles.html`, and that a held finger does get `:active`.
 2. **No state lasts through a drag**, so the press had to be read from scrolling: per-body scroller handles (the
    gesture latches to the one under the finger, which also works for a drag that starts at once, with no `:hover`),
    and a follower scroller whose layout re-snap Chrome defers until the gesture ends (the "finger down" bit).
