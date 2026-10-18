@@ -117,4 +117,7 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
   from specialised variants.
 - Error 99 on the page means no parser variant accepts that token. L3 accepts any nonzero error for `suite_err`.
 - `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines.
+- Label the CSS you add (`lbl.section` / `lbl.group` in gen_fvm4.py, ccpage5.py, ui_rb.py;
+  `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py build/js_in_css.xhtml` prints the
+  page's outline.
 - Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed: `git checkout 91d73bc -- js-minus-js/archive`.

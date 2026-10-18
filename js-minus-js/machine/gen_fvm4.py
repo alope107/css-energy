@@ -20,6 +20,8 @@ import json, sys, base64, html as _h, os
 UI = os.environ.get('UI') == '1'     # typed-program page: editor + scan readback + compile chain (ccpage5) + Run/Edit
 import zoomfix, memtree
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
+import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 from uarch import PRINTOPS, STRTAG, STR_LO, STR_HI, PRINT_CHUNK
 
 image = json.load(open(sys.argv[1])); pre = sys.argv[2]; outp = sys.argv[3]
@@ -70,7 +72,10 @@ scalar += [f"{x}{w}" for w in range(WB) for x in ["vval", "vdirty", "doWB", "doW
 scalar += [f"{x}{k}" for k in range(N) for x in ["Ae", "vf", "vd", "tag", "st", "present", "th", "isv", "fillv", "fillh", "clean", "tagT", "vdT", "vfT"]]
 scalar += [f"Ve{k}_{s}" for k in range(N) for s in range(7)]
 scalar += [f"{x}{k}_{w}" for k in range(N) for w in range(WB) for x in ["ws", "val", "dirty", "wsT", "valT"]]
-props = [zoomfix.css()] + [prop(n) for n, _, _ in regs] + [prop(f"next-{n}") for n, _, _ in regs] + [prop(x) for x in scalar]
+props = ([lbl.section('Registered properties', 'the zoom probe, the CPU registers and their next values, the trap service\'s scalars, RAM channels'),
+          lbl.group('Zoom probe: --R is the device-pixel ratio, from resolution queries'), zoomfix.css(),
+          lbl.group('CPU registers and their next values')] + [prop(n) for n, _, _ in regs] + [prop(f"next-{n}") for n, _, _ in regs] +
+         [lbl.group('Trap service scalars and state-line inputs')] + [prop(x) for x in scalar])
 # per input cell counter values
 for c in meta['cells']:
     if c['input']: props.append(prop(f"i{c['pos']}"))
@@ -250,15 +255,20 @@ names = ", ".join(f"--{n}" for n, _, _ in aregs)
 anims = ", ".join(f"r-{n}" for n, _, _ in aregs)
 WNAMES = [f"wa{w}{c}" for w in range(WB) for c in CH] + [f"wd{w}{c}" for w in range(WB) for c in CH]
 inner_names = names if False else ", ".join(f"--{n}" for n, _, _ in regs if n not in WNAMES)
-css = ["#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
+css = [lbl.section('CPU: clock, registers and trap service', 'the frame gate, the effective state and the trap service live on #cpu'),
+       "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
        "#cpu {\n  timeline-scope: " + inner_names + ";\n  animation-name: " + anims + ";\n  animation-timeline: " + names +
        ";\n  animation-duration: auto;\n  animation-timing-function: linear;\n  animation-fill-mode: both;\n  " + "\n  ".join(gate + eff + svc) + "\n}"]
+css += [lbl.group('Register keyframes', 'each register\'s view timeline mapped onto its value range')]
 css += [f"@keyframes r-{n} {{ from {{ --{n}: {H - OFF}; }} to {{ --{n}: {-1 - OFF}; }} }}" for n, H, OFF in regs]
+css.append(lbl.group(f'Read ports: one per RAM bank ({WB})', 'a two-level if() picks the cell\'s anchor name, anchor-size() reads it'))
 for w in range(WB):
     css.append(f"#cpu {{ --sR{w}: " + mux("rb", BANKN, lambda b, w=w: f"--c{4 * b + w}", f"--c{w}") + "; }")
     css.append(f".rp{w} {{ width: anchor-size(var(--sR{w}) width, {WOFF}px); }} .vp{w} {{ --mval{w}: calc(100cqi / 1px - {WOFF}); }}")   # no anchor: an unwritten cell, 0
+css.append(lbl.group('Inside the innermost port: write-backs, state-line inputs, next state'))
 css.append(".vp3 { " + "\n  ".join(svc_inner + inp + nx) + " }")
 # writes
+css.append(lbl.section('RAM writes', f'{len(CH)} write channels per bank, each a decode tree over the bank\'s cells'))
 if RAMMODE == 'flat':   # one rule per cell per channel
     for k in range(RAMN):
         for c in CH:
@@ -271,14 +281,18 @@ else:
         lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
         ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(lib, UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
         print('compile chain', ui_info)
+        css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
         css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES] + ui_tls + ['--rbrdT']) + "; }")
     else:
+        css.append(lbl.group('Timeline scope: the RAM channels'))
         css.append(memtree.scope(WNAMES))
-    _sp, _sc = memtree.shared(); props += _sp; css += _sc
+    _sp, _sc = memtree.shared(); props += [lbl.group('RAM write channels')] + _sp; css += [lbl.group('Decode tree: every bank')] + _sc
     for w in range(WB):
+        css.append(lbl.group(f'Bank {w}'))
         _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF in regs if n in (f"wa{w}{c}" for c in CH) or n in (f"wd{w}{c}" for c in CH)}, BANKN, WOFF, prefix=str(w))
         props += _mp; css += _mc
 # console readers
+css.append(lbl.section('Console', f'one reader per console cell ({COLS} x {ROWS}), drawn with the ascii counter style'))
 for i in range(OUT_SIZE):
     r, c = divmod(i, COLS)
     css.append(f".oc{i} {{ width: anchor-size(--c{OUT_BASE - ROM + i} width, {WOFF}px); left: calc(24px + {c} * 11px); top: calc(24px + {r} * 20px); }}")
@@ -294,6 +308,7 @@ for c in cells:
     else: groups.append((key, [c]))
 styles = {}
 spans_html = []
+css.append(lbl.section('State line', 'the text the CPU font shapes: one span per readback field, digits as counters'))
 for gi, (name, cs) in enumerate(groups):
     parts, sets = [], []
     for c in cs:
@@ -308,6 +323,7 @@ for gi, (name, cs) in enumerate(groups):
     css.append(rule)
     an = f' style="anchor-name: --a-{name}"' if name else ''
     spans_html.append(f'<span class="s{gi}"{an}></span>')
+css.append(lbl.group('Digit counter styles'))
 for sty, syms in styles.items():
     css.append(f"@counter-style {sty} {{ system: fixed 0; symbols: {' '.join(chr(34) + chr(92) + '%X ' % s + chr(34) for s in syms)}; }}")
 
@@ -351,6 +367,8 @@ sent = ''.join('&#x%X;' % c['symbols'][(sp0 >> (4 * c['input'][2])) & 15] for c 
 local_regs = [r for r in regs if r[0] not in readback and r[0] not in ('steps', 'fok', 'ccok')]
 
 static = f"""
+  {lbl.section('Page and machine layout', 'hand-written: the static rules every page has')}
+  {lbl.group('Text and status line')}
   body {{ font: 15px/1.5 system-ui, sans-serif; margin: 0; color: #222; background: #fff; }}
   h1 {{ font-size: 1.1rem; font-weight: 600; margin: 0 0 .3rem; }}
   .head {{ position: fixed; left: {COLS * 11 + 48}px; top: 16px; width: 34rem; }}
@@ -358,6 +376,7 @@ static = f"""
   .head pre {{ font: 12px/1.35 ui-monospace, monospace; background: #f4f4f4; padding: .5rem .7rem; border-radius: 4px; margin: .4rem 0; }}
   .status {{ font-family: ui-monospace, monospace; color: #666; font-size: 13px; }} .status b {{ color: #222; margin-right: .8em; font-weight: 600; }}
   .num {{ counter-set: v var(--v); }} .num::after {{ content: counter(v); }}
+  {lbl.group('RAM cells and the readers')}
   .mem {{ height: 0; overflow: hidden; }}
   .w {{ width: fit-content; height: 1px; }}
   .cell {{ display: block; content-visibility: hidden; width: fit-content; height: 1px; contain-intrinsic-size: auto {WOFF}px; }}
@@ -368,14 +387,18 @@ static = f"""
   .reg {{ position: relative; overflow: hidden; width: 1px; }}
   .sub {{ position: absolute; left: 0; width: 1px; height: 1px; }}
   .vp {{ visibility: visible; }}
+  {lbl.group('The CPU font, the state line and the font-ready sentinel')}
   @font-face {{ font-family: FontCPU; src: url(data:font/woff2;base64,{font64}); }}
   #state {{ position: fixed; top: 0; left: 0; font: 1024px/1 FontCPU; font-size: calc(1024px / var(--R)); font-feature-settings: "cv01" var(--go); white-space: pre; width: max-content; visibility: hidden; }}  /* no CPU cycles in passes that will not commit */
   #sent {{ position: fixed; top: 0; left: 0; font: 1024px/1 FontCPU; font-size: calc(1024px / var(--R)); font-feature-settings: "cv02" 1; white-space: pre; width: max-content; visibility: hidden; }}
+  {lbl.group('Zoom warning')}
   .zw {{ display: if(style(--Rok: 0): block; else: none); color: #b00; font-weight: 600; }}
+  {lbl.group('Console')}
   .con {{ position: fixed; left: 16px; top: 16px; width: {COLS * 11 + 16}px; height: {ROWS * 20 + 16}px; background: #151515; border-radius: 6px; }}
   .oc {{ position: fixed; height: 20px; container-type: inline-size; visibility: hidden; font: 16px/20px ui-monospace, monospace; color: #eee; }}
   .oc > b {{ --code: calc(100cqi / 1px - {WOFF}); counter-set: ch var(--code); font-weight: 400; visibility: visible; display: inline-block; width: 11px; }}
   .oc > b::after {{ content: counter(ch, ascii); }}
+  {lbl.group('Local registers')}
   .regs {{ height: 0; overflow: hidden; }}
 """
 cells_html = "\n".join(f'<div class="w" style="anchor-name: --c{k}"><i class="cell c{k}" style="contain-intrinsic-size: auto {image["ram"][k] + WOFF}px"></i></div>' for k in range(RAMN))
@@ -397,8 +420,8 @@ page = f"""<!doctype html>
 <meta charset="utf-8">
 <title>JavaScript on a HarfBuzz CPU</title>
 <style>
+{lbl.header('js-minus-js/machine/gen_fvm4.py', 'js-minus-js/docs/ARCHITECTURE.md')}
 {static}
-/* ---------- generated ---------- */
 {chr(10).join(props)}
 {chr(10).join(css)}
 </style>
@@ -429,6 +452,8 @@ if UI:
     GS = 8
     TOPS = ROWS * 20 + 48
     ui_static = f"""
+  {lbl.section('Editor page', 'hand-written: the layout, the Run button and the compile status line')}
+  {lbl.group('Layout and notes')}
   :root {{ --paper: #f3f5f7; --sheet: #fff; --ink: #17212b; --muted: #5b6875; --rule: #c9d1d9; --accent: #2456c9; }}
   body {{ background: var(--paper); color: var(--ink); }}
   #app {{ position: relative; overflow: hidden; margin: 0 0 0 {COLS * 11 + 72}px; padding: 20px 24px 48px 0; width: {UIP * 10 + 60}px; display: grid; gap: 1rem; align-content: start;
@@ -442,6 +467,7 @@ if UI:
   .frame {{ background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }}
   .frame:focus-within {{ border-color: var(--accent); }}
   #ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
+  {lbl.group('Run / Edit button')}
   .runbtn {{ position: relative; display: inline-block; cursor: pointer; font: 600 .9rem/1 system-ui, sans-serif; color: #fff; background: var(--accent);
     border-radius: 6px; padding: .55rem 1rem; user-select: none; }}
   .runcb {{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }}
@@ -454,8 +480,10 @@ if UI:
   .notes {{ color: var(--muted); font-size: .9rem; display: grid; gap: .5rem; }}
   .notes p {{ margin: 0; }}
   .notes code {{ font: .82rem ui-monospace, monospace; color: var(--ink); }}
+  {lbl.group('Machine status')}
   .head {{ left: 16px; top: {TOPS + 56}px; width: {COLS * 11 + 40}px; }}
   .head .status {{ display: grid; gap: .1rem; }}
+  {lbl.group('Compile status: the compiler\'s result, read from its anchors')}
   .cst, .cst2 {{ position: fixed; left: 16px; height: 1px; visibility: hidden; }}
   .cst {{ top: {TOPS}px; container-type: inline-size; width: anchor-size(--ccinfo width, 0px); }}
   .cst2 {{ top: {TOPS + 36}px; width: anchor-size(--cctoo width, 0px); overflow: hidden; }}
@@ -475,12 +503,14 @@ if UI:
       style(--cse: 25): "error: too many globals / array elements"; style(--cse: 26): "error: too much string data"; style(--cse: 63): "error: strings can only be joined in console.log";
       else: "syntax error (" counter(cse) ")"); }}
 """
-    ui_props = ['@property --run { syntax: "<integer>"; inherits: true; initial-value: 0; }',
+    ui_props = [lbl.section('Run / Edit', 'the Run checkbox starts the scan and the CPU; Edit clears RAM'),
+                '@property --run { syntax: "<integer>"; inherits: true; initial-value: 0; }',
                 '#run:checked ~ #clkw { --run: 1; }',
                 f'#run:not(:checked) ~ .mem .cell {{ content-visibility: visible; width: {WOFF}px; }}   /* Edit: RAM back to zeros */',
                 '#clkw > .oc { display: if(style(--ccgo: 1): block; else: none); }',
                 # no CPU at all until Run's final scan sweep is done (its registers restart from zero on every Run)
                 '#clkw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; } #clk { display: if(style(--ccgo: 1): block; else: none); }'] + \
+               [lbl.group('Compile status values')] + \
                [f'@property --{n} {{ syntax: "<integer>"; inherits: true; initial-value: 0; }}' for n in ('csi', 'csd', 'cse', 'csn')]
     editor = ui_rb.editor_html(image.get('source', ''))
     notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back: a variable axis makes HarfBuzz copy the "
@@ -498,13 +528,15 @@ if UI:
 <meta charset="utf-8"/>
 <title>JavaScript in CSS</title>
 <style><![CDATA[
+{lbl.header('js-minus-js/machine/gen_fvm4.py (page, CPU, RAM), compiler/ccpage5.py (compiler), readback/ui_rb.py (editor scan)', 'js-minus-js/docs/ARCHITECTURE.md')}
 {static}
 {ui_static}
-/* ---------- generated ---------- */
 {chr(10).join(props)}
 {chr(10).join(ui_props)}
 {chr(10).join(css)}
+{lbl.section('Editor scan', 'a font reads the editor back one column per frame and latches each character into a register')}
 {ui_rb.css(UIL, UIP, GS)}
+{lbl.section('Compiler', 'the lexer on a chain of one element per character, the parser on a chain of one element per token')}
 {ui_css}
 ]]></style>
 </head>
@@ -545,5 +577,6 @@ if UI:
 </body>
 </html>
 """
+lbl.check(page, outp)
 open(outp, 'w').write(page)
 print(len(page), 'bytes', len(css), 'rules', K, 'shapings/frame max')
