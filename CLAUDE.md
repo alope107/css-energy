@@ -39,7 +39,7 @@ turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec v
 
 ## Deploys
 
-- `.github/workflows/deploy.yml` deploys to Cloudflare Workers (`*.auberonlopez.workers.dev`): `main` → production,
+- `.github/workflows/deploy.yml` deploys to Cloudflare Workers (`*.auberon.workers.dev`): `main` → production,
   any other branch → a preview of the projects it changed. `deploy/README.md` has the setup and the trust model.
 - **Pushing a branch publishes a public preview: push only when the user asks.** Then `deploy/status.sh` waits for
   the run and prints the preview URLs; give the user the `<version>` URL along with the local link.

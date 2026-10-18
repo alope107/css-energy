@@ -131,7 +131,7 @@ jobs:
         ${{ matrix.project == 'paint' && (vars.WORKER_PAINT || 'paint')
           || matrix.project == 'js-minus-js' && (vars.WORKER_JS_MINUS_JS || 'js-minus-js')
           || (vars.WORKER_CSS_PHYSICS || 'css-physics') }}
-      SUBDOMAIN: ${{ vars.WORKERS_DEV_SUBDOMAIN || 'auberonlopez' }}
+      SUBDOMAIN: ${{ vars.WORKERS_DEV_SUBDOMAIN || 'auberon' }}
       BRANCH: ${{ github.ref_name }}
       PRODUCTION: ${{ github.ref == 'refs/heads/main' }}
       WRANGLER_VERSION: 4.146.0
@@ -198,8 +198,8 @@ jobs:
               fail "wrangler didn't report $host; set WORKERS_DEV_SUBDOMAIN to the account's workers.dev subdomain"
             url=https://$host alias=
           else
-            # a version that takes no traffic, at its own preview URLs (each its own origin: paint previews never
-            # touch production's dictionaries)
+            # a version that takes no traffic, at its own preview URLs (each its own origin: a paint preview never
+            # overwrites production's dictionaries, but shares the site's 500 in Chrome: deploy/README.md)
             "$wrangler" versions upload -c wrangler.json --tag "${GITHUB_SHA:0:12}" --message "$BRANCH ${GITHUB_SHA:0:12}"
             url=$(jq -r 'select(.type == "version-upload") | .preview_url // empty' "$WRANGLER_OUTPUT_FILE_PATH")
             alias=$(jq -r 'select(.type == "version-upload") | .preview_alias_url // empty' "$WRANGLER_OUTPUT_FILE_PATH")

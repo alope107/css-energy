@@ -18,16 +18,20 @@ deploy nothing.
 | js-minus-js | the committed `dist/js_in_css.xhtml`; `/` redirects to it. CI warns if `make dist` no longer reproduces it | `js-minus-js` (`WORKER_JS_MINUS_JS`) |
 | paint | the committed `site/`, unchanged | `paint` (`WORKER_PAINT`) |
 
-The account's workers.dev subdomain is `auberonlopez` (`WORKERS_DEV_SUBDOMAIN`). `deploy/assemble.sh <project> <dir>`
+The account's workers.dev subdomain is `auberon` (`WORKERS_DEV_SUBDOMAIN`). `deploy/assemble.sh <project> <dir>`
 produces exactly what CI uploads. It's the same script.
 
 The Worker's whole configuration is written by the deploy job, not read from the repo: the assets directory,
 `html_handling: auto-trailing-slash`, `not_found_handling: none`, `workers_dev` and `preview_urls` on, and a fixed
 compatibility date. A deploy replaces settings changed in the dashboard (wrangler warns in the log and goes on).
 
+Cost: requests to static assets are free and unlimited, and don't count toward the free plan's 100,000 requests a
+day, which only counts requests that run a Worker script. Keep it that way: no script, no `run_worker_first`, and no
+`cache` block (with Workers Cache on, every request is billed, static assets included).
+
 ## One-time setup
 
-1. **Workers.** `css-physics`, `js-minus-js` and `paint` exist on `auberonlopez.workers.dev`. A new one needs nothing
+1. **Workers.** `css-physics`, `js-minus-js` and `paint` exist on `auberon.workers.dev`. A new one needs nothing
    beforehand: the first production deploy creates it.
 2. **API token.** My Profile → API Tokens → Create custom token: *Account · Workers Scripts · Edit*, this account
    only, nothing else. If the first run fails on a permission error, add *Account · Account Settings · Read*. The
@@ -87,13 +91,14 @@ without that approval being available to them.
 - After a push: `deploy/status.sh` waits for the run on `HEAD` and prints its jobs and one notice per deployment
   with its URL. Exits non-zero if the run failed. `gh run view <id> --log-failed` shows why.
 - The `<version>` URL is this commit's build and never changes; the `<branch>` URL follows the branch. Hand the user
-  the `<version>` one alongside the local link CLAUDE.md asks for.
+  the `<version>` one alongside the local link CLAUDE.md asks for. For a paint preview, tell them to open it in a
+  separate Chrome profile or a guest window (see "Workers behaviour" below).
 - Hand-test links for a build: css-physics and js-minus-js through the repo-root server on 8765, paint through
   `node paint/serve.js <dir> 8766` (paint/CLAUDE.md).
 
 ## Workers behaviour these sites depend on
 
-Seen on the `*.auberonlopez.workers.dev` Workers (2026-10-18):
+Seen on the `*.auberon.workers.dev` Workers (2026-10-18):
 
 - `*.html` 307-redirects to the extensionless path (`html_handling: auto-trailing-slash`). css-physics's
   `index-8.html` links rely on that; paint uses extensionless URLs throughout.
@@ -102,10 +107,17 @@ Seen on the `*.auberonlopez.workers.dev` Workers (2026-10-18):
 - `_headers` and `_redirects` work as on Pages, `:placeholder`s and 200 rewrites included: paint's cell URLs, its
   `Use-As-Dictionary` headers and its `Content-Encoding: dcz` responses come through unchanged.
 - `.xhtml` is served as `application/xhtml+xml`.
-- Each preview URL is its own origin, so paint previews keep their own dictionaries and never touch production's.
+- Text is compressed at the edge (br, gzip or zstd, as the browser asks): the 12 MB js-minus-js page and
+  css-physics's 12 MB CSS parts don't go out raw.
+- A dictionary only matches requests to its own origin, so a paint preview never reads or overwrites production's
+  canvas. But `workers.dev` is a public suffix: the site is `auberon.workers.dev`, shared by all three Workers and
+  every preview. Chrome keeps 500 dictionaries per top-level site, and paint's canvas uses up to 480 of them
+  (paint/docs/ARCHITECTURE.md). Painting on a preview in the browser profile that holds your production canvas
+  competes for those 500, and entries past the limit are lost. Open paint previews in another profile or a guest
+  window. (On Pages it was the same: previews were subdomains of the project's own `pages.dev` site.)
 
 Not checked on Workers yet: whether two overlapping `_headers` rules are joined with `, ` as on Pages (paint's rules
-don't overlap), and whether the 12 MB js-minus-js page and css-physics's 12 MB CSS parts are compressed at the edge.
+don't overlap).
 
 ## Not done yet
 
