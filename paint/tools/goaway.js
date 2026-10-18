@@ -11,7 +11,6 @@ const fs = require('fs'), os = require('os'), path = require('path'), net = requ
 const { spawn, execSync } = require('child_process');
 const { PAINT, B, profileDir, sleep } = require('./lib.js');
 
-const HIT = 17;                                              // build.py: a probe that decodes is (v + HIT) x 1
 const N = 480, LOADS = +(process.argv[2] || 5), BASE = process.argv[3];
 let rnd = 7;
 const rand = n => { rnd ^= rnd << 13; rnd >>>= 0; rnd ^= rnd >>> 17; rnd ^= rnd << 5; rnd >>>= 0; return rnd % n; };
@@ -64,11 +63,10 @@ async function serveH2() {
       await pg.goto(srv.base + '/', { waitUntil: 'commit' });
       await sleep(5000);
       while (Date.now() - last < 8000 && Date.now() - t0 < 300000) await sleep(500);   // quiet: first pass and retry done
-      // .v2 is the first pass's read (stages 1 and 2), .w the final one; a read is (value + HIT) px wide (build.py)
-      const [rd, w] = await pg.evaluate(() => ['.v2', '.w'].map(s =>
+      const [rd, w] = await pg.evaluate(() => ['.rd', '.w'].map(s =>
         [...document.querySelectorAll(s)].map(e => e.getBoundingClientRect().width)));
-      const lost = [...Array(N).keys()].filter(k => rd[k] !== want[k] + HIT);
-      const wrong = [...Array(N).keys()].filter(k => w[k] !== want[k] + HIT);
+      const lost = [...Array(N).keys()].filter(k => rd[k] !== want[k] + 1);
+      const wrong = [...Array(N).keys()].filter(k => w[k] !== want[k] + 1);
       bad += wrong.length;
       const why = {}; for (const k of lost) { const e = fails.get(`${srv.base}/c/${k}/r/${want[k]}.png`) || 'no CDP event';
         why[e] = (why[e] || 0) + 1; }

@@ -45,14 +45,12 @@ Probes cost the same as plain images; the limit is requests per second.
 
 | Measure | Value |
 |---|---|
-| First load, page + 480 cell documents + 7,680 probes | 25–47 s (HTTP/2 or HTTP/1.1, `serve.js`; before the staged read) |
-| Staged read (2026-10-18, mini PC, local HTTP/1.1): 480 cells, a third colour 1, a third other colours, a third blank | 7,690 probes vs 10,240 before; read in 11.9–12.0 s vs 11.2–13.5 s before (`survey`-style harness, two runs each) |
-| Staged read, `tools/goaway.js` canvas (480 random colours, 1/16 colour 1), HTTP/2 ending connections after 2,000 requests | every cell read in 5 of 5 loads (the design before: 5 of 5); retries exactly 16 probes per lost cell; loads 26–33 s vs 20–25 s before |
+| First load, page + 480 cell documents + 7,680 probes | 25–47 s (HTTP/2 or HTTP/1.1, `serve.js`) |
 | Writes, 480 cells at once | 2.5–5.6 s |
 | `<link rel=compression-dictionary>` delay after its page loads | ~120–180 ms idle; ~24–30 s while the page is still probing |
 | Live (Cloudflare Workers): cells the first pass loses per reload | 0–31, most loads; HTTP/2 `GOAWAY` or HTTP/3 close after ~10,000 requests per connection (HISTORY §6) |
 | Workers preview: first pass lost / after the retry | 0–32 / 0 per load, 5 loads |
-| Local HTTP/2, `--goaway 10000`: first pass lost / after the retry | 0–32 / 0 per load, 11 loads; the retry sends 16 probes per lost cell, 3 s after the second sentinel (before the staged read); staged read: 0–24 / 0, 5 loads |
+| Local HTTP/2, `--goaway 10000`: first pass lost / after the retry | 0–32 / 0 per load, 11 loads; the retry sends 16 probes per lost cell, 3 s after the second sentinel |
 | Console errors per load | 15 `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` per painted cell (7,200 with 480 painted); 0 from cells never written |
 | Files deployed | 53 (`site/`), 5 dynamic `_redirects` rules, 6 `_headers` rules |
 

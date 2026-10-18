@@ -40,38 +40,20 @@ dictionaries, 16 probes and 17 pages however many cells there are:
 
 - `d/v.png` is a valid 1×1 PNG with a unique `tEXt` chunk: valid, because an image load that fails to decode is
   cancelled before Chrome stores the dictionary; unique, because the bytes are the value.
-- `r/v.png` is a (v+17)×1 PNG, zstd-compressed against `d/v.png` (wider than a failed probe's 16 px box, below).
+- `r/v.png` is a (v+1)×1 PNG, zstd-compressed against `d/v.png`.
 - `Vary: *` on dictionaries keeps Blink's memory cache from serving a reused write URL without a network request.
 
 ## Reading (the page)
 
-A probe is an `<img src=/c/k/r/v.png>` (no `alt`), and it has three sizes: 0×0 while pending, Chrome's 16×16
-broken-image box once it fails (another value's dictionary, a cell never written, a lost request), and (v+17)×1 once
-it decodes. Probes stack vertically, so a stack's width is its widest probe (v+17 if one hit, 16 if all that finished
-missed) and its height counts the finished ones (16 per miss, 1 per hit). So CSS knows when a probe has *finished*,
-not only when it hit, and reads in stages:
-
-1. **Stage 1:** one probe for colour 1, the default brush (the likeliest painted colour).
-2. **Stage 2:** the other 15 probes, shown only once stage 1 missed.
-3. **Retry:** 16 probes with fresh URLs, shown once stage 2 has finished with every probe missed (below).
+For each cell the page holds a row of 16 probes, `<i style="content:url(/c/k/r/v.png)">`. Only the probe for the
+stored value decodes; a failed probe is 0 px wide. So the row is (value + 1) px wide, and 0 for a cell never written.
 
 ```css
-.c   { anchor-scope: --s1, --s2, --rt }
-.s1  { position: absolute; anchor-name: --s1 }                                      /* stage 1: one <img> */
-.v1  { position: absolute; width: anchor-size(--s1 width); container-type: inline-size }
-.s2  { display: none; anchor-name: --s2 }                                            /* stage 2: 15 <img loading=lazy> */
-@container (width: 16px) { .s2 { display: block } }                                  /* stage 1 missed */
-.v2  { width: max(100cqw, anchor-size(--s2 width, 0px)); height: anchor-size(--s2 height, 0px); container-type: size }
-.w   { width: max(100cqw, anchor-size(--rt width, 0px)); container-type: inline-size }   /* the read */
-.px  { --bv: calc(100cqw / 1px - 17); background: if(style(--bv: 0): var(--p0); …) }       /* --bv: <integer> */
+.c   { anchor-scope: --rd }
+.rd  { position: absolute; display: flex; anchor-name: --rd; opacity: 0 }               /* the probe row */
+.v   { position: absolute; width: anchor-size(--rd width); container-type: inline-size } /* the reader   */
+.px  { --bv: calc(100cqw / 1px - 1); background: if(style(--bv: 0): var(--p0); …) }       /* --bv: <integer> */
 ```
-
-- An `<img>` fetches even under `display: none`; `loading=lazy` holds a hidden stage back (it never intersects the
-  viewport), so stages 2 and 3 are lazy and stage 1 isn't.
-- `.w` is (value + 17) px wide, or under 17 px for a cell never written; the pixel and the `<object>`s query it.
-- Requests per cell: 1 for a cell holding colour 1, 16 for another colour, 32 for a cell never written (1 + 15 + 16,
-  as before). For 480 cells, a third colour 1, a third other colours, a third blank: 7,690 probes against 10,240.
-  The cost is one more round trip for the cells that aren't colour 1.
 
 The reads must live in the one top-level document. When each cell's own document read its probes, 480 frames put
 about 7,700 requests in flight at once, Chrome rejected the excess before sending them, and those cells read blank. A
@@ -82,38 +64,37 @@ Each probe URL is fetched once per document, so the page reads each cell once pe
 ### Retry
 
 A probe can fail outright, not just answer "no". Cloudflare ends every connection after about 10,000 requests
-(HTTP/2: `GOAWAY` with last stream 19999; HTTP/3: a close with `H3_NO_ERROR` and no `GOAWAY`), and a load was about
-9,000 before the staged read. When the HTTP/2 `GOAWAY` arrives, Chrome retries the streams the server refused but
-fails a few hundred requests it had queued with `ERR_FAILED`, never sent and never retried ([crbug 355006326]; the
-cause is in `SpdySession`, `bugs/README.md`). The HTTP/3 close fails everything in flight. Either way about 5–30
-cells read blank on most reloads on the live site; locally, over HTTP/1.1, never.
+(HTTP/2: `GOAWAY` with last stream 19999; HTTP/3: a close with `H3_NO_ERROR` and no `GOAWAY`), and a load is about
+9,000. When the HTTP/2 `GOAWAY` arrives, Chrome retries the streams the server refused but fails a few hundred
+requests it had queued with `ERR_FAILED`, never sent and never retried ([crbug 355006326]; the cause is in
+`SpdySession`, `bugs/README.md`). The HTTP/3 close fails everything in flight. Either way about 5–30 cells read
+blank on most reloads on the live site; locally, over HTTP/1.1, never.
 
-A lost probe either fails (`ERR_FAILED`: it looks like a miss) or hangs (sent, never answered, its `<img>` pending
-for good). So a cell reads again, with fresh URLs, on either of two triggers:
-
-- **at once**, when its 16 probes have all finished without a hit;
-- **8 s after the second sentinel**, if it is still unread (this catches hung probes); 90 s after load if a sentinel
-  itself fails. The sentinel no longer queues behind every probe (stage 2 is requested as stage 1 answers, partly
-  after it), so the margin is wider than the old 3 s: at 3 s, `tools/goaway.js` loads re-read 200–260 cells whose
-  stage 2 was still in flight; at 8 s, only the lost ones.
+So a cell still blank after the first pass reads again, with fresh URLs:
 
 ```css
-.v2  { animation: go-late 0s 90s forwards }                                         /* --go: 1 */
-@container s2 (width < 524px) { .v2 { animation: go 0s 8s forwards } }               /* second sentinel loaded */
-@container (width < 17px) { .rt { display: if(style(--go: 1): block; else: none) } } /* still unread */
-@container (height: 240px) { .rt { display: block } }                               /* all 16 probes missed */
+.stage > .sig { display: flex; width: 536px }             /* the grid's 528 px + one 8×1 sentinel */
+.gd      { flex: 1 1 0; container: s1 / inline-size }      /* 536 px; 528 once /s.png loads */
+.gd .gd  { container-name: s2 }                            /* inside it, the same with /s.png?2: 528, then 520 */
+@container s1 (width < 532px) { .sig > i.s2 { display: block } }      /* start the second sentinel */
+.v   { animation: go-late 0s 90s forwards }                            /* --go: 1 */
+@container s2 (width < 524px) { .v { animation: go 0s 3s forwards } }
+@container (width: 0px) { .rt { display: if(style(--go: 1): flex; else: none) } }   /* the second row */
+.w   { width: max(100cqw, anchor-size(--rt width, 0px)); container-type: inline-size }
 ```
 
-- `.v2`'s height is 240 px exactly when stage 2's 15 probes have all missed (stage 1 missed too, or stage 2 wouldn't
-  show); a hit anywhere makes it 225 px and the width 17 px or more.
-- The sentinels: `<i style="content:url(/s.png)">` (no-store) comes after every stage-1 probe in the document, at the
-  same priority, so it loads once stage 1 has gone out. `/s.png?2` is requested only when the first has loaded, so it
-  queues behind the stage-2 probes and the requests a `GOAWAY` re-sent. Each sentinel narrows its own `.gd`
-  container from outside: the `.sig` row is fixed width and the sentinel takes 8 px of it (the small-screen scale is
-  on the outer `.sig`).
+- The first sentinel `<i style="content:url(/s.png)">` (no-store) comes after every probe in the document, at the
+  same priority, so it loads once the first pass has gone out. But a `GOAWAY` re-sends the refused requests after
+  it, so the second sentinel, `/s.png?2`, is requested only when the first has loaded, and queues behind them. Three
+  seconds after it, `--go` turns 1; if a sentinel fails, 90 s after load.
+- Each sentinel narrows its own `.gd` container, which can't depend on its contents, from outside: the `.sig` row
+  is fixed width and the sentinel takes 8 px of it. The scale for small screens is on the outer `.sig`, so the
+  extra 8 px scale with the grid.
 - `.rt` holds 16 probes `/c/k/r/2/<v>.png` (another `_redirects` rule onto `r/<v>.png`, inside the dictionary's
-  `match`).
-- A cell never written always pays its probes twice: "never written" and "read failed" look the same.
+  `match`). Descendants of a `display: none` element get no style, so nothing loads until the row shows.
+- `.w`, inside `.v`, is the reader the pixel and the `<object>`s query: the wider of the two rows.
+- The condition is "first row 0 px wide", so a cell never written always pays its 16 probes twice (7,680 more
+  requests for an empty canvas).
 
 [crbug 355006326]: https://issues.chromium.org/issues/355006326
 

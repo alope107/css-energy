@@ -61,6 +61,5 @@ test D's four-page chain:
 - Works on Cloudflare Workers. The console shows `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` 15 times per painted cell:
   the probes answering "no". Cloudflare ends connections after ~10,000 requests and Chrome drops some queued probes;
   a retry pass re-reads those cells (docs/ARCHITECTURE.md, "Retry").
-- First load reads 480 cells in stages: 1 probe for a cell holding colour 1, 16 for another colour, 32 for a blank cell
-  (docs/ARCHITECTURE.md, "Reading").
+- First load reads 480 cells with 7,680 probes: about 25–45 s in a slow headless sandbox.
 - Capacity: 500 dictionaries per top-level site, log₂K bits each; this canvas uses 480 × 4 bits.
