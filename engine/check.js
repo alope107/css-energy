@@ -22,7 +22,7 @@ const PROBES = [
   {
     id: 'style-int-256', kind: 'fact',
     claim: '@container style(--v: N) never matches a calc()-computed registered <integer> of 256 or more',
-    docs: 'js-minus-js docs/ENGINE_NOTES.md 1; AGENTS.md pitfalls',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 1; CLAUDE.md pitfalls',
     page: () => html(N({ name: 'v' }) + '.c{--v:calc(var(--a) * 1)}.l{--v:256}i{--o:0}' +
       [255, 256, 1000].map(n => `@container style(--v: ${n}){.n${n}{--o:1}}`).join(''),
       [255, 256, 1000].map(n => `<div class=c style="--a:${n}"><i class=n${n} id=c${n}></i></div>`).join('') + '<div class=l><i class=n256 id=lit></i></div>'),
@@ -56,7 +56,7 @@ const PROBES = [
   {
     id: 'style-range', kind: 'fact',
     claim: 'range style queries work: style(--h > 5)',
-    docs: 'css-physics docs/BENCHMARKS.md §2 (1.6 µs per rule); CLAUDE.md',
+    docs: 'css-physics docs/BENCHMARKS.md §2 (1.7 µs per rule); CLAUDE.md',
     page: () => html(N({ name: 'h' }) + 'i{--o:0}@container style(--h > 5){.r{--o:1}}@container style(--h: 7){.e{--o:1}}',
       '<div style="--h:7"><i class=r id=r7></i><i class=e id=e7></i></div><div style="--h:3"><i class=r id=r3></i></div>'),
     read: () => ({ e7: prop('e7', '--o'), r7: prop('r7', '--o'), r3: prop('r3', '--o') }),
@@ -93,7 +93,7 @@ const PROBES = [
   {
     id: 'html-nesting-512', kind: 'fact',
     claim: 'the HTML parser stops nesting at 512 elements; XHTML nests as deep as the markup',
-    docs: 'js-minus-js ENGINE_NOTES.md 19, AGENTS.md (pages must be XHTML)',
+    docs: 'js-minus-js ENGINE_NOTES.md 19, CLAUDE.md (pages must be XHTML)',
     pages: () => ({
       html: '<!doctype html><body>' + '<div>'.repeat(600) + '<i id=deep></i>' + '</div>'.repeat(600) + '</body>',
       xhtml: '<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/></head><body>' + '<div>'.repeat(600) + '<i id="deep"/>' + '</div>'.repeat(600) + '</body></html>',

@@ -59,7 +59,7 @@ $(B)/js_in_css.xhtml: $(B)/f4cc_16.woff2 $(wildcard $(CC)/*.py machine/*.py read
 dist: page
 	cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
 
-# ---- tests (see docs/ARCHITECTURE.md#tests)
+# ---- tests (see docs/ARCHITECTURE.md#5-tests)
 expect:                                   # Node is the oracle: writes tests/suite/*.out
 	$(NODE) tests/suite_expect.js tests/suite
 l1:                                       # reference compiler + 20-bit simulator vs Node

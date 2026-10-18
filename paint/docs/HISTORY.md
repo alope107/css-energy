@@ -17,74 +17,68 @@ The question: can pure CSS keep state across a page reload? Channels tried:
 | History entries + cross-document view transitions | partly | 48 bits per entry carried between pages, but nothing script-free can traverse history; a stack, not RAM |
 | Geolocation permission (`<geolocation>`, `:granted`) | yes | 1 bit, set by the user |
 
-## 2. Compression dictionaries (2026-10-12)
+## 2–3. Compression dictionaries, more bits per entry (2026-10-12)
 
-`Use-As-Dictionary` turned out to be a store that CSS can write (load a file) and read (a probe compressed against
-one dictionary decodes only if that dictionary is current). Found along the way:
+`Use-As-Dictionary` is a store CSS can write (load a file) and read (a probe compressed against one dictionary decodes
+only if it is current). The registration rules in `CLAUDE.md` came from failures here: `no-store`/`no-cache`/
+`max-age=0` never register; random-byte image dictionaries lost ~75% of writes (the decoder cancels the load); reused
+write URLs failed every third round until `Vary: *`.
 
-- A dictionary must be fresh-cacheable: `no-store`, `no-cache` and `max-age=0` never register.
-- Dictionaries loaded as images must be valid images: random bytes lost about 75% of writes, because the decoder
-  cancels the load before Chrome stores it.
-- Reusing a write URL in the same tab failed every third round until dictionaries got `Vary: *` (Blink's memory
-  cache served the old response without reaching the network).
-- Which loads register: `mask-image`, `filter: url()`, `@font-face`, `@import`, lazy `<img>`, prefetch, preload. Not
-  `background-image` or `cursor`. Iframe and object documents don't register either.
-- 500 entries per top-level site (512 written, 12 lost), from Chromium's constants; frames of other origins share
-  the parent site's 500.
-- First demo: 16×16 binary pixels, 8 paints per pixel per load.
-
-## 3. More bits per entry (2026-10-12)
-
-- K dictionaries per cell give log₂K bits; a read is K probes, because each probe is an equality test.
-- File count went from one file per (cell, value) to 2K for any number of cells: the cell number moved into the
-  probe's query string, and one `_redirects` rule maps every cell's dictionary URL to a shared file. URLPattern
-  gotcha: `match="/r/*?k-*"` never matched, because `*?` is an optional wildcard; `"/r/*.png?k-*"` works.
-- K = 16, 256 and 4096 all read back with 0 errors, including after a browser restart.
-- Canvas v1: 24×20, 16 colours, one document, 6 paints per cell per load (write URLs carry a slot number). The
-  paint colour is latched with `transition: --c 0s 1e9s`. An `if()` picking the write URL had to sit on a child:
-  on the same element it saw the pre-transition value, so a palette change rewrote painted cells.
+- K dictionaries per cell give log₂K bits; a read is K probes (each is an equality test). K = 16, 256 and 4096 all read
+  back with 0 errors, including after a browser restart.
+- One file per (cell, value) became 2K files for any number of cells: one `_redirects` rule maps every cell onto shared
+  files. URLPattern `match="/r/*?k-*"` never matched (`*?` is an optional wildcard).
+- Canvas v1 (one document, 6 paints per cell per load): an `if()` picking the write URL had to sit on a child of the
+  latched colour; on the same element it saw the pre-transition value, so a palette change rewrote painted cells.
 
 ## 4. Unlimited writes (2026-10-13 → 10-17)
 
-- **Cells as documents.** Each cell became a same-origin iframe whose relative URLs resolve under `/c/<k>/`; painting
-  navigates it to a new document, which has a fresh fetch memo. Back and Forward became undo and redo.
-- **Reads failed inside 480 frames.** With each cell document reading its own probes, a reload lost 12–200 cells.
-  A net log showed the requests created and never sent: about 7,700 in flight at once, past Chrome's limit, with
-  no retry. Reads moved to the top-level page, which throttles its own loads. The cell learnt its value through
-  its height instead.
-- **Undo didn't persist.** Back restored the picture, but storage kept the undone colour: the server saw no request
-  at all. History traversal serves every CSS-initiated fetch from cache (mask-image, `@import`, fonts, prefetch,
-  even with `no-store` documents), and a cached response doesn't register. Only `<link rel=compression-dictionary>`
-  went to the network. Its `media` attribute is ignored (both links of a pair loaded), so it couldn't be made
-  conditional on the value passed in by height.
-- **A page per value.** Each cell instead starts on the page for its value, so the link can be unconditional. First
-  try: 16 hidden `loading=lazy` iframes per cell. Loading stalled after 59 cells: every iframe takes one of Chrome's
-  ~1,000 frames per page, even hidden and never loaded. Hidden `<object>`s take none, so the cells use those.
-- **The link alone was too slow.** It loads when the network is idle: ~150 ms normally, ~30 s while the page is
-  still probing. A paint followed by a quick reload was lost. Painted pages now write both ways.
-- A test once expected one undo step too many: repainting a cell its current colour is a same-URL navigation, which
-  replaces the history entry.
+- **Cells as documents:** painting navigates the cell's frame to a new document, which has a fresh fetch memo; Back
+  and Forward became undo and redo.
+- **Reads inside 480 frames failed:** ~7,700 requests in flight, past Chrome's limit, never sent or retried. Reads
+  moved to the top-level page.
+- **Undo didn't persist:** history traversal serves every CSS-initiated fetch from cache, and a cached response
+  doesn't register. Only `<link rel=compression-dictionary>` reaches the network, and its `media` is ignored, so it
+  couldn't be made conditional: each cell starts on the page for its value instead.
+- **16 hidden lazy iframes per cell stalled after 59 cells** (~1,000 frames per page, hidden or not). Hidden
+  `<object>`s take none.
+- **The link alone was too slow** (it loads when the network is idle, ~30 s while probing), so a paint followed by a
+  quick reload was lost. Painted pages write both ways.
 
 ## 5. Cloudflare (2026-10-14 → 10-17)
 
-- GitHub Pages can't set headers, so it can't host this.
-- Cloudflare's own Shared dictionaries feature strips dictionary headers when "disabled" and passes them through on
-  "passthrough". `selftest/` checks a deployment for exactly the four things the canvas needs; it passed on the
-  user's deployment.
-- Pages redirects `*.html` to extensionless paths, which inside a rewrite would leave a cell's namespace: every URL
-  became extensionless. Pages joins a header set by two `_headers` rules with `, `, so rules must not overlap.
-- On the deployment, the console shows `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` for every probe that answers
-  "no", as designed.
+GitHub Pages can't set headers, so it can't host this. Cloudflare's Shared dictionaries setting strips dictionary
+headers unless set to passthrough; `selftest/` checks a deployment for the four things the canvas needs. `*.html`
+redirects and joined `_headers` values forced extensionless URLs and non-overlapping rules.
+
+## 6. Missing pixels on the live site (2026-10-18)
+
+Reloads of the Workers deployment showed a few blank cells that the next reload found again. Net logs (headless
+Chromium 153, 480 cells written):
+
+- **Cloudflare ends every connection after about 10,000 requests**: HTTP/2 `GOAWAY(NO_ERROR, last_stream_id=19999)`
+  after 10,011–10,039 streams; HTTP/3 `CONNECTION_CLOSE` (`H3_NO_ERROR`, no `GOAWAY`) after 10,514. A load is about
+  9,000 requests, so a connection kept across reloads hits the limit in most loads.
+- **HTTP/2:** with ~50–80 streams active and hundreds queued, Chrome retried ~650 refused requests but failed 200–500
+  with `ERR_FAILED`, never sent (a `SpdySession` race, `bugs/README.md`). The lost probes come in a run: 5–31 adjacent
+  cells blank. **HTTP/3:** the close fails everything in flight, then Chrome marks HTTP/3 broken for the origin.
+- Local tests never saw it (`serve.js` was HTTP/1.1); `serve.js --goaway 10000` reproduces it over HTTP/2.
+- Nothing on the page can keep a connection under 10,000 requests, and fewer probes per cell isn't possible, so a cell
+  still blank after the first pass reads again (`ARCHITECTURE.md#retry`).
+- **When to retry:** a fixed delay is either late or doubles a slow read. One sentinel image after the grid started
+  the retry 6–11 s early (re-sent requests queue behind it), sending 2,300–3,900 needless probes. A second sentinel,
+  requested only once the first has loaded, finished within 50 ms of the last first-pass probe, and the retry sent
+  exactly 16 probes per lost cell.
+- Results: local HTTP/2 `--goaway 10000`, 11 loads: 0–32 cells lost per first pass, all 480 right after the retry.
+  Workers preview, 5 loads: 0–32 lost, all right after the retry, ~30 s per load.
 
 ## Open questions and ideas not tried
 
-- **`ERR_FAILED` on a few probes, on Cloudflare only.** Served headers and bytes match the files exactly. Not
-  reproduced locally over HTTP, HTTP/2, with 80 ms of added latency, or with all 480 cells written. Suspects:
-  HTTP/3 (the host advertises it), or an extension. A failed matching probe drops a pixel from that load's read; the
-  stored value is untouched. A `chrome://net-export` capture would settle it.
-- **Read retry**: a second set of probes, with fresh URLs, for cells still blank after a few seconds.
+- **Fewer requests per load** would make the connection limit fall in fewer loads: the cell pages' own writes on
+  load (480 mask-images now, 480 links when idle) only repeat the stored value. The start page needs the link (undo
+  back to it re-registers), not the mask-image.
 - **Staggered reads**: start the probes a row at a time to keep fewer requests in flight.
 - **Packing**: `zoom: 17^j` on cell j's probes, so one row reads several cells as one number.
-- **A save area for js-minus-js**: read once at boot into machine RAM, write back; the scroll register (48 bits,
-  synchronous) as a superblock with a "formatted" flag and an atomic bank switch.
+- **A save area for js-minus-js** (`../COMPARISON.md`), with the scroll register (48 bits, synchronous) as a superblock
+  holding a "formatted" flag and an atomic bank switch.
 - **Save codes**: copyable text generated from RAM and parsed back by a font, for more than ~500 bytes.
