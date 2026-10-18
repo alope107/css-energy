@@ -30,7 +30,7 @@ fact, so a change in Chrome flips a reading.
 | `html-nesting-512` | the HTML parser stops nesting at 512; XHTML nests as deep as the markup | js-minus-js pages are XHTML (ENGINE_NOTES 19) |
 | `font-resets-fvs` | the `font` shorthand resets `font-variation-settings` declared before it | both |
 | `play-state-base` | `animation-play-state` computed from an element's own animated property doesn't pause it (read from the base style) | js-minus-js (ENGINE_NOTES 9) |
-| `var-ident` (watch) | `var(ident("--m" var(--k)))` is unsupported; if it ships, both projects gain dynamic indexing | css-physics `experiments/ident` |
+| `var-ident` (watch) | `var(ident("--m" var(--k)))` is unsupported; if it ships, both projects gain dynamic indexing | — |
 
 Chromium 153.0.8010.12 (2026-10-14, and on the mini PC 2026-10-17): every fact holds under both profiles; `var-ident`
 is still unsupported.

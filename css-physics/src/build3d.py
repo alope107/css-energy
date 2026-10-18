@@ -113,7 +113,7 @@ if MULTI:
         h = h.replace(f"The page holds {len(COUNTS)} complete engines, one per body count ({', '.join(map(str, COUNTS))}); the ones not "
                       "selected are <code>display:none</code>, so the style engine never looks at them.",
                       f"Each body count ({', '.join(map(str, COUNTS))}) is its own page with its own engine.")
-        # a stylesheet over the artifact host's 16 MB file limit goes out as linked .css files
+        # a stylesheet over CSS_SPLIT goes out as linked .css files (hosts limit file size: Workers 25 MiB)
         # (split between top-level rules, in order)
         if len(e['css']) > CSS_SPLIT:
             parts, cur, size = [], [], 0

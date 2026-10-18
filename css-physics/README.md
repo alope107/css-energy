@@ -10,7 +10,7 @@ The physics runs in the browser's style engine: about 170k custom-property decla
 npm install && npx playwright install chromium   # test tools only (in the devcontainer: npm install only)
 COUNTS=16 PLAIN=1 python3 src/build3d.py out/p16.html     # one 16-body engine, readable names
 bash tools/smoke.sh 16            # physics pass/fail check in headless Chromium
-bash tools/make_site.sh           # the published pages: site/rigid3d-{8,16,24,32,48,64}.html
+python3 src/build3d.py out/rigid3d.html   # the published pages: out/rigid3d-{8,16,24,32,48,64}.html
 ```
 
 Open a built page in Chrome or Firefox; for 48 and 64, serve the folder, because they link split `.css` files. The page offers scenes (tower, rain, stack), gravity, shake and reset.
@@ -31,4 +31,4 @@ Headless Chromium 153 on an Intel i5-12600H mini PC without a GPU; an idle (all 
 
 [ARCHITECTURE](docs/ARCHITECTURE.md) (how it works), [BENCHMARKS](docs/BENCHMARKS.md) (measurements and the cost
 model), [HISTORY](docs/HISTORY.md) (dead ends and open ideas), [experiments/](experiments/README.md) (the
-microbenchmarks), [archive/](archive/README.md) (the pre-optimization generator). Working on it: [CLAUDE.md](CLAUDE.md).
+microbenchmarks). Working on it: [CLAUDE.md](CLAUDE.md).

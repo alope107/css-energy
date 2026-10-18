@@ -25,7 +25,37 @@ Token chain (#tcr, nested inside the deepest character level; levels past the to
 import sys, json, re, os
 from dsl import css2 as tocss, isK, S
 import cc_dsl as D, cc_ref as R
-from ccpage4 import Names, mux_shift, mux_lab, WOFF, OTH, DELAYED_V, PORTS
+
+WOFF = 1 << 20
+OTH = {'A': 'B', 'B': 'A'}
+DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v')) for f in ('h1', 'h2', last)}   # read by var() one level down
+PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
+
+def mux_shift(prop, n, base, shift=0):
+    """--c<v + shift> for v in [base, base+n): prop holds v, prop-h holds (v - base) // 32"""
+    hi = []
+    for h in range((n + 31) // 32):
+        lo = ' '.join(f'style(--{prop}: {base + h * 32 + l}): --c{base + h * 32 + l + shift};' for l in range(32) if h * 32 + l < n)
+        hi.append(f'style(--{prop}-h: {h}): if({lo} else: none);')
+    return f'if({" ".join(hi)} else: none)'
+
+def mux_lab(prop, n):
+    return 'if(' + ' '.join(f'style(--{prop}: {j}): --lab{j};' for j in range(n)) + ' else: --nolab)'
+
+class Names:
+    """registered properties; long names in the generator, short names in the output"""
+    def __init__(self, short=True):
+        self.reg = {}; self.short = short
+    def add(self, name, inh):
+        self.reg[name] = self.reg.get(name, False) or inh
+    def rename(self, text):
+        if not self.short: return text
+        keys = sorted(self.reg)
+        m = {k: f'z{i:x}' for i, k in enumerate(keys) if k not in ('c', 'cn', 'e', 'n')}
+        return re.sub(r'--([A-Za-z0-9_-]+)', lambda mo: '--' + m.get(mo.group(1), mo.group(1)), text)
+    def props(self):
+        return [f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if i else "false"}; initial-value: 0; }}' for n, i in self.reg.items()]
+
 
 PR = set(range(32, 127))
 CLASSES = [{32}, D.ALPHA, D.DIGIT, {34}, {92}, {47}, PR - D.ALPHA - D.DIGIT - {32, 34, 92, 47}, {10}, {0}]
@@ -63,7 +93,7 @@ def cell_html(k, j):
     return (f'<b class="cr"><b class="c1" style="view-timeline-name: --ch{k}_{j}"></b>'
             f'<b class="cp"></b></b>')
 
-def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_src=None):
+def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     code_base = R.LAYOUT['code_base'] if code_base is None else code_base; data_base = R.LAYOUT['data_base'] if data_base is None else data_base
     initw = lib.get('init', R.LAYOUT['init'])
     code_cells = initw - 1 - code_base; data_cells = R.SDATA; ishift = initw - data_base
@@ -164,16 +194,11 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
         else: st.append(f'--c: {10 if sl[0] == "nl" else 0}')
         if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]})')
         else: st.append(f'--cn: {10 if nxt[0] == "nl" else 0}; --ncl: {CL_NL if nxt[0] == "nl" else CL_NUL}')
-        if static_src is not None:      # experiment: characters as inline constants instead of timelines
-            cc = static_src[i]; cn_ = static_src[i + 1] if i + 1 < NC else 0
-            st.append(f'--c: {cc}; --cn: {cn_}; --ncl: {next(ci for ci, cs in enumerate(CLASSES) if cn_ in cs)}')
         if sl[0] == 'col' and sl[2] == 0:
             ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{sl[1]}_{j}" for j in range(P))}">')
         ch_html.append(f'<div class="lv{x} {kcls}" style="{"; ".join(st)}"><b class="ovs"></b>'
                        f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
     root_st = ''
-    root_st = ''
-    if static_src is not None: root_st = f'--ncl: {next(ci for ci, cs in enumerate(CLASSES) if static_src[0] in cs)}'
     fo = OTH['A' if (NC - 1) % 2 == 0 else 'B']      # suffix written by the deepest character level
     css.append('#cc { ' + ' '.join(f'--{n}: {v};' for n, v in init.items()) + ' }')
     # ================= token chain

@@ -125,7 +125,7 @@ const PROBES = [
   {
     id: 'var-ident', kind: 'watch',
     claim: 'var(ident("--m" var(--k))) (dynamic property names) is not supported',
-    docs: 'css-physics experiments/ident (unsupported in 141 and 153); it would give both projects dynamic indexing',
+    docs: 'unsupported in 141 and 153; it would give both projects dynamic indexing',
     page: () => html(N({ name: 'op', syntax: '<number>', init: -99 }), '<i id=x style=\'--pc:3;--m3:13;--op:var(ident("--m" var(--pc)))\'></i><i id=y style="--m3:13;--op:var(--m3)"></i>'),
     read: () => ({ ident: +prop('x', '--op'), plain: +prop('y', '--op') }),
     judge: r => ({ control: r.plain === 13, holds: r.ident !== 13, note: `var(ident(…)) reads ${r.ident} (13 if supported)` }),

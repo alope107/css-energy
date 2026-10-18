@@ -1,9 +1,5 @@
 node_modules/
 __pycache__/
 out/
-site/
 *.png
 experiments/**/*.html
-!experiments/iframes/par*.html
-!experiments/ident/ident.html
-experiments/fonts/*.ttf

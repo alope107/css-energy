@@ -384,19 +384,9 @@ src_html = _h.escape(image.get("source", ""))
 blurb = (f"<p>The CPU is a font. Each layout pass, the machine state is rendered as a line of text and Blink's HarfBuzz runs "
          f"{S} micro-cycles of a bytecode CPU implemented in GSUB (a {N}-line cache of RAM inside the glyph string, four words per line); the widths of the "
          f"state's spans are read back as the next state. CSS handles what the font traps on: cache misses, write-backs, MUL/DIV/MOD, output. "
-         f"The ROM is the self-hosted JavaScript-subset compiler; it compiles the program below and runs it.</p><pre>{src_html}</pre>")
+         f"The ROM holds the runtime library; the program below sits compiled in RAM.</p><pre>{src_html}</pre>")
 local_html = "\n".join(f'<div class="reg" style="height: {H}px">{sub_html(n, OFF, f"var(--next-{n})")}</div>' for n, H, OFF in local_regs)
-CC = os.environ.get('CC')      # prefix of a CSS compile chain (ccpage4.py): its overlays supply code and data in RAM
-cc_css = open(CC + '.css').read() if CC else ''
-cc_html = open(CC + '.html').read() if CC else ''
-if CC:
-    blurb = (f"<p>The CPU is a font; the compiler is the stylesheet. The program below sits in the page as one nested element per character. "
-             f"Style resolution runs a lexer on every element and, on the element after each completed token, the parser variant for its "
-             f"(mode, token), selected by container queries. Each emitted bytecode word is a fixed-position element named after its RAM cell, "
-             f"so the font CPU's memory reads find it. Then HarfBuzz runs it: each layout pass shapes the machine state as a line of text "
-             f"({S} micro-cycles of a bytecode CPU in GSUB, a {N}-line cache of RAM, four words per line) and the widths of its spans are the next state. "
-             f"The ROM holds only the runtime library.</p><pre>{src_html}</pre>")
-# groups live from the start: the console (its readers) and, without a compile chain to supply them, the static areas (strings,
+# groups live from the start: the console (its readers) and, on a CPU-only page, the static areas (strings,
 # code, count, staging); every other group appears when the program first writes into it
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'compiler')); import cc_ref as _R
 STATIC_CELLS = set(range(_R.LAYOUT['data_base'] + _R.SDATA - ROM, image.get('init', _R.LAYOUT['init']) + _R.SDATA - ROM))
@@ -411,9 +401,8 @@ page = f"""<!doctype html>
 /* ---------- generated ---------- */
 {chr(10).join(props)}
 {chr(10).join(css)}
-{cc_css}
 </style>
-{mem_outer}{cc_html}<div class="con"></div>
+{mem_outer}<div class="con"></div>
 {console}
 <div id="clk"><div id="cpu">
 {mem_inner}
@@ -422,7 +411,7 @@ page = f"""<!doctype html>
 <div id="state">{''.join(spans_html)}</div>
 {''.join(rb_html)}
 <div class="head">
-<h1>{"JavaScript, compiled by a stylesheet and run by a font" if CC else "JavaScript, compiled and run by a font"}</h1>
+<h1>JavaScript, compiled and run by a font</h1>
 <p class="zw">This screen scale / zoom level isn't one the page recognises, so the machine won't start. Reset the zoom (Cmd/Ctrl + 0).</p>
 {blurb}
 <div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--PC)"></b> sp <b class="num" style="--v: var(--SP)"></b>

@@ -9,7 +9,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Don't open or `cat` generated pages: they're 1–30 MB. Use grep, Python or the tools.
 
 ## Setup
-- Python 3.10+ (stdlib only for `src/`); `pip install fonttools` for `experiments/fonts`. `npm install` for the tools; run them from the repo root (they resolve page paths against the cwd).
+- Python 3.10+ (stdlib only). `npm install` for the tools; run them from the repo root (they resolve page paths against the cwd).
 - Browser launch (`CHROME=`, the `physics` profile, the image's Chromium fallback) and the harness shared with js-minus-js: `../shared/README.md`. This project's own helpers are in `tools/lib/physics.js` (camera projection, BODYINFO, freezing). After changing either, run `make test-shared` at the repo root and `smoke.sh`.
 - Firefox: `BROWSER=firefox` (evaluate-based tools only: smoke, floatcheck, grabtest, perf3, …; tracing needs Chrome); `FIREFOX=/path` overrides. **Don't `npx playwright install` in the devcontainer:** it garbage-collects the image's other browsers, `/usr/local/bin/chromium`'s target included (restore with `npx playwright@1.63.0 install`).
 - After a Chrome upgrade: `make engine-check` at the repo root (the behaviours this engine depends on; `../engine/README.md`).
@@ -21,7 +21,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
 - Profile one step (freeze + ablate) and microbenchmarks: the `perf-profile` skill. Tool index: BENCHMARKS.md "How to measure".
 - Sparse regime: `SCENE=field TRAY=2 FIELD_GAP=30 COUNTS=64 PLAIN=1 python3 src/build3d.py out/g64.html`, then `node tools/sparse.js out/g64.html 64 c`; freeze mid-drag with `BODY=k node tools/freezegrab.js`.
-- Published site: `bash tools/make_site.sh` (into `site/`, 24 as the default page, CSS split into ≤14 MB files)
+- Published site: `python3 src/build3d.py out/x.html` (one page per count, CSS over 14 MB split into linked files); CI deploys `../deploy/assemble.sh css-physics <dir>`
 - Motion checks: `node tools/filmstrip.js page.html out.png [delay] [dur]` (compositor frames as a contact sheet, plus a snap-back score); `node tools/transcheck.js page.html` (transform transitions must restart where the running one was).
 
 ## Working style for performance work

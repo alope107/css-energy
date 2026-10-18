@@ -1,7 +1,7 @@
 # History: how the design got here, and what didn't work
 
-Numbers for superseded code come from `archive/results/` and earlier chats on other machines; the code is in git
-(`archive/README.md`). "Self-compile": the self-hosted `jsc.js` in ROM compiles FizzBuzz at run time, then runs it.
+Numbers for superseded code come from raw logs and earlier chats on other machines. The code was removed on
+2026-10-15 (`git checkout 91d73bc -- js-minus-js/archive`), the logs on 2026-10-18 (`83d4fde`). "Self-compile": the self-hosted `jsc.js` in ROM compiles FizzBuzz at run time, then runs it.
 "Direct fizz": FizzBuzz compiled into ROM.
 
 ## Timeline

@@ -105,24 +105,6 @@ for b in BODIES:
     b['im'] = 1 / b['m']
     b['ii'] = tuple(1 / v for v in b['I'])
 
-# ---- spatial cells (CELLS=1; off: measured as a dead end, see HISTORY.md) ------------------------
-# The floor is cut into CELL-sized cells along x and z. An awake body marks every cell column (x) and row
-# (z) its reach (R_i + max R + margin) can touch, as digits of decimal words: one digit per column, B10 =
-# 10^(digits of N) per digit so a count can't overflow, CPW columns per word (a registered number survives
-# var() with 6 significant digits). A sleeping body is "present" (its rules are evaluated and it can be
-# touched or woken) only if some awake body marks both its column and its row. Far sleepers then cost one
-# absent-name rule per pair instead of a broadphase property, and the all-pairs digest that said "an awake
-# body is near me" is replaced. (The test is separable, so it's a superset: with many awake bodies
-# everything is present, as before.) It loses because every sleeper pays its cell and presence properties
-# on every pass (about 80 us each), more than the near tests it saves; the digest only charges awake bodies.
-CELLS = os.environ.get('CELLS', '0') == '1'
-CELL = float(os.environ.get('CELL', 120))
-KX, KZ = -(-int(2 * WX) // int(CELL)), -(-int(2 * WZ) // int(CELL))
-RMAX = max(b['R'] for b in BODIES)
-DIG = len(str(N))
-B10 = 10 ** DIG
-CPW = 6 // DIG
-NWX, NWZ = -(-KX // CPW), -(-KZ // CPW)
 
 
 def quat(ax=0.0, ay=0.0, az=0.0):
@@ -519,21 +501,15 @@ for gr in groups:
         dv = vsub(B[a]['p'], B[bb]['p'])
         e = f"{f(rr)} - hypot({', '.join(dv)})"
     gr['flag'] = f'n{gr["id"]}'
-    if pl or not CELLS:
-        g.P(gr['flag'], f'sign(max(0, {e}))', L0, AW(a), syntax='<integer>')
-        if not pl:
-            g.A(gr['flag'], f'sign(max(0, {e}))', L0, AW(bb))
-    else:
-        # a pair's near test exists only while one body is awake (name w) and the other present (name
-        # b: awake, or asleep in the reach of an awake body): two name-only nested rules, no style()
-        g.P(gr['flag'], f'sign(max(0, {e}))', L0, ('nn', a, bb), syntax='<integer>')
-        g.A(gr['flag'], f'sign(max(0, {e}))', L0, ('nn', bb, a))
+    g.P(gr['flag'], f'sign(max(0, {e}))', L0, AW(a), syntax='<integer>')
+    if not pl:
+        g.A(gr['flag'], f'sign(max(0, {e}))', L0, AW(bb))
 # Neighbourhood digests. Each awake body j sums its near flags into decimal words (body i is digit
 # i % 6 of word i // 6; a registered number survives var() with 6 significant digits, so a word holds
 # six bodies, each counting up to 9 awake neighbours). Summing the words over all bodies (asleep ones
 # contribute nothing: their words are undeclared) tells every body at once whether an awake body is
 # near it, whether a moving one is, and whether one that isn't ready to sleep is: one digit each
-# instead of a sum over every possible partner per body. (With CELLS=1 the first comes from the cells.)
+# instead of a sum over every possible partner per body.
 NW = (N + 5) // 6
 pflag = {(gr['a'], gr['b']): gr['flag'] for gr in groups if not gr['plane']}
 fl_ = lambda i, j: V(pflag[(min(i, j), max(i, j))])
@@ -544,24 +520,14 @@ for j in range(N):
             g.P(f'nm{j}_{m}', ' + '.join(terms), L0, AW(j))
 for m in range(NW):
     ws = [V(f'nm{j}_{m}') for j in range(N) if (f'nm{j}_{m}') in g.props]
-    if not CELLS:
-        g.P(f'SN{m}', ' + '.join(ws), L0, ('mix', 1))
+    g.P(f'SN{m}', ' + '.join(ws), L0, ('mix', 1))
     g.P(f'SP{m}', ' + '.join(f'{w} * var(--mf{j})' for j, w in zip([j for j in range(N) if f'nm{j}_{m}' in g.props], ws)), L0, ('mix', 1))
     g.P(f'SB{m}', ' + '.join(f'{w} * var(--nr{j})' for j, w in zip([j for j in range(N) if f'nm{j}_{m}' in g.props], ws)), L0, ('anyrd', 1))
 dig = lambda S, i: f'sign(mod(round(down, var(--{S}{i // 6}) / {10 ** (i % 6)}), 10))'
 for i in range(N):
     g.P(f'pk{i}', dig('SP', i), L0, AS(i), syntax='<integer>')    # asleep, near a body that is moving
     g.P(f'bk{i}', dig('SB', i), L0, (f'rd{i}', 1), syntax='<integer>')   # ready, touching one that isn't
-    if not CELLS:
-        g.P(f'nb{i}', dig('SN', i), L0, AS(i), syntax='<integer>')   # asleep, near an awake body (all-pairs digest)
-        continue
-    g.reg(f'nb{i}', syntax='<integer>')     # asleep, in the reach of an awake body (cells; declared on #LW)
-    g.reg(f'hx{i}', syntax='<integer>')     # a sleeper's cell column and row (declared on #LM)
-    g.reg(f'hz{i}', syntax='<integer>')
-    for w_ in range(NWX):
-        g.reg(f'xm{i}_{w_}')                # an awake body's column marks, one word each (declared on #LM)
-    for w_ in range(NWZ):
-        g.reg(f'zm{i}_{w_}')
+    g.P(f'nb{i}', dig('SN', i), L0, AS(i), syntax='<integer>')   # asleep, near an awake body (all-pairs digest)
 
 # ---- grab (L0, gated on the pointer being down) ----------------------------------
 # Two phases. Picking (pointer down, nothing held yet: --pick at #LS) ray-casts every body once and
@@ -1548,13 +1514,9 @@ for (lev, gate), ds in _ord:
     rule = f'#L{lev}{{{";".join(ds)}}}'
     if gate is None:
         w(rule)
-    elif isinstance(gate, tuple) and gate[0] == 'nn':
-        # a pair's near test: body gate[1] awake (w) and body gate[2] present (b); the inner name is
-        # evaluated first and short-circuits, so a far sleeper costs one absent-name lookup
-        w(f'@container w{gate[1]}{{@container b{gate[2]}{{{rule}}}}}')
     else:
         gn, gv = gate if isinstance(gate, tuple) else (gate, 1)
-        own = owner(gn) if lev <= OWNLEV and (CELLS or lev >= 1) else None
+        own = owner(gn) if lev <= OWNLEV and lev >= 1 else None
         if own is not None:
             assert decl_level.get(gn, -1) <= 1, gn
         # style(--flag) is true iff the registered flag differs from its initial 0: the same test as
@@ -1563,43 +1525,15 @@ for (lev, gate), ds in _ord:
         # whenever ANY body was held, so dragging anything also pulled body 0; tools/statcheck.py, grabtest.js)
         q = f'style(--{gn})' if BOOLQ and gv == 1 and gn not in _MULTI and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
         w(f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}')
-# ---- cells: #LM marks (awake) and cell coordinates (asleep), #LW words, presence and the names ----
-h_ = f(STEP)
-for i in range(N if CELLS else 0):
-    ds = []
-    reach = f(BODIES[i]['R'] + RMAX + MARGIN + 1)
-    for ax_, W_, NW_, nm_ in (('X', WX, NWX, 'xm'), ('Z', WZ, NWZ, 'zm')):
-        pos_ = f'(var(--{ax_}{i}) + var(--V{ax_}{i}) * {h_} + {W_})'
-        for w_ in range(NW_):
-            lo = f'clamp(0, round(down, ({pos_} - {reach}) / {f(CELL)}) - {w_ * CPW}, {CPW})'
-            hi = f'clamp(0, round(down, ({pos_} + {reach}) / {f(CELL)}) + 1 - {w_ * CPW}, {CPW})'
-            ds.append(f'--{nm_}{i}_{w_}:calc((pow({B10}, {hi}) - pow({B10}, {lo})) / {B10 - 1})')
-    w(f'@container style(--ac{i}: 1){{#LM{{{";".join(ds)}}}}}')
-    w(f'@container style(--as{i}: 1){{#LM{{--hx{i}:calc(clamp(0, round(down, (var(--X{i}) + {WX}) / {f(CELL)}), {KX - 1}));'
-      f'--hz{i}:calc(clamp(0, round(down, (var(--Z{i}) + {WZ}) / {f(CELL)}), {KZ - 1}))}}}}')
-if CELLS:
-    w('#LW{' + ''.join(f'--SX{w_}:calc(' + ' + '.join(f'var(--xm{i}_{w_})' for i in range(N)) + ');' for w_ in range(NWX)) +
-      ''.join(f'--SZ{w_}:calc(' + ' + '.join(f'var(--zm{i}_{w_})' for i in range(N)) + ');' for w_ in range(NWZ)) + '}')
-
-
-def _digit(S, NW_, hv):
-    """digit hv of the word row S: pick the word by hv // CPW, then the digit hv % CPW"""
-    sel = ' + '.join(f'(1 - min(1, abs(round(down, {hv} / {CPW}) - {w_}))) * var(--{S}{w_})' for w_ in range(NW_))
-    return f'mod(round(down, ({sel}) / pow({B10}, mod({hv}, {CPW}))), {B10})'
-
-
-for i in range(N if CELLS else 0):
-    w(f'@container style(--as{i}: 1){{#LW{{--nb{i}:calc(sign({_digit("SX", NWX, f"var(--hx{i})")}) * sign({_digit("SZ", NWZ, f"var(--hz{i})")}))}}}}')
 _names = ' '.join(f'var(--A{i})' for i in range(N))
-# (without cells the presence digest is computed on #L0, so the names are too, as before)
-w(('#LW{' if CELLS else '#L0{') + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}{" w" + str(i) if CELLS else ""}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
-if FFQ and not CELLS:
+w('#L0{' + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
+if FFQ:
     # Firefox has no if(): there every body is always named. The names only let a sleeping neighbourhood's rules be
     # skipped unevaluated; with all of them present every rule evaluates its own gate, with the same result.
     w('@supports (-moz-appearance: none){#L0{' + ''.join(f'--A{i}:b{i};' for i in range(N)) + '}}')
 # every level carries the names, so a named rule always resolves to its parent (Chrome only forces
 # a re-match of rules that depend on a style container for that container's children)
-w(('#LW,' if CELLS else '') + ','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
+w(','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
 # Firefox only (FFQ): Gecko doesn't re-match rules that depend on a style container when the container's value
 # changed through an animation (and every state value here comes from one), so the gates would keep their first
 # result. It re-matches the whole subtree of a size container whose size changed: #LM's content box follows the clock
@@ -1751,8 +1685,7 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
             # this keeps L0 out of that unless its inputs really changed)
             # (the grab overlay hangs off L0, the only level that uses the pointer; L1 zeroes the pointer
             # for everything below, so a pointer move alone restyles nothing past L1)
-            # (two wrappers; with CELLS=1, #LM holds the cell marks of awake bodies and the cells of sleeping
-            # ones, #LW the cell words, the presence of sleepers and the container names that #L0's rules query)
+            # (two wrappers; in Firefox (FFQ) #LM is the size-container re-match clock and #LW restores the arena's size)
             '<div class="lv" id="LM"><div class="lv" id="LW">' + ''.join(f'<div class="lv" id="L{l}">' + ('<i class="tether"></i><i class="pin"></i><i class="ring"></i>' if l == 0 else '')
                                          for l in range(NLEV)) +
             '<div class="regs"><div class="sc">' + reg_html + '</div></div>' +

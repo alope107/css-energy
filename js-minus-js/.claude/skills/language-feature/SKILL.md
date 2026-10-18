@@ -23,7 +23,7 @@ CSS). Both change together, in this order.
    - Don't name locals after DSL helpers (`le`, `lt`, `eq`, `add`, …).
    - `make l2` until `ALL OK`. On a failure, `SPEC=1 python3 tests/cmp_dsl.py tests/suite/<feature>.js` names the
      first diverging state variable.
-4. **Check the size**: `python3 tools/vsz.py` and `python3 tools/lp.py`; report variants, rules, total temps and max
+4. **Check the size**: `python3 tools/vsz.py`; report variants, rules, total temps and max
    label ports before and after. Ports are elements on all 400 levels, temps are CSS per level, and every rule is
    tested on every level: a jump needs a reason or a fix (fold constants, collect labels, prune unreachable blocks,
    keep tokens out of shared classes that multiply variants).

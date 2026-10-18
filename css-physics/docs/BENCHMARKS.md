@@ -22,12 +22,11 @@ container), so compare them only with each other, interleaved. Unpinned runs lan
 | `freezegrab.js src ms out` | same while holding a grab (`BODY=k`, `TOWER=1`) |
 | `ablate.py page NAME=REGEX…` | copies with families of gated blocks removed |
 | `traceagg.js page delay dur` | trace events by total time; `SELF=1` main-thread self time |
-| `gates.js page N ms,…`; `cen.js`, `grabcen.js` | active pair gates (waits cumulative); census of matched blocks with a cost model |
+| `gates.js page N ms,…`; `cen.js page ms` | active pair gates (waits cumulative); census of matched blocks with a cost model |
 | `sleepy.js page N [s]` | asleep count every 0.5 s |
 | `sparse.js page N [k\|c]` | drag body k (`c`: nearest the centre) through a sleeping scene for 3 s |
-| `bpcount.js page N ms,…`; `cellcheck.js` | broadphase candidates (sphere, AABB, touching); `CELLS=1` presence check |
-| `sanity3.js`, `smoke.js` | physics sanity; `smoke.js` exits 1 on failure |
-| `stylebench.js page…`; `compframes.js page…` | median style pass of microbenchmark pages; compositor vs main-thread frames |
+| `smoke.js`; `interact.js` | physics sanity, exits 1 on failure; mouse and touch grab on a PLAIN page (prints positions) |
+| `stylebench.js page…` | median style pass of microbenchmark pages (`experiments/costs/`) |
 
 **Ablation:** freeze a PLAIN page, strip gate families with `ablate.py`, compare with `bench.sh`. Removing a family
 changes downstream gates, so deltas overlap. **Frozen bases are inflated:** with every gated block removed a frozen
@@ -53,7 +52,7 @@ Pages: `COUNTS=<n> PLAIN=1 python3 src/build3d.py out/p<n>.html` (tower, half bo
 | 64 (4 boxes) | 172,042 | 2,272 | 67 | 840 | 17.0 MB | 16.1 s |
 | 96 | 683,673 | 4,944 | 99 | 1,256 | 80.2 MB | 63.7 s |
 
-The published site (`tools/make_site.sh`, 8–64, minified) builds in 33 s.
+The deployed site (`python3 src/build3d.py`, 8–64, minified; `../deploy/assemble.sh`) builds in 33 s.
 
 ### perf3.js (tower)
 
@@ -210,7 +209,7 @@ element unless noted, baseline `base0` 0.21 ms):
 | outer present name, inner absent + `style()` (K such rules per pair, 8,128 pairs) | 0.18–0.21 each for K = 4–9 |
 | unregistered `calc(var(--t) * k)` / 4-branch `if()` producing an ident / 12-branch (2,000 props) | 1.40 / 2.62 / 2.66 |
 
-**Feature support in 153** (`part_feat.py`; `make engine-check` covers what the engine depends on): range style
+**Feature support in 153** (`make engine-check` probes what the engine depends on): range style
 queries with literal, `var()` and `calc()` bounds, and ident equality `style(--cell: var(--cell2))` work. `style(--x)`
 on a registered property is true iff the computed value differs from its initial value (`--h: 7` with initial 7 is
 false, `calc(1 - 1)` is false); on an unregistered one iff it is declared at all (`--u: 0` is true).
@@ -221,29 +220,32 @@ ticking 840 timelines costs outside style); one element per body 3.1 ms. R = 840
 5.2–5.7; all moving 10.5–11.4 ms (5–7 fps); per body 7.2–7.3. The no-timeline page is the most inflated by frequency
 scaling. Per-body readback elements don't help.
 
-**Inheritance.** 2,000 inherited registered props set at the top of a 50-deep chain (`mk.py`): 5.50 ms, the same as
-non-inherited. 6,000 declared at level 1 (`mk_inherit2.py`): 7.0, 7.2 and 7.4 ms at 8, 66 and 130 levels deep (12.3 ms
+**Inheritance.** 2,000 inherited registered props set at the top of a 50-deep chain: 5.50 ms, the same as
+non-inherited. 6,000 declared at level 1: 7.0, 7.2 and 7.4 ms at 8, 66 and 130 levels deep (12.3 ms
 at the root). An empty level costs about 11 µs per pass.
 
-**Paused-animation evaluator** (`mk3.py`, 200 elements, `animation-delay: calc(var(--x) * -1s)` paused, 20 props per
+**Paused-animation evaluator** (200 elements, `animation-delay: calc(var(--x) * -1s)` paused, 20 props per
 keyframe set): 30.2 ms with one animation, 57.4 ms with two composited with add, against 6.2–7.2 ms for calc and 4.5
 ms for no props: about 128 µs per element against 9–13 µs. Dead end.
 
-## 3. Variable fonts as compute (`experiments/fonts/`)
+Sections 3–5 and the inheritance, paused-animation and feature-support results above are dead ends; their scripts
+were removed on 2026-10-18 (`git checkout 83d4fde -- css-physics/experiments`).
 
-`vf.py` builds the fonts (axes −16384…16384, so the CSS value equals the F2DOT14 coordinate). `1ch`/`1ic` give exact
-HVAR advances, `1ex`/`1cap` exact MVAR values, bilinear regions included, at style time with no layout (`t1.py`).
+## 3. Variable fonts as compute
 
-Cost (`t2.py`, 2 axes, distinct coordinates per element per frame), 400 elements: calc baseline 5.49 ms; font + `1ch`
+Fonts with axes −16384…16384 (the CSS value equals the F2DOT14 coordinate). `1ch`/`1ic` give exact HVAR advances,
+`1ex`/`1cap` exact MVAR values, bilinear regions included, at style time with no layout.
+
+Cost (2 axes, distinct coordinates per element per frame), 400 elements: calc baseline 5.49 ms; font + `1ch`
 6.52 ms (+2.6 µs per element over calc); font + 4 outputs 7.58 ms (+5.2 µs); fixed coordinates (cached instances)
 5.50 ms; no outputs 2.66 ms + 4.1 ms layout per frame.
 
-Width scaling (`t3.py NA R M tag`: M children each pick a font family and read 4 outputs, each output sums R random
+Width scaling (M children each pick a font family and read 4 outputs, each output sums R random
 regions), per child instance: 8 axes, 4 regions 47 µs; 64 axes, 4 regions 54 µs; 64 axes, 200 regions 106 µs; 256
 axes, 200 regions 398 µs; 64 axes, 2,000 regions 437 µs. *(derived)* About 0.07 µs per region term at 64 axes; cost
 grows with regions × axes.
 
-## 4. Compositor interpolation (`experiments/compositor/`, `tools/compframes.js`)
+## 4. Compositor interpolation
 
 | Page | Style per pass | Main-thread frames/s | Compositor draws/s |
 |---|---|---|---|
@@ -260,15 +262,14 @@ page-global, so CSS can't shield the bodies. A frozen page shows no cost (nothin
 never fires (its pose comes from its own animation); only `.bd` transitions. Pose interpolation is a dead end
 (HISTORY.md).
 
-## 5. Process parallelism (`experiments/iframes/`)
+## 5. Process parallelism
 
-48,000-element child (`mkchild.py` with the count raised; its default 12,000 no longer saturates a process), served
-over HTTP, `procs2.js`: one same-origin iframe 26 passes/s; two same-origin, or two sandboxed, share one process (26
+A 48,000-element child page, served over HTTP: one same-origin iframe 26 passes/s; two same-origin, or two sandboxed, share one process (26
 and 25 total); two cross-site iframes (127.0.0.1 and 127.0.0.2) get **2** processes at 26 passes/s each.
 
 ## 6. Misc
 
-- `ident()` / `var(ident(…))`: unsupported in 153 (`experiments/ident/run.js` prints `--op=-99 --op3=-99`).
+- `ident()` / `var(ident(…))`: unsupported in 153 (`make engine-check`, probe `var-ident`).
 - avar2: Chrome 148+ only.
 - A registered number survives `var()` with **6 significant digits**, which is why the digests pack 6 bodies per
   decimal word.

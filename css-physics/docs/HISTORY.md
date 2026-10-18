@@ -1,8 +1,9 @@
 # History: dead ends and open ideas
 
-**How the design evolved (Oct 2026).** A 2D engine (rigid.css, Oct 9; `archive/README.md`) established state in
+**How the design evolved (Oct 2026).** A 2D engine (rigid.css, Oct 9; in git at `91d73bc:css-physics/archive/rigid2d/`) established state in
 layout read back through view timelines, solver levels as nested elements and `@container style()` gating. The 3D
-port followed (Oct 9–10; `archive/rigid3d-v3/`). One optimization session (Oct 10) produced today's architecture:
+port followed (Oct 9–10; the pre-optimization generator is at `83d4fde:css-physics/archive/rigid3d-v3/gen3d_v3.py`, which
+`GEN=<path> python3 src/build3d.py` still builds). One optimization session (Oct 10) produced today's architecture:
 planes-first rounds, `K/J/JP` accumulators, the soft box patch, owner-named gating, the #LS/#LT split, two registers
 per element, `.ts` scope nests, digests, `SHARE`. Oct 13 tried spatial partitioning; Oct 17 added Firefox. Bugs that
 shipped are CLAUDE.md gotchas, guarded by `tools/smoke.sh`.
@@ -50,7 +51,7 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 
 ### Spatial partitioning (Oct 13)
 
-- **Spatial cells (`CELLS=1`, kept for comparison):** awake bodies mark the 120-unit floor columns and rows in reach as
+- **Spatial cells (`CELLS=1`, removed from `gen3d.py` on 2026-10-18; `83d4fde` has it):** awake bodies mark the 120-unit floor columns and rows in reach as
   digits of decimal words; a sleeper is present (named, touchable, wakeable) only when its column and row are marked;
   a pair's near test becomes a name-only nested rule. Correct but **slower**: one-body drag through 64 sleepers
   22.3–22.5 ms per pass against 16.1–16.3 for the all-pairs digest; 96 bodies with 4 awake about 60 against 35 ms. The
@@ -77,7 +78,7 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 
 ### Alternative compute substrates
 
-- **Variable-font metrics** (`1ch`/`1ic` read HVAR, `1ex`/`1cap` MVAR, exactly, at style time; `experiments/fonts/`):
+- **Variable-font metrics** (`1ch`/`1ic` read HVAR, `1ex`/`1cap` MVAR, exactly, at style time):
   each new set of axis values is a new font instance (47 µs at 8 axes, 106 µs at 64 axes with 200 regions, BENCHMARKS
   §3), 4 outputs, 14-bit inputs. Rigid-body math is branchy and changes every step: a rotation matrix cost about 105 µs
   in a font against 36 µs in CSS (141).

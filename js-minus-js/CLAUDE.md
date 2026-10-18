@@ -44,14 +44,13 @@ SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 
 ```
 compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same step as CSS)  ccpage5.py (compile chain)
-           ccpage4.py (shared helpers)  lib_src.js -> lib.json (runtime library)  rtlib.py (object runtime + GC in ROM)
-           layout.json (the memory map)
+           lib_src.js -> lib.json (runtime library)  rtlib.py (object runtime + GC in ROM)  layout.json (the memory map)
+           mkimage.py (machine images: the page's, or `--ram` with the program in RAM)
 machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py (font)  gen_fvm4.py (page)  memtree.py (RAM)
-           ui_seq.js ui_run.js halttime.js trace.js (browser harnesses)  hbtest.py (font vs model in uharfbuzz)
+           ui_seq.js halttime.js trace.js (browser harnesses)  hbtest.py (font vs model in uharfbuzz)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  level harnesses
-tools/     browser.js page.js (harness helpers)  traps.py  vsz.py  lp.py  mkimg.py
-archive/   results/: raw logs the docs cite. Removed code is in git (archive/README.md).
+tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size)
 ```
 
 ## How to make changes
@@ -62,7 +61,7 @@ archive/   results/: raw logs the docs cite. Removed code is in git (archive/REA
 2. Change `cc_ref.py` until `make l1` passes, then mirror it in `cc_dsl.py` (same state, order of effects, failure
    codes; new state in `parse_state_names()` / `LEX_STATE` and `ref_state()` in `tests/cmp_dsl.py`) until `make l2`
    reports `ALL OK`.
-3. Note `tools/vsz.py` / `tools/lp.py` before and after (now 346 variants, 322 on the page in 188 rules). Every temp,
+3. Note `tools/vsz.py` before and after (now 346 variants, 322 on the page in 188 rules). Every temp,
    every rule (applied or not) and every label port costs on each of 400 token levels.
 4. `make l3`, then `make page && make l5-smoke`, then `make dist`.
 
@@ -71,7 +70,7 @@ archive/   results/: raw logs the docs cite. Removed code is in git (archive/REA
 - SCANI SCAN LDF PUTV NEW SETF ENDK OVER JNEG are defined twice: microcode in `uarch.py` (compiled into the font by
   `cpu4.py`) and in `cc_ref.run()`. Change both together.
 - After changing them or `cpu4.py` / `cpugen.py`, run the font against the model on an object program, not only
-  FizzBuzz: `python3 tools/mkimg.py tests/suite/obj_tree.js img.json && CPUMOD=cpu4 python3 machine/hbtest.py img.json 16 32`
+  FizzBuzz: `python3 compiler/mkimage.py --ram tests/suite/obj_tree.js img.json && CPUMOD=cpu4 python3 machine/hbtest.py img.json 16 32`
   (stops at the first differing shaping). L4 only checks the model against itself.
 - S × subtables per cycle (fvm_build prints them) must stay ≤ 16,384, so ≤ 512 at S = 32. Past that, HarfBuzz drops
   the last lookups without an error and the decoded state reads 0.
@@ -90,8 +89,8 @@ archive/   results/: raw logs the docs cite. Removed code is in git (archive/REA
   ~10.8 s), or interleave with `../shared/js/ab.js` after an A-vs-A run (`.claude/skills/benchmark`).
 - Frame profiles: keep the trace window inside the run, `RUN=1 RUNWAIT=3500 node machine/trace.js page 4`. FizzBuzz
   halts ~10.8 s after Run; a window past HALT shows idle frames and flatters everything.
-- To separate machine costs from the UI's, time a CPU-only page (`gen_fvm4.py` without `UI=1` on a RAM image holding
-  the program; `machine/halttime.js`, which never presses Run): FizzBuzz 6.3 s from load vs 10.8 s after Run on the
+- To separate machine costs from the UI's, time a CPU-only page (`gen_fvm4.py` without `UI=1` on a `mkimage.py --ram`
+  image; `machine/halttime.js`, which never presses Run): FizzBuzz 6.3 s from load vs 10.8 s after Run on the
   page. **Without `UI=1` the page is HTML: name it `.html`.** As `.xhtml` Chrome parses it as XML, there is no `#cpu`,
   and every harness fails on its first read.
 
@@ -118,4 +117,4 @@ archive/   results/: raw logs the docs cite. Removed code is in git (archive/REA
   from specialised variants.
 - Error 99 on the page means no parser variant accepts that token. L3 accepts any nonzero error for `suite_err`.
 - `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines.
-- Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed; `archive/README.md` says how to get it.
+- Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed: `git checkout 91d73bc -- js-minus-js/archive`.

@@ -106,7 +106,7 @@ next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds 
   `style()` (`OWNLEV=1` made a 64-body one-body drag about 20% slower, HISTORY.md); with all awake the form doesn't
   matter. Rules nobody matches are the N² floor: about 3 per pair (narrowphase, solve, alias), 4 ms per pass at 64 in
   a one-body drag, growing like N² × depth.
-- Spatial cells (`CELLS=1`) are a dead end kept for comparison (HISTORY.md; described in `gen3d.py`).
+- Spatial cells were a dead end (HISTORY.md).
 
 ### Sleeping and waking
 
@@ -142,11 +142,11 @@ next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds 
 | Command | Output |
 |---|---|
 | `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine, readable names, a `<!--BODYINFO …-->` comment. **What the test tools expect.** |
-| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). `tools/make_site.sh`: into `site/`, `DEFAULT=24`. |
+| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`). |
 | `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios. |
 
 Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and minified names. Stylesheets over
-`CSS_SPLIT` (14 MB, the artifact host's file limit) split into linked `x-N.k.css` files.
+`CSS_SPLIT` (14 MB; Workers allows 25 MiB per file) split into linked `x-N.k.css` files.
 
 ### gen3d.py knobs (environment)
 
@@ -160,7 +160,6 @@ Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and 
 | `PATCHB` | corners | box/box: corners (clipped) \| soft (experimental, jitters) |
 | `PATCHC` | 1.0 | patch weighting constant |
 | `SCENE`, `SCENE_LIST` | tower | first scene and the list (tower, rain, stack; also calm, pair, field) |
-| `CELLS`, `CELL` | 0, 120 | spatial cells (dead end; 1 builds it for comparison) |
 | `BOOLQ` | 0 | gate 0/1 flags with `style(--flag)` (Chrome only) |
 | `HYPOT1`, `FFQ` | 1, 1 | Firefox: `1 * hypot(…)`; Firefox-only names and #LM re-match clock (§6) |
 | `OWNLEV` | 999 | owner-named rules only at levels ≤ this |

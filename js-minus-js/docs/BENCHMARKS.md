@@ -8,7 +8,6 @@ will differ. A-vs-A noise (`../shared/js/ab.js`, fresh browser per run): the rea
 steady to ±0.5% (10.79 s median, 8 runs); a CPU-only page's load → HALT to ±2%, with an occasional +15% outlier
 (6.33 s median, 12 runs), so take a median of at least three. Compare only runs made back to back on one machine.
 "Before" is the page before the PRINT family (`dist/` of `9319bc0`). *(derived)* marks values computed from logs.
-"Self-compile" means `tests/programs/jsc_self.json` (the self-hosted jsc compiling FizzBuzz on the CPU).
 
 ## Headline numbers
 
@@ -20,7 +19,7 @@ steady to ±0.5% (10.79 s median, 8 runs); a CPU-only page's load → HALT to ±
 | Font CPU on the page, L5 fit | 63 steps/s (15.8 ms per step) | §5b |
 | One CPU frame (mid-run trace) | 3 passes: 124 ms style+layout, 43 ms shaping, 148 ms frame | §6 |
 | CSS compiler alone (L3, no readback) | median 380 ms per program; ≈ 189 ms + 7.6 ms per code word | §4 |
-| HarfBuzz alone (uharfbuzz) | FizzBuzz 20.6 ms per shaping (N16 S32); self-compile 9.55 ms (N16 S16) | §3 |
+| HarfBuzz alone (uharfbuzz) | FizzBuzz 20.6 ms per shaping (N16 S32) | §3 |
 | Editor readback sweep | 1.12–1.21 s, 0 misses | §7 |
 | Objects, FizzBuzz against the page before them | Run → HALT ×1.006, Run → compiled ×1.045, HarfBuzz ×1.015 per shaping | §10 |
 
@@ -53,7 +52,7 @@ data partition 4,368–4,713. S is capped by S × subtables ≤ 16,384; HarfBuzz
 
 ## 2. The CSS compiler's size
 
-`tools/vsz.py`, `tools/lp.py`, the `make page` build line. The first three rows include objects (§10); the rest were
+`tools/vsz.py` and the `make page` build line. The first three rows include objects (§10); the rest were
 measured just before them.
 
 | Measure | Value |
@@ -69,8 +68,8 @@ measured just before them.
 
 ## 3. HarfBuzz alone (uharfbuzz 0.56.3, no browser)
 
-`machine/hbtest.py` shapes the real cpu4 font and checks every shaping against `uarch4`. RAM images built as
-`tests/suite_machine.py` builds them.
+`machine/hbtest.py` shapes the real cpu4 font and checks every shaping against `uarch4`. Images from
+`compiler/mkimage.py --ram prog.js img.json`.
 
 | Workload | N, S | Shapings | Steps | HarfBuzz ms per shaping |
 |---|---|---|---|---|
@@ -78,10 +77,8 @@ measured just before them.
 | `bubble_sort_print` | 16, 32 | 167 | 901 | 20.48 |
 | `array_sort` | 16, 32 | 77 | 635 | 21.07 |
 | `str_table` | 16, 32 | 40 | 168 | 20.37 |
-| Self-compile | 16, 16 | 158,800+ | 636,754+ | 9.55 |
 
-All halted with correct output except the self-compile image, which predates the 16K memory map and never halts on
-the current CPU (every shaping still matches the model, so its time measures the N16 S16 font). *(derived)* FizzBuzz:
+All halted with correct output. *(derived)* FizzBuzz:
 4.6 steps per shaping, 2.1 s of HarfBuzz.
 
 ## 4. The CSS compiler in Chrome
@@ -92,9 +89,9 @@ the current CPU (every shaping still matches the model, so its time measures the
 checked against `cc_ref`. 104/104 pass (90 valid, 14 error programs). Valid: min 229 / median 380 / max 1,488 ms
 (`else_if_long`, 137 words); ms ≈ 189 + 7.6 × words (r = 0.90) *(derived)*. FizzBuzz 580 ms. Errors: 187–522 ms.
 
-### 4b. The typed-input chain with fake latch cells
+### 4b. (removed)
 
-`tests/ui_test.py` + `tests/uitest.js`, FizzBuzz: done 600–642 ms after Run (recalc 558–599 ms).
+The fake-latch chain harness duplicated L3 (§4a), which times the same chain per program; removed 2026-10-18.
 
 ### 4c. Language features: block scope, `const`, `do … while`, `?:` (2026-10-17)
 

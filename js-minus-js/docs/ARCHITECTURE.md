@@ -246,7 +246,7 @@ HP and GCLIM start at 0, so the first NEW sets up the heap.
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
 
 - `make test` = oracle, L1, L2, L4. `tests/suite/` has 109 programs, `tests/suite_err/` 31; `tests/programs/` has
-  the demos t1–t4, e1–e2 and `jsc_self.json` (the self-compile image).
+  the demos t1–t4.
 - L5 runs only programs under 1,500 steps (`tests/suite_ui.py`). Harnesses detect HALT by the page's `--isHALT`
   flag, not a trap-kind index (that moves when opcodes are added).
 - `machine/hbtest.py` runs the real font in uharfbuzz against the model: the only check that the font agrees (L4
