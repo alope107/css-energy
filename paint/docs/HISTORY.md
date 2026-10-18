@@ -72,6 +72,29 @@ Chromium 153, 480 cells written):
 - Results: local HTTP/2 `--goaway 10000`, 11 loads: 0–32 cells lost per first pass, all 480 right after the retry.
   Workers preview, 5 loads: 0–32 lost, all right after the retry, ~30 s per load.
 
+## 7. Staged reads: built, tested, not adopted (2026-10-18)
+
+An `<img>` probe (no `alt`) is 0×0 while pending, Chrome's 16×16 broken-image box once it fails, and its decoded size
+on a hit (`../survey/PRIMITIVES.md`, finding 6), so CSS can see a probe finish. The read became staged: colour 1 (the
+default brush) first, the other 15 only on a miss, a retry per cell as soon as its 16 probes all missed. It passed `make
+test` and `make test-goaway` (and `GOAWAY=2000`, 5 of 5 loads); the design is kept as a patch,
+`../survey/exp/patches/paint-staged-reads.patch` (`build.py`, `tools/goaway.js`, `docs/ARCHITECTURE.md`, against
+`59187f4`; the labelled `build.py` since needs it re-applied by hand).
+
+- **`<img>` fetches under `display: none`**: the first build sent all three stages for every cell (15,360 probes).
+  `loading=lazy` holds a hidden stage back.
+- **A lost request can hang, not fail**: under `serve.js --goaway 2000`, 30–60 cells per load had stage-2 probes sent
+  but never answered nor failed, their `<img>` pending for good, so completion never came and nothing retried. The
+  two-sentinel trigger came back as a second path: any cell unread some seconds after the second sentinel.
+- **The sentinel no longer queues behind every probe**: stage 2 is requested as stage 1 answers, partly after the
+  sentinel. At 3 s, `goaway.js` loads re-read 200–260 cells whose stage 2 was still in flight (3,000–4,000 needless
+  probes); at 8 s, only the lost cells (16 probes each).
+- **Result**: fewer requests where cells hold colour 1 (7,690 vs 10,240 probes with a third of the cells colour 1; about
+  6% fewer on a random canvas), never more; but one more round trip for every other cell and a later retry for hung
+  probes: on `goaway.js`'s random canvas, loads took 26–33 s against 20–25 s. A cell never written still pays 32.
+- **Not adopted**: for this canvas, fewer requests don't pay for slower loads. It may when js-minus-js persists memory
+  here (a save area read once at boot: many cells, a likely value per cell), so the patch stays.
+
 ## Open questions and ideas not tried
 
 - **Fewer requests per load** would make the connection limit fall in fewer loads: the cell pages' own writes on
