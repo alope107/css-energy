@@ -104,6 +104,25 @@ The goal: run in Firefox with tweaks that don't cost Chrome. Firefox 158 (releas
 6. The grab overlay jumped around in Firefox (found by the user): its unregistered `--u` resolved `100cqw` against #LM, the re-match clock's size container, and its percentages followed #LM's box. `--u` registered, #LW back to the arena's size, `tools/overlaycheck.js` in `smoke.sh`. Moving the clock into #LM's padding kept the box still but stopped the re-match (the tower fell through itself again).
 ARCHITECTURE.md §6 has the result. The full smoke suite passes in both browsers.
 
+## Phase 6: touch, Oct 18
+
+The goal: on a phone, touch a body and drag it, and let go to drop it. Before, touch went through a scrollable layer
+3× the arena's size: tap a body to pick it up (the tap set `:hover` on a cell of the layer), drag anywhere (the layer
+scrolled, and a marker on the tapped cell moved with it), tap again to drop. Two taps per drag, and Chrome's axis lock
+turned most diagonal drags into horizontal or vertical ones.
+
+1. **Testing.** CDP touch events (`Input.dispatchTouchEvent`) go through Chromium's gesture recognizer, so touch slop,
+   scroll latching, axis locking and flings behave as on a phone. They don't produce the timer gestures (show-press,
+   long-press): a held finger never sets `:hover`/`:active` here, where a phone sets both after 100–150 ms. Whether a
+   behaviour comes from the recognizer or Blink was read in the Chromium source (`ui/events/gesture_detection`,
+   `GestureManager::GetHitTypeForGestureType`). `tools/touchcheck.js` drives the page; `engine/check.js` has the three
+   Chrome facts the result depends on. An Android emulator can't run accelerated here (no `/dev/kvm`).
+2. **No state lasts through a drag**, so the press had to be read from scrolling: per-body scroller handles (the
+   gesture latches to the one under the finger, which also works for a drag that starts at once, with no `:hover`),
+   and a follower scroller whose layout re-snap Chrome defers until the gesture ends (the "finger down" bit).
+   ARCHITECTURE.md "Touch".
+3. **`scroll-axis-lock: none`** (stable in Chromium 153) turns the axis lock off.
+
 ---
 
 ## Regressions found by the user (2026-10-14), now covered by `tools/smoke.sh`
@@ -166,6 +185,26 @@ Each entry gives what was tried, what happened, and why.
 - **Container names from rules on a wrapper `#LN` between #L0 and #L1** (`@container style(--ac{i}: 1){#LN{--A{i}:b{i}}}`, the same for `nb`), portable instead of `if()`. Correct, but #L1's rules then read their gates on #LN, so every gate declared on #L0 had to become inherited (the "minimal inheritance" pass had made them non-inherited: a rule reads its parent), N² near flags among them. Chrome, frozen 48-body pile: +6% (+11% with `BOOLQ=0`). Replaced by a Firefox-only block naming every body; Firefox's frame rate was the same either way (it re-matches everything each frame anyway).
 - **Shrinking boxes 2–4% in Firefox** so that resting faces stop intersecting: Firefox still drew a resting box over the one above it. Its 3D compositing orders whole bodies by document order even with every face in one preserve-3d context (headless, software WebRender).
 - **A second step per frame in Firefox:** not found. It samples view timelines once per refresh tick; the re-match restyle after layout recomputes the same step.
+
+### Touch (Phase 6, 2026-10-18)
+
+- **`:active` or `:hover` as the press.** Blink sets both for touch on the show-press gesture and clears `:active` on
+  the tap-cancel the recognizer sends when the finger moves past the slop; `:hover` stays where the press was. A
+  quick drag (moving within 100–150 ms) gets neither. The old design's "tap again to drop" came from this.
+- **A range slider's `:active`.** Blink's slider handles touch moves itself and never sets `:active` on the thumb for
+  touch (`SliderContainerElement::HandleTouchEvent`); it would be one axis anyway.
+- **`scroll-state(snapped)` as the press.** It follows the would-snap target during the gesture (the `snapchanging`
+  timing), so it flips mid-drag; it can't tell a still finger from a lifted one.
+- **The dragged scroller snapping itself back.** Chrome's snap at the end of a gesture is animated (200 ms for 100 px,
+  500 ms after a fling) and is part of the gesture: the follower stayed frozen and the body was pulled back along
+  the drag. Hence the oversized area that follows the offset while held, and the layout re-snap afterwards.
+- **A held-time snap area exactly at the offset** (instead of one 80 units bigger): at release the area was a frame
+  behind, and Chrome animated a sub-pixel snap for 250 ms before ending the gesture.
+- **A grid of small scrollers as touch tiles** (the latched tile gives where the finger came down): bodies are
+  20–40 px across on a phone, so a tile must be about 8 px for a reliable pick, over 1,000 scrollers. Per-body
+  handles identify the body exactly with N.
+- **The touch-down point inside the handle** (to grab off-centre and swing boxes, as the mouse can): nothing gives
+  it on a quick drag. Touch grabs the centre.
 
 ### Alternative compute substrates (Phase 3)
 

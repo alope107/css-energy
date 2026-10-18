@@ -41,11 +41,15 @@ Read alongside `src/gen3d.py`. Its module docstring and section comments (`# ---
 
 ### Why the wrapper stack looks the way it does
 
-`.ptr > .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
+`.ptr > #TS > #TI > (#FO) + .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
 
 - **`.ptr`** holds the pointer (`--sx/--sy` from a view timeline on a hover-anchored marker) and the camera yaw.
-- **`#RB`** gates the pointer by `--att`: it is only nonzero while grabbing.
-- **`.rz`** zeroes `--sx/--sy/--yaw`, so hovering doesn't restyle `#LS`.
+- **`#TS`, `#TI`, `#FO`** are the touch input (touch screens only, see "Touch" below): `#TS` scopes the handles'
+  timelines, `#TI` turns them into the drag `--tdx/--tdy`, the dragged body `--tgi` and `--att`, and `#FO` is the
+  follower that says whether a finger is down. They sit above the `.ts` wrappers so that a register's timeline lookup
+  finds its name before it reaches `#TS`'s list. `.view` zeroes the drag, so a drag doesn't restyle the scene.
+- **`#RB`** gates the pointer (and the drag) by `--att`: it is only nonzero while grabbing.
+- **`.rz`** zeroes `--sx/--sy/--yaw` (and `--tdx/--tdy/--tgi`), so hovering doesn't restyle `#LS`.
 - **`#LS`** reads the state registers. In a fully sleeping scene nothing in it changes, so it isn't restyled.
 - **`#LT`** sits inside `#LS` and changes every pass because of the clock. Everything it passes down is either non-inherited or derived only from state, so the solver levels are not restyled while the scene sleeps. This took idle style cost from 13.6 to about 1.0 ms per frame at 32 bodies.
 - **#LM and #LW** are two plain wrappers between #LT and L0; they keep L0 out of #LT's every-pass child restyle unless L0's inputs really changed. With `CELLS=1` (an evaluated dead end, see below) they hold the spatial cells: #LM the cell marks of awake bodies and the cell of each sleeper, #LW the summed words, the sleepers' presence and the container names that #L0's own rules then query.
@@ -125,7 +129,48 @@ The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't 
 - **Picking.** On the first pass of a press, a ray from the camera is unprojected through the CSS camera transform (constants `PERSP`, `TILT`, `CAM_TY`, `CAM_DIST` must match `.cam` in `ui3d.css`) and cast against every sphere and box slab. The hit is latched into registers: `GI` (body index + 1, or N+1 for a miss), `GT` and `GO*`.
 - **Holding** reads only the held body's state, through blocks gated on `GIr = i+1`. A spring-damper pulls the grab point toward the ray point at the latched depth.
 - **Mouse pointer.** A hover grid of cells gets `anchor-name` on `:hover`. A zero-size marker is anchored to the hovered cell and has a view timeline, which turns its position into `--sx/--sy`.
-- **Touch.** Tap a body to pick it up; the point comes from the hovered cell of a grid 3× the arena's size. Dragging scrolls that layer, and the marker inside it moves with the finger. Tap again to drop.
+- **Touch** (`@media (pointer: coarse)`, `--tm: 1`): touch a body and drag it; let go to drop it. The next section.
+
+### Touch
+
+A finger drag gives CSS almost nothing. Chrome sets `:hover` and `:active` from gestures, not from touch points: both
+arrive with the show-press gesture (after the finger has rested about 100–150 ms), `:active` is cleared as soon as the
+finger moves past the touch slop (the gesture recognizer sends a tap-cancel when scrolling starts), and `:hover` never
+follows the finger. A quick drag gets neither. What does follow a finger is a scroll, and which scroller scrolls says
+where the finger came down. So:
+
+- **Handles.** Each body carries a handle (`.hd`, `#h<i>`): a disc of radius bounding radius + 14 at its centre, in
+  its wrapper `#w<i>` (so it moves with the body but doesn't turn with it), facing the camera like the spheres'
+  highlight disc. It is a scroller with a 6000-unit square of content and starts at its rest offset (3000, 3000).
+  The gesture latches to the handle under the finger, so a quick drag works as well as a slow one, and the scroll
+  offset follows the finger exactly. Chrome maps a touch movement onto a transformed scroller's plane: the offset
+  moves in the handle's own units, which are world units on the camera-facing plane through the body (the
+  `touch-3d-scroll` fact in `engine/`). `scroll-axis-lock: none` stops Chrome from locking a drag that starts nearly
+  horizontal or vertical to that axis (`scroll-axis-lock`), and `overscroll-behavior: contain` stops a drag from
+  scrolling the page. Everything else is `pointer-events: none`, so a drag that starts beside every body scrolls the
+  page as usual.
+- **The drag.** `#TI` has one additive animation per handle and axis, on that handle's scroll timeline. Only the
+  dragged handle is off its rest offset, so the sums are its drag, `--tdx/--tdy` (world units, along the screen's x
+  and y), and, through step keyframes that are 0 within 0.6 units of rest, the dragged body's index + 1, `--tgi`.
+- **Is a finger down?** Nothing says so directly. The follower `#FO` is a small scroll-snap container whose one snap
+  area is placed at the drag sums, so it re-snaps to them after every layout. But Chrome defers a layout re-snap
+  while a scroll gesture is active anywhere on the page (`LocalFrameView::ShouldDeferLayoutSnap`, the
+  `touch-snap-defer` fact), and does it in the frame the gesture ends. So `#FO` stands still while a finger drags and
+  catches up when it lifts: `--held` is "the follower lags the sums", and `--att = held × sign(tgi)`.
+- **Back to rest.** While held, a handle's snap area is an oversized area (`u`, 80 units bigger than the handle) that
+  follows its scroll offset: any offset within 40 units of the current one is a valid snap position, so lifting the
+  finger snaps nothing and the gesture ends at once, and a fling stops within 40 units. When `--held` drops, that
+  area goes and the rest area (`i`) comes back; that is a layout change, so the handle re-snaps to rest at once.
+  (Chrome's own snap at the end of a gesture is animated and counts as part of the gesture, so a handle that simply
+  snapped back would keep the body held, and pull it back, for 200–500 ms.) For a frame the handle can be back at
+  rest while `#FO` still lags: `--tgi` is then 0, so `--att` stays 0.
+- **The engine.** In touch mode the first pass of a press (`--tpk` instead of `--pick`) latches `GI = tgi` and, in
+  the `GO` registers, the body's centre in world coordinates; no ray is cast. Holding (`--tho`) pulls the centre
+  (`grr = 0`) toward `GO + tdx · ex + tdy · ey`, where `ex`, `ey` are the screen's x and y on the camera-facing plane
+  (the ray's derivatives, for the current yaw). The overlay's pointer end is that target projected to the screen.
+- **Timing.** In Chromium (`tools/touchcheck.js`) the body is held from the first scroll update and dropped 16–50 ms
+  after the finger lifts; it trails the finger by the touch slop (the first scroll update leaves it out: 15 px in
+  desktop Chromium, about 8 dp on Android).
 
 ---
 
@@ -218,4 +263,4 @@ Three of these are unreported Firefox bugs, with minimal reproductions in `../..
 **Left as they are:**
 - **One step per frame.** Firefox samples view timelines once per refresh tick; Chrome re-samples stale timelines after layout and runs a second pass. So Firefox runs 60 steps per second on a 60 Hz display against `RATE` 90: the simulation runs at about half speed under load (free fall: 0.44–0.59 sim seconds per second, Chrome 0.91). Frame rates are close to Chrome's.
 - **3D sorting across bodies.** Even with all faces in one preserve-3d context, Firefox (headless, software WebRender) composites whole bodies in document order: a box resting on another can draw behind it, and a sphere's rings draw in full over its disc (Chrome hides their back halves).
-- **Touch** (`scroll-initial-target` is unsupported) is untested.
+- **Touch** is untested, and probably grabs nothing: it depends on Chrome deferring layout re-snaps during a scroll gesture (`#FO`), which Firefox has no reason to do.

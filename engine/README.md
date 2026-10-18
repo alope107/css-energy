@@ -31,10 +31,14 @@ change in Chrome flips a reading.
 | `html-nesting-512` | The HTML parser stops nesting at 512 elements (600 nested divs: the innermost sits at depth 513); XHTML nests as deep as the markup. | js-minus-js: pages are XHTML (ENGINE_NOTES 19) |
 | `font-resets-fvs` | The `font` shorthand resets `font-variation-settings` declared before it. | both (css-physics CLAUDE.md, js-minus-js ENGINE_NOTES 8) |
 | `play-state-base` | `animation-play-state` computed from an element's own animated custom property doesn't pause its animations: Blink reads it from the base style. | js-minus-js: the compiler's sources keep running (ENGINE_NOTES 9). The original probe was lost; this is the literal reading. |
+| `touch-snap-defer` | A scroll-snap container re-snaps after a layout change at once, but not while a scroll gesture is active anywhere on the page: then in the frame it ends (`LocalFrameView::ShouldDeferLayoutSnap`). | css-physics touch: the follower `#FO` says whether a finger is down (ARCHITECTURE.md "Touch") |
+| `scroll-axis-lock` | `scroll-axis-lock: none` stops a touch drag that starts nearly horizontal from being locked to that axis (the default is). | css-physics touch handles |
+| `touch-3d-scroll` | A touch drag scrolls a 3D-transformed scroller by the finger's movement unprojected onto its plane: offset = screen movement / on-screen scale. | css-physics touch handles: the drag in world units |
 | `var-ident` (watch) | `var(ident("--m" var(--k)))`, dynamic property names, is not supported. If it ships, both projects gain dynamic indexing. | css-physics `experiments/ident` |
 
 Results on Chromium 153.0.8010.12 (devcontainer), 2026-10-14: every fact PASS under both profiles, and `var-ident`
-is still unsupported.
+is still unsupported. The touch facts (2026-10-18, same Chromium) pass under both. They drive real gestures: CDP touch
+events on a touch-emulated phone viewport go through Chromium's gesture recognizer.
 
 Observed while writing `var-6-digits`, and not a fact either project relies on yet: a plain `--y: var(--x)` from a
 calc()-computed registered `<integer>` of 10⁶ or more into another `<integer>` is invalid at computed-value time. Its

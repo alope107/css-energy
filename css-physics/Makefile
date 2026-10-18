@@ -14,7 +14,7 @@ SCENES  := tower rain stack
 JS      := $(wildcard tools/lib/*.js $(SHARED)/js/*.js)
 # what the pages and checks depend on outside the repo, and the environment variables their scripts read
 P  := $(O)/smoke_$(N).$(call id,$(O)/gen,-,$(wildcard src/*.py))
-C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter firefox,$(BR)),firefox,physics),tools/smoke.js tools/floatcheck.js tools/overlaycheck.js tools/grabtest.js $(JS))
+C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter firefox,$(BR)),firefox,physics),tools/smoke.js tools/floatcheck.js tools/overlaycheck.js tools/grabtest.js tools/touchcheck.js $(JS))
 HARNESS := $(JS) $(RERUN_IF)
 
 $(P)_%.html: $(wildcard src/*)
@@ -31,9 +31,13 @@ $(P).overlay.$(C).log: $(P)_tower.html tools/overlaycheck.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/overlaycheck.js $<
 $(P).grab.$(C).log: $(P)_field.html tools/grabtest.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/grabtest.js $<
+# (touch gestures go through Chromium's gesture recognizer over CDP: Chromium only)
+$(P).touch.$(C).log: $(P)_tower.html tools/touchcheck.js $(HARNESS)
+	@$(LOGGED) $@ -- node tools/touchcheck.js $<
 statcheck: $(SCENES:%=$(P)_%.html)                # static and quick: always runs
 	@rc=0; for f in $^; do python3 tools/statcheck.py $$f || rc=1; done; exit $$rc
 
-CHECKS := $(SCENES:%=$(P)_%.smoke-$(MS).$(C).log) $(P).float.$(C).log $(P).overlay.$(C).log $(P).grab.$(C).log
+CHECKS := $(SCENES:%=$(P)_%.smoke-$(MS).$(C).log) $(P).float.$(C).log $(P).overlay.$(C).log $(P).grab.$(C).log \
+          $(if $(filter firefox,$(BR)),,$(P).touch.$(C).log)
 smoke: $(CHECKS) statcheck
 	$(call report,$(CHECKS),20)

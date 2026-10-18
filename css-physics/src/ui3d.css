@@ -36,7 +36,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);
   font:15px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-#app{max-width:1000px;margin:0 auto;padding:20px 16px 40px;timeline-scope:--pmx,--pmy,--tmx,--tmy}
+#app{max-width:1000px;margin:0 auto;padding:20px 16px 40px;timeline-scope:--pmx,--pmy}
 header h1{font-size:28px;margin:0 0 4px;letter-spacing:-.02em}
 header h1 span{color:var(--acc)}
 header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
@@ -123,9 +123,8 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 .gr>b{flex:1;display:flex;flex-direction:column;contain:layout size style}
 .gr>b>i{flex:1;display:block}
 .gr>b>i:hover{anchor-name:--hov}
-.pm,.tpm{position:absolute;width:0;height:0;pointer-events:none;left:anchor(center,50%);top:anchor(center,50%)}
-.pm{position-anchor:--hov;view-timeline:--pmx x,--pmy y}
-.tpm{position-anchor:--thov;view-timeline:--tmx x,--tmy y}
+.pm{position:absolute;width:0;height:0;pointer-events:none;left:anchor(center,50%);top:anchor(center,50%);
+  position-anchor:--hov;view-timeline:--pmx x,--pmy y}
 
 .ctl{display:flex;flex-wrap:wrap;gap:12px 24px;margin:14px 0 6px}
 .grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
@@ -167,38 +166,36 @@ footer code{color:var(--ink)}
 #app:has(#reset:active),#app:has(.scenes label:active){--rst:1}
 #app:has(#shake:active){--kick:1}
 
-/* touch: Chrome drops :active as soon as a finger starts moving and doesn't move :hover with it,
-   so a finger drag can't be watched the way a mouse drag is. A tap does toggle a checkbox and set
-   :hover, and a scroll follows the finger exactly and can be read with a scroll timeline. So on
-   touch screens: tap a body to pick it up (the tap point comes from the hovered cell of a grid
-   3x the arena's size), drag anywhere to move it (the grid scrolls with the finger, so the held
-   point = that cell minus the scroll offset), tap again to drop it. */
-.tl{position:absolute;inset:0;display:none;overflow:hidden;overscroll-behavior:contain;scrollbar-width:none;
-  scroll-snap-type:both mandatory}
-.tl::-webkit-scrollbar{display:none}
-.tg{display:flex;position:relative;width:300%;height:300%;touch-action:manipulation;user-select:none;-webkit-user-select:none;
-  -webkit-tap-highlight-color:transparent;cursor:pointer}
-.tg>b{flex:1;display:flex;flex-direction:column;contain:layout size style}
-.tg>b>i{flex:1;display:block}
-.tg>b>i:hover{anchor-name:--thov}
-.tg .tmid{position:absolute;left:33.3333%;top:33.3333%;width:33.3333%;height:33.3333%;pointer-events:none;
-  scroll-snap-align:center;scroll-initial-target:nearest}
-#app:has(#tgrab:checked) .tl{overflow:scroll;scroll-snap-type:none}
+/* touch (ARCHITECTURE.md "Touch"): Chrome gives a finger drag no :active or :hover state, but a scroll follows the
+   finger. Each body carries a handle, a camera-facing disc that scrolls in both axes (scroll-axis-lock: none, so a
+   drag isn't locked to one axis); the engine reads the dragged handle's offset from its rest offset as the drag, and
+   which handle moved as the body. Its rest offset is a snap area (i); while held it snaps to an area around wherever
+   it is (u: no snap motion when the finger lifts, a fling stops within 40 units), and when the gesture ends it jumps
+   back to rest, as a layout re-snap, which Chrome does at once. The follower #FO gives --held (the engine CSS). */
+.bw>.hd,.fo{display:none}
+.fo{position:absolute;left:0;top:0;width:10px;height:10px;overflow:hidden;scroll-snap-type:both mandatory;visibility:hidden;pointer-events:none}
+.fo>i{display:block;position:relative}
+.fo>i>b{position:absolute;width:10px;height:10px;scroll-snap-align:start}
 .hint .t{display:none}
-/* touch: Chrome drops :active as soon as a finger starts moving and doesn't move :hover with it, so
-   a finger drag can't be watched like a mouse drag. A tap does toggle a checkbox and set :hover, and
-   a scroll follows the finger exactly. So: tap a body to pick it up, drag anywhere to move it (the
-   layer 3x the arena's size scrolls with the finger, and the marker on the tapped cell moves with it;
-   its view timeline in the layer's viewport is the on-screen point), tap again to drop it. */
 @media (pointer:coarse){
+  #app{--tm:1}
   .gr{display:none}
-  .tl{display:block}
-  .ptr{animation-timeline:--tmx,--tmy}
-  #app:has(#v-o:checked) .ptr{animation-timeline:auto,--tmx,--tmy}
-  #app:has(#tgrab:checked){--att:1}
+  .bw>.hd{display:block;width:calc(var(--hr) * 2px);height:calc(var(--hr) * 2px);margin:calc(var(--hr) * -1px) 0 0 calc(var(--hr) * -1px);
+    border-radius:50%;overflow:scroll;scrollbar-width:none;scroll-snap-type:both mandatory;overscroll-behavior:contain;
+    scroll-axis-lock:none;touch-action:pan-x pan-y;pointer-events:auto;user-select:none;-webkit-user-select:none;
+    -webkit-tap-highlight-color:transparent;transform-style:flat;
+    transform:rotateY(calc(var(--yaw) * -1rad)) rotateX(calc(__TILT__deg * -1))}
+  .hd::-webkit-scrollbar{display:none}
+  .hd>b{display:block;position:relative;width:calc(6000px + var(--hr) * 2px);height:calc(6000px + var(--hr) * 2px)}
+  .hd>b>i{position:absolute;left:3000px;top:3000px;width:calc(var(--hr) * 2px);height:calc(var(--hr) * 2px);scroll-snap-align:start}
+  .hd>b>u{position:absolute;left:0;top:0;width:calc(var(--hr) * 2px + 80px);height:calc(var(--hr) * 2px + 80px);
+    animation:hdl linear both,hdt linear both;animation-timeline:scroll(nearest x),scroll(nearest y)}
+  @container style(--held: 1){.hd>b>u{scroll-snap-align:start}.hd>b>i{scroll-snap-align:none}}
   .hint .m{display:none}
   .hint .t{display:inline}
 }
+@keyframes hdl{from{left:-40px}to{left:5960px}}
+@keyframes hdt{from{top:-40px}to{top:5960px}}
 @media not (pointer:coarse){
   #app:has(.gr:active){--att:1}
 }
