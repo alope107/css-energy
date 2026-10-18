@@ -1,175 +1,48 @@
 # css-physics, js-minus-js and paint: techniques compared
 
-css-physics and js-minus-js compute inside Chrome's rendering pipeline with no script on the page. css-physics
-(rigid3d.css) runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js
-compiles JavaScript with CSS and executes the bytecode in a GSUB "CPU" font while Chrome shapes a line of text.
-This report lists what they share, where they differ, and which techniques could move from one to the other.
-Numbers are from each project's `docs/BENCHMARKS.md` (Chromium 153, the same devcontainer; css-energy's numbers were
-re-measured on the Ubuntu mini PC on 2026-10-17) unless marked *(estimate)*.
+css-physics runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js
+compiles JavaScript with CSS and runs the bytecode in a GSUB "CPU" font while Chrome shapes text. paint stores state
+in Chrome's compression-dictionary store. Numbers are from each project's `docs/BENCHMARKS.md`.
 
-paint, the third project, stores state instead of computing it. Most of this report compares the first two;
-[paint](#paint) at the end lists where it overlaps with them.
-
-## What both rely on
-
-The two projects found many of the same engine facts independently. Most of these are already written down in
-both `CLAUDE.md`/`AGENTS.md` files.
+## What css-physics and js-minus-js share
 
 | Technique | css-physics | js-minus-js |
 |---|---|---|
-| State survives frames in layout, read back by view timelines | 13 registers per body, two per element (`top` and `left`) in a 10⁶ px scroller | CPU registers as view-timeline subjects; RAM as remembered sizes |
+| State kept in layout, read back by view timelines | 13 registers per body, `top`/`left` in a 10⁶ px scroller | CPU registers as view-timeline subjects; RAM as remembered sizes |
 | Two useful passes per frame | 2 physics steps per frame | at most 2 shapings per frame; a third issue runs on stale state |
-| 6 significant digits through `var()` | 6 bodies per decimal word in the wake digests | 20-bit machine words kept signed, \|v\| < 2¹⁹ |
-| Few registered properties, names reused | `SHARE`: level-local props share names | pooled temp names `qp<i>` (13k → 2.6k) |
-| Parity copies avoid self-reference | `J0/J1` accumulators aliased to `K` in the next element | `--p-<name>-A/B` parser state |
-| Per-frame drivers are non-inherited | clock on `#LT`, pointer zeroed by `.rz` | wall clock on `#clk`, `inherits: false` drivers |
-| Deep nested chains as the program | one element per Gauss–Seidel round (67 at 64 bodies) | one element per character (1,561) and per token (400) |
+| 6 significant digits through `var()` | 6 bodies per decimal digest word | 20-bit words kept signed, \|v\| < 2¹⁹ |
+| Few registered properties, names reused | `SHARE`: level-local props share names | pooled temp names `qp<i>` |
+| Parity copies avoid self-reference | `J`/`K` accumulators | `--p-<name>-A/B` parser state |
+| Per-frame drivers are non-inherited | clock on `#LT`, pointer zeroed by `.rz` | wall clock on `#clk` |
+| Deep nested chains as the program | one element per Gauss–Seidel round | one element per character and per token |
 | Data-dependent work selected by `@container` | gates per body, pair and plane | one parser variant per (mode, token) |
-| Integer fields packed into one number | decimal digit words | control-stack entries `kind × 4096 + a × 64 + b` |
 
-## Where they differ
+They differ in shape: css-physics bakes the topology into the stylesheet (rules per pair, N² growth) and does all
+math in `calc()`; js-minus-js runs a fixed generic step selected by data and does its arithmetic in HarfBuzz.
+css-physics is style-bound and works hard to make idle scenes free; js-minus-js only needs to be fast while running.
 
-- **Shape of the work.** css-physics bakes the topology into the stylesheet: every pair of bodies has its own
-  rules, so cost and size grow with N². js-minus-js runs a generic step on every level and picks a specialised
-  variant by data, so its CSS is fixed and its depth grows with the input.
-- **Where the arithmetic happens.** css-physics does all math in `calc()`. js-minus-js moved execution into
-  HarfBuzz, where one shaping runs 32 micro-cycles, and keeps CSS for compiling and servicing traps.
-- **What a frame costs.** css-physics is style-bound: 50–100 ms per pass at 48–64 awake bodies, almost all
-  `UpdateLayoutTree`. js-minus-js is split: about 17 ms of shaping, 5 ms restyling `#cpu`, and layout that
-  includes restyles of size containers.
-- **Idle cost.** css-physics works hard to make a sleeping scene free (about 1 ms per pass). js-minus-js only
-  needs to be fast while running.
-- **Testing.** js-minus-js has five test levels, including a Python twin of the CSS compiler (`cc_dsl.py`) that
-  must match the reference word for word. css-physics has a pass/fail smoke test and sanity checks in Chrome.
+## Open ideas across projects
 
-## From js-minus-js, useful in css-physics
-
-1. **A Python twin of the generated CSS (highest value).** js-minus-js writes each step once in a DSL that
-   evaluates in Python and compiles to CSS, and level 2 checks the two agree. css-physics already holds every
-   declaration as `(level, gate, name, expr)` in `g.decl`. A small evaluator over that list would give
-   browser-free tests of the inliner, simplifier, gating and `SHARE` renaming, step by step against a reference
-   state. Today a subtle generator bug only shows if the smoke test's floor, overlap or speed limits trip.
-2. **A cost model that runs without a browser.** `tools/traps.py` predicts js-minus-js run time in shapings.
-   The same evaluator, counting matched blocks, properties and tokens per pass with the cost table in
-   BENCHMARKS.md §2, would predict a css-physics step. `tools/cen.js` already applies such a model, but needs
-   Chrome to know which gates are active.
-3. **`invalidationTracking` traces.** js-minus-js found that 98% of its style resolutions happened inside
-   layout by tracing with `disabled-by-default-devtools.timeline.invalidationTracking`. css-physics has never
-   looked at which elements restyle per pass, only at totals. That trace would show directly whether the
-   register elements, the render tree or the levels are restyled more than expected.
-4. **Sibling selectors instead of `:has()` for controls.** js-minus-js reads run state with
-   `#run:checked ~ …`. css-physics sets gravity, reset, shake, scene and grab with `#app:has(…)`. The cost only
-   lands on presses, so this is low priority; it is worth one measurement of a grab press at 64 bodies.
-5. **Anchor-name reads as dynamic indexing (a real lead, untried).** A js-minus-js read port
-   (`machine/gen_fvm4.py`, `mux()` and `.rp<w>`) works in two steps. A two-level `if()` picks an anchor name
-   `--c<k>`: at most 64 + 64 `style()` tests for a bank's 4,096 cells, so O(√N), once per port. Then one `anchor-size()`
-   reads the whole word. css-physics has assumed it has no dynamic indexing, which is why every pair of bodies
-   has its own rules. With this technique, a body could keep K contact slots: each slot picks its partner's
-   register elements by name and reads their positions directly. That would make the pair rules O(N·K) instead
-   of O(N²). Caveats:
-   - The value arrives in layout. It reaches style only inside a size-container reader, so the solver that uses
-     it would have to sit under that reader. js-minus-js found that restyles inside size containers dominated
-     its layout until it slimmed its readers.
-   - css-physics once read registers through anchor positioning and measured about 5 ms of layout per frame
-     (HISTORY.md, from an earlier session's summary).
-   - Choosing which K partners to keep is still a ranking over candidates, which the broadphase digests would
-     have to supply.
-
-   A first test is a microbenchmark: N register elements and N·K readers that each pick a partner by name, timed
-   against the per-pair rules at 64 bodies.
-6. **Layer isolation for static panes.** `will-change: transform` on js-minus-js's editor saved about 7 ms of
-   paint per frame. css-physics paints under 1 ms per frame, so this does not pay there today.
-
-Not transferable, with reasons:
-
-- **Execution in a GSUB font.** Physics needs fractional, branchy math. The variable-font experiments in
-  css-physics already rejected font compute for this (a rotation matrix costs about 105 µs in a font against
-  about 36 µs in CSS).
-- **Remembered-size RAM leaves.** They hold state with no per-pass cost, but update only once per frame. That
-  would halve css-physics's step rate.
-
-## From css-physics, useful in js-minus-js
-
-1. **Transition latches may be paying for every `@property` on the page (worth one experiment).** css-physics
-   measured that each transition restart costs time in proportion to the page's registered properties, about
-   0.05 µs per property per restart. js-minus-js latches each editor character with a transition on `--lv` and has
-   about 3,800 `@property` rules. *(estimate)* That is about 0.2 ms per latch restart, or about 5 ms per frame if
-   a column's 24 latches restart each frame, against a sweep of about 19 ms per frame (1.2 s over 64 columns). If
-   a measurement confirms it, the sweep, which is half of compile time, could get cheaper by moving the latches
-   into a document or iframe with few registrations, or by cutting `@property` count further.
-2. **The rule-matching cost table.** css-physics measured matching tiers at scale in Chromium 153 (its
-   BENCHMARKS.md §2). js-minus-js's ENGINE_NOTES.md quoted 1.6–4 µs per container rule from an earlier, undated
-   measurement (it now cites these figures too); the current figures are lower:
-   - a present name with a false `style()` costs 0.8 µs per rule;
-   - `style(--x)` without a value (true when a registered property differs from its initial value) costs 0.5 µs;
-   - range queries such as `style(--x > 5)` work, at about 1.7 µs.
-3. **Query order.** `and` evaluates left to right and stops at the first false test, and nested
-   `@container` rules evaluate the innermost query first. js-minus-js dispatches with
-   `style(--vh: m) and style(--tcq: tc)`, so whichever test rejects more variants should come first. The
-   expected gain is small, because each variant is tested once per level, but the change is one line.
-4. **Freeze and ablate.** css-physics profiles one step by baking the state into constants (`freeze3.js`) and
-   deleting families of rules (`ablate.py`). js-minus-js could attribute its 100 ms of style and layout per frame
-   the same way: freeze the CPU registers, then strip the trap service's families (memory tree, PRINT, EXT) one at
-   a time.
-   The ablation half is ready: `shared/py/ablate.py` works on js-minus-js's XHTML (it skips braces in CSS strings
-   and never overwrites the source), and `shared/js/freeze.js` has the wobbling-constant clock. Freezing the CPU
-   is still open, because much of its state lives in layout (view timelines, remembered sizes), not in custom properties.
-
-Not transferable, with reasons:
-
-- **Owner-named container gating.** An absent container name is a cheap rejection only near the root: Chrome
-  walks every ancestor looking for it. css-physics measured about 0.2 µs plus 0.6 ns per ancestor per name.
-  js-minus-js's token levels sit under about 2,000 ancestors, so an absent name would cost more there than the
-  `style()` test it replaces. A present name is also unsafe there: it could resolve to a distant ancestor that
-  once had the same mode.
-- **Sleeping and neighbourhood digests.** These exist to make idle bodies free. A compiler pass and a CPU have
-  no idle parts to skip.
-- **Spatial partitioning.** css-physics measured it and it lost (its HISTORY.md, Phase 4). It has no analogue in
-  js-minus-js.
-
-## paint
-
-paint keeps a canvas in Chrome's compression-dictionary store: a cell is written by loading a dictionary file and read
-by 16 probe images, of which only the one compressed against the stored dictionary decodes
-([paint/docs/ARCHITECTURE.md](paint/docs/ARCHITECTURE.md)). Its state lives in the network stack and on disk, so it
-survives reloads and restarts, arrives asynchronously, and is measured in requests, not passes. Its numbers come from
-a cloud sandbox, not the mini PC (paint/docs/BENCHMARKS.md).
-
-| Technique | paint | css-physics / js-minus-js |
-|---|---|---|
-| A layout size read back as a number | probe row width → `anchor-size()` reader → `calc(100cqw / 1px)` → registered `<integer>` | js-minus-js read ports read `anchor-size()`; css-physics reads registers through view timelines |
-| Transition latch | the paint colour, `transition: --c 0s 1e9s` (its single-document canvas) | js-minus-js editor latches; css-physics measured restart costs |
-| `if()` selection | colour lookup; a write URL chosen by value | js-minus-js `display: if(…)`, read ports |
-| A child document's viewport as an input | the palette colour reaches each cell `<object>` through its width, read with `@media` | — |
-
-### From paint, useful in the others
-
-1. **A save area for js-minus-js.** 480 entries of 4–8 bits that survive reloads: read once at boot into RAM, write
-   back. Too slow to be RAM itself (a read is K requests). paint/docs/ARCHITECTURE.md, "Feeding a CSS machine", has
-   the read port.
-2. **Frame limits, for anything that splits work across frames** (css-physics `experiments/iframes`). Chrome allows
-   about 1,000 frames per page and every `<iframe>` takes one, even hidden and `loading=lazy`; a hidden `<object>`
-   takes none and loads nothing. Many frames loading at once can also exceed Chrome's in-flight request limit, and
-   the rejected requests are never retried.
-3. **One fetch per URL per document, and history traversal from cache.** Both decide when a CSS-initiated load
-   reaches the network, which matters to any design that signals through loads.
-
-### From the others, useful in paint
-
-1. **Engine probes.** paint's facts (which loads register a dictionary, the frame limit, history from cache) are
-   checked only by its 6-minute end-to-end test. Minimal pages in the `engine/check.js` style would flag a Chrome
-   change in seconds.
-2. **`shared/js/ab.js`** for load-time changes such as staggered reads.
-
-## Suggested next steps
-
-| Project | Step | Effort | Expected value |
+| From → to | Idea | Effort | Value |
 |---|---|---|---|
-| js-minus-js | Measure latch restarts against the `@property` count during the readback sweep | small | could speed up compile, unknown how much |
-| css-physics | Python evaluator over `g.decl` as a reference test | medium | safer generator changes; a browser-free cost model |
-| css-physics | One `invalidationTracking` trace of a 64-body pass | small | shows which elements restyle |
-| css-physics | Microbenchmark anchor-name partner reads for contact slots | small, then large to build | could remove the N² pair rules |
-| js-minus-js | Freeze-and-ablate the trap service | medium | attributes 100 ms per frame |
-| js-minus-js | Reorder the dispatch test (ENGINE_NOTES.md already has the new costs) | small | small |
-| paint | Engine probes for its Chrome facts | small | a Chrome change caught in seconds |
-| js-minus-js | A save area on paint's dictionary store | medium | programs and data that survive a reload |
+| js-minus-js → css-physics | A Python evaluator over `g.decl` as a reference test, like js-minus-js's `cc_dsl.py` twin checked at L2. Today a generator bug only shows if the smoke test's limits trip. Would also give a browser-free cost model. | medium | high |
+| js-minus-js → css-physics | **Anchor-name reads as dynamic indexing.** js-minus-js's read port picks an anchor name `--c<k>` with a two-level `if()` (O(√N) `style()` tests) and reads it with one `anchor-size()`. K contact slots per body reading partners by name would make the pair rules O(N·K) instead of O(N²). Caveats: the value arrives in layout, so the solver must sit under a size-container reader; anchor-positioned registers once cost ~5 ms of layout per frame; the broadphase still has to rank partners. First step: a microbenchmark at 64 bodies. | small, then large | could remove the N² pair rules |
+| js-minus-js → css-physics | One `invalidationTracking` trace of a 64-body pass (js-minus-js found 98% of its restyles inside layout this way). | small | shows which elements restyle |
+| css-physics → js-minus-js | **Transition latches may pay for every `@property`.** A transition restart costs ~0.05 µs per registered property; js-minus-js has ~3,800 and latches each editor character with a transition. *(estimate)* ~0.2 ms per restart, ~5 ms per frame during the ~19 ms/frame readback sweep. Measure it. | small | could speed up compile |
+| css-physics → js-minus-js | Freeze and ablate the trap service (memory tree, PRINT, EXT) to attribute its ~100 ms of style+layout per frame. `shared/py/ablate.py` already works on the XHTML; freezing the CPU is open because its state lives in layout. | medium | attribution |
+| css-physics → js-minus-js | Put the dispatch test that rejects more variants first: `and` short-circuits left to right. | small | small |
+| paint → js-minus-js | A save area: 480 entries of 4–8 bits that survive reloads, read once at boot into RAM, written back ([paint/docs/ARCHITECTURE.md](paint/docs/ARCHITECTURE.md), "Feeding a CSS machine"). | medium | programs that survive a reload |
+| others → paint | Engine probes for paint's Chrome facts (which loads register a dictionary, the frame limit, history from cache) in `engine/check.js` style, instead of only the 6-minute end-to-end test. | small | a Chrome change caught in seconds |
+
+Not transferable: execution in a GSUB font for physics (a rotation matrix costs ~105 µs in a font against ~36 µs in
+CSS); remembered-size RAM for css-physics (updates once per frame, halving the step rate); owner-named container
+gating for js-minus-js (an absent name walks every ancestor, and its token levels sit under ~2,000); sleeping,
+digests and spatial partitioning (a compiler and a CPU have no idle parts).
+
+## paint's overlap
+
+paint's state lives in the network stack and on disk: it survives reloads, arrives asynchronously, and is measured in
+requests, not passes. It shares the layout-size-to-number read (`anchor-size()` → `calc(100cqw / 1px)` → registered
+`<integer>`), the transition latch, and `if()` selection. Facts it found that matter to the others: Chrome allows about
+1,000 frames per page and every `<iframe>` takes one even hidden and lazy (a hidden `<object>` takes none); one fetch
+per URL per document; history traversal serves CSS-initiated fetches from cache.

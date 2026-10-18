@@ -1,9 +1,9 @@
 # Archive
 
-- `rigid3d-v3/gen3d_v3.py` (+ `simp.py`): the 3D engine before the big optimization session (Oct 10). It has unnamed style() gates, a separate solve level and one register per element. It still builds with the current page builder, which makes it an A/B baseline:
-  `GEN=../archive/rigid3d-v3/gen3d_v3.py COUNTS=16 PLAIN=1 python3 src/build3d.py out/v3_16.html`
+- `rigid3d-v3/gen3d_v3.py` (+ `simp.py`): the 3D engine before the big optimization session (Oct 10): unnamed style()
+  gates, a separate solve level, one register per element. It still builds with the current page builder, as an A/B
+  baseline: `GEN=../archive/rigid3d-v3/gen3d_v3.py COUNTS=16 PLAIN=1 python3 src/build3d.py out/v3_16.html`
 
-Removed on 2026-10-15, and still in git at commit `91d73bc` (`git checkout 91d73bc -- css-physics/archive` restores them):
-
-- `rigid2d/gen_v1.py`, `rigid2d/gen.py` (+ `page.html`, `ui.css`): rigid.css, the 2D engine the 3D machine grew from (docs/HISTORY.md, Phase 0). It ran with `python3 gen.py [substeps] [out.html]` in that directory.
-- `rigid3d-v3/build3d_v3.py`: the page builder from the v3 era, kept only for reference; the current `src/build3d.py` builds `gen3d_v3.py`.
+Removed 2026-10-15, still in git at `91d73bc` (`git checkout 91d73bc -- css-physics/archive`): `rigid2d/` (rigid.css,
+the 2D engine the 3D one grew from; `python3 gen.py [substeps] [out.html]` in that directory) and
+`rigid3d-v3/build3d_v3.py` (the v3-era page builder).

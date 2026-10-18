@@ -1,8 +1,9 @@
 # Dictionary Paint
 
 A 16-colour canvas whose pixels persist in Chrome's compression-dictionary store, in HTML and CSS only. `build.py`
-generates `site/`; `serve.js` serves it locally with Cloudflare Pages semantics. Read `docs/ARCHITECTURE.md` before
-changing the generator; `docs/HISTORY.md` lists what already failed (check it before proposing an idea).
+generates `site/`; `serve.js` serves it locally the way Cloudflare does (`_headers`, 200 `_redirects`). Read
+`docs/ARCHITECTURE.md` before changing the generator; `docs/HISTORY.md` lists what already failed (check it before
+proposing an idea).
 
 ## Hard rules
 - IMPORTANT: the pages contain **no JavaScript**, ever, unless the user explicitly asks. JS is fine in `tools/`,
@@ -17,8 +18,8 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
 ## Setup
 - Node 18+ for `serve.js` (no dependencies). `npm install` for the tools (Playwright).
 - Python 3 + `pip install -r requirements.txt` (zstandard) to rebuild.
-- The tools launch Chromium through `../shared/js/browser.js`, profile `physics` (`--no-sandbox`; `CHROME=/path`
-  overrides). They start their own `serve.js` on a free port and use a fresh persistent profile per run.
+- The tools launch Chromium through `../shared/js/browser.js` (profile `physics`, `../shared/README.md`), start their
+  own `serve.js` on a free port, and use a fresh persistent profile per run.
 
 ## Commands (in `paint/`)
 - Local server: `node serve.js site [port]` (default 8080). `--log` prints each request with the
@@ -50,9 +51,9 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
   the excess before sending and never retries. One document's loader throttles itself.
 - URLPattern: `match="/r/*?k-*"` never matches (`*?` is an optional wildcard). Put a literal before `?`:
   `match="/r/*.png?k-*"`.
-- Cloudflare Pages redirects `*.html` to the extensionless path, which inside a 200 rewrite would leave the cell's
-  `/c/<k>/` namespace: every page URL is extensionless. Pages also joins a header set by two `_headers` rules with
-  `, `: no overlapping rules (a joined `Cache-Control` containing `no-cache` stops registration).
+- Cloudflare redirects `*.html` to the extensionless path, which inside a 200 rewrite would leave the cell's
+  `/c/<k>/` namespace: every page URL is extensionless. Pages joined a header set by two `_headers` rules with `, `
+  (unchecked on Workers): no overlapping rules (a joined `Cache-Control` containing `no-cache` stops registration).
 - Painting a cell its current colour is a same-URL navigation: Chrome replaces the history entry, so it is not an
   undo step (tests must paint a different colour before Back).
 - **Cloudflare ends each connection after ~10,000 requests** (HTTP/2 `GOAWAY`, HTTP/3 close), and a load is ~9,000.
