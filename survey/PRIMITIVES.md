@@ -347,7 +347,7 @@ python3 passes/mkram.py 8 out/pass/ram8d.html deep    # then probe --n --m --lo 
 # paint tri-state (starts its own serve.js on 8791/8792)
 node paint/imgstate.js
 # js-minus-js K issues per frame: wider write channels and RONEST=D, kept as a patch so main's js-minus-js is untouched
-cd ../../js-minus-js && git apply ../survey/exp/patches/gen_fvm4-kissues.patch && python3 compiler/mkimage.py --ram tests/suite/fizzbuzz.js out/fizz.json
+cd ../.. && git apply survey/exp/patches/gen_fvm4-kissues.patch && cd js-minus-js && python3 compiler/mkimage.py --ram tests/suite/fizzbuzz.js out/fizz.json
 RONEST=6 python3 machine/gen_fvm4.py out/fizz.json ../../../../js-minus-js/build/f4cc_16 out/k4n.html --issue=4
 IMG=out/fizz.json node ../../../../js-minus-js/machine/halttime.js out/k4n.html 60
 # css-physics inlining
