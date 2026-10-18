@@ -76,13 +76,41 @@ one dictionary decodes only if that dictionary is current). Found along the way:
 - On the deployment, the console shows `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` for every probe that answers
   "no", as designed.
 
+## 6. Missing pixels on the live site (2026-10-18)
+
+Reloads of the Workers deployment showed a few blank cells that the next reload found again: the `ERR_FAILED`
+probes noted on Pages. Measured in headless Chromium 153 against `paint.auberon.workers.dev`, 480 cells written, a
+net log per run:
+
+- **Cloudflare ends every connection after about 10,000 requests.** HTTP/2 sessions got `GOAWAY(NO_ERROR,
+  last_stream_id=19999)` after 10,011–10,039 streams; the HTTP/3 session got `CONNECTION_CLOSE` (application,
+  `H3_NO_ERROR`, no HTTP/3 `GOAWAY`) after 10,514. A load is about 9,000 requests (7,680 probes, 480 cell pages,
+  960 writes), so a connection kept across reloads hits the limit in most loads.
+- **HTTP/2: Chrome fails part of its queue.** At the `GOAWAY` it had ~50–80 streams active and hundreds queued on
+  `SETTINGS_MAX_CONCURRENT_STREAMS` (100). It retried ~650 refused requests, but 200–500 failed with `ERR_FAILED`
+  within 50 ms, never sent: a race in `SpdySession` (`bugs/README.md`; reported as crbug 355006326). The lost probes
+  come in a run, so 5–31 adjacent cells read blank per load.
+- **HTTP/3: the close fails everything in flight** (495 requests, `ERR_CONNECTION_CLOSED`), and Chrome then marks
+  HTTP/3 broken for the origin and uses HTTP/2.
+- Local tests never saw it: `serve.js` speaks HTTP/1.1 (six connections, no limit). `serve.js --goaway 10000`
+  reproduces it over HTTP/2: 32 blank cells in one load, the same `ERR_FAILED` signature.
+- Nothing on the page can keep a connection under 10,000 requests or stop Chrome's race, and fewer probes per cell
+  isn't possible (each probe is one equality test). So a cell still blank after the first pass reads again, with
+  fresh URLs (`ARCHITECTURE.md#retry`).
+- **When to retry.** A fixed delay is either late or doubles a slow read. A sentinel image after the grid loads once
+  the first pass has gone out, but after a `GOAWAY` the re-sent requests queue behind it: with one sentinel the retry
+  started 6–11 s early and sent 2,300–3,900 retry probes for cells still loading. A second sentinel, requested only
+  when the first has loaded, queues behind them: it finished within 50 ms of the last first-pass probe, and the
+  retry sent exactly 16 probes per lost cell.
+- Retry results, local HTTP/2 with `--goaway 10000` (`tools/goaway.js`), 11 loads after the first: the first pass
+  lost 0–32 cells per load (152 in all); the retry sent 16 probes per lost cell and every load ended with all 480
+  cells right. `make test` passes unchanged. Not yet measured on Cloudflare.
+
 ## Open questions and ideas not tried
 
-- **`ERR_FAILED` on a few probes, on Cloudflare only.** Served headers and bytes match the files exactly. Not
-  reproduced locally over HTTP, HTTP/2, with 80 ms of added latency, or with all 480 cells written. Suspects:
-  HTTP/3 (the host advertises it), or an extension. A failed matching probe drops a pixel from that load's read; the
-  stored value is untouched. A `chrome://net-export` capture would settle it.
-- **Read retry**: a second set of probes, with fresh URLs, for cells still blank after a few seconds.
+- **Fewer requests per load** would make the connection limit fall in fewer loads: the cell pages' own writes on
+  load (480 mask-images now, 480 links when idle) only repeat the stored value. The start page needs the link (undo
+  back to it re-registers), not the mask-image.
 - **Staggered reads**: start the probes a row at a time to keep fewer requests in flight.
 - **Packing**: `zoom: 17^j` on cell j's probes, so one row reads several cells as one number.
 - **A save area for js-minus-js**: read once at boot into machine RAM, write back; the scroll register (48 bits,

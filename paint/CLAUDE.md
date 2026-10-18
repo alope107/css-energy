@@ -22,11 +22,13 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
 
 ## Commands (in `paint/`)
 - Local server: `node serve.js site [port]` (default 8080). `--log` prints each request with the
-  `Available-Dictionary` hash Chrome sent; `--delay MS` adds latency; `--fault target|strip|vary` simulates a broken host.
+  `Available-Dictionary` hash Chrome sent; `--delay MS` adds latency; `--fault target|strip|vary` simulates a broken host;
+  `--goaway N` (HTTP/2, `--cert`/`--key`) ends each connection after N streams, as Cloudflare does after 10,000.
 - Manual-test link for the user: `node serve.js site 8766` in the background, link `http://localhost:8766/`, check it
   with `curl -sI`. Not the repo-root `http.server`: it sends none of the headers, and nothing works without them.
 - Rebuild: `python3 build.py [W] [H]` (cells ≤ 490). Self-test site: `python3 selftest/build.py`.
-- Tests: `make test` = `node tools/selftest.js` (~1 min) then `node tools/e2e.js [seed]` (~6 min). Through `make`, a
+- Tests: `make test` = `node tools/selftest.js` (~1 min) then `node tools/e2e.js [seed]` (~6 min); `make test-goaway`
+  (~4 min, needs openssl) checks reads over an HTTP/2 host that ends connections like Cloudflare. Through `make`, a
   test whose site, tools and browser haven't changed since it passed prints `up to date`; `RERUN=1` runs it.
   Long runs exceed default tool timeouts: write output to a file and poll it.
 
@@ -53,6 +55,10 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
   `, `: no overlapping rules (a joined `Cache-Control` containing `no-cache` stops registration).
 - Painting a cell its current colour is a same-URL navigation: Chrome replaces the history entry, so it is not an
   undo step (tests must paint a different colour before Back).
+- **Cloudflare ends each connection after ~10,000 requests** (HTTP/2 `GOAWAY`, HTTP/3 close), and a load is ~9,000.
+  Chrome then fails a few hundred queued probes with `ERR_FAILED` and doesn't retry them (crbug 355006326): ~5–30
+  blank cells per reload, live only. The page's retry row covers it (`docs/ARCHITECTURE.md#retry`); local HTTP/1.1
+  never shows it, so test it with `serve.js --goaway`.
 - `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` in the console is a probe answering "no" (15 per painted cell).
 - `--ignore-certificate-errors` disables HTTP caching, so dictionaries never register. Trust a test cert by SPKI
   (`--ignore-certificate-errors-spki-list=<hash>`) or use `http://localhost`.

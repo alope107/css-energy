@@ -11,6 +11,8 @@
 // refuses to cache responses, so no dictionary ever registers.
 // Flags: --log          print every request with its Available-Dictionary hash (first 8 chars).
 //        --delay MS     add latency to every response.
+//        --goaway N     HTTP/2 only: end each connection after N streams with GOAWAY(NO_ERROR), as Cloudflare
+//                       does after 10,000 (refusing later streams). Chrome fails some requests it had queued.
 //        --fault NAME   simulate a host that gets one thing wrong, to check selftest/ catches it:
 //                       target  match _headers on the rewrite target instead of the request path
 //                       strip   drop Use-As-Dictionary (Cloudflare's Shared dictionaries "disabled")
@@ -22,6 +24,7 @@ const args = process.argv.slice(2);
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args.splice(i, 2)[1] : null; };
 const LOG = args.includes('--log'); if (LOG) args.splice(args.indexOf('--log'), 1);
 const CERT = flag('--cert'), KEY = flag('--key'), DELAY = +(flag('--delay') || 0), FAULT = flag('--fault');
+const GOAWAY = +(flag('--goaway') || 0);
 if (FAULT && !['target', 'strip', 'vary'].includes(FAULT)) throw new Error('--fault: target, strip or vary');
 const ROOT = path.resolve(args[0] || '.'), PORT = +(args[1] || (CERT ? 8443 : 8080));
 
@@ -95,6 +98,11 @@ if (CERT) {
     settings: { maxConcurrentStreams: 1000 } });
   srv.on('stream', (st, h) => {
     st.on('error', () => {});
+    if (GOAWAY) {                                       // client streams have odd ids: the Nth is 2N - 1
+      const last = 2 * GOAWAY - 1;
+      if (st.id > last) return st.close(http2.constants.NGHTTP2_REFUSED_STREAM);
+      if (st.id === last) { st.session.goaway(http2.constants.NGHTTP2_NO_ERROR, last); }
+    }
     respond(h[':method'], h[':path'].split('?')[0], h, (status, hdrs, body, len) => {
       st.respond({ ':status': status, ...hdrs, 'content-length': len ?? body.length }, { endStream: !body });
       if (body) st.end(body);
