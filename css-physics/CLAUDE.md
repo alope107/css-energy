@@ -16,9 +16,10 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 
 ## Commands (repo root)
 - Debug build (readable names + BODYINFO, which the tools need): `COUNTS=16 PLAIN=1 python3 src/build3d.py out/p16.html` (`SCENE=tower|rain|stack`, `NBOX_FIX=4` for 4 boxes and the rest spheres)
-- Smoke and regression tests (pass/fail, ~3 min): `bash tools/smoke.sh 16`, after every generator change. Besides the physics check it runs `statcheck.py` (every scene declares every body's start state; boolean gates only on 0/1 flags), `floatcheck.js` (no body asleep in mid-air, on load or after switching scenes), `grabtest.js` (dragging one body moves no other) and `overlaycheck.js` (the grab ring, pin and tether follow the drag); each guards a bug that shipped. Make skips unchanged passing checks (`up to date`); `RERUN=1` runs them all.
+- Smoke and regression tests (pass/fail, ~3 min): `bash tools/smoke.sh 16`, after every generator change. Besides the physics check it runs `statcheck.py` (every scene declares every body's start state; boolean gates only on 0/1 flags), `floatcheck.js` (no body asleep in mid-air, on load or after switching scenes), `grabtest.js` (dragging one body moves no other) `overlaycheck.js` (the grab ring, pin and tether follow the drag) and, in Chromium, `touchcheck.js` (touch dragging on a phone-sized touch screen); each guards a bug that shipped. Make skips unchanged passing checks (`up to date`); `RERUN=1` runs them all.
 - Step cost: `node tools/tr.js out/p16.html 1500 1500`; compare variants with `bash tools/bench.sh 3 a.html b.html` or `node ../shared/js/ab.js -p bigmed 'node tools/tr.js {} 1500 1500' a.html b.html` (pass one page twice for the noise floor).
 - User-level fps (chaos/settle/idle/drag/hold): `node tools/perf3.js out/p48.html`
+- Touch: `node tools/touchcheck.js out/p16.html` (real gestures through Chromium's gesture recognizer over CDP, phone viewport; `TOUCHCHECK_SHOT=x.png` saves a mid-drag frame); `TOUCH=1 [TOUCHDRAG=1] node tools/tr.js …` times touch mode. Synthetic touch has no show-press or long-press: for those and Android's input path, the emulator (`../shared/android/README.md`, ~9 min to boot, about 1 fps for the engine) with `experiments/touch/android.js`.
 - Profile one step (freeze + ablate) and microbenchmarks: the `perf-profile` skill. Tool index: BENCHMARKS.md "How to measure".
 - Sparse regime: `SCENE=field TRAY=2 FIELD_GAP=30 COUNTS=64 PLAIN=1 python3 src/build3d.py out/g64.html`, then `node tools/sparse.js out/g64.html 64 c`; freeze mid-drag with `BODY=k node tools/freezegrab.js`.
 - Published site: `bash tools/make_site.sh` (into `site/`, 24 as the default page, CSS split into ≤14 MB files)
@@ -43,6 +44,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - RATE below 90 doesn't settle piles. Sleep is tested on displacement, not velocity.
 - The CSS `font` shorthand resets `font-variation-settings`; declare the latter after it.
 - Non-PLAIN builds prefix and minify every engine name; debug only on PLAIN builds.
+- Touch (ARCHITECTURE.md "Touch") rests on three Chrome behaviours `make engine-check` probes: layout re-snaps wait while a scroll gesture is active (the "finger down" bit), `scroll-axis-lock: none`, touch deltas unprojected onto a 3D-transformed scroller. Anything inherited from `#TI` changes every frame of a drag: zero it where unused (`.view`, `.rz`), as `--sx` is.
 - Firefox (ARCHITECTURE.md §6): `style(--flag)` is always true (hence `BOOLQ=0`); `x - hypot(…)` is `x + hypot(…)` (hence `1 * hypot`); no `if()`; style-query rules aren't re-matched after animation-driven changes (the `#LM` size-container clock forces it, so anything below #LM positioned in percentages or sized in `cq*` units follows #LM's box: register such a value, like `--u`).
 
 ## When compacting

@@ -6,6 +6,7 @@
 #   floatcheck.js  no body starts (or stays) asleep in mid-air, on load and after switching to each scene
 #   grabtest.js    dragging one body doesn't move any other
 #   overlaycheck.js the grab overlay (ring, pin, tether) follows the drag
+#   touchcheck.js  touch dragging on a phone-sized touch screen: grab, follow, drop on release (Chromium only)
 # The builds and checks are make targets (Makefile): a check runs only when its page, its harness or the browser
 # changed since it last passed here, and says "up to date" otherwise. RERUN=1 runs them all.
 exec make -k -s smoke N=${1:-16}

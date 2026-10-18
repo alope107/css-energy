@@ -22,3 +22,4 @@ node ~/repo/tools/stylebench.js r_const.html,r_var1.html 500 1500     # median s
 | `compositor/mk.py name heavy tr\|no`, `mk2.py` | transform transitions on the compositor while the main thread is busy | §4 |
 | `iframes/` (`mkchild.py`, `par*.html`, `procs2.js`) | renderer processes per iframe kind (serve with `python3 -m http.server 8765`; raise the child's element count) | §5 |
 | `ident/` | `var(ident(...))` dynamic lookup | §6 (unsupported) |
+| `touch/handles.html`, `touch/android.js` | the touch input (handles, follower) without the engine, on the Android emulator (`../../shared/android/`) | ARCHITECTURE.md "Touch" |

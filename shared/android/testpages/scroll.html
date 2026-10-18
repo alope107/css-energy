@@ -1,0 +1,27 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>scroll test</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  #sc { height: 60vh; overflow-y: scroll; border: 2px solid #333; }
+  #sc div { height: 120px; border-bottom: 1px solid #ccc; }
+  #sc div:active { background: #f88; }
+  #sc div:hover { outline: 3px solid blue; }
+</style>
+<p>scroller below</p>
+<div id="sc"></div>
+<script>
+  // Instrumentation read back over CDP: log (event@time), ys (touch clientY trail), moves (counts).
+  const sc = document.getElementById('sc');
+  for (let i = 0; i < 100; i++) { const d = document.createElement('div'); d.textContent = 'row ' + i; sc.appendChild(d); }
+  const T = e => Math.round(e.timeStamp);
+  window.reset = () => { sc.scrollTop = 0; log.length = 0; ys.length = 0; for (const k in moves) moves[k] = 0; return 1; };
+  window.log = []; window.ys = []; window.moves = {touchmove: 0, pointermove: 0, scroll: 0};
+  for (const t of ['pointerdown','pointerup','pointercancel','touchend','scrollend','contextmenu','click'])
+    sc.addEventListener(t, e => log.push(t + '@' + T(e)), {passive: true});
+  for (const t of ['touchstart','touchmove'])
+    sc.addEventListener(t, e => { ys.push(t[5] + Math.round(e.changedTouches[0].clientY) + '@' + T(e)); if (t === 'touchmove') moves.touchmove++; }, {passive: true});
+  sc.addEventListener('pointermove', () => moves.pointermove++, {passive: true});
+  sc.addEventListener('scroll', e => { moves.scroll++; log.push('scroll' + Math.round(sc.scrollTop) + '@' + T(e)); }, {passive: true});
+  window.state = () => JSON.stringify({st: sc.scrollTop, log: log.join(' '), ys: ys.join(' ')});
+</script>
