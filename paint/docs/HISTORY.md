@@ -104,7 +104,10 @@ net log per run:
   retry sent exactly 16 probes per lost cell.
 - Retry results, local HTTP/2 with `--goaway 10000` (`tools/goaway.js`), 11 loads after the first: the first pass
   lost 0–32 cells per load (152 in all); the retry sent 16 probes per lost cell and every load ended with all 480
-  cells right. `make test` passes unchanged. Not yet measured on Cloudflare.
+  cells right. `make test` passes unchanged.
+- On a Workers preview (`tools/goaway.js 6 <preview>`), 5 loads after the first: the first pass lost 0, 32 (HTTP/3
+  close, `ERR_CONNECTION_CLOSED`), 14 and 29 (HTTP/2, `ERR_FAILED`), 0 and 1 (`ERR_INSUFFICIENT_RESOURCES`) cells;
+  every load ended with all 480 right, about 30 s per load including the retry.
 
 ## Open questions and ideas not tried
 

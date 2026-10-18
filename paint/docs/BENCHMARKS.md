@@ -49,6 +49,7 @@ Probes cost the same as plain images; the limit is requests per second.
 | Writes, 480 cells at once | 2.5–5.6 s |
 | `<link rel=compression-dictionary>` delay after its page loads | ~120–180 ms idle; ~24–30 s while the page is still probing |
 | Live (Cloudflare Workers): cells the first pass loses per reload | 0–31, most loads; HTTP/2 `GOAWAY` or HTTP/3 close after ~10,000 requests per connection (HISTORY §6) |
+| Workers preview: first pass lost / after the retry | 0–32 / 0 per load, 5 loads |
 | Local HTTP/2, `--goaway 10000`: first pass lost / after the retry | 0–32 / 0 per load, 11 loads; the retry sends 16 probes per lost cell, 3 s after the second sentinel |
 | Console errors per load | 15 `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` per painted cell (7,200 with 480 painted); 0 from cells never written |
 | Files deployed | 53 (`site/`), 5 dynamic `_redirects` rules, 6 `_headers` rules |
