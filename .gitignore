@@ -1,4 +1,5 @@
 .claude/worktrees
 __pycache__/
 .auberon/worktrees
+engine/build/
 deploy/out/

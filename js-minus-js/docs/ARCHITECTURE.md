@@ -38,14 +38,16 @@ A word is a 20-bit two's-complement integer. The map lives in `compiler/layout.j
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 1023 | ROM (`rom_size`): the runtime library (`compiler/lib_src.js`, compiled by `jsc.js`, 103 words). It ends with a jump to `code_base`. | baked into the CPU font's GSUB |
+| 0 … 1023 | ROM (`rom_size`): the runtime library (`compiler/lib_src.js`, compiled by `jsc.js`, 103 words; it ends with a jump to `code_base`), then the object runtime (`compiler/rtlib.py`, 383 words), and at 1020 … 1023 (`vec_base`) a jump table into it | baked into the CPU font's GSUB |
 | 1024 | `data_base`: `STRTAG` = 262144, the untag constant read by the lib | lib `__init`, copied from staging |
 | 1025 … 1279 | globals and array literals (255 words) | lib `__init` copies the initial values; the program writes the rest |
-| 1280 … 1535 | string literals, each `[tag word][bytes…][0]` | compiler overlays, read-only |
+| 1280 … 1535 | string literals, each `[tag word][bytes…][0]`, and property names, `[bytes…][0]` | compiler overlays, read-only |
 | 1536 … 2046 | code (`code_base`, 511 words) | compiler overlays, read-only |
 | 2047 | count of staged words | compiler `.fin` |
 | 2048 … 2303 | staged initial globals and array data (`init`), with `STRTAG` at 2048 | compiler overlays |
-| 2560 ↑ | stack (`sp0`), up to the console | program |
+| 2304 … 2322 | the object runtime's cells (`rt_base`): HP, GCLIM, GCSP, KEYCELL, RETCELL, then the ROM routines' scratch | object instructions, ROM routines |
+| 2560 … 11135 | stack (`sp0`) | program |
+| 11136 … 17279 | heap (`heap_lo`): two semi-spaces of 3,072 words (`heap_size`) | object instructions, the GC |
 | 17280 … 17407 | console, 8 columns × 16 rows: the last `cols × rows` words of RAM | PUTC / PRINT service |
 
 RAM runs from `rom_size` (= `data_base`; the compile chain names RAM cell `k` `--c<k>` with `k` = address − 1024) for
@@ -101,6 +103,7 @@ These are in `cc_ref.py` and shared by the DSL.
 | `NF` | 16 | functions |
 | `NL` | 64 | labels (6-bit fields in control-stack entries) |
 | `EMAX` | 12 | code words emitted per step |
+| `NI` | 16 | interned strings and property names |
 | `SDATA` | 256 | size of the globals and string areas |
 | page | 24 × 64 | editor lines × columns |
 | page | 400 | tokens (`TMAX`) |
@@ -177,11 +180,11 @@ These are in `cc_ref.py` and shared by the DSL.
 - **Parser variants**:
   - Level `t + 1` runs the parser on token `t`. The variant is chosen by
     `@container style(--vh: mode) and style(--tcq: tokencode)` on its parent.
-  - The page has 302 variants (`tools/vsz.py` counts 323, before the no-op variants are merged). Pure-error variants are dropped: a token no variant accepts sets `bad`, which
+  - The page has 322 variants (`tools/vsz.py` counts 346, before the no-op variants are merged). Pure-error variants are dropped: a token no variant accepts sets `bad`, which
     shows as error 99.
   - Variants that change nothing collapse into one pass-through rule per token code.
   - Variants of one mode with identical CSS share one rule whose condition lists their token codes
-    (`style(--tcq: a) or style(--tcq: b) …`): 302 variants make 168 rules. Every rule costs time on every token
+    (`style(--tcq: a) or style(--tcq: b) …`): 322 variants make 188 rules. Every rule costs time on every token
     level whether it applies or not (BENCHMARKS.md §4c), so the rule count is a compile-time cost of its own.
   - With a known starting mode, `Prog` folds away the blocks that can't be reached (the `FALL` map). This halved
     the generated CSS.
@@ -299,6 +302,69 @@ The page does at most 2 shapings per frame.
 - `__init` copies the staged globals into place, then the ROM's last word jumps to the user code at `code_base` (1536).
 - The lib is baked into the CPU font, so a lib change means `make page` (lib → image → font → page).
 
+### 3.5 Objects and the garbage collector
+
+**Representation.**
+
+- An object is an 8-word chunk `[k0 v0 k1 v1 k2 v2 L pad]` in the heap. Its value is the chunk's address minus
+  `OBJTAG` = 491,520. That is a multiple of 32,768, so the 15-bit address registers untag it for free: `LDF`, `SETF`,
+  `STOREI` and the probes take an object value as an address.
+- A key is stored as its value + 2^18 (`KBIAS` = `STRTAG`). A string key becomes its address in the string area
+  (positive, below 8192: an immediate); a number `n` becomes `n + 2^18`. 0 marks a free pair, which ends the keys. `L`
+  is 0 or a link to an overflow chunk, an object value, so negative: the sign tells a link from a key.
+- The words after the first free pair are never written (`NEW` zeroes nothing; whoever fills a chunk ends its keys), so
+  a one-pair object touches one cache line.
+- Strings and property names are interned by content hash in a 16-entry parser table (`ih1_k ih2_k iv_k`, a delayed
+  table like the function table), so a key is a compile-time constant and `o[s]` finds `o.x` when `s` is `"x"`. The
+  lexer writes every identifier's bytes to the string area at `sdp` without committing them, and commits a name after
+  `.` (unless it follows `console`) or before `:`; the level after the identifier writes its NUL.
+
+**Instructions** (`machine/uarch.py` has the microcode). New are SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER and JNEG,
+opcodes 45 … 53:
+
+| Op | Stack | Micro-cycles | What it does |
+|---|---|---|---|
+| `SCANI k` | [o] → [c] | 3 per probe | compare the key word at the cursor with `k`: found or 0, stop (the cursor stays on that word); negative, follow the link; else step 2 words. It executes again until it stops |
+| `SCAN` | [o] → [c] | 4 per probe | the same, with the key in KEYCELL (the ROM routines' dynamic keys) |
+| `LDF i` | [p] → [mem[p+i]] | 3 | `o.x` is `SCANI x; LDF 1` |
+| `PUTV k` | [c, v] → [] | 4 | the key is at `c`: `mem[c+1] = v`; else call the ROM's append routine with `[c, v]` (its return address in `mem[c+1]`) |
+| `NEW` | [] → [o] | 4 | a chunk at HP; if the heap is full, call the GC (GCSP = SP, RETCELL = this NEW), which returns to it |
+| `SETF i` | [o, v] → [o] | 3 | `mem[o+i] = v` (a literal's pairs) |
+| `ENDK i` | [o] → [o] | 3 | `mem[o+i] = mem[o+i+1] = 0`: the keys end there |
+| `OVER` | [a, b] → [a, b, a] | 2 | |
+| `JNEG l` | [a, b] → [a, b] | 2 | jump if `a` is negative (an object, where an array is an address) |
+
+- **Selectors.** The probes and the conditional calls need a micro-cycle to choose its address, data and commit by a
+  flag. The font has a 3-valued gate glyph `ZSEL`, computed every cycle from the control glyph and the flags (`ZT1`,
+  `ZT2`, `ZD`, `SD`, and the new `ST2`, the sign of T2), with one small rule set per selector; the per-digit gate `ZJ`
+  copies it. JZ / JNZ use the default selector, Z(T1), as before.
+- **Restart safety.** An instruction restarts from its first micro-cycle after a trap, so every write before the last
+  must leave its inputs unchanged; NEW writes HP last.
+- **Calls into the ROM.** NEW, PUTV and the compiled `x[k]` (`CALL 1023`, `CALL 1022`) enter the routines through the jump
+  table: GC (1020), APPEND (1021), SETX (1022), GETX (1023). The routines keep their state in the cells at `rt_base`
+  (they can run inside one another: APPEND allocates, NEW collects), not in frames.
+
+**`x[k]`.** A name whose static type is number (an array literal) is indexed with IDX as before. Anything else calls
+GETX / SETX, which test the sign of `x` (JNEG): an array is a positive address, an object negative. `o[k] op= e` is `[o, k]
+OVER OVER GETX e op SETX`.
+
+**The collector** (`compiler/rtlib.py`, hand-written, most of its 383 ROM words). Cheney's copying algorithm between the two
+semi-spaces:
+
+- The roots are the globals and arrays (`data_base + 1 …`, the staged count at `init − 1`), the routines' scratch cells,
+  and the stack from `sp0` to GCSP.
+- A root may point into a chunk: a SCANI cursor waits on the stack while the value of `o.x = e` is computed, and `e` may
+  allocate. So a root's offset in its chunk is found with MOD 8. A heap word only ever points at a chunk's start.
+- Every value below the from-space's top is a candidate (all live objects are in from-space); copying sets `k0` to −1
+  and `k1` to the copy.
+- The scan of the copies follows each value up to the first free pair, and the link if all three pairs are used.
+- The cost follows the live chunks: a few shapings per live chunk, and nothing per dead one. Its first call only sets
+  up the heap (HP and GCLIM are 0, so the first NEW calls it).
+
+**Font cost.** The new instructions add 28 control values (120 → 148). Subtables per cycle went down, 432 → 392 of the
+sanitizer's 512 at S = 32, because the address and data stages now put all digits of an expression in one subtable
+(`cpu4.merge_digits`). `docs/BENCHMARKS.md` §10 has the measurements and the generator changes that paid for them.
+
 ---
 
 ## 4. Editor readback (`readback/ui_rb.py`)
@@ -365,9 +431,9 @@ The readback design comes from a separate "CSS Text Readback" chat.
 
 **Suites**
 
-- `tests/suite/` holds 97 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
+- `tests/suite/` holds 108 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
   `suite_ref.py` warns if one doesn't.
-- `tests/suite_err/` holds 25 programs the compiler must reject.
+- `tests/suite_err/` holds 31 programs the compiler must reject.
 - `tests/programs/` holds the older demo programs t1–t4 and e1–e2.
 
 **Not covered**

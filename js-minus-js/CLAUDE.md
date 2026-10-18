@@ -29,6 +29,10 @@ make dist            # copy the built page to dist/
 python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
 ```
 
+`l2`, `l3` and the `l5` targets are logs in `build/` that make keeps while nothing they depend on changed (the built
+page, the harness, the suite, Chrome): such a check prints `up to date` instead of running. `RERUN=1 make l3` runs it
+anyway (`../shared/README.md#checks-in-make`).
+
 - **Browser**: harnesses launch Chromium through `tools/browser.js`. `CHROME=/path` overrides; otherwise the npm
   package `@sparticuz/chromium` is used on Linux x64 (its only build), and elsewhere Playwright's own Chromium, falling
   back to the devcontainer image's `/usr/local/bin/chromium`. The launcher is shared with css-physics (`../shared/`, profile
@@ -46,6 +50,7 @@ python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings
 ```
 compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same step as CSS)  ccpage5.py (compile chain)
            ccpage4.py (shared helpers: Names, muxes)    lib_src.js -> lib.json (runtime library; libbuild.js + jsc.js)
+           rtlib.py (the object runtime in ROM: GC, append, x[k]; hand-written, appended to lib.json)
 machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py (font)  gen_fvm4.py (page)  memtree.py (RAM)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  level harnesses
@@ -66,7 +71,7 @@ archive/   results/ (raw logs the docs cite). README.md indexes the removed old 
      `tests/cmp_dsl.py`.
    - `make l2` must report `ALL OK`. It compares parser state, tables, every code word, label and data word.
 4. **Check the size.** Run `python3 tools/vsz.py` and `tools/lp.py` (they count variants before the page merges
-   the no-op ones: 323, and 302 on the page in 168 rules). Every temp is CSS on each level, every rule is checked
+   the no-op ones: 346, and 322 on the page in 188 rules). Every temp is CSS on each level, every rule is checked
    on each level whether it applies or not (so a new variant costs even if rarely used), and every
    label port is an element on each of 400 token levels. Note the change in variant count, temps and ports
    before and after.
@@ -74,6 +79,16 @@ archive/   results/ (raw logs the docs cite). README.md indexes the removed old 
 6. **Rebuild and smoke-test the page** with `make page && make l5-smoke`, then `make dist`.
 
 The `.claude/skills/language-feature` skill has the detailed version of this checklist.
+
+### Object instructions and runtime (`machine/uarch.py`, `compiler/rtlib.py`)
+
+- The instructions (SCANI SCAN LDF PUTV NEW SETF ENDK OVER JNEG) are defined twice: as microcode in `uarch.py` (which
+  `cpu4.py` compiles into the font) and instruction by instruction in `cc_ref.run()`. Change both together.
+- After any change to them or to `cpu4.py` / `cpugen.py`, run the font against the model on an object program, not only
+  FizzBuzz: `python3 tools/mkimg.py tests/suite/obj_tree.js img.json && CPUMOD=cpu4 python3 machine/hbtest.py img.json 16 32`
+  (it stops at the first shaping where they differ). L4 runs the model against itself; only this shows the font agrees.
+- Watch the font's subtables per cycle (fvm_build prints them): S × subtables must stay at most 16,384, so at most 512 at
+  S = 32. Past that, HarfBuzz drops the last lookups without an error, and the decoded state reads 0.
 
 ### Runtime-library change (`compiler/lib_src.js`)
 

@@ -12,12 +12,14 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 **Status (2026-10-17).**
 
-- All five test levels pass. That includes 97 programs checked against Node's output and 25 programs the
+- All five test levels pass. That includes 108 programs checked against Node's output and 31 programs the
   compiler must reject.
 - On the page, compiling takes about 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
   in about 8.3 s and halts about 10.8 s after Run (headless Chromium 153 on the Ubuntu mini PC, 2026-10-17); it was
   18.3 s on the same machine before printing
   moved into the machine (one trap per output chunk instead of one per character).
+- Objects and garbage collection (branch `js-objects`): FizzBuzz runs as fast as before (Run → HALT within 1%), and
+  compiles about 4% slower; object programs run at the suite's usual 4–5 steps per shaping (BENCHMARKS.md §10).
 - See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the numbers and [docs/HISTORY.md](docs/HISTORY.md) for
   how the design got here.
 
@@ -43,7 +45,7 @@ compiler/   the compiler: cc_ref.py (reference) + cc_dsl.py/dsl.py (the same ste
 machine/    the font CPU: uarch*.py (model), cpu4.py/cpugen.py/otl.py (GSUB), fvm_build.py (font),
             gen_fvm4.py (the page), memtree.py (RAM); browser harnesses (ui_seq.js, fullrun.js, trace.js, ...)
 readback/   editor text readback: ui_rb.py, mkfont2.py (AsciiProbe font)
-tests/      suite/ (97 programs + Node .out), suite_err/ (25 rejects), harnesses for levels L1-L5
+tests/      suite/ (108 programs + Node .out), suite_err/ (31 rejects), harnesses for levels L1-L5
 tools/      browser.js (launcher), traps.py (cost of a program on the CPU), vsz.py / lp.py (variant sizes)
 dist/       the built page
 docs/       ARCHITECTURE.md, HISTORY.md, BENCHMARKS.md, ENGINE_NOTES.md
@@ -64,8 +66,20 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Control flow**: `if` / `else` / `else if`, `while`, `do … while`, `for (;;)` (any part may be empty), `break`,
   `continue`.
   Bodies may be a block or a single statement, and a dangling `else` binds as in JavaScript.
-- **Values**: integers, `true` / `false`, strings in `"..."` or `'...'` with escapes `\n \t \r \\ \" \'`, and
-  number array literals (`[1, -2, 3]`).
+- **Values**: integers, `true` / `false`, `null`, strings in `"..."` or `'...'` with escapes `\n \t \r \\ \" \'`,
+  number array literals (`[1, -2, 3]`), and objects.
+- **Objects**:
+  - Literals `{a: 1, "b c": 2, 3: x, d: {e: 4}}`, with identifier, string or number keys; values of any type, nested to
+    any depth; `{}`; a trailing comma.
+  - Reads and writes by name or by any value: `o.a`, `o.d.e`, `o["b c"]`, `o[3]`, `o[k]` (k a string or a number),
+    `a[i].x`, `f().y`. `o.a`, `o["a"]` and `o[k]` with `k = "a"` are the same property, and `o[1]` is not `o["1"]`.
+  - Assignment as a statement: `o.x = e`, `o.x op= e`, `o.x++`, `o[k] = e`, `o.a.b[i] += 1`. A new key is added
+    to the object, which grows without limit.
+  - Objects are references: `q = p` shares one object, `p === q` compares identity. They can be passed to and
+    returned from functions and stored in arrays and other objects (lists, trees).
+  - `x[k]` works on arrays too, wherever the array comes from (a parameter, a property). A variable assigned an array
+    literal is indexed directly, as before.
+  - Memory is reclaimed by a copying garbage collector when the heap is full.
 - **Operators**:
   - `+ - * / %`, comparisons `< > <= >= == != === !==`, `!` and unary `-`.
   - `&&` and `||` short-circuit and return an operand's value, as in JavaScript (`0 || 7` is `7`).
@@ -73,6 +87,7 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Assignment**: `=`, `+= -= *= /= %=` (also on `a[i]`), and `x++ x-- ++x --x` as statements.
 - **Output**: `console.log(a, b, ...)` and `putc(code)`.
 - **Comments**: `//` and `/* */`.
+- **Strings are interned**: equal string literals are one value, so `===` compares them by content.
 - **Semicolons**: optional where JavaScript inserts them. A newline after a complete statement ends it, unless
   the statement is still inside `( [` or a call. A `}` also ends one (`{ x++ }`).
 
@@ -93,6 +108,22 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - `+` at the top level of a `console.log` argument joins strings: `"n = " + n`, `s + "!"`, `1 + n + "x"`.
   Strings can't be built anywhere else: `var s = "a" + "b"` is a compile error.
 
+### How objects work
+
+- An object is an 8-word chunk in the heap: three key/value pairs and a link to an overflow chunk, so one with more
+  than three keys is a chain of chunks. Its value is a tagged pointer (its address minus 491,520, so the machine's
+  15-bit address registers untag it for free).
+- `o.x` is two machine instructions: `SCANI x` probes one key per execution (and runs again until it finds the key, the
+  keys end, or it follows a link), and `LDF 1` loads the value next to the key. `o.x = e` is `SCANI x`, then `e`,
+  then `PUTV x`. The key is a compile-time constant: the string's interned address.
+- `o[k]` and `x[k] = v` call routines in the ROM that tell an array (an address) from an object (a negative value).
+- `{a: 1, b: 2}` is `NEW`, the pairs stored in place (`SETF`), and `ENDK` to end the keys. Allocation is a pointer
+  bump.
+- When the heap (two semi-spaces of 3,072 words, 384 chunks each) is full, `NEW` calls the collector in the ROM: a
+  copying (Cheney) collector whose roots are the globals, arrays and the whole stack. It costs time in proportion
+  to the live objects, not to the garbage.
+- The machine and its instructions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.5.
+
 ### Limits
 
 - **Program size**:
@@ -101,12 +132,18 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
   - RAM is 16K words (`compiler/layout.json`); the stack has about 14,700 words, so recursion can go a few thousand
     calls deep. Before 2026-10-13 RAM was 3K words and the stack 1,408.
   - 64 labels, 32 variables in scope, 16 functions.
+  - 16 distinct strings and property names (string literals and keys share one interning table). A property name
+    is stored in the string area too.
+  - Objects: about 384 chunks live at once (a chunk holds 3 pairs). A program that keeps more halts with
+    `out of memory`.
   - Blocks nest 8 deep. Expressions nest 8 operators or parentheses deep.
   - A long `else if` chain counts as one level of nesting.
 - **Numbers**:
   - Integers are 20-bit (−524288 … 524287) and wrap.
   - `/` truncates: `7 / 2` is `3`.
   - Numbers from −257792 to −257537 don't print as numbers, because that range holds string tags.
+  - Numbers from −480384 to −474241 are object pointers to the garbage collector, which would move them. Number keys
+    must lie between −262143 and 262143.
 - **Booleans**:
   - A boolean passed as a parameter prints as `1` / `0`.
   - So does a boolean returned by a function called before its definition.
@@ -115,8 +152,15 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
   before its declaration in an inner block (`let x = x + 1`) is not caught.
 - **`do … while`**: `if (a) do s; while (c); else …` is rejected (write it without that `;`), and
   `do s;; while (c)` is accepted.
+- **Objects**:
+  - A missing property reads as 0 (JavaScript: `undefined`), and `null` is 0, so both print as `0`.
+  - `console.log(o)` prints a number (the pointer), not the object.
+  - Duplicate keys in one literal keep the first value. Properties of arrays and of other non-objects are not
+    supported.
+  - No prototypes, methods, `delete`, `in`, `for … in`, `Object.keys`.
+  - An assignment to a property is a statement, not an expression (`a = o.x = 1` is an error).
 - **Not supported**:
-  - objects, `.length`, `undefined` / `null`;
+  - `.length`, `undefined`;
   - nested functions or closures, `switch`;
   - `++` inside an expression;
   - string comparison by content.
@@ -144,6 +188,9 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 40 | missing `}` at end of input | 63 | strings can only be joined in `console.log` |
 | 64 | assignment to a `const` | 65 | `const` without `=` |
 | 66 | `while` expected after a `do` body | 67 | `:` without `?` |
+| 68 | too many strings and property names (16) | 69 | property name expected after `.` |
+| 70 | a property assignment must be a statement | 71 | object literal: key expected |
+| 72 | object literal: `:` expected | | |
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.

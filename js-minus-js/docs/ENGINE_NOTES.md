@@ -104,9 +104,16 @@ that relies on it or records it.
     cycles. fontTools' feature compiler can't express this, hence the hand-written GSUB assembler
     `machine/otl.py`.
 26. **The OTS sanitizer rejects more than 16,384 subtables,** which caps the aliased step count per font
-    (`archive/spikes/first_deliverable/vmfont.py`).
+    (`archive/spikes/first_deliverable/vmfont.py`). In uharfbuzz (no sanitizer) a font past the cap still loads, but the
+    lookups past it never run: with 531 subtables per cycle at S = 32 the export lookup was dropped and every decoded
+    register read 0, with no error (2026-10-17, `docs/HISTORY.md` phase 11). Count subtables per cycle (fvm_build prints
+    them) and keep S × that at most 16,384.
 27. **Contexts are capped at 64 glyphs, and a match consumes its whole input sequence**, hence one lookup per
-    broadcast (`machine/cpu4.py`).
+    broadcast (`machine/cpu4.py`). The same holds inside one cycle's dispatch: two rules of one lookup whose input
+    spans overlap cannot both apply, the later-starting one is skipped. Two temp loads in one micro-cycle
+    (`T3 := MDR`, `T1 := IMM`: the span MDR_j … T3_j covers IMM_j and T1_j) and the two sign flags (T1_4 … ST1 covers
+    T2_4) each need a lookup per rule (2026-10-17). Several digits of one expression can share a subtable, since each
+    digit's span ends before the next digit's source (`cpu4.merge_digits`).
 28. **HarfBuzz's cost is roughly the rules tried times the context walk distance.** Make every state glyph a GDEF
     mark and use mark-filtering sets so each lookup sees only the cells it needs (`machine/cpugen.py`).
     *(per-lookup timing scripts: `archive/machine/`, see `archive/README.md`)*

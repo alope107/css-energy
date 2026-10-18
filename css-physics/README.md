@@ -1,6 +1,6 @@
 # rigid3d.css
 
-A 3D rigid-body physics engine written in **CSS**, with no JavaScript in the page. Boxes and spheres fall, stack, slide, roll, bounce and fall asleep in a walled tray, and you can grab and throw them with the mouse or a finger. Chrome only.
+A 3D rigid-body physics engine written in **CSS**, with no JavaScript in the page. Boxes and spheres fall, stack, slide, roll, bounce and fall asleep in a walled tray, and you can grab and throw them with the mouse or a finger. Chrome, and Firefox 159+ (Firefox 158 with `layout.css.scroll-driven-animations.enabled` in `about:config`), where it runs at about half speed on a 60 Hz display.
 
 The physics runs in the browser's style engine: about 170k custom-property declarations (about 25k registered properties) at 48 bodies, gated by `@container` queries. State is written into layout and read back every frame through scroll-driven animations (view timelines). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -13,7 +13,7 @@ bash tools/smoke.sh 16            # physics pass/fail check in headless Chromium
 bash tools/make_site.sh           # the published pages: site/rigid3d-{8,16,24,32,48,64}.html
 ```
 
-Open a built page in Chrome; for 48 and 64, serve or open the folder, because they link split `.css` files. The page offers scenes (tower, rain, stack), gravity, shake and reset.
+Open a built page in Chrome or Firefox; for 48 and 64, serve or open the folder, because they link split `.css` files. The page offers scenes (tower, rain, stack), gravity, shake and reset.
 
 ## Layout
 

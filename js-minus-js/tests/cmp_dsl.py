@@ -16,6 +16,7 @@ def prog_for(mode, tk, tv):
 
 def ref_state(c):
     st = dict(lx=c.lx, q=c.q, lt=c.lt, tkc=c.tkc, acc=c.acc, h1=c.h1, h2=c.h2, p2=c.p2, sstart=c.sstart, dp=c.dp, mode=c.mode, pn1=c.pn[0], pn2=c.pn[1],
+              sdp=c.sdp, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
               osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, lb=c.lb, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
               pendLa=c.pendLa, err=c.err, arrstart=c.arrstart)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
@@ -29,6 +30,9 @@ def ref_state(c):
     for k in range(R.NF):
         e = c.fn[k]
         for nm, v in ((f'fh1_{k}', e[0]), (f'fh2_{k}', e[1]), (f'fl_{k}', e[2] + 64 * e[3])): st[nm] = v if k < c.nfn else None
+    for k in range(R.NI):
+        e = c.itab[k]
+        for nm, v in ((f'ih1_{k}', e[0]), (f'ih2_{k}', e[1]), (f'iv_{k}', e[2])): st[nm] = v if k < c.nint else None
     return st
 allok = True
 lexp = D.LexProg(DB)
@@ -49,10 +53,10 @@ for f in sys.argv[1:]:
     for i in range(len(src)):
         c, cn = src[i], (src[i + 1] if i + 1 < len(src) else 0)
         if pw:                                   # delayed table writes from the previous level
-            for pre, fl in (('y', ('sh1_', 'sh2_', 'sk_')), ('f', ('fh1_', 'fh2_', 'fl_'))):
+            for pre, fl, last in (('y', ('sh1_', 'sh2_', 'sk_'), 'k'), ('f', ('fh1_', 'fh2_', 'fl_'), 'l'), ('i', ('ih1_', 'ih2_', 'iv_'), 'v')):
                 if pw[f'o_{pre}w']:
                     j = pw[f'o_{pre}i']
-                    for nm, fld in zip(fl, ('h1', 'h2', 'k' if pre == 'y' else 'l')): tab[f'{nm}{j}'] = pw[f'o_{pre}{fld}']
+                    for nm, fld in zip(fl, ('h1', 'h2', last)): tab[f'{nm}{j}'] = pw[f'o_{pre}{fld}']
             pw = None
         if prev['o_tkany']:
             pg = prog_for(ps['mode'], prev['o_tk'], prev['o_tv']) if ps['err'] == 0 else None

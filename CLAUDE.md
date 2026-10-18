@@ -17,6 +17,26 @@ their techniques.
   jobs). Run both after a Chrome upgrade; `engine/README.md` lists the facts and which notes cite them. paint's facts
   (dictionary registration rules, the frame limit) are checked by its own `make test`.
 
+## Checks in make
+
+- The slow checks are make targets that make skips while nothing they depend on changed since they last passed
+  (css-physics `smoke.sh`, js-minus-js `make l2`, `l3`, `l5`, `l5-smoke`, `l5-input`, paint `make test`,
+  `make engine-check`). A skipped check prints `up to date: … passed <time>` and the end of that pass's log.
+- **The evidence before a merge is a real run: `RERUN=1`** (`RERUN=1 make l3`, `RERUN=1 bash tools/smoke.sh 16`).
+  Use it for a suspected flake too. When you paste an `up to date` result while iterating, say it wasn't re-run.
+- `shared/README.md#checks-in-make` says what each check depends on and what make can't see.
+
+## Browser bugs
+
+The projects lean on corners of the engines, so they run into browser bugs. Don't go looking for them, but when one
+turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec violation, in any browser):
+- Research it: the spec text, the browser's tracker (bugzilla.mozilla.org's REST API, issues.chromium.org,
+  bugs.webkit.org), WPT coverage, and the engine source if that helps.
+- If it's already reported, note the report in `bugs/README.md`. If not, write a minimal reproduction in `bugs/`: one
+  self-contained HTML file, pass/fail visible without script, the observed results and spec text in a closing comment
+  (`bugs/README.md` has the conventions), and list it there.
+- Don't file reports: the user reviews the MREs and files them.
+
 ## Deploys
 
 - `.github/workflows/deploy.yml` deploys to Cloudflare Pages: `main` → production, any other branch → a preview of

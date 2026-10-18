@@ -5,6 +5,9 @@
   color-scheme:dark;
 }
 @property --yaw{syntax:'<number>';inherits:true;initial-value:0.25}
+/* --u is registered so that its 100cqw resolves on .arena, against .stage: unregistered, every user would resolve it
+   against its own nearest size container, which in Firefox is the engine's #LM (its size changes every frame) */
+@property --u{syntax:'<length>';inherits:true;initial-value:0px}
 @property --Rx{syntax:'<number>';inherits:false;initial-value:0}
 @property --Ry{syntax:'<number>';inherits:false;initial-value:0}
 @property --Rz{syntax:'<number>';inherits:false;initial-value:0}
@@ -49,7 +52,8 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 /* the scene is laid out in fixed px (1 world unit = 1px) and scaled once: per-element cqw
    units cost ~70us per element per pass when everything moves */
 .view{--sx:0;--sy:0;position:absolute;left:0;top:0;width:__VW__px;height:__VH__px;perspective:__PERSP__px;perspective-origin:50% 50%;
-  transform-origin:0 0;transform:scale(calc(100cqw / __VW__px))}
+  transform-origin:0 0;transform:scale(tan(atan2(100cqw, __VW__px)))}
+/* (tan(atan2(a, b)) is a / b as a number: Firefox before 158 has no typed division, calc(100cqw / 900px)) */
 .cam{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;
   transform:translate3d(0,calc(__TY__ * 1px),calc(__NDIST__ * 1px)) rotateX(__TILT__deg) rotateY(calc(var(--yaw) * 1rad))}
 .cam > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
@@ -135,6 +139,8 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 .grp input:focus-visible+label{outline:2px solid var(--acc);outline-offset:2px}
 .grp label:active,.grp button:active{transform:translateY(1px);border-color:var(--acc)}
 .hint{color:var(--dim);margin:6px 0 0}
+.nosda{display:none;margin:0 0 12px;padding:8px 12px;border:1px solid var(--acc);border-radius:4px}
+@supports not (animation-timeline: --a){.nosda{display:block}}
 footer p{color:var(--dim);font-size:13px;max-width:80ch;margin:18px 0 0}
 footer code{color:var(--ink)}
 

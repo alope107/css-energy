@@ -7,6 +7,17 @@ SPECK ?= mtv
 # reproducible builds: stable @property order (Python set iteration) and font timestamps (fontTools)
 export PYTHONHASHSEED := 0
 export SOURCE_DATE_EPOCH := 0
+# A check (l2, l3, the l5s) is the file build/<name>.<config>.log, written only when it passes (../shared/make/checks.mk):
+# make re-runs it only when something it depends on is newer than its last pass, or with RERUN=1. <config> is a hash
+# of the Node, Python, browser and environment variables it runs with (build/<py|fontcpu|ui>.<config>.id).
+include ../shared/make/checks.mk
+SUITE   := tests/suite tests/suite_err tests/fizz.js $(wildcard tests/suite/*.js tests/suite/*.out tests/suite_err/*.js)
+PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py)
+HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
+# what the checks depend on outside the repo, and the environment variables their scripts read
+L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
+L3       := $(B)/l3.$(call id,$(B)/fontcpu,fontcpu,tests/suite_css.js $(HARNESS)).log
+UICONF   := $(call id,$(B)/ui,fontcpu,machine/ui_seq.js tests/editor_input.js $(HARNESS))
 
 .PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
         expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input clean
@@ -23,8 +34,9 @@ all: page
 
 # ---- runtime library -> ROM (jsc.js, the self-hosted subset compiler, compiles lib_src.js under Node)
 lib: $(CC)/lib.json
-$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.json
+$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.json $(CC)/rtlib.py machine/uarch.py
 	$(NODE) $(CC)/libbuild.js $@
+	$(PY) $(CC)/rtlib.py $@
 
 # ---- image (ROM = lib) -> CPU font (ROM baked into GSUB) -> page (editor + readback + CSS compiler + font CPU)
 image: $(B)/ccimg.json
@@ -48,24 +60,41 @@ expect:                                   # Node is the oracle: writes tests/sui
 	$(NODE) tests/suite_expect.js tests/suite
 l1:                                       # reference compiler + 20-bit simulator vs Node
 	$(PY) tests/suite_ref.py
-l2:                                       # DSL (page's specialised variants) vs reference, level by level
-	SPEC=1 SPECK=$(SPECK) $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
+l2: $(L2)                                 # DSL (page's specialised variants) vs reference, level by level
+	$(call report,$<,3)
+$(L2): tests/cmp_dsl.py $(PYSRC) $(SUITE) $(RERUN_IF)
+	SPEC=1 SPECK=$(SPECK) $(LOGGED) $@ -t 3 -p '^ALL OK' -- $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js
 l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
 l4:                                       # font CPU model (uarch4) runs every compiled image vs Node
 	$(PY) tests/suite_machine.py
 $(B)/suite_css.xhtml: $(wildcard $(CC)/*.py) $(CC)/lib.json tests/suite_css.py
 	REBUILD=1 $(PY) tests/suite_css.py $@ > /dev/null
-l3: $(B)/suite_css.xhtml                  # generated CSS compiler in Chrome vs reference, word for word
+$(B)/suite_css.xhtml.exp.json: $(B)/suite_css.xhtml tests/suite_css.py $(PYSRC) $(SUITE)   # cc_ref's words for each test
 	$(PY) tests/suite_css.py $(B)/suite_css.xhtml > /dev/null
-	$(NODE) tests/suite_css.js $(B)/suite_css.xhtml | tail -25
+l3: $(L3)                                 # generated CSS compiler in Chrome vs reference, word for word
+	$(call report,$<,25)
+$(L3): $(B)/suite_css.xhtml $(B)/suite_css.xhtml.exp.json tests/suite_css.js $(HARNESS) $(RERUN_IF)
+	$(LOGGED) $@ -t 25 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/suite_css.js $(B)/suite_css.xhtml
 # the initial program (tests/fizz.js = tests/suite/fizzbuzz.js) is checked against Node's output too (EXP1)
-l5: page                                  # the real page, typed like a user; console vs Node
-	ARGS="$$($(PY) tests/suite_ui.py 1500)"; EXP1=$(B)/ui_exp/fizzbuzz.grid $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$ARGS
-l5-smoke: page
-	ARGS="$$($(PY) tests/suite_ui.py 400 6)"; EXP1=$(B)/ui_exp/fizzbuzz.grid $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$ARGS
-l5-input: page                            # the editor under user input: what the scan reads is what the editor shows
-	$(PY) tests/suite_ui.py 400 0 > /dev/null; EXP=$(B)/ui_exp/fizzbuzz.grid $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
+# suite_ui.py writes the expected consoles to build/ui_exp and prints ui_seq.js's arguments: args-<maxsteps>-<limit>.txt
+$(B)/ui_exp/args-%.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
+	@mkdir -p $(@D); $(PY) tests/suite_ui.py $(subst -, ,$*) > $@.tmp && mv $@.tmp $@
+# ui_seq.js exits 0 whatever happens: a program passed if its line says "ok":true
+UIOK := -p '"ok":true' -f '"ok":false'
+UI   := $(B)/js_in_css.xhtml machine/ui_seq.js $(HARNESS) $(SUITE) $(RERUN_IF)
+l5: $(B)/l5.$(UICONF).log                 # the real page, typed like a user; console vs Node
+	$(call report,$<,4)
+$(B)/l5.$(UICONF).log: $(B)/ui_exp/args-1500-1000000.txt $(UI)
+	EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
+l5-smoke: $(B)/l5-smoke.$(UICONF).log
+	$(call report,$<,4)
+$(B)/l5-smoke.$(UICONF).log: $(B)/ui_exp/args-400-6.txt $(UI)
+	EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
+l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what the scan reads is what the editor shows
+	$(call report,$<,2)
+$(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)
+	EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
 
 test: expect l1 l2 l4
 test-browser: l3

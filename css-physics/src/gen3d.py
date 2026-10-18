@@ -379,6 +379,9 @@ for _n in ('raw', 'avail', 'consE', 'NTP', 'NDB'):
     g.reg(_n, inherits=False)
 live = g.reg('live', inherits=False, syntax='<integer>')   # used on #LS only: the levels see ac/as
 g.reg('any', syntax='<integer>')
+FFQ = os.environ.get('FFQ', '1') == '1'   # Firefox-only rules: the re-match clock (see #LM below) and the names
+if FFQ:
+    g.reg('ffk')
 g.reg('mix', syntax='<integer>')
 g.reg('anyrd', syntax='<integer>')
 g.reg('GIr', syntax='<integer>')
@@ -1525,7 +1528,9 @@ _OWN = [re.compile(p) for i_, p in enumerate((r'^np(\d+)_\d+$', r'^tcp(\d+)_\d+$
 
 
 OWNLEV = int(os.environ.get('OWNLEV', 999))
-BOOLQ = os.environ.get('BOOLQ', '1') == '1'
+# (off by default: Firefox's style(--flag) is true whenever a registered flag has a value, i.e. always; Chrome's
+# style(--flag: 1) costs within the noise at 48 bodies)
+BOOLQ = os.environ.get('BOOLQ', '0') == '1'
 
 
 def owner(gn):
@@ -1588,9 +1593,26 @@ for i in range(N if CELLS else 0):
 _names = ' '.join(f'var(--A{i})' for i in range(N))
 # (without cells the presence digest is computed on #L0, so the names are too, as before)
 w(('#LW{' if CELLS else '#L0{') + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}{" w" + str(i) if CELLS else ""}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
+if FFQ and not CELLS:
+    # Firefox has no if(): there every body is always named. The names only let a sleeping neighbourhood's rules be
+    # skipped unevaluated; with all of them present every rule evaluates its own gate, with the same result.
+    w('@supports (-moz-appearance: none){#L0{' + ''.join(f'--A{i}:b{i};' for i in range(N)) + '}}')
 # every level carries the names, so a named rule always resolves to its parent (Chrome only forces
 # a re-match of rules that depend on a style container for that container's children)
 w(('#LW,' if CELLS else '') + ','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
+# Firefox only (FFQ): Gecko doesn't re-match rules that depend on a style container when the container's value
+# changed through an animation (and every state value here comes from one), so the gates would keep their first
+# result. It re-matches the whole subtree of a size container whose size changed: #LM's content box follows the clock
+# while anything is awake (two incommensurate periods, so it changes every frame) and stays put once all sleep.
+# (Changing only its padding, i.e. its content box, doesn't trigger the re-match: the frame's size must change.) #LW
+# then takes the arena's size again (--u is the arena's width / VW), so the grab overlay on #L0, positioned in
+# percentages of it, stays put. Chrome never sees it: a size container there would move the subtree's style recalc
+# into layout.
+if FFQ:
+    w('@supports (-moz-appearance: none){#LT{--ffk:calc(var(--any) * var(--now))}'
+      '#LM{container-type:size;right:auto;bottom:auto;width:calc(1000px + mod(var(--ffk) * 6000, 600) * 1px);'
+      'height:calc(1000px + mod(var(--ffk) * 6000, 583) * 1px)}'
+      f'#LW{{right:auto;bottom:auto;width:calc({VIEW_W} * var(--u));height:calc({VIEW_H} * var(--u))}}}}')
 
 
 def _canon(st):
@@ -1698,7 +1720,9 @@ for i, b in enumerate(BODIES):
         inner = f'<i class="disc"></i><div class="bd sp" id="b{i}"><i class="eq"></i><i class="eq eq2"></i></div>'
     R_ = b['R'] if b['k'] == 'sph' else max(b['h'][0], b['h'][2]) * 1.1
     render_css.append(f'#s{i}{{width:{f(2 * R_)}px;height:{f(2 * R_)}px;margin:{f(-R_)}px 0 0 {f(-R_)}px}}')
-    render_html.append(f'<div class="bw" id="w{i}">{inner}<i class="sh" id="s{i}"></i></div>')
+    # (the shadow comes first: it cuts through its own body's lower faces, and Firefox doesn't split intersecting
+    # planes as Chrome does but draws them in document order)
+    render_html.append(f'<div class="bw" id="w{i}"><i class="sh" id="s{i}"></i>{inner}</div>')
 # box face lighting: world normal of face (axis k, sign) is sign * column k of R (generic rules,
 # the same for every engine)
 LIT = []
@@ -1737,6 +1761,12 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i>'
             '<i class="rail rn"></i>' + ''.join(render_html) + '</div></div></div>' + '</div>' * NTS + '</div></div></div>')
 ENG_CSS = (PHYS_CSS + '\n' + '\n'.join(render_css)).replace('__NP1__', str(N + 1)).replace('__HVW__', f(VIEW_W / 2)).replace('__HVH__', f(VIEW_H / 2))
+# Firefox negates hypot() by negating its arguments, which leaves it unchanged: x - hypot(3, 4) is x + 5, also
+# inside a subtracted min/max/sign/sum and through var(). A product stops the negation there (hypot(..) * 1 is
+# folded away, 1 * hypot(..) of numbers is not: of lengths it is too), so every hypot is written 1 * hypot (after
+# simp.py, which would drop it). An unreported Firefox bug: ../../bugs/firefox-hypot-negation.html.
+if os.environ.get('HYPOT1', '1') == '1':
+    ENG_CSS = re.sub(r'(?<![\w-])hypot\(', '1 * hypot(', ENG_CSS)
 
 # ---- per-engine names ------------------------------------------------------------------
 # Several engines share one page, so every engine-owned name gets a prefix: custom properties
@@ -1759,7 +1789,7 @@ if PFX or MINIFY:
     for n in eng_names:
         if n not in ren:
             ren[n] = f'{PFX}{b36(len(ren))}' if MINIFY else f'{PFX}{n}'
-    ids = r'(RB|LS|LT|L\d+|r\d+|ts\d+|w\d+|b\d+|s\d+|ENG|INI)'
+    ids = r'(RB|LS|LT|LM|LW|L\d+|r\d+|ts\d+|w\d+|b\d+|s\d+|ENG|INI)'
     for b_ in BODIES:
         assert not re.fullmatch(r'#[rwbs]\d+', b_['col']), b_['col']
     def rename_css(t):
