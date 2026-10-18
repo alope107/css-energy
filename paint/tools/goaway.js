@@ -3,13 +3,15 @@
 //   node tools/goaway.js [loads] [base]       (default 5 loads; base defaults to a local serve.js)
 //
 // Locally it serves site/ over HTTP/2 with `--goaway 10000`, as Cloudflare ends every connection after 10,000
-// requests, with a throwaway certificate trusted by SPKI (needs openssl). A base URL (https://…) runs it against a
+// requests (GOAWAY=N: after N, to force connection ends inside every load), with a throwaway certificate trusted by
+// SPKI (needs openssl). A base URL (https://…) runs it against a
 // deployment instead. Per load it prints the cells the first pass lost, with the error of the probe that should
 // have decoded, and the cells still wrong after the retry row. Exits non-zero if any cell is wrong after a retry.
 const fs = require('fs'), os = require('os'), path = require('path'), net = require('net');
 const { spawn, execSync } = require('child_process');
 const { PAINT, B, profileDir, sleep } = require('./lib.js');
 
+const HIT = 17;                                              // build.py: a probe that decodes is (v + HIT) x 1
 const N = 480, LOADS = +(process.argv[2] || 5), BASE = process.argv[3];
 let rnd = 7;
 const rand = n => { rnd ^= rnd << 13; rnd >>>= 0; rnd ^= rnd >>> 17; rnd ^= rnd << 5; rnd >>>= 0; return rnd % n; };
@@ -24,7 +26,7 @@ async function serveH2() {
     `openssl dgst -sha256 -binary | base64`).toString().trim();
   const port = await new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
   const proc = spawn(process.execPath, [path.join(PAINT, 'serve.js'), path.join(PAINT, 'site'), String(port),
-    '--cert', cert, '--key', key, '--goaway', '10000'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    '--cert', cert, '--key', key, '--goaway', String(process.env.GOAWAY || 10000)], { stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise((ok, bad) => { proc.stdout.once('data', ok); proc.once('exit', c => bad(new Error(`serve.js exited (${c})`))); });
   return { base: `https://localhost:${port}`, args: [`--ignore-certificate-errors-spki-list=${spki}`],
     stop: () => { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); } };
@@ -62,10 +64,11 @@ async function serveH2() {
       await pg.goto(srv.base + '/', { waitUntil: 'commit' });
       await sleep(5000);
       while (Date.now() - last < 8000 && Date.now() - t0 < 300000) await sleep(500);   // quiet: first pass and retry done
-      const [rd, w] = await pg.evaluate(() => ['.rd', '.w'].map(s =>
+      // .v2 is the first pass's read (stages 1 and 2), .w the final one; a read is (value + HIT) px wide (build.py)
+      const [rd, w] = await pg.evaluate(() => ['.v2', '.w'].map(s =>
         [...document.querySelectorAll(s)].map(e => e.getBoundingClientRect().width)));
-      const lost = [...Array(N).keys()].filter(k => rd[k] !== want[k] + 1);
-      const wrong = [...Array(N).keys()].filter(k => w[k] !== want[k] + 1);
+      const lost = [...Array(N).keys()].filter(k => rd[k] !== want[k] + HIT);
+      const wrong = [...Array(N).keys()].filter(k => w[k] !== want[k] + HIT);
       bad += wrong.length;
       const why = {}; for (const k of lost) { const e = fails.get(`${srv.base}/c/${k}/r/${want[k]}.png`) || 'no CDP event';
         why[e] = (why[e] || 0) + 1; }
