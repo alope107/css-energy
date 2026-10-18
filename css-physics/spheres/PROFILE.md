@@ -43,12 +43,11 @@ holds ~7, sort ~4, activity gating ~3, gate rules and the rest ~2.
 
 ## Render experiments (2026-10-18)
 
-The page now has three looks (radios): **neon** (default) and **toon** are canvas renders, **classic** is the billboard
-render above. A canvas render draws every sphere as entries in one `box-shadow` list on one element, at screen
+The page has two looks (radios): **neon** (default) is a canvas render, **classic** the billboard render above. (A
+third, **toon**, was dropped: it painted in slot order, which drew far marbles over near ones.) A canvas render draws every sphere as entries in one `box-shadow` list on one element, at screen
 positions projected through the camera in `calc()` (3 declarations per sphere), and every floor shadow as entries in
 one `box-shadow` list on an element in the floor plane (no projection: the 3D transform does it). Neon blends
-additively (`mix-blend-mode: plus-lighter`), so the list's paint order never shows; toon paints in slot order, which
-is wrong where two marbles overlap at different depths. Each look sits in a container that is `display: none` when not
+additively (`mix-blend-mode: plus-lighter`), so the list's paint order never shows. Each look sits in a container that is `display: none` when not
 picked (on the elements themselves, `display: none` still styles them every pass, which made the hidden looks cost as
 much as the shown one).
 
@@ -64,3 +63,11 @@ much as the shown one).
 Paint + layerize + commit fall from ~2.2 to ~0.8 ms per frame. Dragging one sphere through a settled 128 pile is about
 even (classic 19–25 fps, neon 21): the canvas restyles as a whole every hold pass, the classic render only the spheres
 that moved. Rendering is no longer a large item; the readback and the register writeback are.
+
+## Bigger spread of sizes (2026-10-18)
+
+Radii 7–24.5 (the biggest 3.5× the smallest, 6 sizes; was 13–17), contacts split by mass ((r/RMAX)³). The window must
+now hold pairs up to two big radii apart: in the plain-JS model 1.15× the spheres in a 2 RMAX slab missed contacts at
+192 and 256, 1.3× didn't, so K is 9 / 16 / 23 / 31 at 64 / 128 / 192 / 256 (was 6 / 10 / 15 / 19). At 128 in gas chaos
+the step pass grew from ~36 to ~52 ms: classic 11–12 fps, neon 13 fps (+20%, hold pass 26 → 20 ms). No missed contacts,
+no floor penetration; overlaps up to 8 px while 128 spheres pile up, under 1 px once settled.

@@ -169,7 +169,3 @@ footer code{color:var(--ink)}
     linear-gradient(rgb(90 120 255/.14) 1px,transparent 1px) 0 0/calc(40 * 1px) calc(40 * 1px),
     linear-gradient(90deg,rgb(90 120 255/.14) 1px,transparent 1px) 0 0/calc(40 * 1px) calc(40 * 1px),
     #07080d;border-color:rgb(110 140 255/.5)}
-#app:has(#lk-toon:checked) .floor{background:
-    linear-gradient(#d8d2c4 2px,transparent 2px) 0 0/calc(40 * 1px) calc(40 * 1px),
-    linear-gradient(90deg,#d8d2c4 2px,transparent 2px) 0 0/calc(40 * 1px) calc(40 * 1px),
-    #efe9dc;border:3px solid #12131a}

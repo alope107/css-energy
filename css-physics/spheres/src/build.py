@@ -73,6 +73,8 @@ def page(sel, dst):
     html = TPL
     for k_, v in rep.items():
         html = html.replace(k_, v)
+    # the constants the tools need (radii from the type registers)
+    html = html.replace('</body>', '<!--SPHERES ' + json.dumps(dict(e['consts'], N=n, K=e['K'])) + '-->\n</body>')
     open(dst, 'w').write(html)
 
 

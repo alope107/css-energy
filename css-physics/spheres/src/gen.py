@@ -29,16 +29,16 @@ import math, sys, os, json, random, re
 E_ = os.environ.get
 N = int(E_('N', 64))
 WX, WZ, CEIL = int(E_('WX', 280)), int(E_('WZ', 180)), int(E_('CEIL', 300))   # tray: |x| < WX, |z| < WZ, -CEIL < y < 0
-RMIN, RMAX = float(E_('RMIN', 13)), float(E_('RMAX', 17))
+RMIN, RMAX = float(E_('RMIN', 7)), float(E_('RMAX', 24.5))   # the biggest spheres 3.5x the smallest, in NTYPE sizes
 NTYPE = 6
 RADII = [RMIN + (RMAX - RMIN) * t / (NTYPE - 1) for t in range(NTYPE)]
-# the window must hold every sphere within one diameter in x (spheres/model/model.js: 1.1x the spheres in a slab 2 RMAX
-# wide, plus one, had no missed contacts at 128 and 256 with two sort phases per step)
-K = min(int(E_('K', max(6, math.ceil(1.15 * N * 2 * RMAX / (2 * WX)) + 1))), N - 1)
+# the window must hold every sphere within two maximal radii in x (spheres/model/model.js, radii 7-24.5: 1.3x the
+# spheres in a slab 2 RMAX wide, plus one, had no missed contacts at 128 and 256 with two sort phases per step)
+K = min(int(E_('K', max(6, math.ceil(1.3 * N * 2 * RMAX / (2 * WX)) + 1))), N - 1)
 RATE = float(E_('RATE', 60))
 h = 1 / RATE
 GRAV = 1600.0
-OMEGA = float(E_('OMEGA', 1.0))      # Jacobi relaxation (the push per pair is OMEGA/2 of the overlap each side)
+OMEGA = float(E_('OMEGA', 1.0))      # Jacobi relaxation (a pair's overlap is split between its spheres by mass)
 DAMP = float(E_('DAMP', 0.01))       # velocity damping per step
 FRIC = float(E_('FRIC', 0.25))       # share of the horizontal move the floor takes away per step
 PFRIC = float(E_('PFRIC', 0.08))     # share of the horizontal move contact with another sphere takes away per step
@@ -178,8 +178,11 @@ R = lambda s: f'var(--r{s})'
 HD = lambda s: f'max(0, -1 * sign(var(--T{s})))'          # held flag (a negative type)
 for s in range(N):
     P(f'r{s}', f'{f(RMIN)} + (abs(var(--T{s})) - 1) * {f((RMAX - RMIN) / (NTYPE - 1))}', G('ac', s))
+    MASS = lambda s_: f'var(--r{s_}) * var(--r{s_}) * var(--r{s_}) * {f(1 / RMAX ** 3)}'   # (r / RMAX)^3
+    P(f'm{s}', MASS(s), G('ac', s))
     if ACT:
         P(f'r{s}', f'{f(RMIN)} + (abs(var(--T{s})) - 1) * {f((RMAX - RMIN) / (NTYPE - 1))}', G('in', s))
+        P(f'm{s}', MASS(s), G('in', s))
         for a in 'xyz':
             P(f'p{a}{s}', f'var(--{a.upper()}{s})', G('in', s))
             P(f'n{a}{s}', f'var(--{a.upper()}{s})', G('in', s), inherits=True)
@@ -219,14 +222,15 @@ PAIRS = [] if 'nok' in ABL else [(s, s + k) for s in range(N) for k in range(1, 
 for a, b in PAIRS:
     # (1 * hypot: Firefox negates hypot() by negating its arguments, so x - hypot(..) would be x + hypot(..))
     d = f'max(1 * hypot({PV("x", a)} - {PV("x", b)}, {PV("y", a)} - {PV("y", b)}, {PV("z", a)} - {PV("z", b)}), 0.01)'
-    P(f'k{a}_{b}', f'max(0, ({R(a)} + {R(b)}) / {d} - 1)', G('pa', a))
+    # the overlap factor over the pair's total mass: sphere a moves by k m_b (p_a - p_b), sphere b by k m_a (p_b - p_a)
+    P(f'k{a}_{b}', f'max(0, ({R(a)} + {R(b)}) / {d} - 1) / (var(--m{a}) + var(--m{b}))', G('pa', a))
 NB = {s: [] if ('nok' in ABL or 'noq' in ABL) else [t for t in range(max(0, s - K), min(N, s + K + 1)) if t != s] for s in range(N)}
 KK = lambda s, t: f'var(--k{min(s, t)}_{max(s, t)})'
-wgt = f(OMEGA / 2)
+wgt = f(OMEGA)
 for s in range(N):
-    P(f'Ks{s}', ' + '.join(KK(s, t) for t in NB[s]) or '0', G('ac', s))
+    P(f'Ks{s}', ' + '.join(f'{KK(s, t)} * var(--m{t})' for t in NB[s]) or '0', G('ac', s))
     for a in 'xyz':
-        terms = ' + '.join(f'{KK(s, t)} * {PV(a, t)}' for t in NB[s]) or '0'
+        terms = ' + '.join(f'{KK(s, t)} * var(--m{t}) * {PV(a, t)}' for t in NB[s]) or '0'
         P(f'q{a}{s}', f'{PV(a, s)} + {wgt} * ({PV(a, s)} * var(--Ks{s}) - ({terms}))', G('ac', s))
 
 # the tray: clamp, mirrored with restitution E (the floor only above VTH of approach, or resting spheres would hop),
@@ -460,10 +464,10 @@ for ri, (rn, lo, hi) in enumerate(REGS):
     F, s = slot_field(rn)
     if F in RCOMP:
         w(f'@keyframes v{ri}{{from{{--{RCOMP[F]}:{f(lo)}}}to{{--{RCOMP[F]}:{f(hi)}}}}}')
-RENDER = E_('RENDER', 'looks')  # looks: all three looks on the page, picked by the page's "look" radios (the unpicked
+RENDER = E_('RENDER', 'looks')  # looks: both looks on the page, picked by the page's "look" radios (the unpicked
                                 # ones are display:none, so they cost nothing) | anim: only the classic billboards, read
-                                # with the wrappers' own animations | inh: classic, copying the solver's values | neon, toon
-LOOKS = ['neon', 'toon', 'classic'] if RENDER == 'looks' else [{'anim': 'classic', 'inh': 'classic'}.get(RENDER, RENDER)]
+                                # with the wrappers' own animations | inh: classic, copying the solver's values | neon
+LOOKS = ['neon', 'classic'] if RENDER == 'looks' else [{'anim': 'classic', 'inh': 'classic'}.get(RENDER, RENDER)]
 CANVAS = [l_ for l_ in LOOKS if l_ != 'classic']
 INCHAIN = RENDER == 'inh' or bool(CANVAS)
 for s in (range(N) if 'classic' in LOOKS else []):
@@ -486,7 +490,7 @@ if CANVAS:
     # every floor shadow an entry in one box-shadow list on an element lying in the floor plane (#FS<look>: no projection
     # needed, the 3D transform does it). Two restyles and two paints per frame instead of 384 elements and 512
     # animations. box-shadow paints in list order (first on top), not by depth: neon blends additively, so the order
-    # never shows; toon gets it wrong where two marbles overlap at different depths.
+    # never shows (an opaque look painted this way draws far spheres over near ones: a 'toon' look was dropped for it).
     ct_, st2 = f(math.cos(math.radians(TILT))), f(math.sin(math.radians(TILT)))
     proj = ['--cy:cos(var(--yaw))', '--sw:sin(var(--yaw))']
     for c_ in ('cy', 'sw'):
@@ -509,18 +513,12 @@ if CANVAS:
             hd = HD(s_)
             if look == 'neon':
                 # a white-hot core, a coloured halo (held: a wider one); a coloured pool of light on the floor below
-                sh.append(f'{px(sx)} {px(sy)} {px(f"{R_} * 0.55")} {px(f"{R_} * 0.45")} hsl({hue(s_)} 100% 88%)')
-                sh.append(f'{px(sx)} {px(sy)} {px(f"{R_} * 1.7")} {px(f"{R_} * (0.6 + 0.5 * {hd})")} hsl({hue(s_)} 100% 55% / 0.85)')
-                fl.append(f'{px(f"var(--X{s_})")} {px(f"var(--Z{s_})")} {px(f"{rr_(s_)} * 2.2 - var(--Y{s_}) * 0.15")} '
-                          f'{px(rr_(s_))} hsl({hue(s_)} 100% 50% / calc(0.55 + var(--Y{s_}) / 600))')
-            else:
-                # toon: a highlight, a shaded flat body, a thick ink outline (held: amber outline)
-                sh.append(f'{px(f"{sx} - {R_} * 0.32")} {px(f"{sy} - {R_} * 0.36")} 0 {px(f"{R_} * 0.22")} hsl({hue(s_)} 100% 92%)')
-                sh.append(f'{px(f"{sx} + {R_} * 0.12")} {px(f"{sy} + {R_} * 0.14")} 0 {px(f"{R_} * 0.86")} hsl({hue(s_)} 70% 42%)')
-                sh.append(f'{px(sx)} {px(sy)} 0 {px(R_)} hsl({hue(s_)} 80% 60%)')
-                sh.append(f'{px(sx)} {px(sy)} 0 {px(f"{R_} + 2.5")} color-mix(in srgb, #12131a, #f2b134 calc({hd} * 100%))')
-                fl.append(f'{px(f"var(--X{s_})")} {px(f"var(--Z{s_})")} {px(f"{rr_(s_)} * 0.6 - var(--Y{s_}) * 0.1")} '
-                          f'{px(f"{rr_(s_)} * 0.7")} rgb(0 0 0 / calc(0.5 + var(--Y{s_}) / 500))')
+                # a white-hot centre, a saturated body the sphere's size (soft edge of a few px), a coloured halo
+                sh.append(f'{px(sx)} {px(sy)} {px(f"1 + {R_} * 0.3")} {px(f"{R_} * 0.3")} hsl({hue(s_)} 100% 94%)')
+                sh.append(f'{px(sx)} {px(sy)} {px(f"2 + {R_} * 0.25")} {px(f"{R_} * 0.78")} hsl({hue(s_)} 100% 58% / 0.9)')
+                sh.append(f'{px(sx)} {px(sy)} {px(f"{R_} * 1.4")} {px(f"{R_} * (0.6 + 0.5 * {hd})")} hsl({hue(s_)} 100% 50% / 0.5)')
+                fl.append(f'{px(f"var(--X{s_})")} {px(f"var(--Z{s_})")} {px(f"{rr_(s_)} * 1.8 - var(--Y{s_}) * 0.12")} '
+                          f'{px(f"{rr_(s_)} * 0.6")} hsl({hue(s_)} 100% 50% / calc(0.35 + var(--Y{s_}) / 800))')
         w(f'#CV{look}{{' + ';'.join(proj) + ';box-shadow:' + ','.join(sh) + '}')
         w(f'#FS{look}{{box-shadow:' + ','.join(fl) + '}')
 if len(LOOKS) > 1:
