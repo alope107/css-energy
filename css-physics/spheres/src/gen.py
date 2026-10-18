@@ -391,6 +391,10 @@ for s_ in range(N):
     la.append(f'--wr{s_}:calc(sign({win(s_, -K - 2, K + 2)}))')
 w('@container style(--live: 1){#LA{' + ';'.join(la) + '}}')
 w('@container style(--liv: 1){#LC{' + ';'.join(LC) + '}}')
+if 'nophys' in ABL:     # cost bisection: active slots run no physics, they copy (p = n = x) like the inactive ones
+    for s_ in range(N):
+        BLK[('ac', s_)] = list(BLK.get(('in', s_), []))
+        BLK[('pa', s_)] = []
 for s_ in range(N):
         for kind in ('in', 'ac', 'GH', 'pa', 'ws'):
             if BLK.get((kind, s_)):
