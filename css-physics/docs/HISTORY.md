@@ -28,8 +28,8 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 
 - **Unnamed `@container style()` gates:** each rule evaluates its style() every pass, matching or not (2.5–3.5 µs in
   141, 0.8 µs now), which dominated sparse scenes. Replaced by owner-named containers.
-- **Container names on L0/L1 only:** named rules deeper down didn't re-match (Chrome re-matches style-container rules
-  only for direct children). Names are on every level.
+- **Container names on L0/L1 only:** named rules deeper down didn't re-match (Chrome 141; not reproduced in 153,
+  `../../bugs/README.md`). Names are on every level, which is also the cheap lookup.
 - **`@function`:** about 2–3× slower than the same math inline (141).
 - **`if()` selection inside hot properties:** about 4.2 µs per property against 2 µs for calc (141). The 153
   microbenchmark (BENCHMARKS §2) shows 2.70 against 2.61 µs, so this may no longer hold: re-check before relying on it.
@@ -123,7 +123,9 @@ recognizer, no show-press) and the software-emulated Android emulator (`../../sh
 - **Contact slots read by anchor name** (from js-minus-js; `../../COMPARISON.md`): pick a partner's anchor name with a
   two-level `if()` and read it with one `anchor-size()`, so K slots per body make pair rules O(N·K). Caveats: the value
   arrives in layout (the solver must sit under a size-container reader); anchor-positioned registers once cost about
-  5 ms of layout per frame; choosing partners still needs the broadphase. First: a microbenchmark against the per-pair
+  5 ms of layout per frame; choosing partners still needs the broadphase. js-minus-js measured the layout side: a size
+  container restyles its subtree inside layout every dirty pass, and each rendered anchor costs ~1.5 µs per layout pass
+  (its ENGINE_NOTES 34, 40). First: a microbenchmark against the per-pair
   rules at 64 bodies.
 - **AVBD** (Giles, Diaz and Yuksel, SIGGRAPH 2025): body-centric gather, stable stacks at few iterations; but a
   per-body 6×6 Hessian with LDLᵀ is costly in calc, and warm starting needs per-contact registers. Prototype in JS

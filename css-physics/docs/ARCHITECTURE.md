@@ -100,8 +100,8 @@ next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds 
 - **Owner names.** Every rule owned by body i, or by a pair whose lower index is i, is
   `@container b{i} style(--gate){…}` at every level from L1 down (`OWNLEV`). L0 computes
   `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`, and
-  **every** level has `container-name: var(--AN)`, because Chrome only re-matches style-container rules for the
-  container's direct children.
+  **every** level has `container-name: var(--AN)`, so each level finds the name at its parent (Chrome 141 also didn't
+  re-match deeper named rules; not reproduced in 153, `../../bugs/README.md`).
 - **Costs** (BENCHMARKS.md §2): a present name is found at the parent (0.2 µs, 0.8 µs with a false `style(--flag: 1)`).
   An absent name skips the style() but walks every ancestor's name list: about 0.2 µs + 0.6–0.9 ns × depth × names in
   a microbenchmark, about 0.2 + 0.01 × depth µs in the engine. With few names present that still beats an unnamed

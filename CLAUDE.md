@@ -8,19 +8,23 @@ their techniques.
 - `shared/` is harness code the projects' tools use: browser launch profiles, tracing, A/B timing, motion checks,
   freezing, ablation (`shared/README.md`). Each project's commands are unchanged. A change there touches all of them:
   run `make test-shared`, css-physics `bash tools/smoke.sh 16`, js-minus-js `make test`, `make l3`, `make l5-smoke`,
-  and, for `browser.js`, paint `make test`.
+  and, for `browser.js` or `csslabel.py`, paint `make test`.
+- Generated CSS is labelled: a header, then `/* === Section === */` and `/* --- Group --- */` comments, written
+  through `shared/py/csslabel.py` by every generator, which fails the build if a rule comes before the first section.
+  Label new CSS as you add it; the conventions are in `shared/README.md#labels-in-generated-css`.
+  `python3 shared/py/csslabel.py <page>` prints a built page's outline.
 - css-physics and js-minus-js launch Chromium with different flags (`shared/js/browser.js` profiles). Their
   benchmark numbers were taken with those flags; don't unify them without re-measuring both. paint's tools use the
   `physics` profile.
 - `engine/` checks the Chrome behaviour css-physics and js-minus-js depend on: `make engine-check` (facts,
   pass/fail, ~20 s) and `make engine-costs` (the style-engine cost table against the docs, ~2 min, no other browser
-  jobs). Run both after a Chrome upgrade; `engine/README.md` lists the facts and which notes cite them. paint's facts
-  (dictionary registration rules, the frame limit) are checked by its own `make test`.
+  jobs). Run both after a Chrome upgrade; `engine/README.md` lists the facts and which notes cite them. paint's
+  dictionary registration rules are checked by its own `make test`; its frame limit (~1,000 per page) isn't checked.
 
 ## Checks in make
 
 - The slow checks are make targets that make skips while nothing they depend on changed since they last passed
-  (css-physics `smoke.sh`, js-minus-js `make l2`, `l3`, `l5`, `l5-smoke`, `l5-input`, paint `make test`,
+  (css-physics `smoke.sh`, js-minus-js `make l2`, `fuzz`, `l3`, `l5`, `l5-smoke`, `l5-input`, paint `make test`,
   `make engine-check`). A skipped check prints `up to date: … passed <time>` and the end of that pass's log.
 - **The evidence before a merge is a real run: `RERUN=1`** (`RERUN=1 make l3`, `RERUN=1 bash tools/smoke.sh 16`).
   Use it for a suspected flake too. When you paste an `up to date` result while iterating, say it wasn't re-run.

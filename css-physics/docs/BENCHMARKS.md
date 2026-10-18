@@ -228,8 +228,8 @@ at the root). An empty level costs about 11 µs per pass.
 keyframe set): 30.2 ms with one animation, 57.4 ms with two composited with add, against 6.2–7.2 ms for calc and 4.5
 ms for no props: about 128 µs per element against 9–13 µs. Dead end.
 
-Sections 3–5 and the inheritance, paused-animation and feature-support results above are dead ends; their scripts
-were removed on 2026-10-18 (`git checkout 83d4fde -- css-physics/experiments`).
+Sections 3–5 and the inheritance and paused-animation results above are dead ends (the feature-support facts are live:
+`make engine-check` probes them); their scripts were removed on 2026-10-18 (`git checkout 83d4fde -- css-physics/experiments`).
 
 ## 3. Variable fonts as compute
 

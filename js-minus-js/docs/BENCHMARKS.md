@@ -113,6 +113,22 @@ costs the same as `if / else`); real-page FizzBuzz: HALT ratio 1.000, compiled 0
 never-matching rules (+13%) cost +4.3%, +2.0%, +1.6%. So new variants cost more than their temps, and merging the 115
 duplicate variants into shared rules made the compiler ~3% faster than the baseline.
 
+### 4d. `switch`, `++` / `--` in expressions, `a[i]++`, `.length` (branch `sugar`, 2026-10-18)
+
+Compiler only. Size (`tools/vsz.py`): 67,451 → 69,965 temps, 346 → 355 variants (`S_SWCASE`, and `++` / `--` after an
+operand, pure errors before), max label ports 21 → 21, largest variant (`S_NAMES '}'`) 1,523 → 1,545, `S_NAMES ')'`
+1,256 → 1,211. A first version had 70,682 temps: each `emit` costs ~12 temps per variant (one selector per code slot),
+so the switch shares code records, pushes and label ports with what was there (`if` / `while` / `switch` headers push
+once, loop / function / switch closes share their first `JMP`, `RET` / `POP` and a port).
+
+Compile time (L3, the 140 programs both pages compile, six runs pinned to CPUs 12–15, main / sugar / sugar / main /
+main / sugar, an Android emulator on ~3 CPUs throughout): ratios 1.012, 1.001, 1.016 against main-vs-main 0.984,
+so about +1%, at the noise floor.
+
+Run time: old programs compile to the same code size and output; the 97 without array literals take the same steps.
+An array literal's length word costs 16 steps once, when the ROM's startup copies it (`array_basic` 17 → 18 shapings,
+`obj_array` with 3 arrays 83 → 96).
+
 ## 5. The page end to end
 
 ### 5a. FizzBuzz (`machine/ui_seq.js`, initial program)

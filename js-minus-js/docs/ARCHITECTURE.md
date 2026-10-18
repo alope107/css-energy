@@ -77,21 +77,42 @@ It exists twice, and the two must agree exactly (L2).
 labels `NL` = 64 (6-bit fields); `EMAX` = 12 code words per step; `NI` = 16 interned strings and names; `SDATA` = 256
 words of globals and of strings; the page: 24 × 64 characters, 400 tokens (`TMAX`).
 
-**Parser structure.** 27 modes (`S_STMT`, `S_OPND`, …). Control-stack kinds: bodies (`C_IFB`, `C_LOOPB`, …),
-pending headers and statements (`C_IFC`, `C_FORINIT`, `C_ASSIGN`, …), braceless bodies (`kind + BRACELESS`, closed
+**Parser structure.** 31 modes (`S_STMT`, `S_OPND`, …). Control-stack kinds: bodies (`C_IFB`, `C_LOOPB`, `C_SWITCH`,
+…), pending headers and statements (`C_IFC`, `C_SWITCHC`, `C_FORINIT`, `C_ASSIGN`, `C_CASE`, …), braceless bodies (`kind + BRACELESS`, closed
 by `complete_stmt`). Entries pack as `kind × 4096 + a × 64 + b` and `e × 4096 + c × 64 + d` (`e` = block-scope mark).
 
 **Features.**
 
-- `&&` / `||`: `a DUP JZ/JNZ L POP b`, `L` defined when the operator pops.
+- `&&` / `||`: `a DUP JZ/JNZ L POP b`, `L` defined when the operator pops. The value's static type merges both
+  operands' (as `?:` does): boolean if either is, so the PRINTB forms misprint only a 0 or 1 from the other side.
 - `c ? a : b`: `c JZ L1 a JMP L2 L1: b L2:`. `?` pushes `M_TERN`; `:` swaps in `M_TELSE` (lowest precedence), which
   defines `L2` when popped. A ternary in an else branch reuses the outer `L2`, so the DSL checks for one `M_TELSE`
   once after `popops`' loop.
 - `do … while`: `C_DOB` (continue, break, top labels); `S_DOWHILE` waits for `while`; the `)` emits `JNZ top`.
 - Block scope: function-level names grow up from 0 (`nsym`), block-level `let` / `const` down from `NS - 1`
   (`nlet`); each control entry records `nlet` and closing a body restores it. `const` is a symbol bit.
-- Semicolon insertion: the lexer emits `T_NL` after a newline that follows a statement-ending token; the parser
-  treats it as `;` only where a statement can end outside `( [` and calls.
+- Semicolon insertion: a newline after a statement-ending token (identifier, number, string, `) ] } ++ --`) is pending
+  (`pnl`) until the next significant character, which the lexer sees as the lookahead of the blank or comment end
+  before it: `. [ ( ? : , ) ] * % < > & | = ; }` continue the statement or end it themselves (no token), anything else
+  gets `T_NL`. `+` `-` (`++x` starts a statement) and `/` (comment or division) are decided on the character itself;
+  after `return` (`lt` 2) the newline always gives `T_NL`. The parser treats `T_NL` as `;` only where a statement can
+  end outside `( [`, calls and `for` headers. On the page the newline level's lookahead is the next line's first
+  character, so a line's source element opens at the previous line's newline level.
+- `switch`: the value is on the stack only while tested, so bodies, `break`, `continue` and `return` need no cleanup.
+  `C_SWITCH` holds the pending test's label, the end label, `default`'s label and flags. Each `case v:` is `[JMP Bk]
+  Tk: DUP v EQ JZ Tk+1 POP Bk:` (the `JMP` lets the previous body fall through); `}` is `[JMP end] Tlast: POP [JMP
+  default] end:`. `break` targets the innermost loop or switch, `continue` the innermost loop. `S_SWCASE` makes the
+  body start with `case`, `default` or `}`.
+- `++` / `--` in expressions (variables): `x++` is `LOAD INC`, `++x` `INC LOAD` (`--` with `PUSHI 1 SUB` and a `DUP`);
+  `pm` = 3 after one, so no `.` or `[` may follow.
+- `.length`: an array literal's first data word is its count and its pointer is the next word, so `x.length` is
+  `PUSHI 1 SUB LOADI` on any array.
+- `console.log` leaves no value (its PRINT words pop every argument): it ends its statement itself, without the
+  expression statement's `POP` (`print_end`), and can't be used as a value.
+- Argument counts: `fl_k` = label + 64 × type + 256 × (argument count + 1, 0 until the first call or the definition).
+  `M_CALL`'s value is the function index + 16 × type + 64 × commas; its `)` checks or records the count, and
+  `end_params` checks the calls made before the definition (error 76).
+- The string area starts one word past `data_base + SDATA`, which is the lib's empty DONE marker PRINT stops at.
 - `else if`: the inner `if` reuses the `else`'s end label and wrapper (`pendLa + 64`): one control entry per chain.
 - Static types (2-bit, in `sk_j` and `fl_k`): a symbol's last assignment in source order, a function's `return`s.
 
@@ -239,14 +260,25 @@ HP and GCLIM start at 0, so the first NEW sets up the heap.
 | Level | Command | What runs | Checked against |
 |---|---|---|---|
 | oracle | `make expect` | each `tests/suite/*.js` under Node, putc shimmed | writes `*.out` |
-| L1 | `make l1` | `cc_ref` compile + 20-bit simulator | Node output |
+| L1 | `make l1` | `cc_ref` compile + 20-bit simulator, strict: the stack must never go below its start and be back at HALT | Node output |
 | L2 | `make l2` | the DSL in Python level by level, with the page's specialised variants (`SPEC=1`; `make l2-generic` unspecialised) | the reference: parser state, tables, every word and label |
-| L3 | `make l3` | the generated CSS compiler in Chrome (`build/suite_css.xhtml`, programs written into the latch cells) | the reference, word for word; `suite_err` must be rejected (any nonzero error) |
+| L3 | `make l3`, `make fuzz-l3` | the generated CSS compiler in Chrome (`build/suite_css.xhtml`, programs written into the latch cells) | the reference, word for word; `suite_err` must be rejected (any nonzero error) |
 | L4 | `make l4` | `uarch4.Machine4` runs every compiled image | Node output |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
 
-- `make test` = oracle, L1, L2, L4. `tests/suite/` has 109 programs, `tests/suite_err/` 31; `tests/programs/` has
-  the demos t1–t4.
+- `make test` = oracle, L1, quick fuzz, L2, L4. `tests/suite/` has 120 programs (each must fit the editor, or
+  `suite_ref.py` fails it), `tests/suite_err/` 46; `tests/programs/` has the demos t1–t4.
+- **Differential tests** (`tests/fuzz/fuzz.py`; `make test` runs a quick fixed-seed set, `make fuzz` the full one,
+  `make fuzz-l3` 300 of them through L3 in Chrome). Node is the oracle; each program goes through L1, L1 on the
+  page's padded text when it fits the editor, and optionally L2 (`--l2`, on every program, rejected ones too) and L4
+  (`--l4`). Sources: `fmt`, every suite program in 11 layouts that must print the same (no semicolons, comments
+  between all tokens, tabs, CRLF, one line, one token per line, …); `gen`, random programs from `progen.py`, typed
+  across the whole language and rendered twice from one tree, for us and for Node with the machine's integer
+  semantics spelled out (20-bit wrap, truncating division, x / 0 = x % 0 = 0), staying inside the documented
+  language so any difference is a bug; `mut`, suite programs with token edits, where Node's syntax errors must be
+  rejected and L2 must agree (output differences are listed, not failures: a mutant can leave the language unseen).
+  The oracle flags printed values our machine can't produce (objects, arrays, `null`, `undefined`, non-integers).
+  Failures are shrunk into `build/fuzz/`; `tests/fuzz/show.py` replays one, `fuzz.py gen --k N` regenerates one.
 - L5 runs only programs under 1,500 steps (`tests/suite_ui.py`). Harnesses detect HALT by the page's `--isHALT`
   flag, not a trap-kind index (that moves when opcodes are added).
 - `machine/hbtest.py` runs the real font in uharfbuzz against the model: the only check that the font agrees (L4
