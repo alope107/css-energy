@@ -137,15 +137,15 @@ starts on its value's page, undo works back to the colour it had when the page l
 
 ## URLs
 
-Every page URL is extensionless (`/c/k/x`, `/c/k/p/5`). Cloudflare Pages 308-redirects `*.html` to the extensionless
-path; a redirect inside a 200 rewrite would leave the `/c/<k>/` namespace. Files keep `.html` on disk; Pages and
+Every page URL is extensionless (`/c/k/x`, `/c/k/p/5`). Cloudflare redirects `*.html` to the extensionless path; a
+redirect inside a 200 rewrite would leave the `/c/<k>/` namespace. Files keep `.html` on disk; Cloudflare and
 `serve.js` serve `p/5.html` at `/p/5`.
 
 ## Capacity
 
 500 entries per site × log₂K bits per entry, with K probes to read a cell (each probe is an equality test, so
-reading can't be cheaper than K). The host's file limit caps K at half its file count (Cloudflare Pages: 20,000
-files free, 100,000 paid).
+reading can't be cheaper than K). The host's file limit caps K at half its file count (Cloudflare Workers: 20,000
+files per version on the free plan).
 
 | K | Per cell | 500 cells | Probes per read |
 |---|---|---|---|

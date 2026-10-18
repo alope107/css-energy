@@ -1,12 +1,9 @@
 # How rigid3d.css works
 
-A 3D rigid-body physics engine (boxes and spheres in a walled tray, with gravity, friction, restitution, sleeping, mouse and touch grabbing) whose page contains **no JavaScript**. Every physics step is evaluated by Chrome's style engine, and the state survives from frame to frame by being written into layout and read back through scroll-driven animations.
-
-The page is generated: `src/gen3d.py` emits one *engine* (CSS + markup) for a given body count, and `src/build3d.py` wraps one or more engines into pages using `src/page3d.html` and `src/ui3d.css`.
-
-Read alongside `src/gen3d.py`. Its module docstring and section comments (`# ---- …`) carry the same structure.
-
----
+Every physics step is evaluated by Chrome's style engine; state survives between frames by being written into layout
+and read back through scroll-driven animations. `src/gen3d.py` emits one *engine* (CSS + markup) per body count;
+`src/build3d.py` wraps engines into pages with `src/page3d.html` and `src/ui3d.css`. `gen3d.py`'s docstring and
+`# ---- …` section comments follow this document's structure.
 
 ## 1. The frame loop
 
@@ -22,200 +19,218 @@ Read alongside `src/gen3d.py`. Its module docstring and section comments (`# ---
          └ .regs  register elements whose top/left = var(--N…) (the next state)
 ```
 
-- **Two style passes per frame.** Chrome samples animations and recalculates style, then lays out. When view timelines are stale after layout (the registers moved), it recalculates style and layout once more in the same frame. Each recalculation that sees changed state runs one physics step, so a frame normally advances **two steps**.
-- **Timestep.** A fixed `STEP = 1/RATE`, with RATE 90 by default.
-- **Time budget.** #LT keeps a time budget: `TP` is the time of the last step and `DB` the banked time; `live` = 1 when enough time is banked. Steps that would run faster than real time are skipped. Slow frames do not catch up: the simulation runs in slow motion instead.
-- **No dependency cycle.** The next state is written into layout (`top`/`left` of the register elements) and read back on the next pass through timelines, never through a custom-property reference.
+- **Two steps per frame.** Chrome recalculates style and lays out; when view timelines are stale after layout (the
+  registers moved) it does both once more in the same frame. Each recalculation that sees changed state runs a step.
+- **Timestep** `1/RATE`, RATE 90. #LT banks time (`TP` last step, `DB` bank; `live` = 1 when enough is banked): steps
+  faster than real time are skipped, slow frames run in slow motion.
+- **No dependency cycle:** the next state goes through layout and timelines, never a custom-property reference.
 
 ### Registers
 
-- **Mapping.** A state value `v ∈ [lo, hi]` is stored as an element offset in a scroller `HS = 1,000,000 px` tall (`.regs .sc`):
-  `top = (HS − clamp(0, (v − lo)/(hi − lo), 1)·(HS + 1)) px`.
-  The element's `view-timeline` gives progress p ∈ [0, 1], and an `@keyframes qK { from {--X: lo} to {--X: hi} }` animation with `animation-timeline: --tK` turns p back into v.
-- **Two registers per element.** `view-timeline: --tA block, --tB inline` uses `top` for one register and `left` for another, which halves the register elements.
-- **Ranges.** `RANGES` in `gen3d.py` sets each field's range. Precision is LayoutUnit (1/64 px) over 1e6 px, about 26 bits.
-- **Per body:** 12 registers (x, y, z, qx, qy, qz, vx, vy, vz, wx, wy, wz) plus the sleep counter `SC`. `qw` is rederived as `sqrt(1 − |q_v|²)`, with the quaternion kept in canonical form (qw ≥ 0).
-- **Globals:** `TP`, `DB` (time), `GI` (held body), `GOX/GOY/GOZ` (grab offset in the body frame), `GT` (ray parameter) and `GYP` (gravity on the previous pass).
-- **Timeline names.** Names are hoisted with `timeline-scope` on a nest of small `.ts` wrappers holding 24 names each. Short scope lists made the per-element lookup about 3× cheaper than one long list on a single ancestor. The wrappers sit **above** `#RB`; when they were moved inside `.rz`, rendering vanished.
-- **Writeback.** The clock registers `TP`/`DB` are written from `#LT` (in `.regs.rt`); every other register is written from the last level.
+- A value `v ∈ [lo, hi]` (`RANGES` in `gen3d.py`) is an element offset in a 1,000,000 px scroller (`.regs .sc`):
+  `top = (HS − clamp(0, (v − lo)/(hi − lo), 1)·(HS + 1)) px`; its `view-timeline` progress drives
+  `@keyframes qK { from {--X: lo} to {--X: hi} }`. Precision: LayoutUnit (1/64 px) over 1e6 px, about 26 bits.
+- Two registers per element: `view-timeline: --tA block, --tB inline` (`top` and `left`).
+- Per body: x, y, z, qx, qy, qz, vx, vy, vz, wx, wy, wz and the sleep counter `SC`; `qw = sqrt(1 − |q_v|²)` (canonical,
+  qw ≥ 0). Globals: `TP`, `DB`, `GI` (held body), `GOX/GOY/GOZ` (grab offset, body frame), `GT` (ray parameter), `GYP`
+  (previous gravity).
+- Timeline names are hoisted with `timeline-scope` on nested `.ts` wrappers of 24 names each (about 3× cheaper per
+  lookup than one long list), **above** `#RB` (inside `.rz`, rendering vanished).
+- `TP`/`DB` are written from `#LT` (`.regs.rt`), every other register from the last level.
 
 ### Why the wrapper stack looks the way it does
 
-`.ptr > .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
+`.ptr > #TS > #TI > (#FO) + .ts… > #RB > .rz > #LS > #LT > (rt regs) + #LM > #LW > L0 > L1 > … > LF > .regs`
 
-- **`.ptr`** holds the pointer (`--sx/--sy` from a view timeline on a hover-anchored marker) and the camera yaw.
-- **`#RB`** gates the pointer by `--att`: it is only nonzero while grabbing.
-- **`.rz`** zeroes `--sx/--sy/--yaw`, so hovering doesn't restyle `#LS`.
-- **`#LS`** reads the state registers. In a fully sleeping scene nothing in it changes, so it isn't restyled.
-- **`#LT`** sits inside `#LS` and changes every pass because of the clock. Everything it passes down is either non-inherited or derived only from state, so the solver levels are not restyled while the scene sleeps. This took idle style cost from 13.6 to about 1.0 ms per frame at 32 bodies.
-- **#LM and #LW** are two plain wrappers between #LT and L0; they keep L0 out of #LT's every-pass child restyle unless L0's inputs really changed. With `CELLS=1` (an evaluated dead end, see below) they hold the spatial cells: #LM the cell marks of awake bodies and the cell of each sleeper, #LW the summed words, the sleepers' presence and the container names that #L0's own rules then query.
-- **The grab overlay** (ring, pin, tether) hangs off L0, the only level that uses the pointer. L1 zeroes the pointer for everything below it.
-
----
+- `.ptr`: pointer (`--sx/--sy`) and camera yaw. `#TS`, `#TI`, `#FO`: the touch input ("Touch" below), above the
+  `.ts` wrappers so a register's timeline lookup never scans `#TS`'s list; `.view` zeroes the drag. `#RB` gates the
+  pointer and the drag by `--att` (nonzero only while grabbing); `.rz` zeroes `--sx/--sy/--yaw` and the drag so
+  hovering or dragging doesn't restyle `#LS`.
+- `#LS` reads the registers; asleep, nothing in it changes. `#LT` changes every pass (the clock), but passes down only
+  non-inherited or state-derived values, so the solver isn't restyled while the scene sleeps (idle at 32 bodies went
+  from 13.6 to about 1 ms per frame).
+- `#LM`, `#LW`: plain wrappers that keep L0 out of #LT's every-pass child restyle; #LM is also Firefox's re-match
+  clock (§6).
+- The grab overlay (ring, pin, tether) hangs off L0, the only level using the pointer; L1 zeroes it below.
 
 ## 2. The solver levels
 
-Every physics quantity is a registered custom property (`@property --name{syntax:'<number>';…}`) declared at a **level** (the element `#L<k>`) and inherited downward. Later levels read earlier quantities with `var()`. Each declaration sits inside a **gate**, an `@container … style(--flag)` or `style(--flag: v)` rule, so work that isn't needed is never declared.
+Every quantity is a registered `<number>` declared at a level (`#L<k>`), inherited downward and read with `var()`.
+Each declaration sits in a **gate**, an `@container … style(--flag: v)` rule, so unneeded work is never declared.
 
 | Level | Contents |
 |---|---|
-| **L0** | Prediction (gravity, grab spring, kick), quaternion integration, rotation matrices for boxes, broadphase flags for every body/plane group and every body pair, neighbourhood digests, and the mouse ray cast (first pass of a press). |
-| **L1** | Narrowphase for nearby pairs: box/box face-axis SAT with reference-face selection, sphere/box closest point. Sphere/sphere and body/plane need no separate narrowphase; the broadphase test is exact for them. |
-| **LB = 2** | Batch 0: every body against the tray planes (floor, ceiling, x walls, z walls). Planes go **first**: when they were solved last, a stack's floor push never reached the bodies above within the same step, and stacks kept phantom velocities that never slept. |
-| **LB+1 … LB+NBT−1** | Round-robin rounds (a circle-method schedule, `SCHED`): in each round every body meets at most one other, so each pair is solved exactly once per step in a fixed Gauss–Seidel order. One element per round. A pair's contact geometry is declared at its own round's level, next to its solve. |
-| **LF** | Final state per body (position, rotation, velocities rederived from displacement), sleep counter, and writeback values `N*` for the registers. |
+| **L0** | Prediction (gravity, grab spring, kick), quaternion integration, box rotation matrices, broadphase flags per body/plane group and body pair, neighbourhood digests, the mouse ray cast. |
+| **L1** | Narrowphase for near pairs: box/box face-axis SAT with reference-face selection, sphere/box closest point (sphere/sphere and body/plane need none). |
+| **LB = 2** | Every body against the tray planes, **first**: solved last, a stack's floor push never reached the bodies above within the step. |
+| **LB+1 … LB+NBT−1** | Round-robin rounds (circle method, `SCHED`): each body meets at most one other per round, so each pair is solved once per step in a fixed Gauss–Seidel order. A pair's contact geometry sits at its round's level. |
+| **LF** | Final state (velocities rederived from displacement), sleep counter, writeback values `N*`. |
 
-NLEV is about N + 3: 51 levels at 48 bodies, 67 at 64.
+NLEV ≈ N + 3 (51 at 48 bodies). **`SHARE=1`:** a property declared and read on one batch level only is non-inherited,
+so different levels share names (`zn0, zn1, …`): a third fewer `@property` rules at 64 bodies.
 
 ### Contact model (position level, split impulse)
 
-- **Body vs plane, box.** By default (`PATCHW=soft`) a box gets one contact at a soft support patch: per box axis k, `e_k = h_k (n·col_k)`, the deepest corner is at `dm = d0 + Σ|e_k|`, and the patch centre is placed along each axis by `w_k = |e_k| / (PATCHC + dm − |e_k|)`. That gives the even centroid of the penetrating corners for a nearly flat box, and the corner itself when the box stands on it. `PATCHW=even|depth` uses all 8 corners instead.
-- **Body vs plane, sphere.** One contact at the support point.
-- **Box vs box.** Only one reference face per pair is used (ties go to the lower index). The incident box's 8 corners are written as affine functions of the corner signs and **clipped laterally** to the reference face, which gives the real overlap patch for crossed or overhanging boxes. The contacts are then reduced to one depth-weighted contact (Q = Σq, D = Σq²/Q, patch point = q-weighted mean). `PATCHB=soft` (a single soft patch) is experimental: piles jitter and never sleep.
-- **Solve per group.** For a single reduced contact:
-  - **Split impulse.** `lvel` cancels this step's approach velocity and carries velocity. The rest (`lex`) pushes out older overlap beyond `SLOP`, capped at `MAXCORR`. `lex` is position-only and is removed again from the rederived velocity, so depenetration never launches bodies.
-  - **Restitution** applies above a bounce threshold (`BOUNCE_THR`).
-  - **Coulomb friction** uses the effective inverse mass along the sliding direction.
-  - **Torsional friction** cancels relative spin about n, limited by μ·pn·patch radius.
-  - **Rolling resistance** applies to spheres (`ROLL`) and optionally boxes (`ROLLB`).
-  - **Shock propagation:** the lower body of a vertical contact is made heavier (`SHOCK`).
-  - **Sleeping partners** are treated as immovable (inverse mass 0).
+- **Box vs plane** (`PATCHW=soft`): one contact at a soft support patch. Per box axis k, `e_k = h_k (n·col_k)`, the
+  deepest corner is at `dm = d0 + Σ|e_k|`, and the patch centre sits at `w_k = |e_k| / (PATCHC + dm − |e_k|)` along
+  each axis: the centroid of the penetrating corners for a flat box, the corner for a box on its corner.
+  `PATCHW=even|depth` uses all 8 corners. **Sphere vs plane:** the support point.
+- **Box vs box:** one reference face per pair (ties to the lower index); the incident box's 8 corners, affine in the
+  corner signs, are clipped laterally to it, then reduced to one depth-weighted contact (Q = Σq, D = Σq²/Q, point =
+  q-weighted mean).
+- **Solve:** `lvel` cancels this step's approach velocity; `lex` pushes out older overlap beyond `SLOP` (capped at
+  `MAXCORR`), position-only and removed from the rederived velocity, so depenetration never launches bodies.
+  Restitution above `BOUNCE_THR`; Coulomb friction with the effective inverse mass along the slide; torsional friction
+  (μ·pn·patch radius); rolling resistance (`ROLL`, `ROLLB`); shock propagation (`SHOCK`: the lower body of a vertical
+  contact is heavier); sleeping partners have inverse mass 0.
 
-### Accumulators: running totals without sums over all partners
+### Accumulators
 
-A body can be touched by any round. Instead of summing over every possible partner, each body keeps **running totals**:
-
-- **The totals:** position change x,y,z; rotation change tx,ty,tz; and the position-only "pseudo" shares ex,ey,ez and gx,gy,gz. Spheres skip the pseudo rotation share.
-- **`K{i}{c}`** (syntax `'*'`, inherited) is the latest total. A round that touches body i declares `J{par}{i}{c} = K + this round's contribution`, and the **next** element aliases `K = J`. Reading the latest total is then one `var()` with no fallback chain.
-- **`JP{i}{c}`** holds the last batch's totals. The final level reads `var(--JP, var(--K, init))`.
-- **Final velocities:** `v = (pos − X − pseudo)/h` and `w = o + (θ − pseudo_θ)/h`.
+Any round can touch a body, so each keeps running totals instead of sums over all partners: position change x,y,z,
+rotation tx,ty,tz, and position-only "pseudo" shares ex,ey,ez, gx,gy,gz (none for sphere rotation). `K{i}{c}` (syntax
+`'*'`, inherited) is the latest total; a round touching body i declares `J{par}{i}{c} = K + contribution` and the
+next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds the last batch's totals; LF reads
+`var(--JP, var(--K, init))`. Velocities: `v = (pos − X − pseudo)/h`, `w = o + (θ − pseudo_θ)/h`.
 
 ### Gating: what makes a sleeping or sparse scene cheap
 
-- **Gates.** Each declaration's gate is a style() condition on a flag computed at L0/L1. A flag is tested as `style(--flag: 1)`. In Chrome `style(--flag)` (true iff the registered value differs from its initial 0) is about 0.3 µs per rule cheaper (`BOOLQ=1`), within the noise in the engine, but in Firefox it is always true (§6), so it is off by default. Examples: `ac{i}` (body awake and this pass advances time), `np{a}_{b}` (pair near), `tcp…` (touching), `p{a}_{b}uA/uB` (which reference face), `nw{i}{F|C|X|Z}` (near a plane).
-- **Named containers.** A rule whose container name is absent from every ancestor is skipped without evaluating its style() query: about 0.1 µs per rule at shallow depth in Chromium 153 (free in 141), against 0.4–0.7 µs for a present name with a false style() (2.5–3.5 µs in 141).
-  - So every rule owned by body i, or by a pair whose lower index is i, is written `@container b{i} style(--gate){…}` at every level from L1 down (`OWNLEV`; L0's rules query the plain wrapper, which has no names).
-  - L0 computes `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`: `b{i}` while body i is awake or near an awake body (with `CELLS=1` an awake body also gets `w{i}`).
-  - **Every** level has `container-name: var(--AN)`, so a named rule resolves at its parent. Chrome only re-matches rules that depend on a style container for that container's direct children, so the names must be on every level.
-  - A present name is found at the parent (about 0.16 µs). An **absent name walks every ancestor and scans each one's name list**: about 0.2 µs + 0.6 ns × depth × names in a microbenchmark, and about 0.2 + 0.01 × depth µs in the engine. With few names present (a sparse scene) that is still cheaper than an unnamed `style()` (0.4 µs): unnamed deep rules (`OWNLEV=1`) made a 64-body one-body drag 30% slower. When everything is awake, all names are present and the form doesn't matter.
-  - The cost of a rule nobody matches is the N² floor of this design: about 3 rules per pair (narrowphase, solve, alias) at 0.2–0.7 µs, so 4 ms per pass at 64 bodies in a one-body drag, and growing like N² × depth.
-
-### Spatial cells: evaluated, off by default (`CELLS=1`, `CELL`)
-
-The floor is cut into `CELL`-sized columns (x) and rows (z). Partitioning can't change which rules exist (every pair has its own static rules), only how cheaply irrelevant ones are rejected and how many per-pair properties are computed. The implementation, kept for comparison:
-
-- **Marks (#LM).** An awake body marks every column and row its reach (`R_i + max R + MARGIN`, around its predicted position) can touch. A mark is a decimal word with one digit per column: `(B^hi − B^lo) / (B − 1)` sets digits lo…hi−1 in one term; `B = 10^(digits of N)` so a digit can't overflow, and a word holds `6 // digits` columns (6 significant digits survive `var()`). A sleeping body declares its own column and row (`hx{i}`, `hz{i}`).
-- **Words and presence (#LW).** `SX{w}`/`SZ{w}` sum the marks of all bodies (an undeclared mark is 0). A sleeper is present, `nb{i} = 1`, if the digit of its column and the digit of its row are both nonzero (a separable superset of "an awake body is in reach"). Presence gates the name `b{i}`, the sleeper's rotation matrices at L1 and its wake test; the near test of a pair becomes a name-only nest `@container w{a}{@container b{b}{#L0{--np{a}_{b}: …}}}` (plus its mirror), evaluated inner-first, so a far sleeper costs one absent-name lookup at depth 1 instead of a property.
-- **Why it loses** (HISTORY.md has the numbers): the sleepers pay per pass (two cell properties and a presence property, about 80 µs per sleeper: CSS math functions are dear), while the all-pairs digest charges only awake bodies (N/6 words each) and the near tests it would save cost a few µs per awake body per partner. With one body awake among 64 the cells build is 6 ms per pass slower; with everything awake nothing is saved.
-- **Shared names (`SHARE=1`).** A property declared and read on only one batch level is invisible to every other level (it is non-inherited), so properties of different levels share names (`zn0, zn1, …`). This shrinks the `@property` list by about a third at 64 bodies.
+- **Flags** from L0/L1, tested as `style(--flag: 1)`: `ac{i}` (awake, and this pass advances time), `np{a}_{b}` (pair
+  near), `tcp…` (touching), `p{a}_{b}uA/uB` (reference face), `nw{i}{F|C|X|Z}` (near a plane). `BOOLQ=1` tests
+  `style(--flag)` instead (about 0.3 µs per rule cheaper, within noise in the engine; always true in Firefox).
+- **Owner names.** Every rule owned by body i, or by a pair whose lower index is i, is
+  `@container b{i} style(--gate){…}` at every level from L1 down (`OWNLEV`). L0 computes
+  `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`, and
+  **every** level has `container-name: var(--AN)`, because Chrome only re-matches style-container rules for the
+  container's direct children.
+- **Costs** (BENCHMARKS.md §2): a present name is found at the parent (0.2 µs, 0.8 µs with a false `style(--flag: 1)`).
+  An absent name skips the style() but walks every ancestor's name list: about 0.2 µs + 0.6–0.9 ns × depth × names in
+  a microbenchmark, about 0.2 + 0.01 × depth µs in the engine. With few names present that still beats an unnamed
+  `style()` (`OWNLEV=1` made a 64-body one-body drag about 20% slower, HISTORY.md); with all awake the form doesn't
+  matter. Rules nobody matches are the N² floor: about 3 per pair (narrowphase, solve, alias), 4 ms per pass at 64 in
+  a one-body drag, growing like N² × depth.
+- Spatial cells were a dead end (HISTORY.md).
 
 ### Sleeping and waking
 
-- **Going to sleep.** A body that moves less than `SLEEP_DX`/`SLEEP_DA` in a step counts up `SC` to `SLEEP_K` (45 passes). At `SLEEP_K` it is "ready", and it sleeps (SC = SLEEP_K + 1) unless it is blocked by touching a body that isn't ready.
-- **The stillness test uses displacement, not velocity.** Resting boxes carry a bounded phantom velocity from the split impulse. The test also counts a step that undoes the previous one as still, because resting boxes can rock by a hair every other step.
-- **Waking.** A sleeping body wakes on shake, reset, a gravity change, being grabbed, or a moving body coming near.
-- **Neighbourhood digests.** "A moving body is near me" (and "a body that isn't ready is near me") is computed with decimal words:
-  - Each awake body j sums its near flags into words where body i is digit `i % 6` of word `i // 6`. A registered number survives `var()` with only 6 significant digits.
-  - Summing the words over all bodies tells every body at once whether an awake, moving or not-ready body is near it.
-  - The gates are `mix`, `anyrd`, `pk`, `bk` and `nb` ("asleep, near an awake body", formerly `nbs`).
-- **Starting asleep.** Scenes start with bodies asleep only if they are at rest **and touching the floor** (`scene_decls`). Anything placed in the air starts awake.
+- A body moving less than `SLEEP_DX`/`SLEEP_DA` per step counts `SC` up to `SLEEP_K` (45), is "ready", and sleeps
+  (SC = SLEEP_K + 1) unless it touches a body that isn't. Stillness is displacement, not velocity (resting boxes carry
+  phantom split-impulse velocity), and a step undoing the previous one counts as still (resting boxes rock by a hair).
+- Wakes on shake, reset, gravity change, grab, or a moving body coming near.
+- **Digests:** each awake body sums its near flags into decimal words, body i as digit `i % 6` of word `i // 6` (6
+  significant digits survive `var()`); the sum over all bodies tells every body whether an awake, moving or not-ready
+  body is near. Gates: `mix`, `anyrd`, `pk`, `bk`, `nb` (asleep, near an awake body).
+- Scenes start a body asleep only if it rests **on the floor** (`scene_decls`); each scene's `#INI` rule declares every
+  body's `--isc`.
 
-### Grabbing (mouse and touch)
+### Grabbing
 
-- **Picking.** On the first pass of a press, a ray from the camera is unprojected through the CSS camera transform (constants `PERSP`, `TILT`, `CAM_TY`, `CAM_DIST` must match `.cam` in `ui3d.css`) and cast against every sphere and box slab. The hit is latched into registers: `GI` (body index + 1, or N+1 for a miss), `GT` and `GO*`.
-- **Holding** reads only the held body's state, through blocks gated on `GIr = i+1`. A spring-damper pulls the grab point toward the ray point at the latched depth.
-- **Mouse pointer.** A hover grid of cells gets `anchor-name` on `:hover`. A zero-size marker is anchored to the hovered cell and has a view timeline, which turns its position into `--sx/--sy`.
-- **Touch.** Tap a body to pick it up; the point comes from the hovered cell of a grid 3× the arena's size. Dragging scrolls that layer, and the marker inside it moves with the finger. Tap again to drop.
+- On a press's first pass a camera ray (`PERSP`, `TILT`, `CAM_TY`, `CAM_DIST`, matching `.cam` in `ui3d.css`) is cast
+  against every sphere and box slab; the hit is latched into `GI` (index + 1, N+1 for a miss), `GT`, `GO*`. Holding
+  reads only the held body, through blocks gated on `GIr = i+1`; a spring-damper pulls the grab point to the ray.
+- Mouse: hover cells get `anchor-name` on `:hover`; a zero-size marker anchored there has a view timeline giving
+  `--sx/--sy`. Touch (`@media (pointer: coarse)`, `--tm: 1`): touch a body and drag; let go to drop.
 
----
+### Touch
+
+Chrome gives a finger drag almost nothing: `:hover`/`:active` arrive only with show-press (a finger resting
+100–150 ms), `:active` clears when the finger passes the touch slop (tap-cancel), `:hover` never follows. A quick drag
+gets neither. A scroll does follow the finger, and the scroller that scrolls says where it came down.
+
+- Handles: each body's wrapper holds `.hd` (`#h<i>`), a camera-facing disc of radius R + 14, a scroller with
+  6000-unit content resting at (3000, 3000). The gesture latches to the handle under the finger; Chrome unprojects the
+  movement onto the handle's plane, so its offset is the drag in world units on the camera-facing plane through the
+  body (`touch-3d-scroll` in `engine/`). `scroll-axis-lock: none` stops axis locking; `overscroll-behavior: contain`
+  keeps the page still; everything else is `pointer-events: none`, so drags beside the bodies scroll the page.
+- `#TI`: one additive animation per handle and axis gives `--tdx/--tdy` (only the dragged handle is off rest) and,
+  through step keyframes (0 within 0.6 units of rest), `--tgi` = dragged index + 1.
+- Finger down: the follower `#FO` is a small snap container whose snap area sits at the sums, so it re-snaps after
+  every layout, except that Chrome defers layout re-snaps while a scroll gesture is active (`ShouldDeferLayoutSnap`,
+  `touch-snap-defer`) and does them in the frame it ends. `--held` = "#FO lags the sums"; `--att = held × sign(tgi)`.
+- Back to rest: while held a handle's snap area is an oversized one (`u`) following its offset (valid within ±40),
+  so lifting snaps nothing and a fling stops within 40 units; when `--held` drops the rest area (`i`) returns and the
+  handle re-snaps at once (a layout re-snap). Chrome's own end-of-gesture snap is animated and part of the gesture: it
+  kept the body held and pulled it back for 200–500 ms. A frame with the handle at rest and `#FO` lagging has
+  `tgi = 0`, so `att` stays 0.
+- Engine: the press's first pass (`--tpk`, not `--pick`) latches `GI = tgi` and the body's centre into `GO`; no ray.
+  Holding (`--tho`) pulls the centre (`grr = 0`) to `GO + tdx·ex + tdy·ey` (screen x, y on the camera-facing plane,
+  the ray's derivatives at the current yaw); the overlay shows that target projected.
+- Measured (`tools/touchcheck.js`): held from the first scroll update, dropped 16–50 ms after the lift (2–3 frames:
+  250 ms at 48 bodies), trailing the finger by the touch slop (15 px desktop, ~8 dp Android). On the Android emulator
+  (`../../shared/android/`, `experiments/touch/handles.html`) every drag that became a scroll grabbed and dropped;
+  flings ran past the 40-unit cap (~190 units). Checked on a real phone by the user, 2026-10-18.
 
 ## 3. Rendering
 
-- **Units.** The scene is laid out in fixed px (1 world unit = 1 px) inside `.view` and scaled once with `transform: scale(100cqw / VW)`. Per-element `cqw` units cost about 70 µs per element per pass when everything moves.
-- **Body wrapper.** Each body wrapper `#w{i}` animates its own pose from the registers' view timelines (keyframes `v{K}`) into **non-inherited** props `--Rx --Ry --Rz --Ri --Rj --Rk --Rg`.
-- **Rotation and lighting.** `.bd` pulls the quaternion with an explicit `inherit` and builds a `matrix3d`. Faces get per-face lighting colours by `color-mix` from the rotation columns. This is about 3× cheaper than letting inherited registered props flow into every face.
-- **Shadows** are blurred discs on the floor, sized and faded by height.
-
----
+- Laid out in fixed px (1 world unit = 1 px) inside `.view`, scaled once with `transform: scale(100cqw / VW)`
+  (per-element `cqw` cost about 70 µs per element per pass).
+- `#w{i}` animates its pose from the registers' timelines (`v{K}`) into **non-inherited**
+  `--Rx --Ry --Rz --Ri --Rj --Rk --Rg`; `.bd` pulls them with explicit `inherit` into a `matrix3d`, and faces get
+  lighting by `color-mix` from the rotation columns (3× cheaper than inherited registered props in every face).
+- Shadows are blurred floor discs sized and faded by height.
 
 ## 4. Pages and builds
 
 | Command | Output |
 |---|---|
-| `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine with readable names and a `<!--BODYINFO …-->` comment. **This is what the test tools expect.** |
-| `python3 src/build3d.py out/x.html` | One page per count (default 8, 16, 24, 32, 48, 64), `out/x-N.html`, linked to each other; `out/x.html` is a copy of the `DEFAULT` count's page (16). A stylesheet over `CSS_SPLIT` (14 MB) goes out as linked `x-N.k.css` files. `tools/make_site.sh` does this into `site/` with `DEFAULT=24`. |
-| `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios; unselected engines are `display:none`. |
+| `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine, readable names, a `<!--BODYINFO …-->` comment. **What the test tools expect.** |
+| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`). |
+| `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios. |
 
-- **Prefixes.** Engines are generated in parallel, one `gen3d.py` process per count. Each non-PLAIN engine gets a name prefix (`PFX`) and minified property names.
-- **CSS splitting.** A stylesheet over `CSS_SPLIT` (14 MB, the artifact host's per-file limit) is split into linked `rigid3d-N.k.css` files, cut between top-level rules.
-- **Artifact index.** `tools/artifact_index.py` strips doctype/html/head/body for the claude.ai artifact host.
+Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and minified names. Stylesheets over
+`CSS_SPLIT` (14 MB; Workers allows 25 MiB per file) split into linked `x-N.k.css` files.
 
 ### gen3d.py knobs (environment)
 
 | Knob | Default | Meaning |
 |---|---|---|
-| `NBOX`, `NSPH` | 8, 8 | body counts (min 4 each; the hand-built scenes use 4+4). `build3d.py` sets them from `COUNTS`; `NBOX_FIX` overrides the box count. |
-| `RATE` | 90 | steps per second. At 60 or 45 piles never settle (measured); 120 is stiffer but slower. |
+| `NBOX`, `NSPH` | 8, 8 | body counts (min 4 each); set from `COUNTS`; `NBOX_FIX` overrides the box count |
+| `RATE` | 90 | steps per second; at 60 or 45 piles never settle, 120 is stiffer but slower |
 | `SLEEP_K` | 45 | still passes before sleeping |
 | `ROLL` / `ROLLB` | 0.06 / 0 | rolling-resistance arm for spheres / boxes |
-| `PATCHW` | soft | box/plane contact: soft (one patch) \| even \| depth (8 corners) |
-| `PATCHB` | corners | box/box: corners (clipped incident corners) \| soft (experimental, jitters) |
+| `PATCHW` | soft | box/plane: soft (one patch) \| even \| depth (8 corners) |
+| `PATCHB` | corners | box/box: corners (clipped) \| soft (experimental, jitters) |
 | `PATCHC` | 1.0 | patch weighting constant |
-| `SCENE`, `SCENE_LIST` | tower | first scene and the scene list (tower, rain, stack; also calm, pair, field) |
-| `CELLS`, `CELL` | 0, 120 | spatial cells for presence and near tests (an evaluated dead end; 1 builds it for comparison) |
-| `BOOLQ` | 0 | gate 0/1 flags with `style(--flag)` instead of `style(--flag: 1)` (Chrome only: always true in Firefox) |
-| `HYPOT1`, `FFQ` | 1, 1 | Firefox: `1 * hypot(…)`; the Firefox-only names and #LM re-match clock (§6) |
-| `OWNLEV` | 999 | owner-named container rules only at levels ≤ this (1 was measured slower: see Gating) |
-| `TRAY`, `FIELD_GAP` | 1, 6 | tray scale (benchmarks only: the camera doesn't follow) and the spacing of the field scene |
+| `SCENE`, `SCENE_LIST` | tower | first scene and the list (tower, rain, stack; also calm, pair, field) |
+| `BOOLQ` | 0 | gate 0/1 flags with `style(--flag)` (Chrome only) |
+| `HYPOT1`, `FFQ` | 1, 1 | Firefox: `1 * hypot(…)`; Firefox-only names and #LM re-match clock (§6) |
+| `OWNLEV` | 999 | owner-named rules only at levels ≤ this |
+| `TRAY`, `FIELD_GAP` | 1, 6 | tray scale (benchmarks only: the camera doesn't follow); field spacing |
 | `SIMPLIFY` | 1 | `simp.py` calc() simplifier |
 | `INLINE2`, `INL_DEPTH`, `INL_ONLY1` | 1, 2, 1 | inline single-use props into their consumers |
 | `SHARE` | 1 | shared names for level-local props |
-| `PSEUDOROT` | 1 | track the position-only share of rotation for boxes |
-| `OWNSET` | 01234 | which gate families get container-name ownership (ablation knob) |
+| `PSEUDOROT` | 1 | track the position-only share of box rotation |
+| `OWNSET` | 01234 | gate families with container-name ownership (ablation knob) |
 | `PFX`, `MINIFY` | — | set by build3d for multi-engine pages |
 
 ### Scenes
 
-`SCENES` holds hand-placed 8-body layouts for tower, rain and stack. `_extend()` adds bodies past 8:
-- **Layer 0:** an 8×5 grid on the floor, clear of the hand-placed bodies.
-- **Upper layers:** offset by half a cell and dropped from above.
-- **Rain:** the original 24 drop columns, then a higher offset set.
-- **Field:** every body shelf-packed at rest on the floor, axis-aligned, `FIELD_GAP` apart, so the scene loads asleep; what doesn't fit drops from just above. The sparse-regime benchmark scene (`tools/sparse.js`).
+`SCENES` has hand-placed 8-body tower, rain and stack; `_extend()` adds an 8×5 floor grid, then upper layers offset by
+half a cell and dropped (rain: its 24 drop columns, then a higher set). **Field** shelf-packs every body at rest on the
+floor, `FIELD_GAP` apart, so it loads asleep: the sparse-regime scene (`tools/sparse.js`).
 
----
+## 5. Where the time goes
 
-## 5. Where the time goes (summary; details in BENCHMARKS.md, measured 2026-10-13 in Chromium 153)
-
-- **Per-property cost.** A registered property costs about 1.5–2 µs plus about 0.1–0.15 µs per arithmetic operation and about 0.17 µs per `var()` reference. Arithmetic is not the bottleneck; property count is.
-- **A 48-body pile.** One step costs about 37 ms (frozen at 4 s), almost all of it style recalculation:
-  - contact pairs about 15 ms;
-  - per-body awake blocks about 27 ms (82 + 24 props per body; overlaps with the pairs);
-  - base about 6 ms.
-- **N² costs (all bodies awake, 48 bodies).**
-  - The all-pairs broadphase is 1,128 near tests at about 2.9 µs each, about 3.3 ms.
-  - Owner-named pair rules whose name is present (body awake) but whose style() is false add about 0.9 µs × 3,360 ≈ 3 ms.
-  - Together that is about 17% of a step, and it grows with N².
-- **Registers.** About 2–8 µs per register element (2 values) per pass in a microbenchmark, rising with the register count (BENCHMARKS.md §2, `mk_regs.py`).
-- **An idle scene** (32 bodies, all asleep) costs about 2 ms per style pass, 2 passes per frame.
-
----
+[BENCHMARKS.md](BENCHMARKS.md) §1 (ablation, N² costs) and §2 (cost per construct). Property count, not arithmetic,
+is the bottleneck.
 
 ## 6. Firefox
 
-The same page runs in Firefox 159+ (in 158 the scroll-driven animations the registers depend on are behind `layout.css.scroll-driven-animations.enabled`; the page says so when they are missing). Measured in Firefox 157 (Playwright's) with the pref, and in stock 158 (pref), 159 DevEdition and 160 Nightly, 2026-10-17. Everything the engine evaluates is identical to Chrome on a static state (every property on every level, to float noise), after these changes:
+Runs in Firefox 159+ (158 needs `layout.css.scroll-driven-animations.enabled`; the page says so). Checked in 157 (with
+the pref), 158, 159 DevEdition and 160 Nightly, 2026-10-17: on a static state every property on every level matches
+Chrome to float noise, after these changes (Chrome cost: BENCHMARKS.md §1 Firefox, within noise):
 
-| Firefox behaviour | Workaround | Chrome cost |
-|---|---|---|
-| `style(--x)` (no value) is true whenever a registered property has a value, i.e. always (Chrome: iff it differs from the initial value) | `BOOLQ=0` by default: 0/1 gates are `style(--x: 1)` | within the noise at 48 bodies (BENCHMARKS.md) |
-| Negating `hypot()` negates its arguments, which leaves it unchanged: `100 - hypot(3, 4)` is 105, also inside a subtracted `min`/`max`/`sign`/sum and through `var()`. Every other math function is right. | every `hypot(` is written `1 * hypot(` after `simp.py` (`hypot(…) * 1` is folded away again; `HYPOT1=0` turns it off) | none measured |
-| No `if()` (the container names `--A{i}`) | `@supports (-moz-appearance: none)`: every body always named on #L0. Names only skip rules unevaluated; with all present each rule evaluates its own gate. | none (Chrome drops the block) |
-| Rules that depend on a style container are **not re-matched** when the container's value changed through an animation, and every state value here arrives through one (the register timelines, the clock). The gates kept their first result: bodies fell through each other. A class or inline-style change re-matches correctly. | Firefox re-matches the whole subtree of a size container whose size changed. Firefox only, #LM is one, sized from `--ffk = any × now` on two incommensurate periods, so it changes every frame while anything is awake and stays put once all sleep (idle stays at 60 fps). Its box must change (padding alone, i.e. the content box, doesn't trigger it), so #LW takes the arena's size back (`VW × --u`), and `--u` is registered so that its `100cqw` resolves on `.arena`: unregistered, the grab overlay resolved it against #LM, and with #LM's percentages it jumped around (`tools/overlaycheck.js`). `FFQ=0` drops it. | none (Chrome drops the block; a size container there would move the subtree's style recalc into layout) |
-| No typed division before Firefox 158: `scale(calc(100cqw / 900px))` is invalid | `scale(tan(atan2(100cqw, 900px)))` | none |
-| Intersecting 3D planes aren't split; they draw in document order (a body's shadow cut through its lower faces and drew on top) | the shadow comes first in each body | 39 pixels of antialiasing differ in Chrome |
+| Firefox behaviour | Workaround |
+|---|---|
+| `style(--x)` (no value) is always true on a registered property | `BOOLQ=0`: 0/1 gates are `style(--x: 1)` |
+| Negating `hypot()` negates its arguments, leaving it unchanged: `100 - hypot(3, 4)` is 105 (also in a subtracted `min`/`max`/`sign`/sum, through `var()`) | every `hypot(` becomes `1 * hypot(` after `simp.py` (`HYPOT1=0` off) |
+| No `if()` (the names `--A{i}`) | `@supports (-moz-appearance: none)`: every body always named on #L0 |
+| Style-container rules aren't re-matched when the container's value changes through an animation (all state does): gates kept their first result | Firefox re-matches the subtree of a size container whose size changed: Firefox-only, #LM's box is sized from `--ffk = any × now` (two incommensurate periods), so it changes every frame while anything is awake (padding alone doesn't trigger it). #LW restores the arena's size (`VW × --u`); `--u` is registered so its `100cqw` resolves on `.arena`, not #LM (`tools/overlaycheck.js`). `FFQ=0` off. |
+| No typed division before 158 | `scale(tan(atan2(100cqw, 900px)))` |
+| Intersecting 3D planes drawn in document order (a shadow over its body) | the shadow comes first in each body |
 
-Three of these are unreported Firefox bugs, with minimal reproductions in `../../bugs/` (hypot, the style-query re-match, the boolean query).
+Three are unreported Firefox bugs, with reproductions in `../../bugs/` (hypot, style-query re-match, boolean query).
 
-**Left as they are:**
-- **One step per frame.** Firefox samples view timelines once per refresh tick; Chrome re-samples stale timelines after layout and runs a second pass. So Firefox runs 60 steps per second on a 60 Hz display against `RATE` 90: the simulation runs at about half speed under load (free fall: 0.44–0.59 sim seconds per second, Chrome 0.91). Frame rates are close to Chrome's.
-- **3D sorting across bodies.** Even with all faces in one preserve-3d context, Firefox (headless, software WebRender) composites whole bodies in document order: a box resting on another can draw behind it, and a sphere's rings draw in full over its disc (Chrome hides their back halves).
-- **Touch** (`scroll-initial-target` is unsupported) is untested.
+**Left as they are:** one step per frame (Firefox samples view timelines once per tick), so 60 steps/s against
+`RATE` 90, about half speed under load; whole bodies composited in document order (a box resting on another can draw
+behind it; sphere rings draw over the disc); touch untested, and probably grabs nothing (it needs Chrome's deferred
+layout re-snap).

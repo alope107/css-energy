@@ -22,7 +22,7 @@ const PROBES = [
   {
     id: 'style-int-256', kind: 'fact',
     claim: '@container style(--v: N) never matches a calc()-computed registered <integer> of 256 or more',
-    docs: 'js-minus-js docs/ENGINE_NOTES.md 1; AGENTS.md pitfalls',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 1; CLAUDE.md pitfalls',
     page: () => html(N({ name: 'v' }) + '.c{--v:calc(var(--a) * 1)}.l{--v:256}i{--o:0}' +
       [255, 256, 1000].map(n => `@container style(--v: ${n}){.n${n}{--o:1}}`).join(''),
       [255, 256, 1000].map(n => `<div class=c style="--a:${n}"><i class=n${n} id=c${n}></i></div>`).join('') + '<div class=l><i class=n256 id=lit></i></div>'),
@@ -56,7 +56,7 @@ const PROBES = [
   {
     id: 'style-range', kind: 'fact',
     claim: 'range style queries work: style(--h > 5)',
-    docs: 'css-physics docs/BENCHMARKS.md §2 (1.6 µs per rule); CLAUDE.md',
+    docs: 'css-physics docs/BENCHMARKS.md §2 (1.7 µs per rule); CLAUDE.md',
     page: () => html(N({ name: 'h' }) + 'i{--o:0}@container style(--h > 5){.r{--o:1}}@container style(--h: 7){.e{--o:1}}',
       '<div style="--h:7"><i class=r id=r7></i><i class=e id=e7></i></div><div style="--h:3"><i class=r id=r3></i></div>'),
     read: () => ({ e7: prop('e7', '--o'), r7: prop('r7', '--o'), r3: prop('r3', '--o') }),
@@ -93,7 +93,7 @@ const PROBES = [
   {
     id: 'html-nesting-512', kind: 'fact',
     claim: 'the HTML parser stops nesting at 512 elements; XHTML nests as deep as the markup',
-    docs: 'js-minus-js ENGINE_NOTES.md 19, AGENTS.md (pages must be XHTML)',
+    docs: 'js-minus-js ENGINE_NOTES.md 19, CLAUDE.md (pages must be XHTML)',
     pages: () => ({
       html: '<!doctype html><body>' + '<div>'.repeat(600) + '<i id=deep></i>' + '</div>'.repeat(600) + '</body>',
       xhtml: '<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/></head><body>' + '<div>'.repeat(600) + '<i id="deep"/>' + '</div>'.repeat(600) + '</body></html>',
@@ -122,18 +122,81 @@ const PROBES = [
       return { animated: z('an'), static: z('st'), animatedState: getComputedStyle(document.getElementById('an')).animationPlayState, p: prop('an', '--p') }; },
     judge: r => ({ control: r.static === 0, holds: r.animated > 0, note: `animated flag (--p = ${r.p}, computed play state "${r.animatedState}"): --z ${r.animated.toFixed(2)}; static flag: --z ${r.static}` }),
   },
+  // ---- touch: css-physics's touch input (ARCHITECTURE.md "Touch"). The gestures go through Chromium's gesture recognizer
+  // (CDP touch events, on a touch-emulated phone viewport): touch slop, scroll latching, axis locking, flings.
+  {
+    id: 'touch-snap-defer', kind: 'fact', ctx: 'touch',
+    claim: 'a scroll-snap container re-snaps after a layout change at once, except while a scroll gesture is active anywhere on the page: then it waits until the gesture ends',
+    docs: 'css-physics ARCHITECTURE.md "Touch" (the follower #FO, --held); Blink LocalFrameView::ShouldDeferLayoutSnap',
+    page: () => html('body{margin:0;timeline-scope:--ix,--iy}#I{width:300px;height:300px;overflow:scroll;scroll-timeline:--ix x,--iy y}#I>div{width:900px;height:900px}' +
+      '#O{width:10px;height:10px;overflow:hidden;scroll-snap-type:both mandatory}#O>i{display:block;position:relative;width:1000px;height:1000px}' +
+      '#T{position:absolute;width:1px;height:1px;scroll-snap-align:start;animation:fx linear both,fy linear both;animation-timeline:--ix,--iy}' +
+      '@keyframes fx{from{left:0}to{left:600px}}@keyframes fy{from{top:0}to{top:600px}}',
+      '<div id=I><div></div></div><div id=O><i><i id=T></i></i></div>'),
+    act: async (p, T) => {
+      const off = () => p.evaluate(() => [I.scrollLeft, I.scrollTop, O.scrollLeft, O.scrollTop].map(Math.round));
+      await p.evaluate(() => I.scrollTo(100, 100)); await p.waitForTimeout(100); const prog = await off();   // a programmatic scroll: O follows
+      await T('touchStart', 150, 150); for (let k = 1; k <= 8; k++) { await T('touchMove', 150 - 8 * k, 150 - 6 * k); await p.waitForTimeout(16); }
+      await p.waitForTimeout(150); const mid = await off(); await T('touchEnd'); await p.waitForTimeout(150);
+      return { prog, mid, end: await off() };
+    },
+    read: () => ({}),
+    judge: r => ({ control: r.prog[2] === r.prog[0] && r.prog[3] === r.prog[1] && r.end[0] !== r.prog[0],
+      holds: r.mid[2] === r.prog[2] && r.mid[0] !== r.prog[0] && r.end[2] === r.end[0] && r.end[3] === r.end[1],
+      note: `follower after a programmatic scroll ${r.prog.slice(2)} (scroller ${r.prog.slice(0, 2)}); mid-drag ${r.mid.slice(2)} (scroller ${r.mid.slice(0, 2)}); after the finger lifts ${r.end.slice(2)} (scroller ${r.end.slice(0, 2)})` }),
+  },
+  {
+    id: 'scroll-axis-lock', kind: 'fact', ctx: 'touch',
+    claim: 'scroll-axis-lock: none stops a touch drag that starts nearly horizontal from being locked to the horizontal axis',
+    docs: 'css-physics ARCHITECTURE.md "Touch" (the handles)',
+    page: () => html('body{margin:0}.s{position:absolute;left:0;width:300px;height:200px;overflow:scroll}.s>div{width:900px;height:900px}#a{top:0}#b{top:250px;scroll-axis-lock:none}',
+      '<div class=s id=a><div></div></div><div class=s id=b><div></div></div>'),
+    act: async (p, T) => {
+      const drag = async y => { await T('touchStart', 250, y); for (let k = 1; k <= 12; k++) { await T('touchMove', 250 - 10 * k, y - 4 * k); await p.waitForTimeout(16); } await T('touchEnd'); await p.waitForTimeout(300); };
+      await drag(150); await drag(400);
+      return p.evaluate(() => ({ a: [a.scrollLeft, a.scrollTop], b: [b.scrollLeft, b.scrollTop] }));
+    },
+    read: () => ({}),
+    judge: r => ({ control: r.a[0] > 80 && r.a[1] === 0, holds: r.b[0] > 80 && r.b[1] > 30,
+      note: `drag (-120, -48): default ${r.a} (locked to x), scroll-axis-lock:none ${r.b}` }),
+  },
+  {
+    id: 'touch-3d-scroll', kind: 'fact', ctx: 'touch',
+    claim: 'a touch drag scrolls a 3D-transformed scroller by the finger movement unprojected onto its plane: its offset in its own px is the screen movement / its on-screen scale',
+    docs: 'css-physics ARCHITECTURE.md "Touch" (the handles measure the drag in world units)',
+    page: () => html('body{margin:0}.st{position:absolute;left:0;width:400px;height:300px;perspective:800px}#s1{top:0}#s2{top:320px}' +
+      '.c{position:absolute;left:150px;top:100px;width:100px;height:100px;overflow:scroll;scrollbar-width:none;scroll-axis-lock:none}.c>div{width:2000px;height:2000px}' +
+      '#d{transform:translateZ(-400px)}',
+      '<div class=st id=s1><div class=c id=d><div></div></div></div><div class=st id=s2><div class=c id=f><div></div></div></div>'),
+    act: async (p, T) => {
+      const drag = async (x, y) => { await T('touchStart', x, y); for (let k = 1; k <= 10; k++) { await T('touchMove', x - 8 * k, y - 4 * k); await p.waitForTimeout(16); } await T('touchEnd'); await p.waitForTimeout(300); };
+      const r = await p.evaluate(() => [d, f].map(e => { const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2, b.width / 100]; }));
+      await drag(r[0][0], r[0][1]); await drag(r[1][0], r[1][1]);
+      return { sc: r[0][2], d: await p.evaluate(() => [d.scrollLeft, d.scrollTop]), f: await p.evaluate(() => [f.scrollLeft, f.scrollTop]) };
+    },
+    read: () => ({}),
+    judge: r => {
+      // the same drag (80, 40 px minus the touch slop) on a flat scroller and on one shown at scale sc: offsets in the ratio 1 / sc
+      const k = r.d[0] / r.f[0];
+      return { control: r.f[0] > 40 && r.f[1] > 15, holds: Math.abs(k * r.sc - 1) < 0.08 && Math.abs(r.d[1] / r.f[1] * r.sc - 1) < 0.15,
+        note: `flat ${r.f}; at on-screen scale ${r.sc.toFixed(3)}: ${r.d} (ratio ${k.toFixed(3)}, 1 / scale ${(1 / r.sc).toFixed(3)})` };
+    },
+  },
   {
     id: 'var-ident', kind: 'watch',
     claim: 'var(ident("--m" var(--k))) (dynamic property names) is not supported',
-    docs: 'css-physics experiments/ident (unsupported in 141 and 153); it would give both projects dynamic indexing',
+    docs: 'unsupported in 141 and 153; it would give both projects dynamic indexing',
     page: () => html(N({ name: 'op', syntax: '<number>', init: -99 }), '<i id=x style=\'--pc:3;--m3:13;--op:var(ident("--m" var(--pc)))\'></i><i id=y style="--m3:13;--op:var(--m3)"></i>'),
     read: () => ({ ident: +prop('x', '--op'), plain: +prop('y', '--op') }),
     judge: r => ({ control: r.plain === 13, holds: r.ident !== 13, note: `var(ident(…)) reads ${r.ident} (13 if supported)` }),
   },
 ];
 
+// touch probes run on a touch-emulated phone viewport and drive gestures through CDP (act(page, touch))
+const TOUCH_CTX = { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true };
 async function runProbe(B, b, dir, P) {
-  const p = await b.newPage({ viewport: { width: 1000, height: 800 } });
+  const ctx = P.ctx === 'touch' ? await b.newContext(TOUCH_CTX) : null;
+  const p = ctx ? await ctx.newPage() : await b.newPage({ viewport: { width: 1000, height: 800 } });
   await p.addInitScript(`window.prop = ${prop.toString()}`);   // the reads' helper (harness only: the probe pages have no script)
   try {
     let r;
@@ -148,13 +211,18 @@ async function runProbe(B, b, dir, P) {
       const f = path.join(dir, `${P.id}.html`); fs.writeFileSync(f, P.page());
       await p.goto(require('url').pathToFileURL(f).href); await p.waitForTimeout(P.wait || 100);
       r = await p.evaluate(P.read);
+      if (P.act) {
+        const c = await p.context().newCDPSession(p);
+        const T = (type, x, y) => c.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+        Object.assign(r, await P.act(p, T));
+      }
     }
     const j = P.judge(r);
     const status = !j.control ? 'BROKEN' : P.kind === 'watch' ? (j.holds ? 'WATCH' : 'WATCH-CHANGED') : j.holds ? 'PASS' : 'FAIL';
     return { status, ...j };
   } catch (e) {
     return { status: 'BROKEN', note: String(e).split('\n')[0] };
-  } finally { await p.close(); }
+  } finally { await p.close(); if (ctx) await ctx.close(); }
 }
 
 async function main(argv) {

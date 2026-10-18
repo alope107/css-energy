@@ -1,0 +1,57 @@
+<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- The touch input of rigid3d.css on its own (ARCHITECTURE.md "Touch"): three camera-facing scroller handles in a
+     perspective stage, #W sums their offsets (--sdx/--sdy, --gi) and the follower #O says whether a finger is down
+     (--held, --att). The script only logs (window.LOG) for the drivers: node android.js (Android emulator) or any CDP
+     touch driver. Serve the repo and open experiments/touch/handles.html. -->
+<style>
+@property --sdx{syntax:'<number>';inherits:true;initial-value:0}
+@property --sdy{syntax:'<number>';inherits:true;initial-value:0}
+@property --gi{syntax:'<number>';inherits:true;initial-value:0}
+@property --fox{syntax:'<number>';inherits:true;initial-value:0}
+@property --foy{syntax:'<number>';inherits:true;initial-value:0}
+@property --att{syntax:'<number>';inherits:true;initial-value:0}
+@property --held{syntax:'<number>';inherits:true;initial-value:0}
+body{margin:0;timeline-scope:--d0x,--d0y,--d1x,--d1y,--d2x,--d2y,--fx,--fy}
+#stage{position:absolute;left:0;top:0;width:400px;height:300px;perspective:800px;background:#223}
+#cam{position:absolute;left:50%;top:50%;transform-style:preserve-3d;transform:translateZ(-300px) rotateX(-25deg)}
+.b{position:absolute;transform-style:preserve-3d}
+.d{position:absolute;left:-40px;top:-40px;width:80px;height:80px;border-radius:50%;overflow:scroll;scrollbar-width:none;
+  scroll-snap-type:both mandatory;overscroll-behavior:contain;scroll-axis-lock:none;background:rgb(255 200 0/.5);
+  transform:rotateX(25deg)}
+.d>i{display:block;position:relative;width:4080px;height:4080px}
+.d>i>b{position:absolute;left:2000px;top:2000px;width:80px;height:80px;scroll-snap-align:start}
+.d>i>u{position:absolute;left:0;top:0;width:160px;height:160px;animation:flx linear both,fly linear both;animation-timeline:scroll(nearest x),scroll(nearest y)}
+@keyframes flx{from{left:-40px}to{left:3960px}}@keyframes fly{from{top:-40px}to{top:3960px}}
+@container style(--held: 1){.d>i>u{scroll-snap-align:start}.d>i>b{scroll-snap-align:none}}
+#d0{scroll-timeline:--d0x x,--d0y y}#d1{scroll-timeline:--d1x x,--d1y y}#d2{scroll-timeline:--d2x x,--d2y y}
+/* sum of displacements: progress p over [0, max=4000] -> offset 4000p; rest 2000 */
+@keyframes ax{from{--sdx:-2000}to{--sdx:2000}}
+@keyframes ay{from{--sdy:-2000}to{--sdy:2000}}
+@keyframes g0{0%,49.99%{--gi:1}50%{--gi:0}50.01%,100%{--gi:1}}
+@keyframes g1{0%,49.99%{--gi:2}50%{--gi:0}50.01%,100%{--gi:2}}
+@keyframes g2{0%,49.99%{--gi:3}50%{--gi:0}50.01%,100%{--gi:3}}
+@keyframes fx{from{--fox:-2000}to{--fox:2000}}
+@keyframes fy{from{--foy:-2000}to{--foy:2000}}
+#W{animation-composition:add;animation-timing-function:linear;animation-fill-mode:both;
+  animation-name:ax,ay,ax,ay,ax,ay,g0,g1,g2,fx,fy;
+  animation-timeline:--d0x,--d0y,--d1x,--d1y,--d2x,--d2y,--d0x,--d1x,--d2x,--fx,--fy;
+  animation-composition:add,add,add,add,add,add,add,add,add,replace,replace}
+/* follower: T at (2000 + sdx, 2000 + sdy) in O's content; O snaps to it */
+#W{--held:calc(sign(max(0, abs(var(--sdx) - var(--fox)) + abs(var(--sdy) - var(--foy)) - 0.01)));--att:calc(var(--held) * sign(var(--gi)))}
+#O{position:absolute;left:0;top:340px;width:10px;height:10px;overflow:hidden;scroll-snap-type:both mandatory;scroll-timeline:--fx x,--fy y}
+#O>i{display:block;position:relative;width:4010px;height:4010px}
+#T{position:absolute;width:10px;height:10px;scroll-snap-align:start;left:calc(2000px + var(--sdx) * 1px);top:calc(2000px + var(--sdy) * 1px)}
+</style>
+<div id="W"><div id="stage"><div id="cam">
+ <div class="b" style="transform:translate3d(-120px,0,0)"><div class="d" id="d0"><i><b></b><u></u></i></div></div>
+ <div class="b" style="transform:translate3d(0,0,-150px)"><div class="d" id="d1"><i><b></b><u></u></i></div></div>
+ <div class="b" style="transform:translate3d(120px,40px,100px)"><div class="d" id="d2"><i><b></b><u></u></i></div></div>
+</div></div>
+<div id="O"><i><div id="T"></div></i></div></div>
+<script>
+window.LOG=[];const t1=performance.now();const X=document.getElementById('W');
+for(const ev of ['touchstart','touchend','pointercancel'])addEventListener(ev,e=>LOG.push([Math.round(performance.now()-t1),ev,e.target.id||e.target.parentElement.parentElement.id]),true);
+let last='';(function f(){const c=getComputedStyle(X);const v=k=>(+c.getPropertyValue(k)).toFixed(1);const ds=[0,1,2].map(i=>{const d=document.getElementById('d'+i);return (d.scrollLeft-2000).toFixed(0)+','+(d.scrollTop-2000).toFixed(0)}).join(' ');
+ const cur=`sd=${v('--sdx')},${v('--sdy')} fo=${v('--fox')},${v('--foy')} gi=${v('--gi')} held=${v('--held')} att=${v('--att')} | discs ${ds}`;if(cur!=last){LOG.push([Math.round(performance.now()-t1),cur]);last=cur}requestAnimationFrame(f)})();
+window.addEventListener('load',()=>{const r=['d0','d1','d2'].map(id=>{const b=document.getElementById(id).getBoundingClientRect();return id+':'+[b.x,b.y,b.width,b.height].map(Math.round)});LOG.push([0,'rects '+r.join(' ')])});
+</script>

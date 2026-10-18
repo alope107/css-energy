@@ -1,4 +1,5 @@
 // mouse + touch grab checks on a PLAIN single-engine page: grab the top of the stack (body 3), drag, read its position
+// (the touch checks proper are tools/touchcheck.js)
 const {launch,fileUrl,arena}=require('./lib/physics');
 (async()=>{const b=await launch();
 const f=process.argv[2];
@@ -13,9 +14,10 @@ for(const mode of ['mouse','touch']){
  if(mode=='mouse'){await p.mouse.move(px,py);await p.mouse.down();await p.waitForTimeout(200);await p.mouse.move(px+200,py-60,{steps:12});await p.waitForTimeout(1200);
   const during=await pos(p);await p.screenshot({path:'ix_mouse.png',clip:{x:ar.x,y:ar.y,width:ar.width,height:ar.height}});await p.mouse.up();await p.waitForTimeout(1500);
   console.log(mode,'before',before,'during',during,'after',await pos(p))}
- else{await p.touchscreen.tap(px,py);await p.waitForTimeout(400);
-  for(let k=1;k<=12;k++){await p.evaluate(()=>{const t=document.querySelector('.tl');t.scrollLeft-=8;t.scrollTop+=4});await p.waitForTimeout(50)}
+ else{// a real touch drag (through Chromium's gesture recognizer): touch the body, drag, hold, lift
+  const c=await ctx.newCDPSession(p);const T=(type,x,y)=>c.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:[{x,y}]});
+  await T('touchStart',px,py);for(let k=1;k<=12;k++){await T('touchMove',px-8*k,py+4*k);await p.waitForTimeout(16)}
   await p.waitForTimeout(800);const during=await pos(p);await p.screenshot({path:'ix_touch.png',clip:{x:ar.x,y:ar.y,width:ar.width,height:ar.height}});
-  await p.touchscreen.tap(ar.x+ar.width-20,ar.y+20);await p.waitForTimeout(1500);console.log(mode,'before',before,'during',during,'after',await pos(p))}
+  await T('touchEnd');await p.waitForTimeout(1500);console.log(mode,'before',before,'during',during,'after',await pos(p))}
  await ctx.close()}
 await b.close()})();
