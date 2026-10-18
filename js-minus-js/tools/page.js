@@ -9,9 +9,13 @@ const gridRows = (codes, rows = 16, cols = 8) => { const r = []; for (let i = 0;
 const gridText = (codes, rows, cols) => gridRows(codes, rows, cols).join('\n').replace(/\s+$/, '');
 
 // Replace the editor's text with `lines`, typed like a user: select all, delete, then each line (Enter between).
+// Typing (or pasting) a run of spaces into the editor (white-space: nowrap) makes Chrome write U+00A0 for all of it at
+// either end of a line and for all but its last space inside, so none collapses (readback/ui_rb.py nbsp). insertText
+// inserts plain spaces instead, which collapse: "a b  c" read back as "a b c", and indentation was lost.
+const nbsp = s => s.replace(/ +/g, (m, i) => i === 0 || i + m.length === s.length ? '\u00a0'.repeat(m.length) : '\u00a0'.repeat(m.length - 1) + ' ');
 async function typeLines(p, lines) {
   await p.click('#ed'); await p.keyboard.press('Control+A'); await p.keyboard.press('Delete');
-  for (let i = 0; i < lines.length; i++) { if (i) await p.keyboard.press('Enter'); await p.keyboard.insertText(lines[i]); }
+  for (let i = 0; i < lines.length; i++) { if (i) await p.keyboard.press('Enter'); await p.keyboard.insertText(nbsp(lines[i])); }
 }
 
 module.exports = { consoleCodes, gridRows, gridText, typeLines };

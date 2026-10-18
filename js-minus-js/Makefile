@@ -16,20 +16,23 @@ PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py)
 HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
 # what the checks depend on outside the repo, and the environment variables their scripts read
 L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
+FUZZ     := $(B)/fuzz.$(call id,$(B)/py,-,tests/cmp_dsl.py tests/fuzz/fuzz.py tests/fuzz/oracle.js tests/fuzz/all.sh $(PYSRC)).log
 # The browser's part needs `npm install`. Goals that launch no browser skip it (CI deploys with `make dist` and no
 # npm packages: ../deploy/README.md), and those checks' logs get a name no pass is ever written under.
-NOBROWSER := help all lib image font page dist expect l1 l2 l2-generic l4 test clean
+NOBROWSER := help all lib image font page dist expect l1 l2 l2-generic l4 fuzz fuzz-quick test clean
 BCONF     = $(if $(filter-out $(NOBROWSER),$(MAKECMDGOALS)),$(call id,$(1),fontcpu,$(2)),no-browser)
 L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
 UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
 
 .PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input clean
+        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
-	@echo "make test           fast levels, no browser: Node oracle, L1 reference, L2 DSL, L4 machine model (~5 s)"
+	@echo "make test           fast levels, no browser: Node oracle, L1 reference, quick fuzz, L2 DSL, L4 machine model (~15 s)"
+	@echo "make fuzz           differential tests against Node on thousands of programs, L1 + L2 + L4 (a few minutes)"
 	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~1.5 min)"
+	@echo "make fuzz-l3        L3 on 300 generated and mutated programs (~5 min)"
 	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~1 min)"
 	@echo "make test-ui        L5 on every quick program (~10 min)"
 	@echo "make dist           copy the built page to dist/"
@@ -72,10 +75,26 @@ l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
 l4:                                       # font CPU model (uarch4) runs every compiled image vs Node
 	$(PY) tests/suite_machine.py
+# differential tests against Node without a browser (tests/fuzz/fuzz.py): the suite reformatted, generated programs,
+# one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and L4 too, a few minutes)
+fuzz-quick:
+	$(PY) tests/fuzz/fuzz.py fmt && $(PY) tests/fuzz/fuzz.py gen -n 500 && $(PY) tests/fuzz/fuzz.py mut -n 1000
+fuzz: $(FUZZ)
+	$(call report,$<,6)
+$(FUZZ): tests/fuzz/fuzz.py tests/fuzz/progen.py tests/fuzz/oracle.js tests/fuzz/all.sh tests/cmp_dsl.py $(PYSRC) $(SUITE) $(RERUN_IF)
+	$(LOGGED) $@ -p '^ALL OK' -- sh tests/fuzz/all.sh
 $(B)/suite_css.xhtml: $(wildcard $(CC)/*.py) $(CC)/lib.json tests/suite_css.py
 	REBUILD=1 $(PY) tests/suite_css.py $@ > /dev/null
 $(B)/suite_css.xhtml.exp.json: $(B)/suite_css.xhtml tests/suite_css.py $(PYSRC) $(SUITE)   # cc_ref's words for each test
 	$(PY) tests/suite_css.py $(B)/suite_css.xhtml > /dev/null
+# L3 on programs from the fuzzers that fit the editor (the same page; tests/fuzz/fuzz.py dump writes them)
+FUZZL3 := $(B)/fuzz-l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
+fuzz-l3: $(FUZZL3)
+	$(call report,$<,3)
+$(FUZZL3): $(B)/suite_css.xhtml tests/suite_css.py tests/suite_css.js tests/fuzz/fuzz.py tests/fuzz/progen.py $(PYSRC) $(HARNESS) $(RERUN_IF)
+	$(PY) tests/fuzz/fuzz.py dump -n $(or $(N),150) --dir $(B)/fuzz-l3 && ln -sf suite_css.xhtml $(B)/fuzz-l3.xhtml && \
+	  $(PY) tests/suite_css.py $(B)/fuzz-l3.xhtml $(B)/fuzz-l3 > /dev/null
+	$(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/suite_css.js $(B)/fuzz-l3.xhtml
 l3: $(L3)                                 # generated CSS compiler in Chrome vs reference, word for word
 	$(call report,$<,25)
 $(L3): $(B)/suite_css.xhtml $(B)/suite_css.xhtml.exp.json tests/suite_css.js $(HARNESS) $(RERUN_IF)
@@ -100,7 +119,7 @@ l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what th
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)
 	EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
 
-test: expect l1 l2 l4
+test: expect l1 fuzz-quick l2 l4
 test-browser: l3
 test-ui: l5
 test-ui-smoke: l5-smoke
