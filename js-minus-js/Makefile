@@ -12,7 +12,7 @@ export SOURCE_DATE_EPOCH := 0
 # of the Node, Python, browser and environment variables it runs with (build/<py|fontcpu|ui>.<config>.id).
 include ../shared/make/checks.mk
 SUITE   := tests/suite tests/suite_err tests/fizz.js $(wildcard tests/suite/*.js tests/suite/*.out tests/suite_err/*.js)
-PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py)
+PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py) $(SHARED)/py/csslabel.py
 HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
 # what the checks depend on outside the repo, and the environment variables their scripts read
 L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
@@ -56,7 +56,7 @@ $(B)/f4cc_16.woff2: $(B)/ccimg.json $(wildcard machine/cpu4.py machine/cpugen.py
 	CPUMOD=cpu4 $(PY) machine/fvm_build.py $(B)/ccimg.json 16 32 $(B)/f4cc_16
 
 page: $(B)/js_in_css.xhtml
-$(B)/js_in_css.xhtml: $(B)/f4cc_16.woff2 $(wildcard $(CC)/*.py machine/*.py readback/*.py)
+$(B)/js_in_css.xhtml: $(B)/f4cc_16.woff2 $(wildcard $(CC)/*.py machine/*.py readback/*.py) $(SHARED)/py/csslabel.py
 	UI=1 $(PY) machine/gen_fvm4.py $(B)/ccimg.json $(B)/f4cc_16 $@
 
 dist: page

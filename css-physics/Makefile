@@ -17,10 +17,10 @@ P  := $(O)/smoke_$(N).$(call id,$(O)/gen,-,$(wildcard src/*.py))
 C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter firefox,$(BR)),firefox,physics),tools/smoke.js tools/floatcheck.js tools/overlaycheck.js tools/grabtest.js tools/touchcheck.js $(JS))
 HARNESS := $(JS) $(RERUN_IF)
 
-$(P)_%.html: $(wildcard src/*)
+$(P)_%.html: $(wildcard src/*) $(SHARED)/py/csslabel.py
 	SCENE=$* COUNTS=$(N) PLAIN=1 python3 src/build3d.py $@ 2>/dev/null
 # (a spread-out field with no gravity, shaken awake: other bodies drift freely, so a leaked grab force shows)
-$(P)_field.html: $(wildcard src/*)
+$(P)_field.html: $(wildcard src/*) $(SHARED)/py/csslabel.py
 	SCENE=field FIELD_GAP=30 COUNTS=$(N) PLAIN=1 python3 src/build3d.py $@ 2>/dev/null
 
 $(P)_%.smoke-$(MS).$(C).log: $(P)_%.html tools/smoke.js $(HARNESS)

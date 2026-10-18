@@ -23,6 +23,8 @@ Usage: gen3d.py [engine.json]   (NBOX/NSPH bodies, SCENE=name picks the scene th
 import math, sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from simp import simplify as _simplify
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
+import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 SIMPLIFY = os.environ.get('SIMPLIFY', '1') == '1'
 from collections import OrderedDict
 
@@ -1461,11 +1463,13 @@ if os.environ.get('SHARE', '1') == '1':
 # ---- emit ----------------------------------------------------------------------------
 out = []
 w = out.append
+w(lbl.section('Registered properties', f'the {N}-body engine: every value it computes, with its syntax, inheritance and initial value'))
 for name, (syn, inh, init) in g.props.items():
     if syn == '*':
         w(f"@property --{name}{{syntax:'*';inherits:{'true' if inh else 'false'}}}")
     else:
         w(f"@property --{name}{{syntax:'{syn}';inherits:{'true' if inh else 'false'};initial-value:{init}}}")
+w(lbl.section('Clock and register keyframes', '--now counts 0 to 100 every 100 s; one keyframes rule per register maps its view timeline onto its value range'))
 w('@keyframes clk{from{--now:0}to{--now:100}}')
 for ri, (rn, nn, lo, hi) in enumerate(REGS):
     w(f'@keyframes q{ri}{{from{{--{rn}:{f(lo)}}}to{{--{rn}:{f(hi)}}}}}')
@@ -1474,9 +1478,11 @@ for ri, (rn, nn, lo, hi) in enumerate(REGS):
 # clock), but nothing it passes down changes: the levels below are left alone.
 names = [f'q{ri}' for ri in range(2, len(REGS))]
 tl = [f'--t{ri}' for ri in range(2, len(REGS))]
+w(lbl.section('Pointer gating (#RB, .rz)', 'the pointer, camera yaw and touch drag reach the solver only while a body is held'))
 w(f'#RB{{--sxg:calc(var(--sx) * var(--att));--syg:calc(var(--sy) * var(--att));--yawg:calc(var(--yaw) * var(--att));'
   '--tdxg:calc(var(--tdx) * var(--att));--tdyg:calc(var(--tdy) * var(--att));--tgig:calc(var(--tgi) * var(--att))}')
 w('.rt,.rt *{--NTP:inherit;--NDB:inherit}.rz{--sx:0;--sy:0;--yaw:0;--tdx:0;--tdy:0;--tgi:0}')
+w(lbl.section('State read-back (#LS)', 'animates the registers into each body\'s state; sleep and wake flags'))
 w('#LS{')
 w(f'animation-name:{",".join(names)};')
 w(f'animation-duration:{",".join(["auto"] * len(names))};')
@@ -1498,6 +1504,7 @@ for i in range(N):
       f'--nr{i}:calc(sign(max(0, {SLEEP_K} - var(--SC{i}))));--mf{i}:calc(sign(max(0, 2 - var(--SC{i}))));')
 w('--any:calc(sign(' + ' + '.join(f'var(--aw{i})' for i in range(N)) + '));')
 w('--GYP:var(--gy);}')
+w(lbl.section('Clock and time budget (#LT)', 'the clock and the time bank: whether this pass advances time by one step, and which bodies it simulates'))
 w('#LT{animation-name:clk,q0,q1;animation-duration:100s,auto,auto;animation-iteration-count:infinite,1,1;'
   'animation-timing-function:linear;animation-fill-mode:both;animation-timeline:auto,--t0,--t1;')
 w('--TP:var(--now);--DB:0;' + LS_TIME)
@@ -1512,8 +1519,9 @@ blocks = OrderedDict()
 for lev, gate, name, expr in g.decl:
     blocks.setdefault((lev, gate), []).append(f'--{name}:calc({_simplify(expr) if SIMPLIFY else expr})')
 # reset overrides must come last in the cascade
-_ord = sorted(blocks.items(), key=lambda kv: 1.2 if isinstance(kv[0][1], tuple) and kv[0][1][0] == 'GIr' else
-               {('att', 1): 1, ('tho', 1): 1.1, ('pick', 1): 1.5, ('tpk', 1): 1.6, ('kick', 1): 2, ('rst', 1): 3}.get(kv[0][1], 0))
+_ord_key = lambda kv: 1.2 if isinstance(kv[0][1], tuple) and kv[0][1][0] == 'GIr' else \
+    {('att', 1): 1, ('tho', 1): 1.1, ('pick', 1): 1.5, ('tpk', 1): 1.6, ('kick', 1): 2, ('rst', 1): 3}.get(kv[0][1], 0)
+_ord = sorted(blocks.items(), key=_ord_key)
 # Named gates: a container query that names a container no ancestor has is rejected almost for
 # free, while an ordinary style() query costs ~2.5us per rule per pass whether it matches or not.
 # L0 and L1 carry the container name b<i> only while body i is awake or near an awake body, and
@@ -1541,7 +1549,17 @@ def owner(gn):
 # flags tested against a value other than 0 or 1 somewhere are not 0/1 flags: BOOLQ must not shorten their gates
 _MULTI = {gt[0] for _l, gt, _n, _e in g.decl if isinstance(gt, tuple) and len(gt) == 2 and isinstance(gt[1], (int, float))
           and gt[1] not in (0, 1)}
+w(lbl.section(f'Solver levels (#L0–#L{NLEV - 1})', f'one element per level: L0 predict and broadphase, L1 narrowphase, '
+                f'L{LB}–L{LFIN - 1} the Gauss–Seidel batches, L{LFIN} the next state'))
+# the blocks in cascade order: what every step computes, then the input overrides (reset last)
+_GROUPS = {0: 'The step: predict, contacts, solve, next state', 1: 'Grab: pointer down', 1.1: 'Touch hold', 1.2: 'Holding: the held body\'s state, one block per body',
+           1.5: 'Pick: the ray cast on the first pass of a press', 1.6: 'Touch pick', 2: 'Shake', 3: 'Reset (last in the cascade)'}
+_grp = None
 for (lev, gate), ds in _ord:
+    _k = _ord_key(((lev, gate), ds))
+    if _k != _grp:
+        _grp = _k
+        w(lbl.group(_GROUPS[_k]))
     rule = f'#L{lev}{{{";".join(ds)}}}'
     if gate is None:
         w(rule)
@@ -1557,6 +1575,7 @@ for (lev, gate), ds in _ord:
         q = f'style(--{gn})' if BOOLQ and gv == 1 and gn not in _MULTI and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
         w(f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}')
 _names = ' '.join(f'var(--A{i})' for i in range(N))
+w(lbl.section('Container names (named gates)', 'body i\'s rules name container bi, which the levels carry only while it is awake or near an awake body'))
 w('#L0{' + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
 if FFQ:
     # Firefox has no if(): there every body is always named. The names only let a sleeping neighbourhood's rules be
@@ -1574,6 +1593,7 @@ w(','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg
 # percentages of it, stays put. Chrome never sees it: a size container there would move the subtree's style recalc
 # into layout.
 if FFQ:
+    w(lbl.group('Firefox only: the size-container clock that re-matches the gates (#LM, #LW)'))
     w('@supports (-moz-appearance: none){#LT{--ffk:calc(var(--any) * var(--now))}'
       '#LM{container-type:size;right:auto;bottom:auto;width:calc(1000px + mod(var(--ffk) * 6000, 600) * 1px);'
       'height:calc(1000px + mod(var(--ffk) * 6000, 583) * 1px)}'
@@ -1613,6 +1633,7 @@ def scene_decls(sn):
 
 # the scene's initial state lives on this engine's .ini element (not on #app, which restyles on
 # every control change) and is picked by the scene radios
+w(lbl.section('Scene start states (#INI)', 'every body\'s start state for each scene; the checked or pressed scene\'s rule wins'))
 w(f'#INI{{{scene_decls(SCENE_NAMES[0])}}}')
 for sn in SCENE_NAMES[1:]:
     w(f'#app:has(#sc-{sn}:checked) #INI{{{scene_decls(sn)}}}')
@@ -1629,9 +1650,12 @@ NREGEL = (len(REGS) + 1) // 2
 # ancestor: a restyled element with view timelines looks its names up in the scope lists, and short
 # lists make that ~3x cheaper (it's paid by every register element on every pass)
 NTS = max(1, -(-NREGEL // 24))
+w(lbl.section('Registers (#r0, #r1, …)', f'{len(REGS)} registers, two per element: its top and left are the next state, its view timelines read them back'))
+w(lbl.group('Timeline scopes (.ts wrappers)'))
 for s_ in range(NTS):
     ks = range(s_ * 24, min(NREGEL, s_ * 24 + 24))
     w(f'#ts{s_}{{timeline-scope:' + ','.join(f'--t{ri}' for k in ks for ri in (2 * k, 2 * k + 1) if ri < len(REGS)) + '}')
+w(lbl.group('Register positions'))
 w(f'#r0{{view-timeline:--t0 block,--t1 inline;top:{_rpos(0)};left:{_rpos(1)}}}')
 for k in range(1, NREGEL):
     a, b = 2 * k, 2 * k + 1
@@ -1659,6 +1683,8 @@ RIDX = {rn: ri for ri, (rn, nn, lo, hi) in enumerate(REGS)}
 # only children that ask with an explicit `inherit` are recomputed, which is ~3x cheaper than letting
 # inherited registered props flow into every face.
 RF = [('x', 'Rx'), ('y', 'Ry'), ('z', 'Rz'), ('qx', 'Ri'), ('qy', 'Rj'), ('qz', 'Rk')]
+render_css.append(lbl.section('Bodies', 'each body\'s wrapper animates its pose from the registers\' timelines; boxes get six faces, spheres a disc'))
+render_css.append(lbl.group('Pose keyframes'))
 for i in range(N):
     for fl, rp in RF:
         rn = f'{fl.upper()}{i}'
@@ -1668,6 +1694,7 @@ for i in range(N):
 _gi = RIDX['GI']
 render_css.append(f'@keyframes v{_gi}{{from{{--Rg:{f(REGS[_gi][2])}}}to{{--Rg:{f(REGS[_gi][3])}}}}}')
 for i, b in enumerate(BODIES):
+    render_css.append(lbl.group(f'Body {i}: {"box" if b["k"] == "box" else "sphere"}'))
     ris = [RIDX[f'{fl.upper()}{i}'] for fl, rp in RF] + [_gi]
     base = ';'.join(f'--{rp}:var(--i{fl}{i})' for fl, rp in RF)
     render_css.append(
@@ -1699,9 +1726,11 @@ LIT = []
 for fi, (k, sg, tf, wa, ha) in enumerate(FACES):
     lam = ' + '.join(f'var(--r{rr}{k}) * {f(sg * LIGHT[rr])}' for rr in range(3))
     LIT.append(f'--k{fi}:color-mix(in oklab,var(--cs) calc((0.42 + 0.58 * max(0, {lam})) * 100%),#07080a)')
-SHARED_CSS = ['.bx{--cs:color-mix(in oklab,var(--c),var(--acc) calc(var(--sel) * 55%));' + ';'.join(LIT) + '}',
+SHARED_CSS = [lbl.section('Box face lighting', 'shared by every engine: each face\'s colour from its world normal'),
+              '.bx{--cs:color-mix(in oklab,var(--c),var(--acc) calc(var(--sel) * 55%));' + ';'.join(LIT) + '}',
               ''.join(f'.bx .f{fi}{{--k{fi}:inherit;background:var(--k{fi})}}' for fi in range(6))]
 # grab feedback, drawn flat over the scene in screen units (reads this engine's grab state)
+render_css.append(lbl.section('Grab feedback (ring, pin, tether)', 'drawn flat over the scene in screen units'))
 render_css.append("""#ENG .ring,#ENG .pin,#ENG .tether{position:absolute;left:50%;top:50%;pointer-events:none;opacity:clamp(0, (__NP1__ - var(--GIr)) * var(--GIr) * var(--att), 1)}
 #ENG .ring{width:calc(16 * var(--u));height:calc(16 * var(--u));border:2px solid var(--acc);border-radius:50%;
   transform:translate(calc(var(--Nosx) * var(--u) - 50%),calc(var(--Nosy) * var(--u) - 50%))}
@@ -1716,6 +1745,8 @@ render_css.append("""#ENG .ring,#ENG .pin,#ENG .tether{position:absolute;left:50
 # per handle and axis. The index is a step function, 0 within 0.6 units of rest. #FO follows the sum by snapping to an
 # area placed at it, but Chrome defers that re-snap while a scroll gesture is active, so #FO stands still while a finger
 # drags and catches up in the frame the gesture ends: --held is "#FO lags the sum".
+render_css.append(lbl.section('Touch input (#TS, #TI, #FO)', 'the handles\' scroll offsets summed into the drag and the dragged body'))
+render_css.append(lbl.group('Handle keyframes'))
 _hk = []
 for i in range(N):
     for a in 'xy':
@@ -1725,6 +1756,7 @@ for i in range(N):
 for a in 'xy':
     render_css.append(f'@keyframes hf{a}{{from{{--fo{a}:{HD_L}}}to{{--fo{a}:{-HD_L}}}}}')
     _hk.append((f'hf{a}', f'--F{a}', 'replace'))
+render_css.append(lbl.group('The drag sum and the follower (touch screens only)'))
 render_css.append('@media (pointer:coarse){'
                   '#TS{timeline-scope:' + ','.join(t for _n, t, _c in _hk) + '}'
                   '#TI{animation-name:' + ','.join(n for n, _t, _c in _hk) + ';animation-timeline:' + ','.join(t for _n, t, _c in _hk) +

@@ -11,6 +11,8 @@ import json, os, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'shared', 'py'))
+import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 COUNTS = [int(c) for c in os.environ.get('COUNTS', '8,16,24,32,48,64').split(',')]
 PLAIN = os.environ.get('PLAIN') == '1'
 # several counts: one page per count by default, so a page only parses the engine it shows
@@ -45,10 +47,13 @@ VW, VH = C['VW'], C['VH']
 css = []
 for n, e in zip(COUNTS, engines):
     css.append(e['css'])
+css.append(lbl.section('Engine selection', 'each engine is shown while its count is picked'))
+for n, e in zip(COUNTS, engines):
     css.append(f"#app:has(#n-{n}:checked) #{e['eng_id']}{{display:block}}")
 # with no count picked yet: a bigger default for mouse machines, a small one for touch screens
 eid = {n: e['eng_id'] for n, e in zip(COUNTS, engines)}
 none = '#app:not(:has(.counts input:checked))'
+css.append(lbl.section('Default body count', 'before any count is picked: a bigger one for mouse machines, a small one for touch screens'))
 css.append(f"{none} #{eid[DEFAULT_FINE]}{{display:block}}")
 css.append(f"{none} label[for=n-{DEFAULT_FINE}]{{background:var(--acc);color:#14161a;border-color:var(--acc)}}")
 if DEFAULT_COARSE != DEFAULT_FINE:
@@ -64,7 +69,8 @@ UI = open(os.path.join(HERE, 'ui3d.css')).read()
 html = open(os.path.join(HERE, 'page3d.html')).read()
 f = lambda v: str(v)
 rep = {
-    '/*UI*/': UI.replace('/*GRID*/', '\n'.join(grid)).replace('/*BODIES*/', ''), '/*SHARED*/': e0['shared_css'],
+    '/*UI*/': lbl.header('css-physics/src/build3d.py (page, ui3d.css) and gen3d.py (engines)', 'css-physics/docs/ARCHITECTURE.md') + '\n' +
+              UI.replace('/*GRID*/', '\n'.join(grid)).replace('/*BODIES*/', ''), '/*SHARED*/': e0['shared_css'],
     '/*ENGINES*/': '\n'.join(css),
     '<!--ENGINE_HTML-->': ''.join(e['html'] for e in engines),
     '<!--GRID-->': ('<b>' + '<i></i>' * GR + '</b>') * GC,
@@ -104,7 +110,7 @@ if MULTI:
         cnt = ''.join(f'<input type="radio" name="n" id="n-{m}"><label for="n-{m}">{m}</label>' for m in COUNTS)
         h = h.replace(cnt, links)
         # this page's engine is always shown
-        h = h.replace('</style>', f"#{e['eng_id']}{{display:block!important}}.counts a{{font:inherit;color:var(--ink);background:var(--panel);"
+        h = h.replace('</style>', lbl.section('This page\'s engine and the count links') + f"\n#{e['eng_id']}{{display:block!important}}.counts a{{font:inherit;color:var(--ink);background:var(--panel);"
                       "border:1px solid var(--line);border-radius:4px;padding:4px 10px;text-decoration:none}.counts a.on{background:var(--acc);"
                       "color:#14161a;border-color:var(--acc)}.counts a:hover{border-color:var(--dim)}</style>", 1)
         h = h.replace('switching the count restarts the scene', 'each count is its own page')
@@ -123,15 +129,18 @@ if MULTI:
             links = ''
             for k, part in enumerate(parts):
                 cssname = f'{base}-{n}.{k + 1}.css'
+                part = f'/* {base}-{n}.html\'s engine stylesheet, part {k + 1} of {len(parts)} */\n' + part
                 open(os.path.join(os.path.dirname(stem) or '.', cssname), 'w').write(part)
                 links += f'<link rel="stylesheet" href="{cssname}">'
             h = h.replace(e['css'], '</style>' + links + '<style>', 1)
         out = f'{stem}-{n}.html'
+        lbl.check(h, out)
         open(out, 'w').write(h)
         sizes.append(f'{n}: {len(h) / 1e6:.1f} MB')
         if n == DEFAULT_FINE:
             open(dst, 'w').write(h)
     print(f'{dst} + {stem}-N.html: ' + ', '.join(sizes), file=sys.stderr)
 else:
+    lbl.check(html, dst)
     open(dst, 'w').write(html)
     print(f'{dst}: engines {COUNTS}, {len(html) / 1e6:.1f} MB', file=sys.stderr)

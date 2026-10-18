@@ -41,5 +41,24 @@ def cli():
         eq(open(os.path.join(d, 'p_np.xhtml')).read(), A.strip(CSS, '--np')[0])
 t('the command line writes page_NAME.xhtml and leaves the source alone', cli)
 
+import csslabel as L
+def raises(f, *a):
+    try:
+        f(*a)
+    except (ValueError, SystemExit):
+        return
+    raise AssertionError(f'{f.__name__}{a} did not raise')
+t('label formats', lambda: (eq(L.section('CPU registers'), '/* === CPU registers === */'),
+                            eq(L.group('Bank 0', 'four channels'), '/* --- Bank 0 ---\n   four channels */')))
+t('a label that would end the comment, a rule or the style element is refused',
+  lambda: [raises(L.section, bad) for bad in ('a */ b', 'a { b', 'a } b', '</style>', 'a ]]> b', 'two\nlines')])
+SHEET = '\n'.join([L.header('x/gen.py', 'x/docs/A.md'), L.section('One', 'note'), 'a{b:1}', L.group('Two'), 'c{d:2}'])
+t('outline: line, level, title', lambda: eq(L.outline(SHEET), [(2, 1, 'One'), (5, 2, 'Two')]))
+t('check passes a page whose rules all follow a section, and returns it',
+  lambda: eq(L.check(f'<style>{SHEET}</style><p>x</p><style><![CDATA[{SHEET}]]></style>', 't'), f'<style>{SHEET}</style><p>x</p><style><![CDATA[{SHEET}]]></style>'))
+t('check fails on a rule before the first section, in any style element',
+  lambda: (raises(L.check, 'a{b:1}\n' + SHEET, 't'), raises(L.check, f'<style>{SHEET}</style><style>z{{}}</style>', 't'),
+           eq(L.unlabelled('/* a comment is not a label */ a{b:1}' + SHEET), 'a{b:1}')))
+
 print(f'{n - bad}/{n} pass')
 sys.exit(1 if bad else 0)

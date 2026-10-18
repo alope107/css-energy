@@ -60,6 +60,9 @@ proposing an idea).
   Chrome then fails a few hundred queued probes with `ERR_FAILED` and doesn't retry them (crbug 355006326): ~5–30
   blank cells per reload, live only. The page's retry row covers it (`docs/ARCHITECTURE.md#retry`); local HTTP/1.1
   never shows it, so test it with `serve.js --goaway`.
+- Label the CSS you add (`lbl.section` / `lbl.group` in build.py; `../shared/README.md#labels-in-generated-css`). The
+  cell documents get short labels without notes: every cell loads one. `python3 ../shared/py/csslabel.py site/index.html`
+  prints the page's outline.
 - `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` in the console is a probe answering "no" (15 per painted cell).
 - `--ignore-certificate-errors` disables HTTP caching, so dictionaries never register. Trust a test cert by SPKI
   (`--ignore-certificate-errors-spki-list=<hash>`) or use `http://localhost`.

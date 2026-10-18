@@ -1,4 +1,5 @@
-/* layout: header, then a 900x560 stage holding a CSS 3D camera over a walled tray, then controls */
+/* === Page layout ===
+   header, then a 900x560 stage holding a CSS 3D camera over a walled tray, then controls */
 :root{
   --bg:#14161a;--panel:#1c1f25;--ink:#e8e6e1;--dim:#8b8f98;--line:#2a2e36;--acc:#f2b134;
   --floor:#1b1e24;--floorline:#2c313b;--void:#0e1013;
@@ -8,6 +9,7 @@
 /* --u is registered so that its 100cqw resolves on .arena, against .stage: unregistered, every user would resolve it
    against its own nearest size container, which in Firefox is the engine's #LM (its size changes every frame) */
 @property --u{syntax:'<length>';inherits:true;initial-value:0px}
+/* --- Render properties: a body's pose, rotation matrix and face colours (non-inherited) --- */
 @property --Rx{syntax:'<number>';inherits:false;initial-value:0}
 @property --Ry{syntax:'<number>';inherits:false;initial-value:0}
 @property --Rz{syntax:'<number>';inherits:false;initial-value:0}
@@ -33,6 +35,7 @@
 @property --k4{syntax:'<color>';inherits:false;initial-value:#000}
 @property --k5{syntax:'<color>';inherits:false;initial-value:#000}
 @property --cs{syntax:'<color>';inherits:false;initial-value:#000}
+/* --- Header and stage --- */
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);
   font:15px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
@@ -49,6 +52,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
   background:radial-gradient(120% 90% at 50% 30%,#171a20,var(--void));
 }
 .lv{position:absolute;inset:0;pointer-events:none;z-index:1}
+/* === Scene: camera and tray === */
 /* the scene is laid out in fixed px (1 world unit = 1px) and scaled once: per-element cqw
    units cost ~70us per element per pass when everything moves */
 .view{--sx:0;--sy:0;position:absolute;left:0;top:0;width:__VW__px;height:__VH__px;perspective:__PERSP__px;perspective-origin:50% 50%;
@@ -84,6 +88,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 
 .sh{border-radius:50%;background:radial-gradient(closest-side,rgb(0 0 0/.75),rgb(0 0 0/0))}
 
+/* === Body shapes and shading (all engines) === */
 /* bodies: the wrapper (.bw) holds the pose as non-inherited props and translates; .bd pulls the
    quaternion and grab index with explicit inherit, builds the rotation and the lit face colors */
 .bw{animation-duration:auto;animation-timing-function:linear;animation-fill-mode:both;
@@ -117,6 +122,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
   transform:translateY(calc(var(--Ry) * -1px - 1px)) rotateX(90deg) scale(calc(1 - var(--Ry) / 700))}
 /*BODIES*/
 
+/* === Mouse input: the pointer grid === */
 .gr{position:absolute;inset:0;display:flex;overflow:hidden;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;
   --att:0}
 .gr:active{cursor:grabbing}
@@ -126,6 +132,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 .pm{position:absolute;width:0;height:0;pointer-events:none;left:anchor(center,50%);top:anchor(center,50%);
   position-anchor:--hov;view-timeline:--pmx x,--pmy y}
 
+/* === Controls and footer === */
 .ctl{display:flex;flex-wrap:wrap;gap:12px 24px;margin:14px 0 6px}
 .grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .grp b{color:var(--dim);font-weight:400;margin-right:4px}
@@ -143,6 +150,7 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 footer p{color:var(--dim);font-size:13px;max-width:80ch;margin:18px 0 0}
 footer code{color:var(--ink)}
 
+/* === Engines: shared wrappers, pointer and controls state === */
 /* engines: one complete solver per body count; the unselected ones are display:none, so the
    style engine never looks at them */
 .eng{position:absolute;inset:0;display:none;pointer-events:none}
@@ -166,6 +174,7 @@ footer code{color:var(--ink)}
 #app:has(#reset:active),#app:has(.scenes label:active){--rst:1}
 #app:has(#shake:active){--kick:1}
 
+/* === Touch input: handles and the follower === */
 /* touch (ARCHITECTURE.md "Touch"): Chrome gives a finger drag no :active or :hover state, but a scroll follows the
    finger. Each body carries a handle, a camera-facing disc that scrolls in both axes (scroll-axis-lock: none, so a
    drag isn't locked to one axis); the engine reads the dragged handle's offset from its rest offset as the drag, and
@@ -196,10 +205,12 @@ footer code{color:var(--ink)}
 }
 @keyframes hdl{from{left:-40px}to{left:5960px}}
 @keyframes hdt{from{top:-40px}to{top:5960px}}
+/* --- Mouse grab (not on touch screens) --- */
 @media not (pointer:coarse){
   #app:has(.gr:active){--att:1}
 }
 
+/* === Register cells (all engines) === */
 /* registers: hidden layout cells that hold state between frames */
 .regs{position:fixed;left:0;top:0;width:0;height:0;overflow:clip;visibility:hidden}
 .regs .sc{position:absolute;left:0;top:0;width:__HS__px;height:__HS__px;overflow:hidden}

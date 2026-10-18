@@ -8,7 +8,11 @@ their techniques.
 - `shared/` is harness code the projects' tools use: browser launch profiles, tracing, A/B timing, motion checks,
   freezing, ablation (`shared/README.md`). Each project's commands are unchanged. A change there touches all of them:
   run `make test-shared`, css-physics `bash tools/smoke.sh 16`, js-minus-js `make test`, `make l3`, `make l5-smoke`,
-  and, for `browser.js`, paint `make test`.
+  and, for `browser.js` or `csslabel.py`, paint `make test`.
+- Generated CSS is labelled: a header, then `/* === Section === */` and `/* --- Group --- */` comments, written
+  through `shared/py/csslabel.py` by every generator, which fails the build if a rule comes before the first section.
+  Label new CSS as you add it; the conventions are in `shared/README.md#labels-in-generated-css`.
+  `python3 shared/py/csslabel.py <page>` prints a built page's outline.
 - css-physics and js-minus-js launch Chromium with different flags (`shared/js/browser.js` profiles). Their
   benchmark numbers were taken with those flags; don't unify them without re-measuring both. paint's tools use the
   `physics` profile.
