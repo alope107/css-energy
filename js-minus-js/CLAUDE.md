@@ -21,7 +21,8 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 ```
 npm install && pip install -r requirements.txt     # once
 make page            # build/js_in_css.xhtml: lib -> image -> CPU font -> page (~25 s, reproducible)
-make test            # fast gate, no browser (~5 s): Node oracle, L1, L2, L4
+make test            # fast gate, no browser (~15 s): Node oracle, L1, quick fuzz, L2, L4
+make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, L4 (~6 min; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~1.5 min)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~1 min)
 make l5              # every program under 1,500 steps (~10 min; run in the background)
@@ -32,7 +33,7 @@ python3 compiler/cc_ref.py prog.js                 # compile and run one program
 SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 ```
 
-- `l2`, `l3`, `l5*` skip while nothing they depend on changed (`up to date`); `RERUN=1` forces a run
+- `l2`, `fuzz`, `fuzz-l3`, `l3`, `l5*` skip while nothing they depend on changed (`up to date`); `RERUN=1` forces a run
   (`../shared/README.md#checks-in-make`).
 - Browser setup: `tools/browser.js`, the shared launcher (profile `fontcpu`, `CHROME=/path` overrides;
   `../shared/README.md`). After changing it or `tools/page.js`: repo-root `make test-shared`, then `make test`,
@@ -49,7 +50,7 @@ compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same 
 machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py (font)  gen_fvm4.py (page)  memtree.py (RAM)
            ui_seq.js halttime.js trace.js (browser harnesses)  hbtest.py (font vs model in uharfbuzz)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
-tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  level harnesses
+tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
 tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size)
 ```
 
@@ -60,10 +61,12 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
 1. Test first: `tests/suite/<name>.js` (at most 24 lines × 64 columns) or `tests/suite_err/`; `make expect`.
 2. Change `cc_ref.py` until `make l1` passes, then mirror it in `cc_dsl.py` (same state, order of effects, failure
    codes; new state in `parse_state_names()` / `LEX_STATE` and `ref_state()` in `tests/cmp_dsl.py`) until `make l2`
-   reports `ALL OK`.
-3. Note `tools/vsz.py` before and after (now 346 variants, 322 on the page in 188 rules). Every temp,
+   reports `ALL OK`. Teach the program generator (`tests/fuzz/progen.py`) the feature, within what the language
+   guarantees, and run `python3 tests/fuzz/fuzz.py gen -n 2000`, `fmt` and `mut -n 2000`.
+3. Note `tools/vsz.py` before and after (now 355 variants). Every temp,
    every rule (applied or not) and every label port costs on each of 400 token levels.
-4. `make l3`, then `make page && make l5-smoke`, then `make dist`.
+4. `make fuzz` and `make l3` (`make fuzz-l3` too if the lexer or the page changed), then `make page && make l5-smoke`,
+   then `make dist`.
 
 ### Object instructions and runtime (`machine/uarch.py`, `compiler/rtlib.py`)
 
@@ -96,7 +99,8 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
 
 ## Done means
 
-- `make test` passes; `make l3` for any compiler change; `make l5-smoke` for any change that reaches the page.
+- `make test` passes; `make l3` and `make fuzz` for any compiler change; `make l5-smoke` for any change that reaches
+  the page.
 - `dist/` is rebuilt if the page changed.
 - Measured effects are in `docs/BENCHMARKS.md`; new Chrome behaviour is in `docs/ENGINE_NOTES.md`.
 - Paste the tests' summary lines as evidence; don't just say they pass.
@@ -116,7 +120,11 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
   in `token()`. A new fallthrough between modes must go in `token()`'s `FALL` map, or the block silently vanishes
   from specialised variants.
 - Error 99 on the page means no parser variant accepts that token. L3 accepts any nonzero error for `suite_err`.
-- `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines.
+- `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines, so `suite_ref.py` fails one
+  that doesn't.
+- A fuzz failure is in `build/fuzz/`; `python3 tests/fuzz/show.py build/fuzz/<name>` replays it. Check it is inside
+  the language (README Limits) before fixing the compiler: the shrinker drops lines, which can remove a declaration
+  the generator relied on. A real one becomes a `tests/suite` regression test.
 - Label the CSS you add (`lbl.section` / `lbl.group` in gen_fvm4.py, ccpage5.py, ui_rb.py;
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py build/js_in_css.xhtml` prints the
   page's outline.

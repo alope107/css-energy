@@ -53,8 +53,8 @@ since it last passed:
 | Project | Checks | Always run |
 |---|---|---|
 | css-physics | `smoke.sh` (= `make -k smoke N=…`): `smoke.js` per scene, `floatcheck.js`, `overlaycheck.js`, `grabtest.js` | `statcheck.py` |
-| js-minus-js | `make l2`, `l3`, `l5`, `l5-smoke`, `l5-input` | `expect`, `l1`, `l4` |
-| paint | `make test-selftest`, `make test-e2e` | |
+| js-minus-js | `make l2`, `fuzz`, `fuzz-l3`, `l3`, `l5`, `l5-smoke`, `l5-input` | `expect`, `l1`, `fuzz-quick`, `l4` |
+| paint | `make test-selftest`, `make test-e2e`, `make test-goaway` | |
 | repo root | `make engine-check` | `make engine-costs` |
 
 - **The log** is `build/<check>.<config>.log` (css-physics `out/smoke_<N>.<gen>_….<config>.log`; root

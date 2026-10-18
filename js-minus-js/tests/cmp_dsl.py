@@ -16,7 +16,7 @@ def prog_for(mode, tk, tv):
 
 def ref_state(c):
     st = dict(lx=c.lx, q=c.q, lt=c.lt, tkc=c.tkc, acc=c.acc, h1=c.h1, h2=c.h2, p2=c.p2, sstart=c.sstart, dp=c.dp, mode=c.mode, pn1=c.pn[0], pn2=c.pn[1],
-              sdp=c.sdp, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
+              sdp=c.sdp, pnl=c.pnl, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
               osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, lb=c.lb, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
               pendLa=c.pendLa, err=c.err, arrstart=c.arrstart)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
@@ -29,7 +29,7 @@ def ref_state(c):
             st[nm] = v if live and not (nm.startswith('sk') and e[3] < 0) else None
     for k in range(R.NF):
         e = c.fn[k]
-        for nm, v in ((f'fh1_{k}', e[0]), (f'fh2_{k}', e[1]), (f'fl_{k}', e[2] + 64 * e[3])): st[nm] = v if k < c.nfn else None
+        for nm, v in ((f'fh1_{k}', e[0]), (f'fh2_{k}', e[1]), (f'fl_{k}', e[2] + 64 * e[3] + 256 * e[4])): st[nm] = v if k < c.nfn else None
     for k in range(R.NI):
         e = c.itab[k]
         for nm, v in ((f'ih1_{k}', e[0]), (f'ih2_{k}', e[1]), (f'iv_{k}', e[2])): st[nm] = v if k < c.nint else None
@@ -42,10 +42,11 @@ if SPEC:                                         # class-specialised lexers, as 
     def lex_for(c): return lexes[next(i for i, cs in enumerate(C5.CLASSES) if c in cs)]
 else:
     def lex_for(c): return lexp
-print(f'lexer: {len(lexp.x.temps)} temps; parser: {len(gen.x.temps)} temps')
+if __name__ == '__main__': print(f'lexer: {len(lexp.x.temps)} temps; parser: {len(gen.x.temps)} temps')
 work = 0; steps = 0
-for f in sys.argv[1:]:
-    text = open(f).read().rstrip('\n') + '\n'
+def check(text):
+    """run the DSL level by level on one source text against cc_ref -> (ok, detail)"""
+    global work, steps
     src = [ord(ch) for ch in text] + [0, 0]
     ref = R.Compiler(DB, CB, lib)
     ls = D.initial_lex(DB); ps = D.initial_parse(DB); tab = {n: 0 for n in D.table_names()}; lab = {}; code = {}; data = {}
@@ -83,8 +84,12 @@ for f in sys.argv[1:]:
     diff = [k for k, v in rs.items() if v is not None and st.get(k) != v]
     rlab = {j: v for j, v in enumerate(ref.lab) if v != -1}
     rcode = {a: (op, (lab_ if lab_ is not None else imm), int(lab_ is not None)) for a, (op, imm, lab_) in ref.code.items()}
+    lab = {j: v for j, v in lab.items() if j < R.NL}   # (labels past NL exist only after error 20)
     ok = not diff and code == rcode and data == ref.data and lab == rlab
-    allok &= ok
-    print(f, 'OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}')
-print(f'parser steps {steps}, temps evaluated {work} ({work // max(steps, 1)}/step); variants {len(variants)}')
-print('ALL OK' if allok else 'FAILURES')
+    return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}')
+if __name__ == '__main__':                       # (tests/fuzz/fuzz.py imports check())
+    for f in sys.argv[1:]:
+        ok, msg = check(open(f).read().rstrip('\n') + '\n'); allok &= ok
+        print(f, msg)
+    print(f'parser steps {steps}, temps evaluated {work} ({work // max(steps, 1)}/step); variants {len(variants)}')
+    print('ALL OK' if allok else 'FAILURES')
