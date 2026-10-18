@@ -20,7 +20,8 @@ The README describes the project; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e
 ```
 npm install && pip install -r requirements.txt     # once
 make page            # build/js_in_css.xhtml: lib -> image -> CPU font -> page (~25 s, reproducible)
-make test            # fast gate, no browser (~5 s): Node oracle, L1, L2, L4
+make test            # fast gate, no browser (~15 s): Node oracle, L1, quick fuzz, L2, L4
+make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, L4 (~6 min; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~1.5 min)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~1 min)
 make l5              # every program under 1,500 steps (~10 min; run in the background)
@@ -64,7 +65,8 @@ archive/   results/ (raw logs the docs cite). README.md indexes the removed old 
 
 1. **Write the test first.** Add `tests/suite/<name>.js` (at most 24 lines × 64 columns), or a program for
    `tests/suite_err/`. Run `make expect` so Node writes the `.out`.
-2. **Change `compiler/cc_ref.py`.** Iterate until `make l1` passes.
+2. **Change `compiler/cc_ref.py`.** Iterate until `make l1` passes. Teach the generator (`tests/fuzz/progen.py`) the
+   feature too, within what the language guarantees, and run `python3 tests/fuzz/fuzz.py gen -n 2000` and `fmt`.
 3. **Mirror the change in `compiler/cc_dsl.py`.**
    - Same state, same order of effects, same failure codes.
    - Every new state variable must be added to `parse_state_names()` / `LEX_STATE`, and to `ref_state()` in
@@ -75,7 +77,8 @@ archive/   results/ (raw logs the docs cite). README.md indexes the removed old 
    on each level whether it applies or not (so a new variant costs even if rarely used), and every
    label port is an element on each of 400 token levels. Note the change in variant count, temps and ports
    before and after.
-5. **Run `make l3`** to confirm the generated CSS agrees with the reference in Chrome.
+5. **Run `make fuzz`** (the DSL against the reference on thousands of generated, reformatted and mutated programs),
+   then **`make l3`** to confirm the generated CSS agrees with the reference in Chrome.
 6. **Rebuild and smoke-test the page** with `make page && make l5-smoke`, then `make dist`.
 
 The `.claude/skills/language-feature` skill has the detailed version of this checklist.
@@ -116,7 +119,7 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
 ## Done means
 
 - `make test` passes.
-- `make l3` passes for any compiler change.
+- `make l3` and `make fuzz` pass for any compiler change.
 - `make l5-smoke` passes for any change that reaches the page.
 - `dist/` is rebuilt if the page changed.
 - Measured effects are recorded in `docs/BENCHMARKS.md`.
@@ -142,8 +145,11 @@ The `.claude/skills/language-feature` skill has the detailed version of this che
     fallthrough between modes must be added there, or the block silently disappears from that variant.
 - **Error 99 on the page means no parser variant accepts that token** (pure-error variants are dropped). L3
   accepts any nonzero error for `suite_err` programs.
-- **`tests/suite` programs must fit the editor (24 × 64).** `suite_ref.py` warns when one doesn't. The page
-  truncates long lines, so such a test fails for the wrong reason.
+- **`tests/suite` programs must fit the editor (24 × 64).** `suite_ref.py` fails one that doesn't. The page
+  truncates long lines, so such a test would fail L4 / L5 for the wrong reason.
+- **A fuzz failure is in `build/fuzz/`**: `python3 tests/fuzz/show.py build/fuzz/<name>` replays it. Before fixing the
+  compiler, check it is inside the language (README Limits): the shrinker drops lines, which can break the generator's
+  guarantees (a declaration or a key gone). A real one becomes a `tests/suite` regression test.
 - **Doc paths under `archive/` other than `archive/results/` name removed code.** `archive/README.md` says how to
   restore it. Its scripts point at old absolute paths (`/root/cc`, `/root/vm`), so don't build on them.
 

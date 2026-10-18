@@ -20,7 +20,7 @@ their techniques.
 ## Checks in make
 
 - The slow checks are make targets that make skips while nothing they depend on changed since they last passed
-  (css-physics `smoke.sh`, js-minus-js `make l2`, `l3`, `l5`, `l5-smoke`, `l5-input`, paint `make test`,
+  (css-physics `smoke.sh`, js-minus-js `make l2`, `fuzz`, `l3`, `l5`, `l5-smoke`, `l5-input`, paint `make test`,
   `make engine-check`). A skipped check prints `up to date: … passed <time>` and the end of that pass's log.
 - **The evidence before a merge is a real run: `RERUN=1`** (`RERUN=1 make l3`, `RERUN=1 bash tools/smoke.sh 16`).
   Use it for a suspected flake too. When you paste an `up to date` result while iterating, say it wasn't re-run.

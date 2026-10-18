@@ -157,10 +157,19 @@ These are in `cc_ref.py` and shared by the DSL.
   visible block-scoped name is always the innermost, since a `var` of the same name inside its block would be a
   redeclaration. A `var` declared in a block survives the block, as in JavaScript. `const` is a bit in the symbol
   entry, checked where a name is assigned. All of it is compile time only.
-- **Semicolon insertion**: the lexer emits token `T_NL` (14) at a newline that follows a token that can end a
-  statement (identifier, number, string, `)` `]` `++` `--`). The parser treats it as `;` only where a statement
-  can end and no `( [` or call is open; elsewhere it ignores it. A `}` right after an unterminated statement ends
-  it first (the `asic` / `f_asic` path).
+- **Semicolon insertion**: a newline that follows a token that can end a statement (identifier, number, string,
+  `)` `]` `}` `++` `--`) is pending (`pnl`) until the next significant character. The lexer sees that character as
+  the lookahead of the blank or comment end before it: one of `. [ ( ? : , ) ] * % < > & | = ; }` continues the
+  statement or ends it by itself, so there is no token; anything else gets token `T_NL` (14). `+` / `-` are decided
+  on the character itself (`++x` starts a statement, `+ b` continues), and so is `/` (a comment or a division).
+  After `return` the newline always gives `T_NL` (`lt` 2: JavaScript's restricted production). The parser treats
+  `T_NL` as `;` only where a statement can end, no `( [` or call is open and no `for` header is being read;
+  elsewhere it ignores it. A `}` right after an unterminated statement ends it first (the `asic` / `f_asic` path).
+- **`console.log`** leaves no value: its PRINT words pop every argument, so it ends its statement itself (mode
+  `S_INC`) instead of taking the expression statement's `POP`, and anything else (`x = console.log(1)`) is error 30.
+- **Argument counts**: the function table's `fl_k` holds the count every call must pass (+ 1; 0 until the first call
+  or the definition). `M_CALL`'s value is the function index + 16 × its type + 64 × the commas so far; the `)` checks
+  and records the count, and `end_params` checks the calls made before the definition (error 76).
 - **`else if` chains**: an `if` that is the braceless body of an `else` reuses that `else`'s end label and
   wrapper. `pendLa + 64` flags the reuse. A chain therefore uses one control-stack entry and one label however
   long it is.
@@ -437,17 +446,40 @@ The readback design comes from a separate "CSS Text Readback" chat.
 | Level | Command | What runs | Checked against |
 |---|---|---|---|
 | oracle | `make expect` | each `tests/suite/*.js` under Node, with putc shimmed | writes `*.out` |
-| L1 | `make l1` | `cc_ref` compile + 20-bit simulator | Node output |
+| L1 | `make l1` | `cc_ref` compile + 20-bit simulator, strict: the stack must never go below where it started and be back there at HALT (every statement is stack-neutral) | Node output |
 | L2 | `make l2` | DSL evaluated in Python level by level: the page's specialised variants and class lexers (`SPEC=1`); `make l2-generic` uses the unspecialised parser | the reference: parser state, tables, every code word, label and data word |
-| L3 | `make l3` | the generated CSS compiler in Chrome. One page (`build/suite_css.xhtml`); the harness writes each program into the latch cells | the reference, word for word; `tests/suite_err/*` must be rejected |
+| L3 | `make l3`, `make fuzz-l3` | the generated CSS compiler in Chrome. One page (`build/suite_css.xhtml`); the harness writes each program into the latch cells | the reference, word for word; `tests/suite_err/*` must be rejected |
 | L4 | `make l4` | `uarch4.Machine4` (cache, traps) runs every compiled image | Node output |
 | L5 | `make l5` / `l5-smoke` | the real page. Type each program, Run, read the console | Node output laid out on the 8 × 16 grid |
 
 **Suites**
 
-- `tests/suite/` holds 114 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
-  `suite_ref.py` warns if one doesn't.
-- `tests/suite_err/` holds 38 programs the compiler must reject.
+- `tests/suite/` holds 120 programs, each with a Node-generated `.out`. They must fit the editor (24 × 64);
+  `suite_ref.py` fails one that doesn't (the page would truncate it, so L4 / L5 would fail for the wrong reason).
+- `tests/suite_err/` holds 46 programs the compiler must reject.
+
+**Differential tests** (`tests/fuzz/fuzz.py`; `make test` runs a quick fixed-seed set, `make fuzz` the full one).
+Node is the oracle and each program goes through L1, L1 on the page's padded text (when it fits the editor), and
+optionally L2 (`--l2`, on every program, rejected ones too) and L4 (`--l4`). Three sources of programs:
+
+- `fmt`: every suite program in 11 layouts that must print the same: semicolons dropped, comments between all tokens,
+  tabs, CRLF, blank lines, one line, no spaces, one token per line (Node decides what that one means).
+- `gen`: random programs from `progen.py`, which covers the whole language with types (number, string, boolean,
+  array, object, functions with recursion, switch, loops with break / continue, an allocation loop that runs the
+  collector) and renders each program twice from one tree: as written for us, and for Node with the machine's
+  integer semantics spelled out (wrap to 20 bits, truncating division, x / 0 = x % 0 = 0). It stays inside the
+  documented language, so any difference is a bug; programs that hit a documented limit error are counted and skipped.
+- `mut`: suite programs with one or two random token edits. What Node rejects as a syntax error must be rejected, and
+  with `--l2` the DSL must agree with the reference on every mutant, most of which are rejected. An output difference
+  is listed for a look but isn't a failure (`--strict` makes it one): a mutant can leave the language in ways no filter
+  sees, such as a string compared with a number or `+` on a string held in a parameter.
+- `make fuzz-l3` (browser): `fuzz.py dump` writes 150 generated programs and 150 mutants that fit the editor, and the
+  L3 harness runs them through the CSS compiler in Chrome against the reference. This is the only level that sees
+  the page's element structure (it found the newline level reading the wrong line's first character).
+
+The oracle flags output our machine can't produce (an object, array, `null`, `undefined` or non-integer printed).
+A failure is shrunk (lines dropped while the same kind of failure remains) and written to `build/fuzz/`;
+`tests/fuzz/show.py build/fuzz/<name>` replays it. `fuzz.py gen --k N` regenerates program N of a seed.
 - `tests/programs/` holds the older demo programs t1–t4 and e1–e2.
 
 **Not covered**

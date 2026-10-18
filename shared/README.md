@@ -61,7 +61,7 @@ The slow checks are make targets, so make skips one while nothing it depends on 
 | Project | Checks | Always run |
 |---|---|---|
 | css-physics | `smoke.sh` (= `make -k smoke N=…`): `smoke.js` per scene, `floatcheck.js`, `overlaycheck.js`, `grabtest.js` | `statcheck.py` (20 ms) |
-| js-minus-js | `make l2`, `l3`, `l5`, `l5-smoke`, `l5-input` | `expect`, `l1`, `l4` (< 1 s) |
+| js-minus-js | `make l2`, `fuzz`, `l3`, `l5`, `l5-smoke`, `l5-input` | `expect`, `l1`, `l4` (< 1 s), `fuzz-quick` (~5 s) |
 | paint | `make test-selftest`, `make test-e2e` | |
 | repo root | `make engine-check` | `make engine-costs` (a measurement) |
 

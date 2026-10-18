@@ -7,7 +7,8 @@ Slots: L lines x (P columns + newline), then one NUL; a column past the end of i
 
 Character chain (#cc inside #ccw; shown once the editor's scan says the text is complete, i.e. one sweep after Run):
   - one source element per line (.ls) animates the line's P codes into --lc<j> (names reused by every line); each
-    level reads --c / --cn from its line's source and computes --ncl, the class of the next character.
+    level reads --c / --cn from its line's source and computes --ncl, the class of the next character. A line's source
+    opens at the previous line's newline level, so that level's --cn is the line's first character.
   - the lexer is specialised per character class and picked by the parent's --ncl (9 small rules, class selectors).
   - a level that completes a token shows its token register .tr: a scroller whose four subjects are named
     --tk<t>c/v/h/g (t = tokens so far, chosen with an if() mux) and placed at tc / tv / th1 / th2 px.
@@ -167,8 +168,11 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, static_sr
         if static_src is not None:      # experiment: characters as inline constants instead of timelines
             cc = static_src[i]; cn_ = static_src[i + 1] if i + 1 < NC else 0
             st.append(f'--c: {cc}; --cn: {cn_}; --ncl: {next(ci for ci, cs in enumerate(CLASSES) if cn_ in cs)}')
-        if sl[0] == 'col' and sl[2] == 0:
-            ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{sl[1]}_{j}" for j in range(P))}">')
+        # a line's source opens just before the previous line's newline level, whose --cn must be this line's first
+        # character (the lexer's lookahead at a newline decides semicolon insertion; that level's own --c is 10)
+        nk = 0 if sl == ('col', 0, 0) else sl[1] + 1 if sl[0] == 'nl' and sl[1] + 1 < L else None
+        if nk is not None:
+            ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{nk}_{j}" for j in range(P))}">')
         ch_html.append(f'<div class="lv{x} {kcls}" style="{"; ".join(st)}"><b class="ovs"></b>'
                        f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
     root_st = ''

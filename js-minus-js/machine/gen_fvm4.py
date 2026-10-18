@@ -484,6 +484,7 @@ if UI:
       style(--cse: 40): "error: missing }}"; style(--cse: 54): "error: unexpected }}"; style(--cse: 56): "error: break outside a loop";
       style(--cse: 57): "error: return outside a function"; style(--cse: 60): "error: undefined function";
       style(--cse: 73): "error: case outside a switch"; style(--cse: 75): "error: two defaults in a switch";
+      style(--cse: 76): "error: wrong number of arguments";
       style(--cse: 25): "error: too many globals / array elements"; style(--cse: 26): "error: too much string data"; style(--cse: 63): "error: strings can only be joined in console.log";
       else: "syntax error (" counter(cse) ")"); }}
 """

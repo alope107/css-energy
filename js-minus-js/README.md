@@ -12,7 +12,7 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 **Status (2026-10-17).**
 
-- All five test levels pass. That includes 114 programs checked against Node's output and 38 programs the
+- All five test levels pass. That includes 120 programs checked against Node's output and 46 programs the
   compiler must reject.
 - On the page, compiling takes about 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15 then runs
   in about 8.3 s and halts about 10.8 s after Run (headless Chromium 153 on the Ubuntu mini PC, 2026-10-17); it was
@@ -45,7 +45,7 @@ compiler/   the compiler: cc_ref.py (reference) + cc_dsl.py/dsl.py (the same ste
 machine/    the font CPU: uarch*.py (model), cpu4.py/cpugen.py/otl.py (GSUB), fvm_build.py (font),
             gen_fvm4.py (the page), memtree.py (RAM); browser harnesses (ui_seq.js, fullrun.js, trace.js, ...)
 readback/   editor text readback: ui_rb.py, mkfont2.py (AsciiProbe font)
-tests/      suite/ (114 programs + Node .out), suite_err/ (38 rejects), harnesses for levels L1-L5
+tests/      suite/ (120 programs + Node .out), suite_err/ (46 rejects), fuzz/ (differential tests), harnesses for levels L1-L5
 tools/      browser.js (launcher), traps.py (cost of a program on the CPU), vsz.py / lp.py (variant sizes)
 dist/       the built page
 docs/       ARCHITECTURE.md, HISTORY.md, BENCHMARKS.md, ENGINE_NOTES.md
@@ -92,7 +92,10 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Comments**: `//` and `/* */`.
 - **Strings are interned**: equal string literals are one value, so `===` compares them by content.
 - **Semicolons**: optional where JavaScript inserts them. A newline after a complete statement ends it, unless
-  the statement is still inside `( [` or a call. A `}` also ends one (`{ x++ }`).
+  the statement is still inside `( [` or a call or a `for (…)` header, or the next line continues it: a line that
+  starts with `.` `[` `(` `?` `:` `,` or a binary operator (`x = a` / `  + b`; but `++x` on a new line is a new
+  statement, as in JavaScript). After `return` a newline always ends the statement. A `}` also ends one (`{ x++ }`).
+- **Calls** pass exactly as many arguments as the function has parameters (error 76 otherwise).
 
 ### How values print
 
@@ -138,7 +141,8 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
     `default`.
   - Each array literal takes one word of the 255 for its length, besides its elements.
   - 16 distinct strings and property names (string literals and keys share one interning table). A property name
-    is stored in the string area too.
+    is stored in the string area too, and every `.name` in the program takes its length + 1 words of it again (the
+    lexer keeps the bytes before the parser knows whether the name is new).
   - Objects: about 384 chunks live at once (a chunk holds 3 pairs). A program that keeps more halts with
     `out of memory`.
   - Blocks nest 8 deep. Expressions nest 8 operators or parentheses deep.
@@ -152,7 +156,8 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
 - **Booleans**:
   - A boolean passed as a parameter prints as `1` / `0`.
   - So does a boolean returned by a function called before its definition.
-  - So does a boolean from `c ? a : b` whose other branch is not a boolean (`c ? false : 7`).
+  - A value of `c ? a : b`, `a && b` or `a || b` where one side is a boolean and the other a number prints as a
+    boolean if it is `0` or `1` (`x || y > 0` with `x = 1` prints `true`); other numbers print as numbers.
 - **Arrays**: `.length` is the literal's length; writing past the end (`x[k] = v`) does not change it. On an
   object or a string, `.length` reads a meaningless number (it is not a property read).
 - **`++` / `--`**: inside an expression only on a variable (`a[i]++` and `o.x++` are statements only).
@@ -167,10 +172,17 @@ AGENTS.md   instructions for coding agents (CLAUDE.md imports it)
     supported.
   - No prototypes, methods, `delete`, `in`, `for … in`, `Object.keys`.
   - An assignment to a property is a statement, not an expression (`a = o.x = 1` is an error).
+- **`console.log`** prints each argument (and each piece of a `+` join) as soon as it is computed, where JavaScript
+  computes them all first. The output differs only if a later argument calls a function that prints:
+  `console.log("a", f())` prints `f`'s output after `a `. It is a statement, not a value, and takes no trailing comma
+  (`console.log(a, )`; error 30).
+- **Strings and numbers**: comparing a string with a number (`"s" < 5`, `"5" == 5`) compares the string's pointer, and
+  so does `+` / `+=` on a string the compiler can't see is one (a parameter, a property).
 - **Not supported**:
   - `undefined`;
   - nested functions or closures;
-  - string comparison by content.
+  - string comparison by content;
+  - expression statements that start with a literal or `(` (`1;`, `(f)();`).
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
 
 ### Error codes
@@ -190,7 +202,7 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 24 | too many variables (32) | 56 | `break` / `continue` outside a loop |
 | 25 | too many globals / array elements | 57 | `return` outside a function |
 | 26 | too much string data | 60 | undefined function |
-| 30, 38–39 | malformed `console.log` | 61 | a statement emits too much code at once |
+| 30, 38–39 | malformed `console.log`, or used as a value | 61 | a statement emits too much code at once |
 | 32–37 | malformed `if` / `while` / `for` / `function` header | 62 | program too long (more than 511 words) |
 | 40 | missing `}` at end of input | 63 | strings can only be joined in `console.log` |
 | 64 | assignment to a `const` | 65 | `const` without `=` |
@@ -199,6 +211,7 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 70 | a property assignment must be a statement | 71 | object literal: key expected |
 | 72 | `:` expected after an object key or `default` | 73 | `case` / `default` outside a `switch` |
 | 74 | a `switch` body must start with `case` / `default` | 75 | a second `default` |
+| 76 | a call passes a different number of arguments than another call or the definition | | |
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.

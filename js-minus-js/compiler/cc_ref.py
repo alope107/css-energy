@@ -71,11 +71,19 @@ KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 
 
 # punctuation codes: single chars by ASCII; two-char ops: == 1, != 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
 # += 9, -= 10, *= 11, /= 12, %= 13 (=== and !== lex as == and !=); NL 14: a newline after a token that can end a
-# statement (identifier, number, string, ) ] ++ --), for automatic semicolon insertion
+# statement (identifier, number, string, ) ] } ++ --), for automatic semicolon insertion. (After a block's '}' the parser
+# is in a mode that ignores it; after an object literal's it ends the statement.)
 TWO = {(61, 61): 1, (33, 61): 2, (60, 61): 3, (62, 61): 4, (38, 38): 5, (124, 124): 6, (43, 43): 7, (45, 45): 8,
        (43, 61): 9, (45, 61): 10, (42, 61): 11, (47, 61): 12, (37, 61): 13}
 BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE, 1: EQ, 2: NE, 5: AND, 6: OR}
 T_NL = 14
+# Semicolon insertion. A newline after a token that can end a statement (lt) is pending (pnl) until the next significant
+# character, which the lexer sees as the lookahead cn of the blank or comment end before it: a line starting with one of
+# CONT continues the statement or ends it by itself (no T_NL: ';' and '}' end it without one), any other starts a new one (T_NL). '+' '-' (++x / --x start a statement, x + y
+# continues) and '/' (a comment or a division) are decided on the character itself. After return (lt 2, JavaScript's
+# restricted production) the newline always ends the statement. A newline inside a /* */ comment counts.
+CONT = (46, 91, 40, 63, 58, 44, 41, 93, 42, 37, 60, 62, 38, 124, 61, 59, 125)    # . [ ( ? : , ) ] * % < > & | = ; }
+BLANK = (9, 10, 13, 32)
 COMPOUND = {9: ADD, 10: SUB, 11: MUL, 12: DIV, 13: MOD}
 ESC = {110: 10, 116: 9, 114: 13}
 BOOLOPS = (LT, GT, LE, GE, EQ, NE, NOT)
@@ -117,11 +125,14 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
  S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_ERR) = range(31)
 # S_DOT: a property name after '.'; S_OKEY / S_OCOLON: an object literal's key / its ':'. After o.x (SCANI emitted, the key in pn)
 # or x[k] the parser is in S_OPER with pm = 1 / 2: the load is pending until the next token shows it is not assigned to.
+# pm = 3 after x++ / ++x in an expression, which no '.' or '[' may follow.
 # S_SWCASE: a switch body's first token (case, default or '}'); default's ':' is read in S_OCOLON
 
 def tmerge(a, b):
-    """static type of a value that is one of two values of types a, b"""
-    return a if a == b else 0
+    """static type of a value that is one of two values of types a, b (?: && ||). A boolean with anything else is boolean: the
+    PRINTB forms print only 0 / 1 as false / true, and other numbers and strings as they are, so only a 0 or 1 from the
+    other side misprints (unknown would misprint every boolean)"""
+    return 1 if 1 in (a, b) else a if a == b else 0
 
 class Compiler:
     def __init__(self, data_base, code_base, lib):
@@ -132,9 +143,10 @@ class Compiler:
         # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
-        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0
+        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.pnl = 0
         self.dp = data_base + 1             # globals and array literals (parser); data_base holds STRTAG
-        self.sdp = data_base + SDATA        # string literals (lexer)
+        self.sdp = data_base + SDATA + 1    # string literals and property names (lexer); data_base + SDATA itself is the lib's
+                                            # empty DONE marker, which PRINT stops at (a property name there printed as '')
         # parser
         self.mode = S_STMT; self.pn = (0, 0)
         self.ops = [0] * OD; self.opv = [0] * OD; self.osp = 0
@@ -142,7 +154,7 @@ class Compiler:
         # symbols: h1 h2 kind(1 g, 2 l) addr type const. Two regions: function- and program-level names grow up from 0
         # (nsym), block-scoped let / const grow down from NS - 1 (nlet); closing a block restores nlet
         self.sym = [[0, 0, 0, 0, 0, 0] for _ in range(NS)]; self.nsym = 0; self.nlet = 0
-        self.fn = [[0, 0, 0, 0] for _ in range(NF)]; self.nfn = 0              # h1 h2 label type
+        self.fn = [[0, 0, 0, 0, 0] for _ in range(NF)]; self.nfn = 0           # h1 h2 label type argc (+1; 0: no call or definition yet)
         self.lab = [-1] * NL; self.nlab = 0
         self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings: h1 h2 address + 4096 if no tag word
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
@@ -158,7 +170,8 @@ class Compiler:
     def newlab(self):
         if self.nlab >= NL: self.fail(20)
         self.nlab += 1; return self.nlab - 1
-    def deflab(self, l, v): self.lab[l % NL] = v
+    def deflab(self, l, v):
+        if l < NL: self.lab[l] = v                    # (a label past NL comes only after error 20)
     def here(self): return self.cb + self.cp
     def fail(self, code):
         if not self.err: self.err = code
@@ -186,7 +199,7 @@ class Compiler:
         for k in range(self.nfn):
             if (self.fn[k][0], self.fn[k][1]) == h: return k
         if self.nfn >= NF: self.fail(23); return 0
-        l = self.newlab(); self.fn[self.nfn] = [h[0], h[1], l, 0]; self.nfn += 1
+        l = self.newlab(); self.fn[self.nfn] = [h[0], h[1], l, 0, 0]; self.nfn += 1
         return self.nfn - 1
     def declare(self, h, kind, addr, cst=0, blk=0):
         """blk: a let / const inside a block (the block-scoped region)"""
@@ -207,7 +220,8 @@ class Compiler:
         && / || were emitted as jumps when pushed; popping one defines its jump's target."""
         while self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
             self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
-            if code in (AND, OR): self.deflab(val, self.here())
+            if code in (AND, OR):                              # the value is one of the operands: their merged type
+                self.deflab(val % 64, self.here()); self.lb = tmerge(val // 64, self.lb)
             elif code == M_TELSE:                              # the value's type: both branches' if they agree
                 self.deflab(val % 64, self.here()); self.lb = tmerge(val // 64, self.lb)
             elif code == ADD:                                  # strings cannot be built
@@ -251,7 +265,7 @@ class Compiler:
     def shash(self, c):
         self.h1 = (self.h1 * 31 + c) % H1M; self.h2 = (self.h2 * 37 + c) % H2M
     def char(self, c, cn):
-        tok = None
+        tok = None; gap = 0                               # gap: a blank or the end of a comment (no token here)
         isal = lambda x: 65 <= x <= 90 or 97 <= x <= 122 or x in (95, 36)
         isdg = lambda x: 48 <= x <= 57
         if self.inul and not (self.lx == 0 and self.p2 == 0 and c in (34, 39)): self.sbyte(self.inul, 0)   # NUL after an identifier
@@ -266,20 +280,20 @@ class Compiler:
         elif self.lx == 3:                                # after a backslash
             self.data[self.sdp] = ESC.get(c, c); self.sdp += 1; self.lx = 1; self.shash(ESC.get(c, c))
         elif self.lx == 2:                                # // comment
-            if c == 10:
-                self.lx = 0
-                if self.lt: tok = ('P', T_NL)
+            if c == 10: self.lx = 0; gap = 1; tok = self.newline()
         elif self.lx == 4:                                # /* comment
             if c == 42 and cn == 47: self.lx = 5
-        elif self.lx == 5: self.lx = 0                    # the '/' of '*/' (or the third char of === / !==)
+            elif c == 10: tok = self.newline()
+        elif self.lx == 5: self.lx = 0; gap = 1           # the '/' of '*/' (or the third char of === / !==)
         elif self.lx == 6: self.lx = 4                    # the '*' of '/*'
         elif self.p2:
             tok = ('P', self.p2)
             if self.p2 in (1, 2) and cn == 61: self.lx = 5
             self.p2 = 0
         elif c == 0: tok = ('EOF', 0)
-        elif c == 10 and self.lt: tok = ('P', T_NL)
-        elif c in (9, 10, 13, 32): pass
+        elif c in BLANK:
+            gap = 1
+            if c == 10: tok = self.newline()
         elif c == 47 and cn == 47: self.lx = 2
         elif c == 47 and cn == 42: self.lx = 6
         elif c in (34, 39):                               # a string: its tag word, then its bytes (hashed for interning)
@@ -301,15 +315,29 @@ class Compiler:
             if not isdg(cn): tok = ('NUM', self.acc); self.tkc = 0
         elif (c, cn) in TWO: self.p2 = TWO[(c, cn)]
         else: tok = ('P', c)
+        if self.pnl:                                      # the pending newline: decide on the next significant character
+            if gap:
+                if cn in CONT: self.pnl = 0
+                elif cn not in BLANK + (47, 43, 45): tok = ('P', T_NL); self.pnl = 0
+            elif c in (43, 45):                           # ++x / --x: a new statement; x + y / x - y: continues
+                if cn == c: tok = ('P', T_NL)
+                self.pnl = 0
+            elif c == 47 and self.lx == 0: self.pnl = 0   # a division (a comment keeps it pending)
         if tok:
             if tok == ('P', 58) and self.icm: self.sdp += self.icm            # an object literal's key: commit its string
             if tok[0] != 'ID' and tok != ('P', T_NL): self.icm = 0
             if tok != ('P', T_NL):                             # (console.log's log is not a property name)
                 self.kpos = 2 if tok == ('P', 46) and not self.lcon else int(tok in (('P', 123), ('P', 44)))
                 self.lcon = int(tok == ('ID', KW['console']))
-            self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 7, 8)))
+            self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 125, 7, 8))) + int(tok == ('ID', KW['return']))
             cp0 = self.cp; self.token(*tok)
             if self.cp - cp0 > EMAX: self.fail(61)
+
+    def newline(self):
+        """a newline (also in a comment): after return a T_NL at once; after another token that can end a statement, pending"""
+        if self.lt == 2: return ('P', T_NL)
+        if self.lt: self.pnl = 1
+        return None
 
     # ---------------- parser: one token
     def token(self, kind, v):
@@ -343,7 +371,7 @@ class Compiler:
             if isP(40):
                 if h == KW['putc']: self.push_op(M_PUTC)
                 else:
-                    k = self.fnfind(h); self.push_op(M_CALL, self.fn[k][2] + 64 * self.fn[k][3])
+                    k = self.fnfind(h); self.push_op(M_CALL, k + 16 * self.fn[k][3])
                 self.mode = S_OPND; return
             if isP(7) or isP(8): return self.incdec(h, v, 2)       # x++ / x-- in an expression: the old value
             j = self.lookup(h)
@@ -474,7 +502,7 @@ class Compiler:
         if m == S_FPARAM:
             if isP(41): return self.end_params()
             if kind != 'ID': return self.fail(36)
-            self.declare(v, 2, self.npar); self.npar += 1; self.mode = S_FPSEP; return
+            self.declare(v, 2, 4096 + self.npar); self.npar += 1; self.mode = S_FPSEP; return     # (= the DSL's encoding until end_params)
         if m == S_FPSEP:
             if isP(44): self.mode = S_FPARAM; return
             if isP(41): return self.end_params()
@@ -487,7 +515,8 @@ class Compiler:
             self.push_op(M_PRINT); self.mode = S_CONFIRST; return
         if m == S_CONFIRST:                                    # an argument's first token (a string: concatenation)
             if isP(41):                                        # console.log()
-                self.osp -= 1; self.emit(PUSHI, 10); self.emit(PUTC); self.emit(PUSHI, 0); self.mode = S_OPER; return
+                if self.opv[self.osp - 1] == 2: return self.fail(30)   # console.log(a, ): a's space is printed already
+                self.osp -= 1; self.emit(PUSHI, 10); self.emit(PUTC); return self.print_end()
             self.opv[self.osp - 1] = 0
             m = self.mode = S_OPND
         if m == S_ARR:                                       # [n, -n, ...]
@@ -574,8 +603,8 @@ class Compiler:
                 if self.dp >= self.db + SDATA: return self.fail(25)
                 self.arrstart = self.dp; self.dp += 1; self.mode = S_ARR; return
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
-            if isP(41) and self.top_op()[0] == M_CALL:      # f()
-                self.osp -= 1; self.emit(CALL, 0, self.opv[self.osp] % 64, b=self.opv[self.osp] // 64); self.mode = S_OPER; return
+            if isP(41) and self.top_op()[0] == M_CALL:      # f() (or f(a, ) with a trailing comma)
+                self.osp -= 1; self.call_end(self.opv[self.osp], 0); self.mode = S_OPER; return
             if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:     # return;
                 self.emit(PUSHI, 0)
                 if isP(125): return self.asi_close(lambda: self.end_expr_stmt('P', T_NL))
@@ -585,6 +614,9 @@ class Compiler:
                 self.emit(PUSHI, 1); return self.end_expr_stmt(kind, v)
             return self.fail(3)
         if m == S_OPER:
+            if self.pm == 3:                                   # after x++ / ++x: not a member expression (x++[1], x++.y)
+                self.pm = 0
+                if isP(46) or isP(91): return self.fail(48)
             if self.pm:                                        # after o.x (cursor on the stack) or x[k] ([x, k] on the stack)
                 ks, dyn = self.pn[0], self.pm == 2
                 asg = isP(61) or (kind == 'P' and v in COMPOUND) or isP(7) or isP(8)
@@ -612,8 +644,8 @@ class Compiler:
                     self.print_call(0); self.opv[self.osp - 1] = 1; self.mode = S_OPND; return
                 if op == ADD: self.push_op(M_CADD if t == M_PRINT else ADD, self.lb); self.mode = S_OPND; return
                 if op in (AND, OR):                            # short-circuit: a DUP JZ/JNZ L POP b L:
-                    l = self.newlab(); self.emit(DUP); self.emit(JZ if op == AND else JNZ, 0, l); self.emit(POP)
-                    self.push_op(op, l); self.mode = S_OPND; return
+                    lb = self.lb; l = self.newlab(); self.emit(DUP); self.emit(JZ if op == AND else JNZ, 0, l); self.emit(POP)
+                    self.push_op(op, l + 64 * lb); self.mode = S_OPND; return
                 self.push_op(op); self.mode = S_OPND; return
             if isP(63):                                        # c ? ...
                 self.popops(2); t, tv = self.top_op()
@@ -641,7 +673,8 @@ class Compiler:
                 if isP(44) and t == M_OKEY: return self.okey_end(tv, 0)
                 if isP(93) and t == M_INDEX: self.osp -= 1; self.pm = 2; return
                 if isP(44):
-                    if t == M_PRINT: self.print_call(32); self.mode = S_CONFIRST; return
+                    if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return     # (2: after a ',')
+                    if t == M_CALL: self.opv[self.osp - 1] += 64      # count the arguments
                     if t in (M_CALL, M_PUTC): self.mode = S_OPND; return
                     if self.osp == 0 and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
                     return self.fail(44)
@@ -650,12 +683,13 @@ class Compiler:
                     if t == M_IDXA: self.osp -= 1; self.emit(ADD); self.mode = S_IDXEQ; return
                     return self.fail(45)
                 if t == M_PAREN: self.osp -= 1; return
-                if t == M_CALL: self.osp -= 1; self.emit(CALL, 0, tv % 64, b=tv // 64); return
+                if t == M_CALL: self.osp -= 1; return self.call_end(tv, 1)
                 if t == M_PUTC: self.osp -= 1; self.emit(PUTC); self.emit(PUSHI, 0); return
-                if t == M_PRINT: self.osp -= 1; self.print_call(10); return
+                if t == M_PRINT: self.osp -= 1; self.print_call(10); return self.print_end()
                 if self.osp: return self.fail(46)
                 return self.end_expr_stmt(kind, v)             # ')' closing a statement-level paren
-            asiok = not any(self.ops[k] >= 100 for k in range(self.osp)) and self.top_cs()[0] in (C_ASSIGN, C_IDXA, C_EXPR, C_RETURN, C_PSET)
+            asiok = (not any(self.ops[k] >= 100 for k in range(self.osp)) and self.top_cs()[0] in (C_ASSIGN, C_IDXA, C_EXPR, C_RETURN, C_PSET)
+                     and not (self.csp >= 2 and self.cs[self.csp - 2][0] in (C_FORINIT, C_FORSTEP)))      # (none in a for header)
             if isP(T_NL) and not asiok: return                   # a newline ends the statement, unless inside ( [ or a call
             if isP(125) and asiok:
                 return self.asi_close(lambda: (self.popops(1), self.end_expr_stmt('P', T_NL)))
@@ -676,6 +710,21 @@ class Compiler:
             if self.opv[self.osp - 1] < 4: self.emit(ENDK, 2 * self.opv[self.osp - 1])
             self.osp -= 1; self.lb = 0; self.mode = S_OPER
         else: self.mode = S_OKEY
+
+    def call_end(self, tv, last):
+        """a call's ')': M_CALL's value tv = function index + 16 * its type + 64 * the commas; last: an argument just ended.
+        Our calls pass exactly as many words as the function pops, so every call and the definition must agree on the count
+        (the first one seen sets it; 76 otherwise)"""
+        k, argc = tv % 16, tv // 64 + last
+        if self.fn[k][4] and self.fn[k][4] != argc + 1: return self.fail(76)
+        self.fn[k][4] = argc + 1
+        self.emit(CALL, 0, self.fn[k][2], b=(tv // 16) % 4)
+
+    def print_end(self):
+        """console.log(...) ended. Its PRINT words popped every argument, so it leaves no value: it must be a statement of its
+        own (C_EXPR, nothing else open), which ends here without the expression statement's POP"""
+        if self.osp or self.top_cs()[0] != C_EXPR: return self.fail(30)
+        self.pop_cs(); self.mode = S_INC
 
     def case_end(self):
         """a case value ended (':'): EQ JZ Tnext POP Bk:"""
@@ -702,7 +751,7 @@ class Compiler:
             if x == 1: self.emit(DUP)
             self.store(j)
         if x == 1 and v == 7: self.load(j)
-        if x: self.lb = 3; self.mode = S_OPER
+        if x: self.lb = 3; self.pm = 3; self.mode = S_OPER
         else: self.mode = S_INC
 
     # ---- an expression ended at statement level (';' or ')' or ','): what was it for?
@@ -801,6 +850,9 @@ class Compiler:
     def end_params(self):
         for i in range(self.npar):                           # param k of n sits at fp - 1 - n + k
             self.sym[self.fsym + i][3] = -1 - self.npar + i
+        f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
+        if f[4] and f[4] != self.npar + 1: return self.fail(76)
+        f[4] = self.npar + 1
         self.emit(ENTER, 0, self.cs[self.csp - 1][2]); self.mode = S_LBRACE
 
     def end_array(self):
@@ -824,7 +876,9 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator (= build.js run())
-def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6):
+def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False):
+    """strict: check the stack discipline the compiler promises: statements leave the stack as they found it, so sp
+    never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced')"""
     if out_base is None: out_base = LAYOUT['out_base']
     mem = [0] * (AMASK + 1)
     for i, w in enumerate(rom): mem[i] = w
@@ -841,6 +895,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6):
     while True:
         steps += 1
         if steps > max_steps: raise RuntimeError('step limit')
+        if strict and sp < sp0 and pc >= LAYOUT['code_base']: raise RuntimeError(f'stack underflow at code word {pc - LAYOUT["code_base"]}')
         w = mem[pc]; op, imm = w // 8192, w % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
         if op == 0: pass
         elif op == 1: mem[sp] = imm; sp += 1
@@ -874,7 +929,9 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6):
             if c == 10: optr = (optr // cols + 1) * cols % (cols * rows)
             else: mem[out_base + optr] = c; optr = (optr + 1) % (cols * rows)
             out.append(c)
-        elif op == 32: return steps, ''.join(map(chr, out))
+        elif op == 32:
+            if strict and sp != sp0: raise RuntimeError(f'stack unbalanced at HALT: sp - sp0 = {sp - sp0}')
+            return steps, ''.join(map(chr, out))
         elif op == 33: sp -= 1; pc = mem[sp]
         elif op == 34: mem[sp - 1] = s20(mem[sp - 1] * 8192)
         elif op == 35: mem[imm] = s20(mem[imm] + 1)
@@ -928,12 +985,12 @@ def image_mem(c, words, data, init=None):
     mem[init] = STRTAG                  # the lib's untag constant, staged for data_base
     return mem
 
-def compile_and_run(src, lib, max_steps=10 ** 6):
+def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
     c = Compiler(LAYOUT['data_base'], LAYOUT['code_base'], lib)
     words, data = c.compile(src)
     if c.err: return c, None
     mem = image_mem(c, words, data, lib.get('init', 5120))
-    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps)
+    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict)
 
 if __name__ == '__main__':
     import json

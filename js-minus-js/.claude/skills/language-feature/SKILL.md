@@ -19,7 +19,10 @@ CSS). Both change together, in this order.
    - parser: `token()` and its helpers `end_expr_stmt`, `end_simple_stmt`, `complete_stmt`, `close_block`;
    - limits and codes at the top of the file.
 
-   Iterate on `make l1`.
+   Iterate on `make l1` (its simulator is strict: a statement that leaves the stack unbalanced fails).
+   - Add the feature to the program generator `tests/fuzz/progen.py`, inside what the language guarantees, and run
+     `python3 tests/fuzz/fuzz.py gen -n 2000`, `fmt` and `mut -n 2000`. A failure is in `build/fuzz/`
+     (`tests/fuzz/show.py` replays it); make each real one a `tests/suite` test.
    - Keep it one step per character, with fixed-size state and no lookahead past the next character.
    - Use a new failure code if needed, and add it to the README's error table.
 3. **Mirror the change in the DSL.** Edit `compiler/cc_dsl.py`:
@@ -36,7 +39,8 @@ CSS). Both change together, in this order.
    - Report total temps and the maximum label ports before and after.
    - A jump in ports (elements on all 400 levels) or in temps (CSS per level) needs a reason or a fix: fold
      constants, collect labels, prune unreachable blocks.
-5. **Run `make l3`** (about 1.5 minutes, in the background). Every program must match the reference word for word.
+5. **Run `make fuzz`** (a few minutes: the DSL against the reference on generated, reformatted and mutated programs,
+   rejected ones included) and **`make l3`** (about 1.5 minutes, in the background). Every program must match the reference word for word.
 6. **If the runtime library changed** (`compiler/lib_src.js`), compare `python3 tools/traps.py
    tests/suite/fizzbuzz.js tests/programs/t*.js` before and after. Shapings are the cost.
 7. **Rebuild and check the page**: `make page && make l5-smoke`, then `make dist`.
