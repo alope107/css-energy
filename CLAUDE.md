@@ -39,12 +39,11 @@ turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec v
 
 ## Deploys
 
-- `.github/workflows/deploy.yml` deploys to Cloudflare Pages: `main` → production, any other branch → a preview of
-  the projects it changed. `deploy/README.md` has the setup and the trust model.
+- `.github/workflows/deploy.yml` deploys to Cloudflare Workers (`*.auberonlopez.workers.dev`): `main` → production,
+  any other branch → a preview of the projects it changed. `deploy/README.md` has the setup and the trust model.
 - **Pushing a branch publishes a public preview: push only when the user asks.** Then `deploy/status.sh` waits for
-  the run and prints the preview URLs; give the user the `<hash>` URL along with the local link.
-- `deploy/assemble.sh <project> <dir>` builds exactly what CI deploys. `npx wrangler pages dev <dir>` emulates Pages
-  for a check, but opens ~7 ports per instance: stop it afterwards, and don't use it for hand-test links.
+  the run and prints the preview URLs; give the user the `<version>` URL along with the local link.
+- `deploy/assemble.sh <project> <dir>` builds exactly what CI deploys.
 - Stop every server you start except the ones you hand to the user. Stray ports make VS Code stop auto-forwarding.
 
 ## User rules (all projects)

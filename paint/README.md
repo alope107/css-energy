@@ -24,10 +24,9 @@ python3 build.py 24 20                # W H (at most 490 cells) -> site/, keepin
 certificate must be trusted (`mkcert localhost`, then `node serve.js site 8443 --cert localhost.pem --key
 localhost-key.pem`): with a self-signed one Chrome stops caching responses and no dictionary ever registers.
 
-Deploy: pushing to `main` deploys `site/` through GitHub Actions (`../deploy/README.md`); by hand, `npx wrangler pages
-deploy site --project-name dictionary-paint`. Keep
-`site/d/*.png` across deploys: visitors' browsers hold those exact bytes, and new ones make every stored canvas read
-as blank.
+Deploy: pushing to `main` deploys `site/` to the `paint` Worker through GitHub Actions (`../deploy/README.md`), at
+https://paint.auberonlopez.workers.dev/; by hand, Actions → deploy → Run workflow. Keep `site/d/*.png` across
+deploys: visitors' browsers hold those exact bytes, and new ones make every stored canvas read as blank.
 
 ## Host self-test
 

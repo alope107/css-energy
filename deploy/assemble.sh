@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assemble one project's deployable site: deploy/assemble.sh <project> <outdir>
-# CI runs this in the build job and uploads <outdir> to Cloudflare Pages unchanged; run it locally to see exactly what
-# will be deployed (`npx wrangler pages dev <outdir>` serves it with Pages semantics). See deploy/README.md.
+# CI runs this in the build job and uploads <outdir> to a Cloudflare Worker unchanged; run it locally to see exactly
+# what will be deployed. See deploy/README.md.
 set -euo pipefail
 project=${1:?usage: assemble.sh css-physics|js-minus-js|paint <outdir>}
 out=${2:?usage: assemble.sh <project> <outdir>}
