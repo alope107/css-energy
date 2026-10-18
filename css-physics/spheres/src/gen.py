@@ -516,11 +516,12 @@ if PFX:
     ENG_ID, INI_ID = PFX + 'ENG', PFX + 'INI'
 else:
     ENG_ID, INI_ID = 'ENG', 'INI'
+NDECL = len(LC) + sum(len(v) for v in BLK.values())
 frag = dict(N=N, K=K, eng_id=ENG_ID, ini_id=INI_ID, css=ENG_CSS, html=ENG_HTML, scenes=SCENE_NAMES, grav=f(GRAV),
-            ndecl=len(LC), nreg=len(REGS),
+            ndecl=NDECL, nreg=len(REGS),
             consts=dict(VW=VIEW_W, VH=VIEW_H, HS=HS, PERSP=f(PERSP), TILT=f(TILT), TY=f(CAM_TY), DIST=f(CAM_DIST),
                         WX=WX, WZ=WZ, CEIL=CEIL, RMIN=RMIN, RMAX=RMAX, NTYPE=NTYPE, RATE=RATE))
 dst = sys.argv[1] if len(sys.argv) > 1 else 'engine.json'
 open(dst, 'w').write(json.dumps(frag))
-print(f'{dst}: N={N} K={K} {len(LC)} step declarations ({len(LC) / N:.1f} per slot), {len(PAIRS)} window pairs, '
+print(f'{dst}: N={N} K={K} {NDECL} step declarations ({NDECL / N:.1f} per slot, gated by activity), {len(PAIRS)} window pairs, '
       f'{len(REGS)} registers in {NLS} readback groups, css {len(ENG_CSS) // 1024} KB', file=sys.stderr)
