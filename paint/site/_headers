@@ -10,5 +10,7 @@
   Cache-Control: no-cache
 /c/:k/p/*
   Cache-Control: no-store
+/s.png
+  Cache-Control: no-store
 /
   Cache-Control: no-cache

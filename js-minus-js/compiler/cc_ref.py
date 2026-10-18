@@ -992,6 +992,21 @@ def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
     mem = image_mem(c, words, data, lib.get('init', 5120))
     return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict)
 
+def image(src, lib, ram=False):
+    """The machine image every harness takes (gen_fvm4.py, uarch4, hbtest.py): ROM = the lib; RAM all zero (the page's
+    compile chain supplies code and data), or with ram=True the program as the CSS compiler leaves it (CPU-only pages,
+    the model, the font in uharfbuzz). steps/expected come from cc_ref's simulation."""
+    L = LAYOUT
+    c = Compiler(L['data_base'], L['code_base'], lib)
+    words, data = c.compile(src)
+    if c.err: raise ValueError(f'compile error {c.err}')
+    mem = image_mem(c, words, data, lib['init'])
+    r = run(lib['rom'], dict(mem), L['sp0'])
+    if not ram: mem = {}
+    return dict(rom=lib['rom'], romSize=L['rom_size'], ram=[mem.get(L['rom_size'] + i, 0) for i in range(L['ram_size'])],
+                ramSize=L['ram_size'], sp0=L['sp0'], outBase=L['out_base'], rows=L['rows'], cols=L['cols'], source=src,
+                codeBase=L['code_base'], init=L['init'], steps=r[0], expected=r[1])
+
 if __name__ == '__main__':
     import json
     lib = json.load(open(__import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath(__file__)), 'lib.json')))

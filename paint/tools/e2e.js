@@ -24,7 +24,7 @@ const PALETTE_INDEX = `(sel) => {
 }`;
 
 async function state(pg) {
-  const out = await pg.evaluate(`(${PALETTE_INDEX})('.c > .v > .px')`);       // what the page read
+  const out = await pg.evaluate(`(${PALETTE_INDEX})('.c .w > .px')`);       // what the page read
   for (const f of pg.mainFrame().childFrames()) {                               // cells showing a painted document
     const m = /\/c\/(\d+)\/p\//.exec(f.url());
     if (!m || f.isDetached()) continue;

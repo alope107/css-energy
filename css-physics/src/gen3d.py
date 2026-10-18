@@ -105,24 +105,6 @@ for b in BODIES:
     b['im'] = 1 / b['m']
     b['ii'] = tuple(1 / v for v in b['I'])
 
-# ---- spatial cells (CELLS=1; off: measured as a dead end, see HISTORY.md) ------------------------
-# The floor is cut into CELL-sized cells along x and z. An awake body marks every cell column (x) and row
-# (z) its reach (R_i + max R + margin) can touch, as digits of decimal words: one digit per column, B10 =
-# 10^(digits of N) per digit so a count can't overflow, CPW columns per word (a registered number survives
-# var() with 6 significant digits). A sleeping body is "present" (its rules are evaluated and it can be
-# touched or woken) only if some awake body marks both its column and its row. Far sleepers then cost one
-# absent-name rule per pair instead of a broadphase property, and the all-pairs digest that said "an awake
-# body is near me" is replaced. (The test is separable, so it's a superset: with many awake bodies
-# everything is present, as before.) It loses because every sleeper pays its cell and presence properties
-# on every pass (about 80 us each), more than the near tests it saves; the digest only charges awake bodies.
-CELLS = os.environ.get('CELLS', '0') == '1'
-CELL = float(os.environ.get('CELL', 120))
-KX, KZ = -(-int(2 * WX) // int(CELL)), -(-int(2 * WZ) // int(CELL))
-RMAX = max(b['R'] for b in BODIES)
-DIG = len(str(N))
-B10 = 10 ** DIG
-CPW = 6 // DIG
-NWX, NWZ = -(-KX // CPW), -(-KZ // CPW)
 
 
 def quat(ax=0.0, ay=0.0, az=0.0):
@@ -368,8 +350,10 @@ def num3(v):
 # registers, the pointer, the camera yaw) is kept NON-inherited on #LS, or zeroed there: then a
 # sleeping scene leaves the solver levels' inherited data unchanged and they aren't restyled.
 g.reg('now', inherits=False)
-for c in ['gy', 'att', 'sx', 'sy', 'kick', 'rst', 'sxg', 'syg', 'yawg', 'tk']:
+for c in ['gy', 'att', 'sx', 'sy', 'kick', 'rst', 'sxg', 'syg', 'yawg', 'tk', 'tm', 'tdx', 'tdy', 'tgi', 'tdxg', 'tdyg', 'tgig', 'held']:
     g.reg(c)
+for c in ['tgx', 'tgy', 'fox', 'foy']:   # touch input, on #TI only
+    g.reg(c, inherits=False)
 for i in range(N):
     for fl in FIELDS:
         g.reg(f'i{fl}{i}')
@@ -386,6 +370,8 @@ g.reg('mix', syntax='<integer>')
 g.reg('anyrd', syntax='<integer>')
 g.reg('GIr', syntax='<integer>')
 g.reg('pick', syntax='<integer>')
+g.reg('tpk', syntax='<integer>')
+g.reg('tho', syntax='<integer>')
 # sleeping: a body still for SLEEP_K passes stops being simulated until something wakes it
 SLEEP_K = int(os.environ.get('SLEEP_K', 45))
 SLEEP_DX, SLEEP_DA = 0.03, 0.0008
@@ -519,21 +505,15 @@ for gr in groups:
         dv = vsub(B[a]['p'], B[bb]['p'])
         e = f"{f(rr)} - hypot({', '.join(dv)})"
     gr['flag'] = f'n{gr["id"]}'
-    if pl or not CELLS:
-        g.P(gr['flag'], f'sign(max(0, {e}))', L0, AW(a), syntax='<integer>')
-        if not pl:
-            g.A(gr['flag'], f'sign(max(0, {e}))', L0, AW(bb))
-    else:
-        # a pair's near test exists only while one body is awake (name w) and the other present (name
-        # b: awake, or asleep in the reach of an awake body): two name-only nested rules, no style()
-        g.P(gr['flag'], f'sign(max(0, {e}))', L0, ('nn', a, bb), syntax='<integer>')
-        g.A(gr['flag'], f'sign(max(0, {e}))', L0, ('nn', bb, a))
+    g.P(gr['flag'], f'sign(max(0, {e}))', L0, AW(a), syntax='<integer>')
+    if not pl:
+        g.A(gr['flag'], f'sign(max(0, {e}))', L0, AW(bb))
 # Neighbourhood digests. Each awake body j sums its near flags into decimal words (body i is digit
 # i % 6 of word i // 6; a registered number survives var() with 6 significant digits, so a word holds
 # six bodies, each counting up to 9 awake neighbours). Summing the words over all bodies (asleep ones
 # contribute nothing: their words are undeclared) tells every body at once whether an awake body is
 # near it, whether a moving one is, and whether one that isn't ready to sleep is: one digit each
-# instead of a sum over every possible partner per body. (With CELLS=1 the first comes from the cells.)
+# instead of a sum over every possible partner per body.
 NW = (N + 5) // 6
 pflag = {(gr['a'], gr['b']): gr['flag'] for gr in groups if not gr['plane']}
 fl_ = lambda i, j: V(pflag[(min(i, j), max(i, j))])
@@ -544,24 +524,14 @@ for j in range(N):
             g.P(f'nm{j}_{m}', ' + '.join(terms), L0, AW(j))
 for m in range(NW):
     ws = [V(f'nm{j}_{m}') for j in range(N) if (f'nm{j}_{m}') in g.props]
-    if not CELLS:
-        g.P(f'SN{m}', ' + '.join(ws), L0, ('mix', 1))
+    g.P(f'SN{m}', ' + '.join(ws), L0, ('mix', 1))
     g.P(f'SP{m}', ' + '.join(f'{w} * var(--mf{j})' for j, w in zip([j for j in range(N) if f'nm{j}_{m}' in g.props], ws)), L0, ('mix', 1))
     g.P(f'SB{m}', ' + '.join(f'{w} * var(--nr{j})' for j, w in zip([j for j in range(N) if f'nm{j}_{m}' in g.props], ws)), L0, ('anyrd', 1))
 dig = lambda S, i: f'sign(mod(round(down, var(--{S}{i // 6}) / {10 ** (i % 6)}), 10))'
 for i in range(N):
     g.P(f'pk{i}', dig('SP', i), L0, AS(i), syntax='<integer>')    # asleep, near a body that is moving
     g.P(f'bk{i}', dig('SB', i), L0, (f'rd{i}', 1), syntax='<integer>')   # ready, touching one that isn't
-    if not CELLS:
-        g.P(f'nb{i}', dig('SN', i), L0, AS(i), syntax='<integer>')   # asleep, near an awake body (all-pairs digest)
-        continue
-    g.reg(f'nb{i}', syntax='<integer>')     # asleep, in the reach of an awake body (cells; declared on #LW)
-    g.reg(f'hx{i}', syntax='<integer>')     # a sleeper's cell column and row (declared on #LM)
-    g.reg(f'hz{i}', syntax='<integer>')
-    for w_ in range(NWX):
-        g.reg(f'xm{i}_{w_}')                # an awake body's column marks, one word each (declared on #LM)
-    for w_ in range(NWZ):
-        g.reg(f'zm{i}_{w_}')
+    g.P(f'nb{i}', dig('SN', i), L0, AS(i), syntax='<integer>')   # asleep, near an awake body (all-pairs digest)
 
 # ---- grab (L0, gated on the pointer being down) ----------------------------------
 # Two phases. Picking (pointer down, nothing held yet: --pick at #LS) ray-casts every body once and
@@ -616,6 +586,13 @@ pick = g.P('gpick', f"{anyhit} * (" + ' + '.join(f'{i + 1} * sign(max(0, {tmin} 
 # a press that hits nothing latches N + 1 ("missed") so the ray isn't cast again until release
 G = g.P('G', f'var(--GIr) + (1 - sign(var(--GIr))) * ({pick} + (1 - sign({pick})) * {N + 1})', 0, AT)
 eqs = [g.P(f'eq{i}', f'1 - min(1, abs({pick} - {i + 1}))', 0, PK) for i in range(N)]
+# Touch (--tm: 1, ARCHITECTURE.md "Touch"): the body comes from the handle the finger is on (--tgig = index + 1, never
+# 0 while att is 1), and the latched "offset" GO is the body's centre in world coordinates, the anchor the drag is added
+# to. No ray is cast: --pick is 0 in touch mode, --tpk replaces it.
+TPK, THO = ('tpk', 1), ('tho', 1)
+g.A('gpick', 'var(--tgig)', 0, TPK)
+for i in range(N):
+    g.A(f'eq{i}', f'1 - min(1, abs({pick} - {i + 1}))', 0, TPK)
 sel = lambda terms: add(*(mul(e, t) for e, t in zip(eqs, terms) if not is0(t)))
 # the pick pass latches where the ray hit and the hit point in the body's frame
 tG = g.P('gtG', GT, 0, AT)
@@ -627,6 +604,7 @@ isboxp = sel(['1' if b['k'] == 'box' else '0' for b in BODIES])
 off = [g.P(f'gof{k}', prev, 0, AT) for k, prev in enumerate((GOX, GOY, GOZ))]
 for k in range(3):
     g.A(f'gof{k}', f'{isboxp} * {dot(colGp[k], vsub(hitp, pGp))}', 0, PK)
+    g.A(f'gof{k}', pGp[k], 0, TPK)
 # holding: the held body's state, declared by the one block whose index matches
 HOLD = ['gpx', 'gpy', 'gpz', 'gqw', 'gqx', 'gqy', 'gqz', 'gvx', 'gvy', 'gvz', 'gwx', 'gwy', 'gwz', 'gim', 'gii0', 'gii1', 'gii2', 'giso', 'gimx']
 for i, b in enumerate(BODIES):
@@ -642,8 +620,16 @@ pG = (hv['gpx'], hv['gpy'], hv['gpz'])
 RG = rot_of(hv['gqw'], hv['gqx'], hv['gqy'], hv['gqz'])
 colG = [tuple(g.P(f'gc{k}{r}', RG[r][k], 0, AT) for r in range(3)) for k in range(3)]
 r = g.P3('grr', tuple(add(*(mul(off[k], colG[k][a]) for k in range(3))) for a in range(3)), 0, AT)
+for a in 'xyz':     # touch grabs the centre
+    g.A(f'grr{a}', '0', 0, THO)
 gp = g.P3('Ngw', tuple(add(pG[a], r[a]) for a in range(3)), 0, AT)
-target = tuple(add(o, mul(tG, dv)) for o, dv in zip(RO, RD))
+target = g.P3('gtg', tuple(add(o, mul(tG, dv)) for o, dv in zip(RO, RD)), 0, AT)
+# touch: the anchor plus the drag, which the handle measured in world units on the camera-facing plane through the body:
+# its x and y axes are the ray's derivatives along the screen's x and y (unit, orthogonal)
+EX = (cyw, '0', syw)
+EY = (f'{f(st_)} * {syw}', f(ct), f'{f(-st_)} * {cyw}')
+for k, a in enumerate('xyz'):
+    g.A(f'gtg{a}', add(off[k], mul('var(--tdxg)', EX[k]), mul('var(--tdyg)', EY[k])), 0, THO)
 vG = (hv['gvx'], hv['gvy'], hv['gvz'])
 wG = (hv['gwx'], hv['gwy'], hv['gwz'])
 vp = tuple(add(v, c) for v, c in zip(vG, cross(wG, r)))
@@ -666,6 +652,15 @@ y3 = f'({gp[1]} * {f(ct)} - {z1} * {f(st_)} + {f(CAM_TY)})'
 z3 = f'({gp[1]} * {f(st_)} + {z1} * {f(ct)} - {f(CAM_DIST)})'
 g.P('Ngsx', f'{x1} * {f(PERSP)} / ({f(PERSP)} - {z3})', 0, AT)
 g.P('Ngsy', f'{y3} * {f(PERSP)} / ({f(PERSP)} - {z3})', 0, AT)
+# the overlay's pointer end: the pointer, or with touch the target projected to the screen
+g.P('Nosx', 'var(--sxg)', 0, AT)
+g.P('Nosy', 'var(--syg)', 0, AT)
+x1 = f'({target[0]} * {cyw} + {target[2]} * {syw})'
+z1 = f'(-1 * {target[0]} * {syw} + {target[2]} * {cyw})'
+y3 = f'({target[1]} * {f(ct)} - {z1} * {f(st_)} + {f(CAM_TY)})'
+z3 = f'({target[1]} * {f(st_)} + {z1} * {f(ct)} - {f(CAM_DIST)})'
+g.A('Nosx', f'{x1} * {f(PERSP)} / ({f(PERSP)} - {z3})', 0, THO)
+g.A('Nosy', f'{y3} * {f(PERSP)} / ({f(PERSP)} - {z3})', 0, THO)
 
 # Gauss-Seidel schedule: batch 0 = every body's planes, then round-robin rounds in which each body
 # meets at most one other. Each batch is its own element (level LB + batch); a pair's contact
@@ -1269,8 +1264,8 @@ g.P('NGT', V('gtG'), LF)
 g.P('NGYP', 'var(--gy)', LF)
 NLEV = g.levels
 
-REGS = [('TP', 'NTP', 0, 100), ('DB', 'NDB', 0, 0.1), ('GI', 'NGI', 0, N + 1), ('GOX', 'NGOX', -100, 100),
-        ('GOY', 'NGOY', -100, 100), ('GOZ', 'NGOZ', -100, 100), ('GT', 'NGT', 0, 4), ('GYP', 'NGYP', -2000, 2000)]
+REGS = [('TP', 'NTP', 0, 100), ('DB', 'NDB', 0, 0.1), ('GI', 'NGI', 0, N + 1), ('GOX', 'NGOX', -800, 800),
+        ('GOY', 'NGOY', -800, 800), ('GOZ', 'NGOZ', -800, 800), ('GT', 'NGT', 0, 4), ('GYP', 'NGYP', -2000, 2000)]
 for i in range(N):
     REGS.append((f'SC{i}', f'NSC{i}', 0, SLEEP_K + 4))
 for i in range(N):
@@ -1479,8 +1474,9 @@ for ri, (rn, nn, lo, hi) in enumerate(REGS):
 # clock), but nothing it passes down changes: the levels below are left alone.
 names = [f'q{ri}' for ri in range(2, len(REGS))]
 tl = [f'--t{ri}' for ri in range(2, len(REGS))]
-w(f'#RB{{--sxg:calc(var(--sx) * var(--att));--syg:calc(var(--sy) * var(--att));--yawg:calc(var(--yaw) * var(--att))}}')
-w('.rt,.rt *{--NTP:inherit;--NDB:inherit}.rz{--sx:0;--sy:0;--yaw:0}')
+w(f'#RB{{--sxg:calc(var(--sx) * var(--att));--syg:calc(var(--sy) * var(--att));--yawg:calc(var(--yaw) * var(--att));'
+  '--tdxg:calc(var(--tdx) * var(--att));--tdyg:calc(var(--tdy) * var(--att));--tgig:calc(var(--tgi) * var(--att))}')
+w('.rt,.rt *{--NTP:inherit;--NDB:inherit}.rz{--sx:0;--sy:0;--yaw:0;--tdx:0;--tdy:0;--tgi:0}')
 w('#LS{')
 w(f'animation-name:{",".join(names)};')
 w(f'animation-duration:{",".join(["auto"] * len(names))};')
@@ -1488,7 +1484,8 @@ w(f'animation-iteration-count:1;')
 w('animation-timing-function:linear;animation-fill-mode:both;')
 w(f'animation-timeline:{",".join(tl)};')
 w('--GI:0;--GOX:0;--GOY:0;--GOZ:0;--GT:0;--sx:0;--sy:0;--yaw:0;')
-w('--GIr:calc(round(var(--GI)));--pick:calc(var(--att) * (1 - sign(var(--GIr))));')
+w('--GIr:calc(round(var(--GI)));--pick:calc(var(--att) * (1 - sign(var(--GIr))) * (1 - var(--tm)));'
+  '--tpk:calc(var(--att) * (1 - sign(var(--GIr))) * var(--tm));--tho:calc(var(--att) * var(--tm));')
 for i in range(N):
     for fl in FIELDS:
         if fl == 'qw':
@@ -1516,7 +1513,7 @@ for lev, gate, name, expr in g.decl:
     blocks.setdefault((lev, gate), []).append(f'--{name}:calc({_simplify(expr) if SIMPLIFY else expr})')
 # reset overrides must come last in the cascade
 _ord = sorted(blocks.items(), key=lambda kv: 1.2 if isinstance(kv[0][1], tuple) and kv[0][1][0] == 'GIr' else
-               {('att', 1): 1, ('pick', 1): 1.5, ('kick', 1): 2, ('rst', 1): 3}.get(kv[0][1], 0))
+               {('att', 1): 1, ('tho', 1): 1.1, ('pick', 1): 1.5, ('tpk', 1): 1.6, ('kick', 1): 2, ('rst', 1): 3}.get(kv[0][1], 0))
 # Named gates: a container query that names a container no ancestor has is rejected almost for
 # free, while an ordinary style() query costs ~2.5us per rule per pass whether it matches or not.
 # L0 and L1 carry the container name b<i> only while body i is awake or near an awake body, and
@@ -1548,13 +1545,9 @@ for (lev, gate), ds in _ord:
     rule = f'#L{lev}{{{";".join(ds)}}}'
     if gate is None:
         w(rule)
-    elif isinstance(gate, tuple) and gate[0] == 'nn':
-        # a pair's near test: body gate[1] awake (w) and body gate[2] present (b); the inner name is
-        # evaluated first and short-circuits, so a far sleeper costs one absent-name lookup
-        w(f'@container w{gate[1]}{{@container b{gate[2]}{{{rule}}}}}')
     else:
         gn, gv = gate if isinstance(gate, tuple) else (gate, 1)
-        own = owner(gn) if lev <= OWNLEV and (CELLS or lev >= 1) else None
+        own = owner(gn) if lev <= OWNLEV and lev >= 1 else None
         if own is not None:
             assert decl_level.get(gn, -1) <= 1, gn
         # style(--flag) is true iff the registered flag differs from its initial 0: the same test as
@@ -1563,43 +1556,15 @@ for (lev, gate), ds in _ord:
         # whenever ANY body was held, so dragging anything also pulled body 0; tools/statcheck.py, grabtest.js)
         q = f'style(--{gn})' if BOOLQ and gv == 1 and gn not in _MULTI and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
         w(f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}')
-# ---- cells: #LM marks (awake) and cell coordinates (asleep), #LW words, presence and the names ----
-h_ = f(STEP)
-for i in range(N if CELLS else 0):
-    ds = []
-    reach = f(BODIES[i]['R'] + RMAX + MARGIN + 1)
-    for ax_, W_, NW_, nm_ in (('X', WX, NWX, 'xm'), ('Z', WZ, NWZ, 'zm')):
-        pos_ = f'(var(--{ax_}{i}) + var(--V{ax_}{i}) * {h_} + {W_})'
-        for w_ in range(NW_):
-            lo = f'clamp(0, round(down, ({pos_} - {reach}) / {f(CELL)}) - {w_ * CPW}, {CPW})'
-            hi = f'clamp(0, round(down, ({pos_} + {reach}) / {f(CELL)}) + 1 - {w_ * CPW}, {CPW})'
-            ds.append(f'--{nm_}{i}_{w_}:calc((pow({B10}, {hi}) - pow({B10}, {lo})) / {B10 - 1})')
-    w(f'@container style(--ac{i}: 1){{#LM{{{";".join(ds)}}}}}')
-    w(f'@container style(--as{i}: 1){{#LM{{--hx{i}:calc(clamp(0, round(down, (var(--X{i}) + {WX}) / {f(CELL)}), {KX - 1}));'
-      f'--hz{i}:calc(clamp(0, round(down, (var(--Z{i}) + {WZ}) / {f(CELL)}), {KZ - 1}))}}}}')
-if CELLS:
-    w('#LW{' + ''.join(f'--SX{w_}:calc(' + ' + '.join(f'var(--xm{i}_{w_})' for i in range(N)) + ');' for w_ in range(NWX)) +
-      ''.join(f'--SZ{w_}:calc(' + ' + '.join(f'var(--zm{i}_{w_})' for i in range(N)) + ');' for w_ in range(NWZ)) + '}')
-
-
-def _digit(S, NW_, hv):
-    """digit hv of the word row S: pick the word by hv // CPW, then the digit hv % CPW"""
-    sel = ' + '.join(f'(1 - min(1, abs(round(down, {hv} / {CPW}) - {w_}))) * var(--{S}{w_})' for w_ in range(NW_))
-    return f'mod(round(down, ({sel}) / pow({B10}, mod({hv}, {CPW}))), {B10})'
-
-
-for i in range(N if CELLS else 0):
-    w(f'@container style(--as{i}: 1){{#LW{{--nb{i}:calc(sign({_digit("SX", NWX, f"var(--hx{i})")}) * sign({_digit("SZ", NWZ, f"var(--hz{i})")}))}}}}')
 _names = ' '.join(f'var(--A{i})' for i in range(N))
-# (without cells the presence digest is computed on #L0, so the names are too, as before)
-w(('#LW{' if CELLS else '#L0{') + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}{" w" + str(i) if CELLS else ""}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
-if FFQ and not CELLS:
+w('#L0{' + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
+if FFQ:
     # Firefox has no if(): there every body is always named. The names only let a sleeping neighbourhood's rules be
     # skipped unevaluated; with all of them present every rule evaluates its own gate, with the same result.
     w('@supports (-moz-appearance: none){#L0{' + ''.join(f'--A{i}:b{i};' for i in range(N)) + '}}')
 # every level carries the names, so a named rule always resolves to its parent (Chrome only forces
 # a re-match of rules that depend on a style container for that container's children)
-w(('#LW,' if CELLS else '') + ','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0}')
+w(','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0;--tdxg:0;--tdyg:0;--tgig:0}')
 # Firefox only (FFQ): Gecko doesn't re-match rules that depend on a style container when the container's value
 # changed through an animation (and every state value here comes from one), so the gates would keep their first
 # result. It re-matches the whole subtree of a size container whose size changed: #LM's content box follows the clock
@@ -1686,6 +1651,8 @@ FACES = [  # (axis k, sign, css transform to place the face, width axis, height 
     (1, -1, 'rotateX(90deg) translateZ({hy})', 0, 2), (1, 1, 'rotateX(-90deg) translateZ({hy})', 0, 2),
 ]
 render_css, render_html, shadow_html = [], [], []
+HD_PAD = 14     # touch handle radius = bounding radius + this (world units)
+HD_L = 3000     # a handle scrolls up to this far from its rest offset (world units)
 RIDX = {rn: ri for ri, (rn, nn, lo, hi) in enumerate(REGS)}
 # Each body's wrapper animates its own pose from the registers' view timelines into generic
 # NON-inherited props (--Rx.. --Rk, --Rg). Changing non-inherited values don't restyle descendants;
@@ -1722,7 +1689,10 @@ for i, b in enumerate(BODIES):
     render_css.append(f'#s{i}{{width:{f(2 * R_)}px;height:{f(2 * R_)}px;margin:{f(-R_)}px 0 0 {f(-R_)}px}}')
     # (the shadow comes first: it cuts through its own body's lower faces, and Firefox doesn't split intersecting
     # planes as Chrome does but draws them in document order)
-    render_html.append(f'<div class="bw" id="w{i}"><i class="sh" id="s{i}"></i>{inner}</div>')
+    # touch handle: a camera-facing disc over the body that a finger scrolls (ARCHITECTURE.md "Touch"); a little bigger
+    # than the body, for fingers
+    render_css.append(f'#h{i}{{--hr:{f(round(b["R"] + HD_PAD))};scroll-timeline:--H{i}x x,--H{i}y y}}')
+    render_html.append(f'<div class="bw" id="w{i}"><i class="sh" id="s{i}"></i>{inner}<i class="hd" id="h{i}"><b><i></i><u></u></b></i></div>')
 # box face lighting: world normal of face (axis k, sign) is sign * column k of R (generic rules,
 # the same for every engine)
 LIT = []
@@ -1734,32 +1704,60 @@ SHARED_CSS = ['.bx{--cs:color-mix(in oklab,var(--c),var(--acc) calc(var(--sel) *
 # grab feedback, drawn flat over the scene in screen units (reads this engine's grab state)
 render_css.append("""#ENG .ring,#ENG .pin,#ENG .tether{position:absolute;left:50%;top:50%;pointer-events:none;opacity:clamp(0, (__NP1__ - var(--GIr)) * var(--GIr) * var(--att), 1)}
 #ENG .ring{width:calc(16 * var(--u));height:calc(16 * var(--u));border:2px solid var(--acc);border-radius:50%;
-  transform:translate(calc(var(--sxg) * var(--u) - 50%),calc(var(--syg) * var(--u) - 50%))}
+  transform:translate(calc(var(--Nosx) * var(--u) - 50%),calc(var(--Nosy) * var(--u) - 50%))}
 #ENG .pin{width:8px;height:8px;border-radius:50%;background:var(--acc);
   transform:translate(calc(var(--Ngsx) * var(--u) - 4px),calc(var(--Ngsy) * var(--u) - 4px))}
 #ENG .tether{height:2px;background:var(--acc);transform-origin:0 50%;
-  width:calc(hypot(var(--sxg) - var(--Ngsx), var(--syg) - var(--Ngsy)) * var(--u));
+  width:calc(hypot(var(--Nosx) - var(--Ngsx), var(--Nosy) - var(--Ngsy)) * var(--u));
   transform:translate(calc(var(--Ngsx) * var(--u)),calc(var(--Ngsy) * var(--u) - 1px))
-    rotate(atan2(calc(var(--syg) - var(--Ngsy)), calc(var(--sxg) - var(--Ngsx))))}""")
+    rotate(atan2(calc(var(--Nosy) - var(--Ngsy)), calc(var(--Nosx) - var(--Ngsx))))}""")
+# Touch input (ARCHITECTURE.md "Touch"), only on touch screens. #TI sums the handles' scroll offsets (only the dragged
+# one is off its rest offset) into the drag --tdx/--tdy and the dragged body's index + 1, --tgi: one additive animation
+# per handle and axis. The index is a step function, 0 within 0.6 units of rest. #FO follows the sum by snapping to an
+# area placed at it, but Chrome defers that re-snap while a scroll gesture is active, so #FO stands still while a finger
+# drags and catches up in the frame the gesture ends: --held is "#FO lags the sum".
+_hk = []
+for i in range(N):
+    for a in 'xy':
+        render_css.append(f'@keyframes h{a}{i}{{0%{{--td{a}:{HD_L};--tg{a}:{i + 1}}}49.99%{{--tg{a}:{i + 1};animation-timing-function:step-start}}'
+                          f'50.01%{{--tg{a}:0;animation-timing-function:step-start}}100%{{--td{a}:{-HD_L};--tg{a}:{i + 1}}}}}')
+        _hk.append((f'h{a}{i}', f'--H{i}{a}', 'add'))
+for a in 'xy':
+    render_css.append(f'@keyframes hf{a}{{from{{--fo{a}:{HD_L}}}to{{--fo{a}:{-HD_L}}}}}')
+    _hk.append((f'hf{a}', f'--F{a}', 'replace'))
+render_css.append('@media (pointer:coarse){'
+                  '#TS{timeline-scope:' + ','.join(t for _n, t, _c in _hk) + '}'
+                  '#TI{animation-name:' + ','.join(n for n, _t, _c in _hk) + ';animation-timeline:' + ','.join(t for _n, t, _c in _hk) +
+                  ';animation-composition:' + ','.join(c for _n, _t, c in _hk) + ';animation-duration:auto;animation-timing-function:linear;'
+                  'animation-fill-mode:both;--tgi:calc(max(var(--tgx), var(--tgy)));'
+                  '--held:calc(sign(max(0, abs(var(--tdx) - var(--fox)) + abs(var(--tdy) - var(--foy)) - 0.01)));'
+                  '--att:calc(var(--held) * sign(var(--tgi)))}'
+                  f'#FO{{display:block;scroll-timeline:--Fx x,--Fy y}}#FO>i{{width:{2 * HD_L + 10}px;height:{2 * HD_L + 10}px}}'
+                  f'#FO>i>b{{left:calc(({HD_L} - var(--tdx)) * 1px);top:calc(({HD_L} - var(--tdy)) * 1px)}}'
+                  # (the scene doesn't read the drag: zeroed, a drag doesn't restyle it, as .view does for the pointer)
+                  '#TI .view{--tdx:0;--tdy:0;--tgi:0}}')
 # the clock registers (TP, DB) are written from #LS itself, the rest from the last level
 reg_html = ''.join(f'<i id="r{k}"></i>' for k in range(1, NREGEL))
 reg_rt = '<div class="regs rt"><div class="sc"><i id="r0"></i></div></div>'
-ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr">' + ''.join(f'<div class="lv" id="ts{s_}">' for s_ in range(NTS)) +
+ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr">' +
+            # (touch input: #TS scopes the handles' timelines, #TI turns them into the drag, #FO is the follower. Above
+            # the registers' .ts wrappers, so a register's timeline lookup finds its name before it reaches #TS's list)
+            '<div class="lv" id="TS"><div class="lv" id="TI"><div class="fo" id="FO"><i><b></b></i></div>' +
+            ''.join(f'<div class="lv" id="ts{s_}">' for s_ in range(NTS)) +
             # (the pointer moves --sx/--sy on every hover; this wrapper zeroes them so #LS isn't restyled)
             '<div class="lv" id="RB"><div class="lv rz"><div class="lv" id="LS"><div class="lv" id="LT">' + reg_rt +
             # (a plain wrapper: the clock registers make #LS restyle all its children every pass, and
             # this keeps L0 out of that unless its inputs really changed)
             # (the grab overlay hangs off L0, the only level that uses the pointer; L1 zeroes the pointer
             # for everything below, so a pointer move alone restyles nothing past L1)
-            # (two wrappers; with CELLS=1, #LM holds the cell marks of awake bodies and the cells of sleeping
-            # ones, #LW the cell words, the presence of sleepers and the container names that #L0's rules query)
+            # (two wrappers; in Firefox (FFQ) #LM is the size-container re-match clock and #LW restores the arena's size)
             '<div class="lv" id="LM"><div class="lv" id="LW">' + ''.join(f'<div class="lv" id="L{l}">' + ('<i class="tether"></i><i class="pin"></i><i class="ring"></i>' if l == 0 else '')
                                          for l in range(NLEV)) +
             '<div class="regs"><div class="sc">' + reg_html + '</div></div>' +
             '</div>' * (NLEV + 5) +
             '<div class="view"><div class="cam"><i class="floor"></i><i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i>'
-            '<i class="rail rn"></i>' + ''.join(render_html) + '</div></div></div>' + '</div>' * NTS + '</div></div></div>')
+            '<i class="rail rn"></i>' + ''.join(render_html) + '</div></div></div>' + '</div>' * NTS + '</div></div></div></div></div>')
 ENG_CSS = (PHYS_CSS + '\n' + '\n'.join(render_css)).replace('__NP1__', str(N + 1)).replace('__HVW__', f(VIEW_W / 2)).replace('__HVH__', f(VIEW_H / 2))
 # Firefox negates hypot() by negating its arguments, which leaves it unchanged: x - hypot(3, 4) is x + 5, also
 # inside a subtracted min/max/sign/sum and through var(). A product stops the negation there (hypot(..) * 1 is
@@ -1774,9 +1772,10 @@ if os.environ.get('HYPOT1', '1') == '1':
 # variables, the generic render props) stay as they are.
 PFX = os.environ.get('PFX', '')
 MINIFY = os.environ.get('MINIFY', '1' if PFX else '0') == '1'
-SHARED_NAMES = {'gy', 'att', 'sx', 'sy', 'kick', 'rst'}
+SHARED_NAMES = {'gy', 'att', 'sx', 'sy', 'kick', 'rst', 'tm', 'held'}
 if PFX or MINIFY:
-    eng_names = [n for n in g.props if n not in SHARED_NAMES] + [f't{ri}' for ri in range(len(REGS))]
+    eng_names = [n for n in g.props if n not in SHARED_NAMES] + [f't{ri}' for ri in range(len(REGS))] + \
+        [f'H{i}{a}' for i in range(N) for a in 'xy'] + ['Fx', 'Fy']
     def b36(k):
         d = '0123456789abcdefghijklmnopqrstuvwxyz'
         o = ''
@@ -1789,15 +1788,15 @@ if PFX or MINIFY:
     for n in eng_names:
         if n not in ren:
             ren[n] = f'{PFX}{b36(len(ren))}' if MINIFY else f'{PFX}{n}'
-    ids = r'(RB|LS|LT|LM|LW|L\d+|r\d+|ts\d+|w\d+|b\d+|s\d+|ENG|INI)'
+    ids = r'(RB|LS|LT|LM|LW|L\d+|r\d+|ts\d+|w\d+|b\d+|s\d+|h\d+|ENG|INI|TS|TI|FO)'
     for b_ in BODIES:
         assert not re.fullmatch(r'#[rwbs]\d+', b_['col']), b_['col']
     def rename_css(t):
         t = re.sub(r'--([A-Za-z_][A-Za-z0-9_]*)', lambda m: '--' + ren.get(m.group(1), m.group(1)), t)
         t = re.sub(r'#' + ids + r'(?![0-9A-Za-z_-])', lambda m: '#' + PFX + m.group(1), t)
-        t = re.sub(r'@keyframes (clk|q\d+|v\d+)\{', lambda m: f'@keyframes {PFX}{m.group(1)}{{', t)
+        t = re.sub(r'@keyframes (clk|q\d+|v\d+|h[xy]\d+|hf[xy])\{', lambda m: f'@keyframes {PFX}{m.group(1)}{{', t)
         t = re.sub(r'animation-name:([^;}]*)', lambda m: 'animation-name:' + ','.join(
-            PFX + x if re.fullmatch(r'clk|q\d+|v\d+', x) else x for x in m.group(1).split(',')), t)
+            PFX + x if re.fullmatch(r'clk|q\d+|v\d+|h[xy]\d+|hf[xy]', x) else x for x in m.group(1).split(',')), t)
         return t
     ENG_CSS = rename_css(ENG_CSS)
     if MINIFY:      # spaces are only required around + and - in calc()

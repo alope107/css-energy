@@ -59,7 +59,44 @@ The reads must live in the one top-level document. When each cell's own document
 about 7,700 requests in flight at once, Chrome rejected the excess before sending them, and those cells read blank. A
 single document's loader throttles itself.
 
-Each probe URL is fetched once per document, so the page reads each cell once per load.
+Each probe URL is fetched once per document, so the page reads each cell once per load, plus one retry.
+
+### Retry
+
+A probe can fail outright, not just answer "no". Cloudflare ends every connection after about 10,000 requests
+(HTTP/2: `GOAWAY` with last stream 19999; HTTP/3: a close with `H3_NO_ERROR` and no `GOAWAY`), and a load is about
+9,000. When the HTTP/2 `GOAWAY` arrives, Chrome retries the streams the server refused but fails a few hundred
+requests it had queued with `ERR_FAILED`, never sent and never retried ([crbug 355006326]; the cause is in
+`SpdySession`, `bugs/README.md`). The HTTP/3 close fails everything in flight. Either way about 5–30 cells read
+blank on most reloads on the live site; locally, over HTTP/1.1, never.
+
+So a cell still blank after the first pass reads again, with fresh URLs:
+
+```css
+.stage > .sig { display: flex; width: 536px }             /* the grid's 528 px + one 8×1 sentinel */
+.gd      { flex: 1 1 0; container: s1 / inline-size }      /* 536 px; 528 once /s.png loads */
+.gd .gd  { container-name: s2 }                            /* inside it, the same with /s.png?2: 528, then 520 */
+@container s1 (width < 532px) { .sig > i.s2 { display: block } }      /* start the second sentinel */
+.v   { animation: go-late 0s 90s forwards }                            /* --go: 1 */
+@container s2 (width < 524px) { .v { animation: go 0s 3s forwards } }
+@container (width: 0px) { .rt { display: if(style(--go: 1): flex; else: none) } }   /* the second row */
+.w   { width: max(100cqw, anchor-size(--rt width, 0px)); container-type: inline-size }
+```
+
+- The first sentinel `<i style="content:url(/s.png)">` (no-store) comes after every probe in the document, at the
+  same priority, so it loads once the first pass has gone out. But a `GOAWAY` re-sends the refused requests after
+  it, so the second sentinel, `/s.png?2`, is requested only when the first has loaded, and queues behind them. Three
+  seconds after it, `--go` turns 1; if a sentinel fails, 90 s after load.
+- Each sentinel narrows its own `.gd` container, which can't depend on its contents, from outside: the `.sig` row
+  is fixed width and the sentinel takes 8 px of it. The scale for small screens is on the outer `.sig`, so the
+  extra 8 px scale with the grid.
+- `.rt` holds 16 probes `/c/k/r/2/<v>.png` (another `_redirects` rule onto `r/<v>.png`, inside the dictionary's
+  `match`). Descendants of a `display: none` element get no style, so nothing loads until the row shows.
+- `.w`, inside `.v`, is the reader the pixel and the `<object>`s query: the wider of the two rows.
+- The condition is "first row 0 px wide", so a cell never written always pays its 16 probes twice (7,680 more
+  requests for an empty canvas).
+
+[crbug 355006326]: https://issues.chromium.org/issues/355006326
 
 ## Cells and writing
 
@@ -100,15 +137,15 @@ starts on its value's page, undo works back to the colour it had when the page l
 
 ## URLs
 
-Every page URL is extensionless (`/c/k/x`, `/c/k/p/5`). Cloudflare Pages 308-redirects `*.html` to the extensionless
-path; a redirect inside a 200 rewrite would leave the `/c/<k>/` namespace. Files keep `.html` on disk; Pages and
+Every page URL is extensionless (`/c/k/x`, `/c/k/p/5`). Cloudflare redirects `*.html` to the extensionless path; a
+redirect inside a 200 rewrite would leave the `/c/<k>/` namespace. Files keep `.html` on disk; Cloudflare and
 `serve.js` serve `p/5.html` at `/p/5`.
 
 ## Capacity
 
 500 entries per site × log₂K bits per entry, with K probes to read a cell (each probe is an equality test, so
-reading can't be cheaper than K). The host's file limit caps K at half its file count (Cloudflare Pages: 20,000
-files free, 100,000 paid).
+reading can't be cheaper than K). The host's file limit caps K at half its file count (Cloudflare Workers: 20,000
+files per version on the free plan).
 
 | K | Per cell | 500 cells | Probes per read |
 |---|---|---|---|

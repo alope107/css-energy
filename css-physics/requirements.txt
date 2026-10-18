@@ -1,2 +1,0 @@
-# src/ needs only the Python standard library (3.10+). The font experiments need fontTools.
-fonttools>=4.60

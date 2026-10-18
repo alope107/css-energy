@@ -56,11 +56,9 @@ if DEFAULT_COARSE != DEFAULT_FINE:
                f"{none} label[for=n-{DEFAULT_FINE}]{{background:var(--panel);color:var(--ink);border-color:var(--line)}}"
                f"{none} label[for=n-{DEFAULT_COARSE}]{{background:var(--acc);color:#14161a;border-color:var(--acc)}}}}")
 
-# pointer grids: columns of cells (mouse: 10 view units; touch: 20 units over a layer 3x the arena)
+# pointer grid: columns of cells, 10 view units each (mouse only)
 CELL = 10
 GC, GR = VW // CELL, VH // CELL
-TC = 20
-TGC, TGR = 3 * VW // TC, 3 * VH // TC
 grid = []
 UI = open(os.path.join(HERE, 'ui3d.css')).read()
 html = open(os.path.join(HERE, 'page3d.html')).read()
@@ -69,12 +67,12 @@ rep = {
     '/*UI*/': UI.replace('/*GRID*/', '\n'.join(grid)).replace('/*BODIES*/', ''), '/*SHARED*/': e0['shared_css'],
     '/*ENGINES*/': '\n'.join(css),
     '<!--ENGINE_HTML-->': ''.join(e['html'] for e in engines),
-    '<!--GRID-->': ('<b>' + '<i></i>' * GR + '</b>') * GC, '<!--TGRID-->': ('<b>' + '<i></i>' * TGR + '</b>') * TGC,
+    '<!--GRID-->': ('<b>' + '<i></i>' * GR + '</b>') * GC,
     '<!--COUNTS-->': ''.join(f'<input type="radio" name="n" id="n-{n}"><label for="n-{n}">{n}</label>' for n in COUNTS),
     '<!--SCENES-->': ''.join(
         f'<input type="radio" name="sc" id="sc-{sn}"{" checked" if si == 0 else ""}><label id="lb-{sn}" for="sc-{sn}">{sn}</label>'
         for si, sn in enumerate(e0['scenes'])),
-    '__GC__': str(GC), '__GR__': str(GR), '__TGC__': str(TGC), '__TGR__': str(TGR),
+    '__GC__': str(GC), '__GR__': str(GR),
     '__HVW__': f'{VW / 2:g}', '__HVH__': f'{VH / 2:g}', '__VW__': str(VW), '__VH__': str(VH), '__HS__': str(C['HS']),
     '__PERSP__': C['PERSP'], '__TILT__': C['TILT'], '__TY__': C['TY'], '__NDIST__': str(-float(C['DIST'])).rstrip('0').rstrip('.'),
     '__WX__': str(C['WX']), '__CEIL__': str(C['CEIL']), '__WZ__': str(C['WZ']), '__2WX__': str(2 * C['WX']), '__2WZ__': str(2 * C['WZ']),
@@ -113,7 +111,7 @@ if MULTI:
         h = h.replace(f"The page holds {len(COUNTS)} complete engines, one per body count ({', '.join(map(str, COUNTS))}); the ones not "
                       "selected are <code>display:none</code>, so the style engine never looks at them.",
                       f"Each body count ({', '.join(map(str, COUNTS))}) is its own page with its own engine.")
-        # a stylesheet over the artifact host's 16 MB file limit goes out as linked .css files
+        # a stylesheet over CSS_SPLIT goes out as linked .css files (hosts limit file size: Workers 25 MiB)
         # (split between top-level rules, in order)
         if len(e['css']) > CSS_SPLIT:
             parts, cur, size = [], [], 0

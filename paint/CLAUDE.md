@@ -1,8 +1,9 @@
 # Dictionary Paint
 
 A 16-colour canvas whose pixels persist in Chrome's compression-dictionary store, in HTML and CSS only. `build.py`
-generates `site/`; `serve.js` serves it locally with Cloudflare Pages semantics. Read `docs/ARCHITECTURE.md` before
-changing the generator; `docs/HISTORY.md` lists what already failed (check it before proposing an idea).
+generates `site/`; `serve.js` serves it locally the way Cloudflare does (`_headers`, 200 `_redirects`). Read
+`docs/ARCHITECTURE.md` before changing the generator; `docs/HISTORY.md` lists what already failed (check it before
+proposing an idea).
 
 ## Hard rules
 - IMPORTANT: the pages contain **no JavaScript**, ever, unless the user explicitly asks. JS is fine in `tools/`,
@@ -17,16 +18,18 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
 ## Setup
 - Node 18+ for `serve.js` (no dependencies). `npm install` for the tools (Playwright).
 - Python 3 + `pip install -r requirements.txt` (zstandard) to rebuild.
-- The tools launch Chromium through `../shared/js/browser.js`, profile `physics` (`--no-sandbox`; `CHROME=/path`
-  overrides). They start their own `serve.js` on a free port and use a fresh persistent profile per run.
+- The tools launch Chromium through `../shared/js/browser.js` (profile `physics`, `../shared/README.md`), start their
+  own `serve.js` on a free port, and use a fresh persistent profile per run.
 
 ## Commands (in `paint/`)
 - Local server: `node serve.js site [port]` (default 8080). `--log` prints each request with the
-  `Available-Dictionary` hash Chrome sent; `--delay MS` adds latency; `--fault target|strip|vary` simulates a broken host.
+  `Available-Dictionary` hash Chrome sent; `--delay MS` adds latency; `--fault target|strip|vary` simulates a broken host;
+  `--goaway N` (HTTP/2, `--cert`/`--key`) ends each connection after N streams, as Cloudflare does after 10,000.
 - Manual-test link for the user: `node serve.js site 8766` in the background, link `http://localhost:8766/`, check it
   with `curl -sI`. Not the repo-root `http.server`: it sends none of the headers, and nothing works without them.
 - Rebuild: `python3 build.py [W] [H]` (cells ≤ 490). Self-test site: `python3 selftest/build.py`.
-- Tests: `make test` = `node tools/selftest.js` (~1 min) then `node tools/e2e.js [seed]` (~6 min). Through `make`, a
+- Tests: `make test` = `node tools/selftest.js` (~1 min) then `node tools/e2e.js [seed]` (~6 min); `make test-goaway`
+  (~4 min, needs openssl) checks reads over an HTTP/2 host that ends connections like Cloudflare. Through `make`, a
   test whose site, tools and browser haven't changed since it passed prints `up to date`; `RERUN=1` runs it.
   Long runs exceed default tool timeouts: write output to a file and poll it.
 
@@ -48,11 +51,15 @@ changing the generator; `docs/HISTORY.md` lists what already failed (check it be
   the excess before sending and never retries. One document's loader throttles itself.
 - URLPattern: `match="/r/*?k-*"` never matches (`*?` is an optional wildcard). Put a literal before `?`:
   `match="/r/*.png?k-*"`.
-- Cloudflare Pages redirects `*.html` to the extensionless path, which inside a 200 rewrite would leave the cell's
-  `/c/<k>/` namespace: every page URL is extensionless. Pages also joins a header set by two `_headers` rules with
-  `, `: no overlapping rules (a joined `Cache-Control` containing `no-cache` stops registration).
+- Cloudflare redirects `*.html` to the extensionless path, which inside a 200 rewrite would leave the cell's
+  `/c/<k>/` namespace: every page URL is extensionless. Pages joined a header set by two `_headers` rules with `, `
+  (unchecked on Workers): no overlapping rules (a joined `Cache-Control` containing `no-cache` stops registration).
 - Painting a cell its current colour is a same-URL navigation: Chrome replaces the history entry, so it is not an
   undo step (tests must paint a different colour before Back).
+- **Cloudflare ends each connection after ~10,000 requests** (HTTP/2 `GOAWAY`, HTTP/3 close), and a load is ~9,000.
+  Chrome then fails a few hundred queued probes with `ERR_FAILED` and doesn't retry them (crbug 355006326): ~5–30
+  blank cells per reload, live only. The page's retry row covers it (`docs/ARCHITECTURE.md#retry`); local HTTP/1.1
+  never shows it, so test it with `serve.js --goaway`.
 - `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` in the console is a probe answering "no" (15 per painted cell).
 - `--ignore-certificate-errors` disables HTTP caching, so dictionaries never register. Trust a test cert by SPKI
   (`--ignore-certificate-errors-spki-list=<hash>`) or use `http://localhost`.

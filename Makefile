@@ -1,5 +1,5 @@
 # Checks shared by the projects. Each project has its own tests too: css-physics `bash tools/smoke.sh 16`,
-# js-minus-js `make test`, paint `make test` (see their CLAUDE.md / AGENTS.md).
+# js-minus-js `make test`, paint `make test` (see their CLAUDE.md).
 .PHONY: help test-shared engine-check engine-costs
 # engine-check is the file engine/build/check.<config>.log, written only when it passes (shared/make/checks.mk): make re-runs
 # it only when the probes, the shared harness or either browser changed since its last pass, or with RERUN=1.

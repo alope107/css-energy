@@ -1,15 +1,10 @@
-"""mkimage.py source.js out.json — f4 image for the CSS-compiled page: ROM = lib (with startup copy), RAM all zero
-(the compile chain's overlays supply code and data); expected output/steps from cc_ref's simulation of what the
-chain produces."""
-import sys, json
+"""mkimage.py [--ram] source.js out.json — a machine image (cc_ref.image). Without --ram, the page's image: ROM = the lib,
+RAM all zero, since the compile chain supplies code and data (make page). With --ram, the program sits in RAM as the
+CSS compiler leaves it: for CPU-only pages (gen_fvm4.py without UI=1), uarch4 and machine/hbtest.py."""
+import sys, json, os
 import cc_ref as R
-import os
+args = [a for a in sys.argv[1:] if a != '--ram']
 lib = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib.json')))
-src = open(sys.argv[1]).read()
-c, r = R.compile_and_run(src, lib)
-assert not c.err and r, c.err
-L = R.LAYOUT
-im = dict(rom=lib['rom'], romSize=L['rom_size'], ram=[0] * L['ram_size'], ramSize=L['ram_size'], sp0=L['sp0'], outBase=L['out_base'], rows=L['rows'], cols=L['cols'],
-          source=src, codeBase=L['code_base'], init=L['init'], steps=r[0], expected=r[1], direct=False, romWords=len(lib['rom']), cssCompiled=True)
-json.dump(im, open(sys.argv[2], 'w'))
-print('steps', r[0], 'rom', len(lib['rom']))
+im = R.image(open(args[0]).read(), lib, ram='--ram' in sys.argv)
+json.dump(im, open(args[1], 'w'))
+print('steps', im['steps'], 'rom', len(lib['rom']))

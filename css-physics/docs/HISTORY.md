@@ -1,187 +1,125 @@
-# How we got here
+# History: dead ends and open ideas
 
-This is a chronological account of the engine, reconstructed from the generator versions in `archive/` (the 2D ones were removed on 2026-10-15; `archive/README.md` says how to restore them), the code comments, the end-of-session summaries and the last session's notes (Oct 9–11, 2026, about three working days in one long Claude session).
+**How the design evolved (Oct 2026).** A 2D engine (rigid.css, Oct 9; in git at `91d73bc:css-physics/archive/rigid2d/`) established state in
+layout read back through view timelines, solver levels as nested elements and `@container style()` gating. The 3D
+port followed (Oct 9–10; the pre-optimization generator is at `83d4fde:css-physics/archive/rigid3d-v3/gen3d_v3.py`, which
+`GEN=<path> python3 src/build3d.py` still builds). One optimization session (Oct 10) produced today's architecture:
+planes-first rounds, `K/J/JP` accumulators, the soft box patch, owner-named gating, the #LS/#LT split, two registers
+per element, `.ts` scope nests, digests, `SHARE`. Oct 13 tried spatial partitioning; Oct 17 added Firefox;
+Oct 18 replaced tap-to-pick-up touch with touch-and-drag (ARCHITECTURE.md "Touch"). Bugs that
+shipped are CLAUDE.md gotchas, guarded by `tools/smoke.sh`.
 
-Numbers marked † come from summaries of earlier sessions; their raw logs no longer exist. Everything else was measured in the last session (Chromium 141, a 2-core VM) with the scripts listed in BENCHMARKS.md. BENCHMARKS.md now holds the 2026-10-13 re-measurements on a different machine and Chromium 153, so its numbers differ from the ones quoted here.
-
-Standing goals, set by the project owner throughout:
-- pure CSS pages, with no JavaScript unless asked;
-- Chrome-only is fine;
-- speed matters, payload size does not;
-- Claude tests in headless Chromium itself;
-- "as many objects on screen as possible with smooth animation and interaction".
-
----
-
-## Phase 0: rigid.css (2D), Oct 9
-
-`archive/rigid2d/gen_v1.py` was the first engine, followed by `archive/rigid2d/gen.py`. It established the machine that everything later reuses:
-
-- **State in layout, read back through view timelines.** Each body's x, y, angle, vx, vy and ω sits in a hidden register element's `top`; the element's `view-timeline` progress, hoisted with `timeline-scope`, drives an animation that turns it back into a custom property. The next state is written into `top`, and Chrome re-samples view timelines after layout, which closes the loop with no dependency cycle.
-- **Two style passes per frame**, so about 120 steps/s at 60 Hz.
-- **The solver** is an XPBD-style contact solver written as registered custom properties on a chain of nested elements:
-  - L0: predict and broadphase (bounding circles);
-  - L1: narrowphase (SAT reference-face manifolds for box/box, closest point for circle/box);
-  - L2: Gauss–Seidel over batches (walls, then round-robin matchings of all pairs), with friction, restitution and shock propagation, and velocities rederived from positions.
-- **Gating.** Declarations sit inside `@container style(--flag: 1)` blocks keyed on flags from the level above, so far-apart pairs are never declared at all.
-
-## Phase 1: 3D port (rigid3d.css), Oct 9–10
-
-The same machine, one dimension up, built as a series of generator versions:
-
-| Version | What changed |
-|---|---|
-| `gen3d_presleep` | 13 registers per body (position, quaternion, linear and angular velocity). L0 prediction, quaternion integration, rotation matrices, broadphase against bounding spheres and the 6 tray planes, mouse ray cast. L1 box/plane corners, sphere closest point, box/box SAT with incident corners clipped to the reference face. L2 one depth-weighted contact per group, Gauss–Seidel with world-space inverse inertia. A first inliner substituted cheap or single-use properties. |
-| `gen3d_new` | **Sleeping** (`SLEEP_K`): bodies still for K passes stop being simulated, and a sleeping scene should cost nothing. |
-| `gen3d_prerender` | `simp.py`, a calc() expression simplifier (`SIMPLIFY`). |
-| `gen3d_touch` | Touch flags (LC): the solve runs only for groups with an active contact, since most near pairs aren't touching. Render pose moved into non-inherited props (below). |
-| `gen3d_c` | `INLINE2`: single-use properties inlined into consumers with a depth limit. Cost model in the comments: registered prop about 2.3–3.5 µs, var() reference about 0.7 µs. |
-| `gen3d_pre_eng` | Box rocking fixes (`PATCHW`, `PATCHC`, `ROLL`, `ROLLB`). Touch-screen input (a scrollable 3× layer) came in around here. |
-| `gen3d_pre_grab` | Several engines per page (per-engine name prefix `PFX`, `MINIFY`), selected by radios; unselected engines are `display:none`. |
-| `gen3d_v3` (`archive/rigid3d-v3/`) | Grab rework (latch the pick once, then read only the held body). The baseline before the big optimization session. |
-
-Lessons from Phase 1 that are still in the code:
-
-- **Rendering.** Per-element `cqw` units cost about 70 µs per element per pass when everything moves, so the scene is laid out in fixed px and scaled once.
-- **Body pose props.** Body wrappers animate pose into **non-inherited** props, and faces pull them with an explicit `inherit`. That was about 3× cheaper than inherited registered props flowing into every face.
-- **Pointer input.** The first pointer used `:has(:nth-child(k):hover)` rules, which cost about 30 ms per mouse move. It was replaced by an `anchor-name` on the hovered cell plus a view-timeline marker.
-- **Box contact patches.** Depth-weighted box/plane patches put the push next to the deepest corner, which over-levelled a slightly tilted box and left it rocking every other step. Even weighting and, later, the soft single patch fixed this.
-- **Sleep test.** Testing velocity for stillness doesn't work: resting boxes carry a bounded phantom velocity from the split impulse. The test uses displacement, and counts a step that undoes the previous one as still.
-- **Timestep.** At `RATE` 60 stacks sink; 120 is stiffer but slower. 90 is the compromise.
-
-## Phase 2: the big optimization session, Oct 10
-
-Goal: as many objects as possible with smooth animation and interaction. The session followed a profile → change → short benchmark → occasional large validation loop.
-
-**Kept** (the current architecture):
-
-1. **Early schedule (`LB=2`).** Planes come first, then round-robin rounds, one element per batch. Each pair's geometry lives at its own round's level, next to its solve.
-2. **Running-total accumulators `K/J/JP`**, replacing sums over every possible partner (see ARCHITECTURE §2).
-3. **Soft box/plane patch (`PATCHW=soft`).** One contact instead of 8 corners.
-4. **Named container gating.** Rules are owned by body `b{i}`, and names are carried only while the body is awake or near an awake body. A sleeping neighbourhood's rules cost nothing. The names are on **every** level, because Chrome only re-matches style-container-dependent rules for that container's direct children.
-5. **#LS / #LT split.** The clock and time budget moved into #LT, plus a plain wrapper before L0 and `.rz` zeroing the pointer. Idle style cost fell from 13.6 to 1.0 ms per frame at 32 bodies.†
-6. **Two registers per element** (top and left), which halves the register elements.
-7. **Timeline scope split** into a nest of `.ts` wrappers with 24 names each. The scope-list lookup became about 3× cheaper.
-8. **Neighbourhood digests** (decimal words, 6 bodies per word) for the wake and sleep logic.
-9. **Shared names for level-local props (`SHARE`).** The stylesheet shrank by about a third at 64 bodies.
-10. **Larger scenes.** `_extend()` fills a floor grid and then upper layers, so there are 8–64 body pages.
-11. **Multi-page site.** One page per count; the CSS is split above 14 MB for the artifact host's file limit.
-
-Results at 32 bodies (old → new):†
-
-| Metric | Old | New |
-|---|---|---|
-| Load | 2.9 s | 0.8 s |
-| Idle style per frame | 13.6 ms | 1.0 ms |
-| Hover style per frame | 28.8 ms | 2.0 ms |
-| Rain chaos | 6–9 fps | 8–13 fps |
-| Drag | 11 fps | 14 fps |
-
-At 24 bodies drag ran at 18 fps; at 48 bodies drag was 4–5 fps and hold 8 fps; the 64-body page loads in 3.6 s.†
-
-## Phase 3: bug fix and architecture exploration, Oct 11
-
-- **Fixed:** floor-grid upper layers started asleep and floated in mid-air. The cause was that any body placed with zero velocity started asleep. Now a body starts asleep only if its lowest point touches the floor.
-- **Measured the cost model precisely**, then evaluated alternative substrates and strategies. Most were rejected; see below.
-
-## Phase 4: spatial partitioning, Oct 13
-
-Goal: cut the N² costs so that more bodies run smoothly. The session measured the rule-matching cost model at scale first (BENCHMARKS.md §2), then built and A/B-tested a cell-based broadphase and presence scheme.
-
-- **Measured the matching tiers.** An absent container name is the only cheap rejection (about 0.1 µs at shallow depth), but it walks every ancestor: about 0.2 µs + 0.6 ns × depth × names per ancestor in a microbenchmark, about 0.2 + 0.01 × depth µs in the engine. A present name costs 0.16 µs, `style(--x: 1)` 0.7 µs, `style(--x)` 0.4 µs, a range query 1.6 µs, a property 2 µs and up.
-- **Kept:** `style(--flag)` for 0/1 gates (`BOOLQ`, about 0.3 µs per rule cheaper, within noise in the engine at 48–64); owner names on every level (confirmed best); the `field` scene and `tools/sparse.js` for the sparse regime; `tools/freezegrab.js BODY=k`; `tools/bpcount.js`, `tools/cellcheck.js` (for `CELLS=1` pages); the `CELLS=1` build path, off by default, for comparison.
-- **Rejected:** cell-based presence (below), unnamed deep rules, AABB broadphase, per-body readback elements.
-- **Found that in the sparse regime the pass is contact work**: dragging one body through a dense 64-body pile costs 45–55 ms per pass, of which the awake cluster's narrowphase and solves are 20 ms, its per-body blocks 10–25 ms and the base 5–12 ms; the near tests and digests are a few ms. The N² floor of the design is the rule visits: about 3 rules per pair at 0.2–0.7 µs each (4 ms at 64, growing like N² × depth because absent names walk the chain). With 96 bodies asleep and 4 awake a pass costs 40 ms.
-
-## Phase 5: Firefox, Oct 17
-
-The goal: run in Firefox with tweaks that don't cost Chrome. Firefox 158 (release) lacks scroll-driven animations (a pref), 159 DevEdition and 160 Nightly have them on. Found by probing each feature, then by diffing every computed property on every level between the browsers on a baked static state, and by forcing restyles from the harness. In order:
-1. **Gates always open.** `style(--x)` is true for any registered property in Firefox: `BOOLQ` off by default.
-2. **The tower fell through itself** in a static state too: Firefox negates `hypot()` by its arguments (`100 - hypot(3,4)` = 105). `1 * hypot`.
-3. **Frozen from the first frame:** style-query rules aren't re-matched when an animation changes the container's value. A size container whose size follows the clock forces a subtree re-match each frame (`FFQ`, Firefox only).
-4. **The names (`if()`)**: first a portable wrapper (below, a dead end), then a Firefox-only "always named" block.
-5. Rendering: no typed division in 157 (the view scale), shadows drawn over their bodies (document order).
-6. The grab overlay jumped around in Firefox (found by the user): its unregistered `--u` resolved `100cqw` against #LM, the re-match clock's size container, and its percentages followed #LM's box. `--u` registered, #LW back to the arena's size, `tools/overlaycheck.js` in `smoke.sh`. Moving the clock into #LM's padding kept the box still but stopped the re-match (the tower fell through itself again).
-ARCHITECTURE.md §6 has the result. The full smoke suite passes in both browsers.
-
----
-
-## Regressions found by the user (2026-10-14), now covered by `tools/smoke.sh`
-
-- **Bodies asleep in mid-air after switching scenes** (the second time this class of bug shipped, after Phase 3's
-  floating upper layers). Each scene's `#INI` rule declared the start sleep counter only for the bodies that rest on
-  the floor in that scene; the rules cascade over the first scene's, so in rain (which declares none) every body that
-  rested in the tower kept `isc = 46` and started asleep at its rain position, up to 175 px up. Fixed by declaring
-  every body's counter in every scene. Tests: `statcheck.py` (static) and `floatcheck.js` (browser, every scene, with
-  a real 150 ms press: Playwright's instant click flipped the radio without the reset and hid the bug).
-- **Dragging any body also pulled body 0** (the tower's bottom box, whenever it was awake). `BOOLQ` turned body 0's
-  grab gate `style(--GIr: 1)` into `style(--GIr)`, which is true for any held body. The shortening now applies only
-  to flags never tested against other values. Tests: `statcheck.py` and `grabtest.js` (gravity 0, shaken spread-out
-  field; other bodies with no contact must keep their velocity: the old gate changed body 0's by 73–102 px/s).
-
----
+Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an older 2-core VM, Chromium 141).
 
 ## Paths that didn't work (or didn't pay)
 
-Each entry gives what was tried, what happened, and why.
-
 ### Solver and physics
 
-- **Planes solved last** in the Gauss–Seidel order. A stack's floor push never reached the bodies above it within the step, so stacks settled into a state with phantom downward velocities and never slept. Reverted to planes first.
-- **Soft box/box patch (`PATCHB=soft`).** One contact at the incident box's soft support patch. Leaning piles jitter and never sleep. Kept only as an experimental option.
-- **Depth-weighted box/plane patch (`PATCHW=depth`).** Over-levels tilted boxes, and they rock every other step.
-- **Velocity-based sleep test.** Phantom split-impulse velocity on resting boxes kept them awake.
-- **Larger timestep** (RATE 60 or 45) to get more simulated time per step. 32-body piles never fully slept within 25 s, while RATE 90 settled in about 16 s. (At RATE 60, stacks also sink.)
-- **Starting every zero-velocity body asleep.** Caused the floating-sleeper bug, now fixed.
+- **Planes solved last:** a stack's floor push never reached the bodies above within the step; phantom downward
+  velocities, stacks never slept.
+- **`PATCHB=soft`** (soft box/box patch): leaning piles jitter and never sleep. **`PATCHW=depth`:** over-levels tilted
+  boxes, which rock every other step.
+- **Velocity-based sleep test:** phantom split-impulse velocity kept resting boxes awake.
+- **RATE 60 or 45:** at 32 bodies RATE 90 is all asleep at 3.5 s; at 60 five bodies never sleep, at 45 only 12–20 of
+  32 sleep (BENCHMARKS §1). At 60 stacks also sink.
+- **Starting every zero-velocity body asleep:** upper layers floated in mid-air. Only bodies on the floor now.
 
 ### Style engine mechanics
 
-- **Unnamed `@container style()` gates.** Each rule costs about 2.5–3.5 µs per pass whether it matches or not, and that dominated the cost of sparse scenes. Replaced by owner-named containers.
-- **Container names on L0/L1 only.** Named rules at deeper levels didn't re-match. Fixed by putting the names on every level.
-- **`@function`** is about 2–3× slower than the same math written inline.†
-- **`if()`-based selection inside hot properties** costs about 4.2 µs per property, against about 2 µs for plain calc.
-- **Anchor-positioned registers** (reading state through anchor positioning instead of view timelines) cost about 5 ms of layout per frame.† Reverted.
-- **Moving the `.ts` timeline-scope wrappers inside `.rz`** made rendering vanish. They stay above `#RB`.
-- **Explicit inheritance of #LS's children** and the live toggle on #LS made idle cost 15 ms.† Fixed by the #LT split, the plain wrapper and `.rz`.
-- **Compositor interpolation of body poses (2026-10-13).** The idea: `transition: transform` on the bodies, so the compositor glides between poses at 60 fps while the physics runs at 4–9 fps. A `SMOOTH=<ms>` build option tried it and was removed. Three problems:
-  - **It doesn't fire on `.bw`.** `.bw` gets its pose from its own (view-timeline) animations, and changes caused by an element's own animations don't start transitions. Only `.bd`, which inherits the quaternion, transitioned, so the first test smoothed rotation only. Moving the translation onto `.bd` (and the sphere `.disc`) made both transition.
-  - **It's broken: bodies jump back and forth.** Every transition starts from the pose's *base* value (`--Rx: var(--ix…)`, the scene's spawn point), not the animated pose or the running transition. Each physics frame, every moving body snaps back toward its spawn point and glides forward again. `tools/transcheck.js` found 677 of 935 transitions restarting more than 2 px off (up to 216 px); `tools/filmstrip.js` scored 122 snap-back cells per 1000 against 1.5 without it. Passing the pose through an unregistered copy failed the same way; a minimal view-timeline page didn't reproduce it.
-  - **It halves the physics rate.** Each transition restart costs time in proportion to the page's registered properties (24,896 at 48 bodies, about 1.25 ms per body per pass). At 48 bodies the main thread fell from 8.7 to about 4 fps, and settling took 21.5 s instead of 9 s. Registrations are page-global, so CSS can't avoid it.
-  - Settled screenshots and draw counts (60/s) looked perfect throughout; only frame-by-frame checks showed the glitch.
-- **Hypothesis rejected: quadratic copying of inherited custom properties down a deep chain.** A microbenchmark showed no difference between inherited and non-inherited across 50 levels (4.8 ms either way for 2,000 props). Blink doesn't copy per level in a way that matters here.
+- **Unnamed `@container style()` gates:** each rule evaluates its style() every pass, matching or not (2.5–3.5 µs in
+  141, 0.8 µs now), which dominated sparse scenes. Replaced by owner-named containers.
+- **Container names on L0/L1 only:** named rules deeper down didn't re-match (Chrome re-matches style-container rules
+  only for direct children). Names are on every level.
+- **`@function`:** about 2–3× slower than the same math inline (141).
+- **`if()` selection inside hot properties:** about 4.2 µs per property against 2 µs for calc (141). The 153
+  microbenchmark (BENCHMARKS §2) shows 2.70 against 2.61 µs, so this may no longer hold: re-check before relying on it.
+- **Anchor-positioned registers** (state read through anchor positioning instead of view timelines): about 5 ms of
+  layout per frame (141).
+- **`:has(:nth-child(k):hover)` pointer:** about 30 ms per mouse move; replaced by `anchor-name` on the hovered cell.
+- **`.ts` timeline-scope wrappers inside `.rz`:** rendering vanished.
+- **Explicit inheritance of #LS's children** plus a live toggle on #LS: idle cost 15 ms (141). Fixed by the #LT split,
+  the plain wrapper and `.rz`.
+- **Compositor interpolation of body poses** (`transition: transform`, a removed `SMOOTH=<ms>` option, so the
+  compositor glides at 60 fps while physics runs at 4–9 fps):
+  - Doesn't fire on `.bw` (changes from an element's own animations don't start transitions); only `.bd` transitions.
+  - **Bodies jump back and forth:** each restart begins at the pose's *base* value (the spawn point), not the animated
+    pose. `tools/transcheck.js`: 677 of 935 restarts more than 2 px off (up to 216 px); `tools/filmstrip.js`: 122
+    snap-back cells per 1000 against 1.5. An unregistered copy failed the same way; a minimal page didn't reproduce it.
+  - Halves the physics rate: restarts cost ∝ registered properties, which are page-global (BENCHMARKS §4).
+  - Screenshots and 60/s draw counts looked perfect; only frame-by-frame checks showed it.
+- **Hypothesis rejected: inherited custom properties are copied per level.** Inherited and non-inherited cost the same
+  over 50 levels; 6,000 declared at level 1 cost 7.0–7.4 ms at 8, 66 and 130 levels deep.
 
-### Spatial partitioning (Phase 4, 2026-10-13)
+### Spatial partitioning (Oct 13)
 
-- **Cell-based presence and near tests (`CELLS=1`).** The floor cut into 120-unit columns and rows; awake bodies mark the columns and rows in their reach as digits of decimal words (one closed-form term per body and word), sleepers read the digit of their own column and row, and a sleeper is "present" (named, touchable, wakeable) only when both are marked. The near test of a pair became a name-only nested rule evaluated inner-first (`@container w{a}{@container b{b}{…}}`), so a far sleeper costs one absent-name lookup instead of a property. Physics correct (smoke tests pass; no presence violations during drags). **Slower:** dragging one body through 64 sleepers, 21.6 ms per pass against 15.7 for the all-pairs digest; frozen, 19.3 vs 13.1; at 96 bodies with 4 awake, 55 vs 40 ms. The sleepers' per-pass bookkeeping (two cell properties and one digit extraction each, about 80 µs per sleeper: CSS math functions are dear) costs 5 ms at 64, while the near tests it saves cost a few µs per awake body per partner. The all-pairs digest only charges awake bodies (N/6 words each) and is exact, so cells lose whenever few bodies are awake and save nothing when all are. With everything awake (tower 48, frozen) all variants were within noise. Kept behind `CELLS=1`.
-- **Unnamed rules at the round levels (`OWNLEV=1`).** Expected to beat the absent-name walk (0.2 + 0.01 × depth µs) with a 0.4 µs unnamed `style()`. Measured 29 vs 22 ms per pass in the one-body drag at 64: with few names present the walk is cheap, and the unnamed form costs more than its microbenchmark suggests in the engine. Names stay on every level.
-- **Tighter broadphase (world AABB instead of bounding spheres).** Counted from live state (`tools/bpcount.js`): 124 sphere-near pairs vs 107 AABB-near at 64 bodies, of which 32 touch. The narrowphase work on near-but-not-touching pairs is geometry (a pile is full of close pairs), not a loose test.
-- **Range style queries as the broadphase** (`style(calc(var(--px) − R) < --px2 < calc(var(--px) + R))`). Supported in Chromium 153, but 1.6–2.2 µs per rule, about a property's cost, and nested per axis it costs more than the `hypot` flag it would replace.
-- **Per-body readback elements** (split #LS's 13N view-timeline animations into one element per body so sleeping bodies' animations aren't re-sampled). Microbenchmark: no gain (2.7 vs 2.3 ms at 420 registers); Blink doesn't re-sample unchanged timelines, and the static register elements cost about 2 µs each regardless.
-- **Hypothesis rejected: Blink copies the inherited custom-property map at every level below the root.** 6,000 inherited properties declared at level 1 cost the same at 8, 66 and 130 levels deep (7.1 ms).
-- **Freeze-based attribution overstates the base.** `freeze3.js` wobbles every register, so "every gated block removed" measured 12.5 ms at 64 bodies; with static registers it is 5.1 ms. Read frozen bases with that in mind.
-- **Alternatives considered, not built:** contact slots with dynamically bound partners (no dynamic indexing: selecting a partner's state costs O(N) terms per input, or an `if()` chain, per slot; ranking the nearest partners is O(N²) terms), Jacobi-style rounds with several pairs per body per level (per-body sums cost more than the aliases they remove, and stacks need the Gauss–Seidel order), per-pair container names (the name list would have N²/2 idents on every level), K rules per pair under per-cell names (K × 0.1 µs per pair, no better than today), content-visibility or display:none subtrees per pair (the rules must inherit into the chain).
+- **Spatial cells (`CELLS=1`, removed from `gen3d.py` on 2026-10-18; `83d4fde` has it):** awake bodies mark the 120-unit floor columns and rows in reach as
+  digits of decimal words; a sleeper is present (named, touchable, wakeable) only when its column and row are marked;
+  a pair's near test becomes a name-only nested rule. Correct but **slower**: one-body drag through 64 sleepers
+  22.3–22.5 ms per pass against 16.1–16.3 for the all-pairs digest; 96 bodies with 4 awake about 60 against 35 ms. The
+  sleepers' bookkeeping (cell properties and a digit extraction each) is about 6.6 ms at 64, more than the near tests
+  it saves; the digest charges only awake bodies. All awake (frozen tower 48), all variants within about 5%.
+- **`OWNLEV=1`** (unnamed rules at the round levels, to dodge the absent-name walk): 27 against 22 ms per pass in the
+  64-body one-body drag.
+- **World-AABB broadphase:** keeps 108 of 118 sphere-near pairs at 64 bodies (37 touch); piles are full of close pairs.
+- **Range style queries as the broadphase:** 1.7–2.3 µs per rule, about a property; per axis more than the `hypot` flag.
+- **Per-body readback elements:** no gain (3.1 against 2.5–2.6 ms at 420 registers); unchanged timelines aren't
+  re-sampled.
+- **Considered, not built:** dynamically bound contact slots (no dynamic indexing: O(N) terms per input per slot,
+  ranking O(N²)); Jacobi rounds (per-body sums cost more than the aliases saved; stacks need Gauss–Seidel); per-pair
+  container names (N²/2 idents per level); K rules per pair under per-cell names; content-visibility or display:none
+  per pair (rules must inherit into the chain).
 
-### Firefox (Phase 5, 2026-10-17)
+### Firefox (Oct 17)
 
-- **Container names from rules on a wrapper `#LN` between #L0 and #L1** (`@container style(--ac{i}: 1){#LN{--A{i}:b{i}}}`, the same for `nb`), portable instead of `if()`. Correct, but #L1's rules then read their gates on #LN, so every gate declared on #L0 had to become inherited (the "minimal inheritance" pass had made them non-inherited: a rule reads its parent), N² near flags among them. Chrome, frozen 48-body pile: +6% (+11% with `BOOLQ=0`). Replaced by a Firefox-only block naming every body; Firefox's frame rate was the same either way (it re-matches everything each frame anyway).
-- **Shrinking boxes 2–4% in Firefox** so that resting faces stop intersecting: Firefox still drew a resting box over the one above it. Its 3D compositing orders whole bodies by document order even with every face in one preserve-3d context (headless, software WebRender).
-- **A second step per frame in Firefox:** not found. It samples view timelines once per refresh tick; the re-match restyle after layout recomputes the same step.
+- **Container names from rules on a wrapper `#LN`** (portable instead of `if()`): every gate on #L0 had to become
+  inherited, N² near flags included. Chrome, frozen 48: +6% (+11% with `BOOLQ=0`). Replaced by a Firefox-only block.
+- **Moving the #LM clock into padding** to keep its box still: stopped the re-match.
+- **Shrinking boxes 2–4%** so resting faces don't intersect: Firefox still draws whole bodies in document order.
+- **A second step per frame:** not found; Firefox samples view timelines once per tick.
 
-### Alternative compute substrates (Phase 3)
+### Touch (Oct 18)
 
-- **Variable-font metrics as style-time compute** (`ch`, `ic`, `ex`, `cap`, driven by `font-variation-settings`).
-  - **It works:** in Chromium 141, `1ch`/`1ic` return exact HVAR glyph-advance polynomials and `1ex`/`1cap` exact MVAR values in the same style pass, with no layout. Bilinear (x·y) regions are exact. See `experiments/fonts/`.
-  - **It doesn't pay:** every new set of axis values creates a font instance, costing about 15–20 µs for a 2-axis font, 35 µs at 8 axes and 80 µs at 64 axes, plus about 0.1 µs per region term. That gives 4 outputs, with 14-bit (F2DOT14) inputs. A wide multiply-add is about 4× cheaper than calc() (0.1 vs about 0.4–0.5 µs per term), but the setup cost equals 10–30 CSS properties.
-  - **Why not for rigid bodies:** the math is narrow and branchy (SAT, clipping, clamps), with coefficients that change every step. Computing a rotation matrix in a font is about 105 µs, against about 36 µs in CSS.
-- **Glyph shaping (GSUB) as an arithmetic engine.** About 25 ns per glyph per lookup (measured in a related HarfBuzz project), but byte-level arithmetic needs dozens of lookups per multiply, and fonts carry no state between frames: every output still has to go through registers. At best this breaks even with calc().
-- **avar2** adds a hidden layer (axes → axes), but doesn't fix the per-instance cost or the input precision. It shipped in Chrome 148; the sandbox Chromium is 141, and Chromium 153 was used for avar2 tests.
-- **Paused animations as evaluators** (`animation-delay: calc(var(--x) * -1s)` with paused keyframes, adding several animations with `animation-composition: add`). About 400 µs per element, likely because a changing delay re-creates the animation. Dead.
-- **`ident()` / `var(ident(…))` for dynamic indexing** would have allowed a few contact slots per body instead of fixed all-pairs slots. Not supported in Chromium 141 or 153.
-- **Process parallelism with iframes.** Cross-site iframes (e.g. 127.0.0.1 and 127.0.0.2) do run in separate renderer processes, giving 2× throughput on the 2-core sandbox. Sandboxed same-origin frames share **one** process (also with `--enable-features=IsolateSandboxedIframes`). And the only script-free channel between frames is the iframe's size, which flows parent to child only. So one world can't be split across processes, and a single-origin artifact can't use this at all.
-- **Newer Chrome.** Chromium 153 is only about 10–15% cheaper per property than 141.
+The old touch input was a scrollable layer 3× the arena: tap a body (`:hover` on a cell gave the point), drag
+anywhere, tap again to drop; Chrome's axis lock bent diagonal drags. Behaviour was read from the Chromium source
+(`ui/events/gesture_detection`, `GestureManager::GetHitTypeForGestureType`) and tested with CDP touch (gesture
+recognizer, no show-press) and the software-emulated Android emulator (`../../shared/android/`).
 
-### Open ideas, not yet tried
+- **`:active`/`:hover` as the press:** set only by show-press (100–150 ms still), `:active` cleared at the slop by
+  tap-cancel. A quick drag gets neither; hence the old "tap again to drop".
+- **A range slider's `:active`:** never set for touch (`SliderContainerElement::HandleTouchEvent`); one axis anyway.
+- **`scroll-state(snapped)` as the press:** follows the would-snap target mid-gesture (`snapchanging` timing).
+- **The dragged scroller snapping itself back:** Chrome's end-of-gesture snap is animated (200 ms per 100 px, 500 ms
+  after a fling) and part of the gesture: the follower stayed frozen and the body was pulled back along the drag.
+- **A held-time snap area exactly at the offset:** a frame behind at release; Chrome animated a sub-pixel snap for
+  250 ms before ending the gesture. The area is now 80 units bigger.
+- **A grid of small scrollers as touch tiles:** bodies are 20–40 px on a phone, so ~8 px tiles, over 1,000
+  scrollers. Per-body handles name the body exactly.
+- **The touch-down point inside a handle** (to grab off-centre and swing boxes): nothing gives it on a quick drag.
 
-- **Spheres only** with the current engine: 1.5–2.5× faster per step at the same body count, which buys about a third more bodies (48 → 64) at equal fps. Not dramatic on its own: per-body overhead, registers and the N² pair table remain.
-- **Contact slots read by anchor name** (from js-minus-js, 2026-10-13; see `../../COMPARISON.md`). js-minus-js reads RAM by picking a cell's anchor name with a two-level `if()` (O(√N) `style()` tests) and reading it with one `anchor-size()`: dynamic indexing, which this engine has assumed it lacks. K slots per body that read their partner's register elements by name would make the pair rules O(N·K) instead of O(N²). Caveats: the value arrives in layout, so the solver using it must sit under a size-container reader; anchor-positioned registers once cost about 5 ms of layout per frame here (Phase 2, †); choosing the K partners still needs the broadphase. First step: a microbenchmark against the per-pair rules at 64 bodies.
-- **AVBD** (Giles, Diaz and Yuksel, SIGGRAPH 2025). Body-centric gather (good for CSS) and stable stacks at few iterations. But the per-body 6×6 Hessian plus LDLᵀ is costly in calc, and warm starting needs per-contact persistent state, i.e. registers. Recommended prototype: plain JS outside the browser first.
+### Alternative compute substrates
+
+- **Variable-font metrics** (`1ch`/`1ic` read HVAR, `1ex`/`1cap` MVAR, exactly, at style time):
+  each new set of axis values is a new font instance (47 µs at 8 axes, 106 µs at 64 axes with 200 regions, BENCHMARKS
+  §3), 4 outputs, 14-bit inputs. Rigid-body math is branchy and changes every step: a rotation matrix cost about 105 µs
+  in a font against 36 µs in CSS (141).
+- **GSUB shaping as arithmetic:** about 25 ns per glyph per lookup, but dozens of lookups per multiply, and outputs
+  still need registers. Break-even at best.
+- **avar2** (Chrome 148+): a hidden layer, but neither the per-instance cost nor the input precision improves.
+- **Paused animations as evaluators:** about 128 µs per element against 9–13 µs for calc.
+- **`var(ident(…))` dynamic indexing:** unsupported in Chromium 141 and 153.
+- **Iframes for parallelism:** only cross-site iframes get their own process, and the only script-free channel
+  between frames is the iframe's size, parent to child. A single-origin artifact can't use it.
+- **Newer Chrome:** 153 is only about 10–15% cheaper per property than 141.
+
+## Open ideas, not yet tried
+
+- **Spheres only:** 1.5–2.5× faster per step, about a third more bodies (48 → 64) at equal fps; per-body overhead,
+  registers and the N² pair table remain.
+- **Contact slots read by anchor name** (from js-minus-js; `../../COMPARISON.md`): pick a partner's anchor name with a
+  two-level `if()` and read it with one `anchor-size()`, so K slots per body make pair rules O(N·K). Caveats: the value
+  arrives in layout (the solver must sit under a size-container reader); anchor-positioned registers once cost about
+  5 ms of layout per frame; choosing partners still needs the broadphase. First: a microbenchmark against the per-pair
+  rules at 64 bodies.
+- **AVBD** (Giles, Diaz and Yuksel, SIGGRAPH 2025): body-centric gather, stable stacks at few iterations; but a
+  per-body 6×6 Hessian with LDLᵀ is costly in calc, and warm starting needs per-contact registers. Prototype in JS
+  first.
