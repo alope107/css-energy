@@ -32,7 +32,7 @@ WB = meta['B']; assert WB == 4
 BANKN = RAMN // WB
 OUT_BASE, ROWS, COLS = image['outBase'], image['rows'], image['cols']
 OUT_SIZE = ROWS * COLS
-CH = 'ABCDEFGHIJKLMNOPQRSTUVWX'[:2 * K]   # two write channels per issue (parity), K issues per frame
+CH = 'ABCD'[:2 * K]
 CV = [tuple(v) for v in meta['cvals']]
 ci = lambda *v: CV.index(tuple(v))
 I_START, I_MISS, I_WFAIL, I_PUTC, I_HALT = ci('S'), ci('T', 'MISS'), ci('T', 'WFAIL'), ci('T', 'PUTC'), ci('T', 'HALT')
@@ -258,10 +258,6 @@ for w in range(WB):
     css.append(f"#cpu {{ --sR{w}: " + mux("rb", BANKN, lambda b, w=w: f"--c{4 * b + w}", f"--c{w}") + "; }")
     css.append(f".rp{w} {{ width: anchor-size(var(--sR{w}) width, {WOFF}px); }} .vp{w} {{ --mval{w}: calc(100cqi / 1px - {WOFF}); }}")   # no anchor: an unwritten cell, 0
 css.append(".vp3 { " + "\n  ".join(svc_inner + inp + nx) + " }")
-RONEST = int(os.environ.get('RONEST', 0))
-if RONEST:
-    css.append(".rn { content-visibility: auto; contain-intrinsic-size: auto 10px; min-height: 1px; width: calc(10px + mod(var(--nsh) + var(--k) + var(--rd), 64) * 1px); }")
-RNHTML = ''.join(f'<div class="rn" style="--rd: {d}">' for d in range(RONEST)) + '</div>' * RONEST
 # writes
 if RAMMODE == 'flat':   # one rule per cell per channel
     for k in range(RAMN):
@@ -409,7 +405,7 @@ page = f"""<!doctype html>
 {mem_outer}<div class="con"></div>
 {console}
 <div id="clk"><div id="cpu">
-{RNHTML}{mem_inner}
+{mem_inner}
 <div class="rp rp0"><div class="vp vp0"><div class="rp rp1"><div class="vp vp1"><div class="rp rp2"><div class="vp vp2"><div class="rp rp3"><div class="vp vp3">
 <div id="sent"><span style="anchor-name: --a-SENT">{sent}</span></div>
 <div id="state">{''.join(spans_html)}</div>
@@ -532,7 +528,7 @@ if UI:
 <div id="clkw">
 {console}
 <div id="clk"><div id="cpu">
-{RNHTML}{mem_inner}
+{mem_inner}
 <div class="rp rp0"><div class="vp vp0"><div class="rp rp1"><div class="vp vp1"><div class="rp rp2"><div class="vp vp2"><div class="rp rp3"><div class="vp vp3">
 <div id="sent"><span style="anchor-name: --a-SENT">{sent}</span></div>
 <div id="state">{''.join(spans_html)}</div>
