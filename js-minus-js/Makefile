@@ -16,8 +16,12 @@ PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py)
 HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
 # what the checks depend on outside the repo, and the environment variables their scripts read
 L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
-L3       := $(B)/l3.$(call id,$(B)/fontcpu,fontcpu,tests/suite_css.js $(HARNESS)).log
-UICONF   := $(call id,$(B)/ui,fontcpu,machine/ui_seq.js tests/editor_input.js $(HARNESS))
+# The browser's part needs `npm install`. Goals that launch no browser skip it (CI deploys with `make dist` and no
+# npm packages: ../deploy/README.md), and those checks' logs get a name no pass is ever written under.
+NOBROWSER := help all lib image font page dist expect l1 l2 l2-generic l4 test clean
+BCONF     = $(if $(filter-out $(NOBROWSER),$(MAKECMDGOALS)),$(call id,$(1),fontcpu,$(2)),no-browser)
+L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
+UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
 
 .PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
         expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input clean
