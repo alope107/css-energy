@@ -6,6 +6,12 @@ mini PC; load average 0.4–3 during the runs, so read ratios rather than absolu
 `survey/exp/` and is reproducible with the commands in the last section. Labels: **measured** (run here, this
 session), **researched** (Chromium/HarfBuzz source, M153 branch 8010), **untested** (reasoning only).
 
+> **Corrected by the wider survey in [chromium/](chromium/README.md) (2026-10-18):** finding 3 and recommendation 1
+> (counter-driven lines don't chain inside one layout pass, the checker forced the extra passes; `content: if()` lines
+> do: chromium/06 §1.10); §P4 (transition latches work per pass: chromium/04 §1.3); §P9 and the HarfRust watch item
+> (~24% is end to end; per shaping 1.65× in 153: chromium/06, 07); §5 "cross-site iframes: no way to read a result
+> back" (SVG children report their natural size every frame: chromium/01 §1.8). The rest stands.
+
 ## Headline findings
 
 1. **The "two useful passes per frame" limit is not a limit.** A nest of D elements with

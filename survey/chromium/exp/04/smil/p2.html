@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+<svg width="400" height="200">
+  <foreignObject id="fo" x="0" y="0" width="100" height="20"><div xmlns="http://www.w3.org/1999/xhtml">fo</div></foreignObject>
+  <g id="cls" class="a"/>
+  <set id="s1" href="#fo" attributeName="width" to="300" begin="0s" fill="freeze" dur="10ms"/>
+  <set id="s2" href="#cls" attributeName="class" to="b" begin="0s" fill="freeze" dur="10ms"/>
+</svg>
+<svg width="100" height="100"><rect id="r" x="0" y="50" width="10" height="10"/>
+  <animate id="run" href="#r" attributeName="opacity" values="0;1" dur="1s" repeatCount="indefinite" begin="indefinite"/>
+</svg></body></html>

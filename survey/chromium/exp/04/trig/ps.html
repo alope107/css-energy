@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset=utf-8>
+<style>
+@property --x { syntax: '<number>'; inherits: true; initial-value: 0; }
+@keyframes track { from { --x: 0 } to { --x: 1000 } }
+body { margin: 0; timeline-scope: --data; }
+#sc { height: 100px; width: 300px; overflow-y: scroll; position: relative; }
+#spacer { height: 5000px; }
+#S { position: absolute; top: 2000px; height: 10px; width: 10px; view-timeline: --data; }
+#q, #h { animation: track linear both; animation-timeline: --data; animation-range: cover 0% cover 100%; }
+#h.hold { animation-play-state: paused; }
+</style>
+<div id=sc><div id=spacer></div><div id=S></div></div>
+<div id=q></div><div id=h></div>
+<script>
+window.log = [];
+let frame = 0;
+const $ = id => document.getElementById(id);
+const v = id => Math.round(parseFloat(getComputedStyle($(id)).getPropertyValue('--x')));
+const sc = $('sc');
+const plan = { 2: () => { sc.scrollTop = 1950; return 'scroll 1950'; },
+               5: () => { $('h').classList.add('hold'); const a = v('h'); $('S').style.top = '1930px'; return `hold (same task, before data move: ${a}); then S top 1930 -> same task free=${v('q')} held=${v('h')}`; },
+               9: () => { $('S').style.top = '2005px'; return 'S top 2005 (held)'; },
+               12: () => { $('h').classList.remove('hold'); return `release -> same task held=${v('h')}`; },
+               15: () => { $('S').style.top = '1990px'; return 'S top 1990'; } };
+function tick() {
+  frame++;
+  const note = plan[frame] ? plan[frame]() : '';
+  const a = $('h').getAnimations()[0];
+  log.push(`f${frame} free=${v('q')} held=${v('h')} ${a.playState}${a.pending?'*':''} ${note}`);
+  if (frame < 18) requestAnimationFrame(tick); else window.done = true;
+}
+requestAnimationFrame(tick);
+</script>

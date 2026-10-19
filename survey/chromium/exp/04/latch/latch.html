@@ -1,0 +1,24 @@
+<!doctype html><style>
+@property --r{syntax:'<number>';inherits:false;initial-value:0}
+@property --k{syntax:'<integer>';inherits:true;initial-value:0}
+@property --w{syntax:'<integer>';inherits:true;initial-value:0}
+@property --L{syntax:'<number>';inherits:false;initial-value:-5}
+@property --M{syntax:'<number>';inherits:false;initial-value:-5}
+@keyframes q{from{--r:0}to{--r:100000}}
+#P{timeline-scope:--tA;animation:q auto linear both;animation-timeline:--tA;
+   --k:calc(round(var(--r)));--w:calc(mod(var(--k), 2))}
+.sc{position:relative;height:100000px;width:10px;overflow:hidden}
+#S{position:absolute;left:0;width:1px;height:0;view-timeline:--tA block;top:calc((100000 - var(--k) - 1) * 1px)}
+/* latch: write on odd passes, hold on even ones */
+#C{--L:var(--k);transition:--L 0s;transition-delay:if(style(--w: 1): 0s; else: 1000000s)}
+/* control: the same latch keyed on --w via @container style() */
+#D{container-name:dd}
+#E{--M:var(--k);transition:--M 0s 1000000s}
+@container dd style(--w: 1){#E{transition-delay:0s}}
+@property --r2{syntax:'<number>';inherits:false;initial-value:-5}
+@keyframes q2{from{--r2:0}to{--r2:100000}}
+#F{animation:q2 auto linear both;animation-timeline:--tA;animation-play-state:if(style(--w: 1): running; else: paused)}
+@property --N{syntax:'<number>';inherits:false;initial-value:-5}
+#G{--N:var(--k);transition:--N 0s calc((1 - var(--w)) * 1000000s)}
+</style>
+<div id=P><div class=sc><i id=S></i></div><div id=C></div><div id=F></div><div id=G></div><div id=D><div id=E></div></div></div>

@@ -1,0 +1,12 @@
+<!doctype html><meta charset=utf-8>
+<style>
+body{margin:0}
+#s{position:absolute;left:20px;top:100px;width:1px;height:60px;overflow-x:scroll;overflow-y:hidden;scrollbar-width:none;scroll-timeline:--t x}
+#s>div{width:1001px;height:50px}
+#s::scroll-button(right){content:">";position:fixed;left:500px;top:20px;width:40px;height:40px}
+body{timeline-scope:--t}
+#o{width:0;height:10px;background:red;animation:w linear both;animation-timeline:--t}
+@keyframes w{from{width:0}to{width:1000px}}
+</style>
+<div id=o></div>
+<div id=s><div></div></div>

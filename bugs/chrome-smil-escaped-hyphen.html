@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SMIL ignores an escaped hyphen-minus in a syncbase id</title>
+<style> body { font: 14px/1.4 sans-serif; margin: 16px; } </style>
+<p>Both squares should be green. Left (control): <code>begin="ab.begin"</code> for <code>id="ab"</code>.
+Right: <code>begin="a\-b.begin"</code> for <code>id="a-b"</code>.</p>
+<svg width="220" height="100">
+  <set id="ab" attributeName="visibility" to="visible" begin="0s"/>
+  <set id="a-b" attributeName="visibility" to="visible" begin="0s"/>
+  <rect x="0" y="0" width="100" height="100" fill="red">
+    <set attributeName="fill" to="green" begin="ab.begin" fill="freeze"/>
+  </rect>
+  <rect x="120" y="0" width="100" height="100" fill="red">
+    <set attributeName="fill" to="green" begin="a\-b.begin" fill="freeze"/>
+  </rect>
+</svg>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: left green, right red. Event values ("my\-btn.click") go
+through the same parser. Playwright's Firefox 157: both green.
+
+Spec: SMIL 3.0 Timing, "Parsing timing specifiers"
+(https://www.w3.org/TR/SMIL3/smil-timing.html#Timing-ParsingTimingSpecifiers): "Id-values and Event-symbols are XML
+NMTOKEN values and as such are allowed to contain the full stop '.' and hyphen-minus '-' characters. The reverse
+solidus character '\' must be used to escape these characters within Id-values and Event-symbols, otherwise these
+characters will be interpreted as the full stop separator and hyphen-minus sign, respectively." SVG 2 animations
+defer to it.
+
+Likely cause (same in 153 and on main 22b3b159): SVGSMILElement::ParseCondition
+(third_party/blink/renderer/core/svg/animation/svg_smil_element.cc:554-558) splits off the offset at the first '+' or
+'-' with parse_string.find(), ignoring a preceding '\'; FindUnescapedDot() (same file, 511-525) honours escapes only
+for '.'. So "a\-b.begin" becomes the condition "a\" with the offset "b.begin", the offset fails to parse and the whole
+condition is dropped. Firefox's dom/smil/SMILParserUtils.cpp (MoveToNextToken) skips escaped '+', '-' and '.'.
+
+Related: crbug.com/41291793 "SVG animation timing attributes are not being unescaped per SMIL spec" (2016,
+Blink>SVG), closed as Obsolete in 2018 without a fix for this case. WPT svg/animations/syncbase-escaped-dots.html
+covers escaped dots only; no WPT for escaped hyphens.
+-->

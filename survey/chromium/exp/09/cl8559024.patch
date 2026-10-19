@@ -1,0 +1,68 @@
+From ea2eeea7f120ce740c611e4d509e0c8dd759c516 Mon Sep 17 00:00:00 2001
+From: Rune Lillesveen <futhark@chromium.org>
+Date: Mon, 12 Oct 2026 14:37:24 +0200
+Subject: [PATCH] Registered custom property <integer> incorrectly computed to <number>
+
+Made style() container queries fail comparison.
+
+Bug: 571450199
+Change-Id: I268ba185a26a3077695acb919cf44a832699cb3a
+---
+
+diff --git a/third_party/blink/renderer/core/css/resolver/style_builder_converter.cc b/third_party/blink/renderer/core/css/resolver/style_builder_converter.cc
+index 2761d9d..a51c0a812 100644
+--- a/third_party/blink/renderer/core/css/resolver/style_builder_converter.cc
++++ b/third_party/blink/renderer/core/css/resolver/style_builder_converter.cc
+@@ -3600,8 +3600,13 @@
+     if (primitive_value->IsNumber() && primitive_value->IsCalculated()) {
+       const CSSMathFunctionValue& math_value =
+           To<CSSMathFunctionValue>(*primitive_value);
+-      // Note that GetDoubleValue automatically clamps according to the
++      // Note that ComputeInteger/Number automatically clamps according to the
+       // permitted range.
++      if (primitive_value->IsInteger()) {
++        return *CSSNumericLiteralValue::Create(
++            math_value.ComputeInteger(css_to_length_conversion_data),
++            CSSPrimitiveValue::UnitType::kInteger);
++      }
+       return *CSSNumericLiteralValue::Create(
+           math_value.ComputeNumber(css_to_length_conversion_data),
+           CSSPrimitiveValue::UnitType::kNumber);
+diff --git a/third_party/blink/web_tests/external/wpt/css/css-conditional/container-queries/query-evaluation-style.html b/third_party/blink/web_tests/external/wpt/css/css-conditional/container-queries/query-evaluation-style.html
+index 01ebda5e..c2d4397b4 100644
+--- a/third_party/blink/web_tests/external/wpt/css/css-conditional/container-queries/query-evaluation-style.html
++++ b/third_party/blink/web_tests/external/wpt/css/css-conditional/container-queries/query-evaluation-style.html
+@@ -25,6 +25,11 @@
+     inherits: true;
+     initial-value: 3;
+   }
++  @property --integer {
++    syntax: "<integer>";
++    inherits: true;
++    initial-value: 1001;
++  }
+   @property --angle {
+     syntax: "<angle>";
+     inherits: true;
+@@ -242,6 +247,21 @@
+   test_query_with_custom_properties('style(--length <= 30px)',
+                                   [['--length', 'attr(data-foo type(<length>))']],
+                                   true);
++  test_query_with_custom_properties('style(--integer: 41)',
++                                  [['--integer', 'calc(41)']],
++                                  true);
++  test_query_with_custom_properties('style(--integer: calc(31))',
++                                  [['--integer', '31']],
++                                  true);
++  test_query_with_custom_properties('style(--integer: 57)',
++                                  [['--integer', 'calc(57.2)']],
++                                  true);
++  test_query_with_custom_properties('style(--integer: calc(46.2))',
++                                  [['--integer', '46']],
++                                  true);
++  test_query_with_custom_properties('style(--integer: 16.0)',
++                                  [['--integer', '16']],
++                                  false);
+ 
+   // These should be true: the container has an attribute 'xyzzy="5px"',
+   // while 'plugh' is undefined so will use the default.

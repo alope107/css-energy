@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset=utf-8>
+<style>
+@property --x { syntax: '<number>'; inherits: true; initial-value: 0; }
+@keyframes track { from { --x: 0 } to { --x: 1000 } }
+body { margin: 0; timeline-scope: --data; }
+#sc { height: 100px; width: 300px; overflow-y: scroll; position: relative; }
+#spacer { height: 5000px; }
+/* data register: subject S's position in the scroller drives --x through a view timeline */
+#S { position: absolute; top: 2000px; height: 10px; width: 10px; view-timeline: --data; }
+/* enable: E's view timeline; E in view => trigger active => pause (hold) ; out => play (track) */
+#E { position: absolute; top: 3000px; left: 50px; height: 10px; width: 10px; timeline-trigger: --en view() cover 0% cover 100%; }
+#q  { animation: track linear both; animation-timeline: --data; animation-range: cover 0% cover 100%; }
+#qt { animation: track linear both; animation-timeline: --data; animation-range: cover 0% cover 100%; animation-trigger: --en pause play; }
+</style>
+<div id=sc><div id=spacer></div><div id=S></div><div id=E></div></div>
+<div id=q></div><div id=qt></div>
+<script>
+window.log = [];
+let frame = 0;
+const $ = id => document.getElementById(id);
+const v = id => Math.round(parseFloat(getComputedStyle($(id)).getPropertyValue('--x')));
+const st = id => { const a = $(id).getAnimations()[0]; return a ? a.playState[0] + (a.pending?'*':'') + '@' + (a.currentTime && a.currentTime.value !== undefined ? a.currentTime.value.toFixed(1) + '%' : a.currentTime) : '-'; };
+const sc = $('sc');
+// scrollTop fixed at 1950 so S (top 2000) is within cover range [1900, 2010]; move S to change data.
+const plan = { 2: () => { sc.scrollTop = 1950; return 'scroll to 1950'; },
+               4: () => { $('S').style.top = '1960px'; return 'S top 1960'; },
+               7: () => { $('E').style.top = '1990px'; return 'E into view (enable hold)'; },
+               10: () => { $('S').style.top = '2005px'; return 'S top 2005 (data changes while held)'; },
+               13: () => { $('S').style.top = '1920px'; return 'S top 1920'; },
+               16: () => { $('E').style.top = '3000px'; return 'E out (release: track)'; },
+               19: () => { $('S').style.top = '1990px'; return 'S top 1990'; },
+               22: () => { $('E').style.top = '1990px'; return 'E in (hold again)'; },
+               25: () => { $('S').style.top = '1930px'; return 'S top 1930 (held)'; } };
+function tick() {
+  frame++;
+  let note = plan[frame] ? plan[frame]() : '';
+  log.push(`f${frame} free=${v('q')} latched=${v('qt')} st(latched)=${st('qt')} ${note}`);
+  if (frame < 28) requestAnimationFrame(tick); else window.done = true;
+}
+requestAnimationFrame(tick);
+</script>

@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>animation-trigger: play-pause crashes the renderer</title>
+<p style="font: 14px sans-serif; background: green; color: white; padding: 8px; width: 300px">
+  Pass if this text stays visible. The bug: the tab crashes while loading ("Aw, Snap!").</p>
+<div style="animation-trigger: --t play-pause"></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless, default flags: the renderer crashes while loading
+(Playwright "Page crashed"). Same with `play-alternate`, with or without a timeline-trigger or an animation.
+`--t play-forwards` loads fine. Playwright's Firefox 157 doesn't support animation-trigger: loads fine.
+
+Spec (animation-triggers-1 §5.1, editor's draft of 2026-10-16,
+https://drafts.csswg.org/animation-triggers-1/#propdef-animation-trigger):
+animation-trigger = [ none | [ <dashed-ident> <animation-action>+ ]+ ]#, and the <animation-action> keywords are
+none, play, play-once, play-forwards, play-backwards, pause, reset and replay. play-pause and play-alternate are not
+among them (removed in csswg-drafts#12611), so the declaration should be invalid at parse time; a renderer crash is
+wrong under any grammar.
+
+Likely cause (same in 153 and on main 22b3b159):
+- core/css/properties/css_parsing_utils.cc:4752-4760, ConsumeAnimationTriggerBehavior, still accepts
+  CSSValueID::kPlayAlternate and kPlayPause;
+- core/css/css_value_id_mappings.h:554-575, CssValueIDToPlatformEnum<EAnimationTriggerBehavior>, has no case for
+  them: `default: NOTREACHED();` (fatal in release builds), reached from core/css/resolver/css_to_style_map.cc:835-846
+  (MapSingleAnimationTriggerAttachment) during style building;
+- EAnimationTriggerBehavior is generated from the IDL enum (animation_trigger.idl:8-17), which lacks both values.
+WPT scroll-animations/animation-trigger/parsing/animation-trigger-parsing.tentative.html tests neither keyword.
+AnimationTrigger is status "stable" in 153, 155 and main, so any page can crash a renderer this way.
+-->

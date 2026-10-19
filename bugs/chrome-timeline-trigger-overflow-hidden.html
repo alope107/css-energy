@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>timeline-trigger never fires in an overflow: hidden scroller</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  @keyframes come-in { to { top: 20px; } }          /* moves the subject into the scrollport at 0.3s */
+  @keyframes go-green { from, to { background: green; } }
+  .sc { position: relative; height: 100px; width: 300px; margin: 6px 0; border: 1px solid; }
+  .spacer { height: 1000px; }
+  .subj { position: absolute; top: 600px; left: 0; width: 20px; height: 20px; background: gray;
+          animation: come-in 0.01s 0.3s forwards; }
+  #s1 { timeline-trigger: --t1 view(); }
+  #s2 { timeline-trigger: --t2 view(); }
+  .out { width: 300px; height: 30px; margin: 6px 0; background: red; color: white; padding: 0 6px; }
+  #o1 { animation: go-green 1ms forwards; animation-trigger: --t1 play-forwards; }
+  #o2 { animation: go-green 1ms forwards; animation-trigger: --t2 play-forwards; }
+  /* keeps main-thread frames coming (see chrome-timeline-trigger-idle-page.html for the page without it) */
+  @property --tick { syntax: '<number>'; inherits: false; initial-value: 0; }
+  @keyframes tick { to { --tick: 1; } }
+  .busy { animation: tick 1s infinite; }
+</style>
+<p>Both bars should turn green after 0.3 s, when the gray square enters its scroller.</p>
+<div class="sc" style="overflow: hidden"><div class="spacer"></div><div class="subj" id="s1"></div></div>
+<div class="out" id="o1">overflow: hidden</div>
+<div class="sc" style="overflow: auto"><div class="spacer"></div><div class="subj" id="s2"></div></div>
+<div class="out" id="o2">overflow: auto (control)</div>
+<div class="busy"></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless, default flags: overflow: hidden stays red, overflow: auto
+turns green. Also red with visibility: hidden on an overflow: auto scroller. Both green with
+--disable-blink-features=CompositorTimelineTrigger. A script-scrolled (scrollTop) overflow: hidden scroller fired the
+entry action but never the exit action; a view-timeline-driven animation in the same scroller tracked correctly.
+Playwright's Firefox 157 doesn't support timeline triggers.
+
+Spec (animation-triggers-1, https://drafts.csswg.org/animation-triggers-1/#timeline-triggers, §3): "A timeline
+trigger is a trigger which is activated when some timeline enters the trigger's activation range, and deactivated
+when it leaves the trigger's active range." A view timeline in an overflow: hidden scroll container is an active
+timeline (scroll-animations-1: any scroll container), and the same timeline drives animations correctly.
+
+Likely cause (same in 153 and on main 22b3b159): CompositorTimelineTrigger is status "stable"
+(platform/runtime_enabled_features.json5). Once a cc::TimelineTrigger exists, TimelineTrigger::Update() returns
+early ("If a cc TimelineTrigger exists, it is the source of truth", core/animation/timeline_trigger.cc:63-69), so the
+main thread stops evaluating; the cc trigger is created whenever a cc timeline exists
+(TimelineTrigger::CreateCompositorTrigger, timeline_trigger.cc:191-229) without checking that the impl thread can
+evaluate it. On the impl thread cc::TimelineTrigger::Update returns early while its ScrollTimeline is inactive
+(cc/animation/timeline_trigger.cc:73-76), and cc::ScrollTimeline::IsActive is false when the scroller has no
+composited scroll node (cc/animation/scroll_timeline.cc:71-75), the case for overflow: hidden and visibility: hidden
+scrollers. Neither thread evaluates the trigger then.
+-->

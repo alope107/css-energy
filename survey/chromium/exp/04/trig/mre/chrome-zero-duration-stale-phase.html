@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset=utf-8>
+<title>0s animation keeps a stale phase when only the playback direction changes</title>
+<style>
+@keyframes k { from { background: green } to { background: red } }
+div { width: 300px; height: 40px; margin: 4px; color: white; font: 14px sans-serif; padding: 4px; }
+/* A: triggered 0s animation whose trigger never resolves (untriggered, paused-for-trigger). */
+#a { animation: k 0s both; animation-trigger: --never play; }
+/* A': same with 1ms: shows the from keyframe (green) as Chromium intends for untriggered animations. */
+#a2 { animation: k 1ms both; animation-trigger: --never play; }
+</style>
+<div id=a>A: untriggered 0s (green = pass)</div>
+<div id=a2>A': untriggered 1ms (reference, green)</div>
+<div id=c>C: WAAPI 0s, reverse() at time 0 (green = pass)</div>
+<script>
+// C needs a script only to call reverse(); the colour shows the result.
+const c = document.getElementById('c').animate(
+  [{ background: 'green' }, { background: 'red' }], { duration: 0, fill: 'both' });
+c.pause();
+c.reverse();
+</script>
+<!--
+Observed, Chrome 153.0.8010.12 (headless, default flags and with --disable-blink-features=CompositorTimelineTrigger):
+A red, A' green, C red. For C, getComputedTiming().progress stays 1 with playbackRate -1 and currentTime 0,
+while a fresh animation set to playbackRate -1, paused, currentTime 0 reports progress 0 (green); setting
+currentTime = 0 again doesn't refresh it.
+
+Spec (web-animations-1 ED, "Animation effect phases and states"): animation direction is "backwards" if the
+associated animation's playback rate is less than zero. "An animation effect is in the before phase if [its] local
+time is not unresolved and ... the animation direction is 'backwards', the endpoint-inclusive active interval flag is
+false, and the local time is equal to the before-active boundary time." For a 0s effect at local time 0 with
+playback rate < 0 that is the before phase: fill backwards, progress 0, green (C).
+For A, Chromium's own trigger model puts an untriggered animation in the before phase at its start boundary
+(timing_calculations.cc:106-111, `paused_for_trigger`), which A' shows; animation-triggers-1 doesn't define it.
+
+Likely cause (main 2026-10-18, same in 153): AnimationEffect::UpdateInheritedTime (animation_effect.cc:326-341)
+recomputes timing only if `needs_update_ || last_update_time_ != inherited_time || last_is_idle_ != is_idle`; the
+direction (sign of the playback rate) and `paused_for_trigger_` are inputs to CalculateTimings but not to that
+check, and AnimationEffect::SetPausedForTrigger (animation_effect.cc:406-408) doesn't invalidate. A new triggered
+CSS animation is paused (sampled at time 0, after phase for 0s) before SetPausedForTrigger(true)
+(css/css_animations.cc:2533-2538); reverse() keeps currentTime 0, so the cached after-phase result survives.
+-->

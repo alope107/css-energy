@@ -1,0 +1,316 @@
+PreloadScannerSkipMathMLScript                          —            | stable       | —            | —           
+SvgIgnoreOuterTransforms                                —            | stable       | —            | —           
+AIDecisionModelAPI                                      —            | —            | {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off} | {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off}
+AIDecisionModelAPIForWorkers                            —            | —            | test         | test        
+AIPageContentLabelExpandFallbackSources                 —            | —            | stable       | stable      
+AIPageContentLabelRemoveRedundant                       —            | —            | off          | off         
+AIPageContentLabelRemoveRedundantWholeWordMatching      —            | —            | off          | off          dep:['AIPageContentLabelRemoveRedundant']
+AnimationRangeRejectRelativeLengths                     —            | experimental | experimental | experimental
+AnnotationSpaceForMultiCol                              —            | experimental | experimental | experimental dep:['AnnotationSpaceOnStart']
+AppearanceDisplayAdjustmentForWidgetsOnly               —            | —            | stable       | stable      
+AudioWorkletSharedPort                                  —            | experimental | experimental | experimental
+AvoidNonSelectableSelectionBoundary                     —            | stable       | stable       | stable      
+CSSAlphaColorFunctionRequiresAlpha                      —            | stable       | stable       | stable      
+CSSBackgroundLayerCountIndependence                     —            | test         | experimental | experimental
+CSSCalcEarlyNaNAndInfFolding                            —            | —            | off          | off         
+CSSCustomHighlightUniversalSelector                     —            | experimental | experimental | experimental
+CSSFlowStartAndEnd                                      —            | experimental | experimental | experimental
+CSSFlowStartAndEndSerialization                         —            | —            | experimental | experimental dep:['CSSFlowStartAndEnd']
+CSSLinkParametersProperty                               —            | —            | experimental | experimental
+CSSPositionVisibilityAnchorValid                        —            | —            | stable       | stable      
+CSSPrivate                                              —            | experimental | experimental | experimental
+CSSPseudoElementScrollButton                            —            | —            | experimental | experimental dep:['CSSPseudoElementInterface']
+CSSPseudoElementSelectorText                            —            | —            | experimental | experimental dep:['CSSPseudoElementInterface']
+CSSScrollSnapStopBefore                                 —            | test         | test         | test        
+CSSTreeScopedScrollTimeline                             —            | —            | experimental | experimental
+Canvas2dDeferredFlush                                   —            | experimental | experimental | experimental
+CanvasTextDirectionReflect                              —            | —            | stable       | stable      
+CapabilityDelegationPopup                               —            | —            | experimental | experimental
+CapabilityElementIconOnlyMode                           —            | off          | off          | off         
+CapitalizeAfterSupplementaryCharacterFix                —            | —            | stable       | stable      
+CaretBlinking                                           —            | —            | stable       | stable      
+CaretBrowsingSequentialFocusStartingPoint               —            | —            | —            | stable      
+CaretOutsideEditableAtomicInline                        —            | stable       | stable       | stable      
+CheckCSPOnInlineScriptAttributeSet                      —            | —            | stable       | stable      
+CleanUpActivationBehavior                               —            | experimental | stable       | stable      
+ClearDisplayLockPrePaintFlags                           —            | stable       | stable       | stable      
+ClipboardOnExtensionServiceWorker                       —            | —            | off          | off         
+CompositeHoverStyle                                     —            | —            | —            | off         
+ConstructableStylesheetCache                            —            | test         | test         | test        
+CrossOriginStorage                                      —            | —            | off          | off         
+CustomizableSelectNewUAStyles                           —            | —            | experimental | experimental
+DeclarativeWebMCP                                       —            | —            | experimental | experimental OT:WebMCP impl:['WebMCPDeclarativeFileInput', 'WebMCPFormAssociatedCustomElements']
+DeferLineBoxHitTestToBackground                         —            | —            | stable       | stable      
+DispatchWorkerCSPViolationEventForModuleGraphFetching   —            | —            | experimental | experimental
+DocumentNamedPropertiesIgnoreExposedness                —            | stable       | stable       | stable      
+DragAndDropDownloadURLList                              —            | test         | test         | test        
+DragThresholdRequiresMouseMovement                      —            | —            | —            | test        
+EditContextBoundsUpdateSchedulesFrame                   —            | —            | stable       | stable      
+EditContextCodePointDeletion                            —            | —            | stable       | stable      
+EditContextSelectionUpdateBeforeTextUpdateEvent         —            | stable       | stable       | stable      
+EmojiZWJVerticalOrientation                             —            | —            | stable       | stable      
+EventPseudoTargetViewTransitionName                     —            | —            | stable       | stable      
+FastCompositionCharacterBounds                          —            | —            | —            | stable      
+FedCmActiveModeMultipleIdentityProviders                —            | experimental | experimental | experimental dep:['FedCmMultipleIdentityProviders']
+FedCmIdentityHandler                                    —            | test         | test         | test         dep:['FedCm']
+FindBufferCollapseSkippedSpace                          —            | stable       | stable       | stable      
+FindBufferSkipIgnoredSubtrees                           —            | —            | stable       | stable      
+FirstLineAndLetterExcludeInputTextarea                  —            | —            | stable       | stable      
+FocusResetEvent                                         —            | —            | experimental | experimental
+FontPrewarmerShutdownFallback                           —            | stable       | stable       | stable      
+FontUniqueNameTypefaceCache                             —            | —            | stable       | stable      
+FontVariableItalicAxis                                  —            | —            | stable       | stable      
+FontationsPrinting                                      —            | experimental | stable       | stable      
+FractionalScrollOffsetsForWebAPI                        —            | off          | off          | off         
+FrameCaretSkipHiddenCheck                               —            | —            | stable       | stable      
+GenerateXSLTWarningBanner                               —            | stable       | stable       | stable      
+GetTargetRangesRetargeting                              —            | —            | stable       | stable      
+GlobalPrivacyControlApi                                 —            | —            | experimental | experimental
+HTMLBodyMarginPixelLength                               —            | stable       | stable       | stable      
+HTMLParserIgnoreHeadInNoscript                          —            | —            | stable       | stable      
+HyphenVerticalOrientationFix                            —            | —            | stable       | stable      
+InitialLetterBlockPositioning                           —            | —            | —            | stable      
+InlineContainingBlockSkipOpaque                         —            | —            | test         | test        
+InlineCursorSkipNonIfc                                  —            | stable       | stable       | stable      
+InputClientRectWithoutInlinePadding                     —            | —            | stable       | stable      
+InputMultipleFieldsUIWithPointerChecks                  —            | stable       | off          | off         
+LayoutCloneForScrollableOverflowChange                  —            | —            | stable       | stable      
+LayoutContainingBlockReturnsBox                         —            | —            | stable       | stable      
+LazyParseInlineStyleSheets                              —            | —            | off          | off         
+LineBreakBidiControlEnter                               —            | stable       | stable       | stable      
+LineBreakerClearShapeResultOnOverflow                   —            | —            | stable       | stable      
+LongPressHitTestInFrame                                 —            | —            | stable       | stable      
+LongPressReleasesActiveState                            —            | —            | stable       | stable      
+MacFontWeightFromOS2                                    —            | —            | stable       | stable      
+ModuleMapDoNotCacheFailedFetch                          —            | experimental | stable       | stable      
+MonospaceGlyphCompaction                                —            | —            | off          | test        
+NastaliqScript                                          —            | —            | off          | off         
+NavigationSourcePseudoClass                             —            | experimental | stable       | stable       impl:['RouteMatching']
+NeutralKeyframeEasingCompliance                         —            | —            | —            | stable      
+NoSynchronousThrowForCrossOriginBlockedWorker           —            | —            | experimental | experimental
+OfflineAudioContextIncrementalRendering                 —            | —            | experimental | experimental
+OmitSubframeDetachmentEventsOnRemoval                   —            | off          | off          | off         
+OofLayoutRequiresSideEffects                            —            | stable       | stable       | stable      
+OverscrollAreas                                         —            | —            | experimental | experimental OT:OverscrollAreas dep:['CSSScrollSnapTypePair']
+PaymentHandlerStaticCustomSize                          —            | —            | —            | off         
+PermissionsPolicyForSharedWorkers                       —            | —            | experimental | experimental
+PersistentWidgetAPI                                     —            | —            | off          | off         
+PopupWidgetRequiresUserActivation                       —            | —            | stable       | stable      
+PositionVisibilitySingularValues                        —            | —            | stable       | stable      
+PrePaintBoxInvalidatorUsesFragments                     —            | —            | stable       | stable      
+PreloadScannerImprovements                              —            | —            | stable       | stable      
+ProgressEventInServiceWorker                            —            | —            | stable       | stable      
+RTCConfigurationIceTransports                           —            | off          | off          | off         
+RTCEncodedSource                                        —            | experimental | experimental | experimental
+RTCEncodedVideoFrameConstructor                         —            | experimental | experimental | experimental
+RTCLegacyDiagnosticLogging                              —            | —            | experimental | experimental OT:RTCDiagnosticLogging
+RadioButtonCircularBorderRadius                         —            | —            | stable       | stable      
+ReadOnlyTextControlSelection                            —            | —            | stable       | stable      
+ReplaceChildrenWithFragmentFastPath                     —            | stable       | stable       | stable      
+ReplaceCompositionActualInsertedLength                  —            | —            | —            | stable      
+RubyTextDecorationSpacing                               —            | —            | stable       | stable      
+SVGTextPathSideAttribute                                —            | experimental | experimental | stable      
+ScrollIntoViewNoInitialFocusNavigationStartingPoint     —            | —            | stable       | stable      
+ScrollToTextFragmentDirectiveLimit                      —            | stable       | stable       | stable      
+ScrollVisibilityHiddenScrollers                         —            | —            | stable       | stable      
+SelectedcontentSpec2                                    —            | —            | —            | stable      
+SequentialFocusPrimitives                               —            | —            | test         | test         dep:['CSSPseudoElementInterface']
+SequentialFocusPrimitivesShadowRoots                    —            | —            | test         | test         dep:['SequentialFocusPrimitives']
+ServiceWorkerCodeCacheHashing                           —            | —            | stable       | stable      
+ServiceWorkerScriptEncoding                             —            | —            | stable       | stable      
+SkipCompositingStaticBackdropFilterAnimation            —            | —            | stable       | stable      
+SkipPaintInvalidationWhileStayingInvisible              —            | —            | stable       | stable      
+SkipTickingStaticAnimations                             —            | —            | stable       | stable      
+SpecCompliantXmlMimeTypes                               —            | experimental | experimental | experimental
+SrcsetTwoDimensionalSizes                               —            | —            | —            | experimental
+StaleIntersectionGeometryForThrottledFrames             —            | —            | —            | stable      
+StyleResourceFetcherIdentityCheck                       —            | —            | stable       | stable      
+SubframeMouseCaptureOwner                               —            | —            | stable       | stable      
+SuppressFullscreenFromUnfocusedView                     —            | —            | stable       | stable      
+SvgCss3dTransforms                                      —            | —            | experimental | experimental
+SvgEmptyAttributeStringParsingFix                       —            | stable       | stable       | stable      
+SvgIncrementalStyle                                     —            | —            | stable       | stable      
+SvgInstanceSyncOptimization                             —            | stable       | stable       | stable      
+TargetRangesForBackwardDeletionUnit                     —            | stable       | stable       | stable      
+TemporalInputHostBlur                                   —            | —            | stable       | stable      
+TestFeatureCustomEnableCheck                            —            | —            | off          | off         
+TextBoxTrimOnInlineBox                                  —            | stable       | stable       | stable      
+TextBoxTrimOnInlineBoxTextDecoration                    —            | —            | stable       | stable       dep:['TextBoxTrimOnInlineBox']
+TextIteratorExcludeAutofilledSelectFix                  —            | stable       | stable       | stable      
+TextOverflowInTextarea                                  —            | stable       | stable       | stable      
+TimePickerHonorsStep                                    —            | —            | stable       | stable      
+TrackAnimatedSources                                    —            | test         | test         | test        
+UnsafeEscapingUnboundedElementOnTheOpenWeb              —            | —            | —            | off         
+UnsafeUnboundedElementOnTheOpenWeb                      —            | —            | off          | off          impl:['UnsafeEscapingUnboundedElementOnTheOpenWeb']
+UsePaintGeometryForIntersection                         —            | stable       | stable       | stable      
+ViewTransitionPreventSvgFilterPaint                     —            | —            | —            | stable      
+ViewTransitionSkipPseudoTreeForNavigationCapture        —            | —            | —            | stable      
+ViewTransitionSkipZeroHeightControlsSnap                —            | —            | stable       | stable      
+WavyDecorationContinuousPhase                           —            | —            | stable       | stable      
+WebAuthenticationRemoteClientDataJson                   —            | —            | off          | off         
+WebGLToneMapping                                        —            | experimental | experimental | experimental
+WebGPUExternalImageHDRHeadroom                          —            | experimental | experimental | experimental
+WebHaptics                                              —            | experimental | experimental | experimental
+WebMCPContinuations                                     —            | —            | —            | experimental
+WebTransportCreateStreamsBeforeReady                    —            | stable       | stable       | stable      
+WebTransportDatagramsReadableType                       —            | experimental | experimental | experimental
+WebTransportDatagramsWritable                           —            | experimental | experimental | experimental dep:['WebTransportSendGroup']
+WebTransportExportKeyingMaterial                        —            | —            | experimental | experimental
+WebTransportReliability                                 —            | experimental | stable       | stable      
+WebVTTCueLayoutByPositionAlignment                      —            | stable       | stable       | stable      
+WebVTTCueTightLineBox                                   —            | stable       | stable       | stable      
+WebVTTLineAndPositionAlignment                          —            | experimental | experimental | experimental
+WindowOpenAlwaysOnTop                                   —            | test         | test         | test        
+WindowOpenAttributionSrc                                —            | stable       | stable       | stable      
+AIClassifierAPI                                         {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off} | {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off} | —            | —           
+AllowSameSiteNoneCookiesInSandbox                       off          | —            | —            | —           
+BlinkExtensionChromeOS                                  off          | —            | —            | —           
+CSSColorQuantizedAlphaOnlyLegacy                        stable       | —            | —            | —           
+CSSContrastColor                                        stable       | stable       | —            | —           
+CSSGapDecoration                                        stable       | —            | —            | —            dep:['CSSGridGapSuppression']
+CSSGridGapSuppression                                   stable       | —            | —            | —           
+CSSLetterAndWordSpacingPercentage                       stable       | stable       | —            | —           
+CSSOverscrollBehaviorChain                              stable       | stable       | —            | —           
+CSSTimelineNameConflictResolution                       experimental | experimental | —            | —           
+CSSTypedArithmetic                                      stable       | stable       | —            | —           
+CheckVisibilityExtraProperties                          stable       | stable       | —            | —           
+ClickFocusDoesntPersistStatusBubble                     stable       | —            | —            | —           
+CollapseZeroWidthSpaceWhenReuseItem                     stable       | —            | —            | —           
+CommaSeparatedContainerQueries                          stable       | stable       | —            | —           
+CompositeBGColorAnimation                               stable       | stable       | stable       | —           
+CompositeBoxShadowAnimation                             off          | off          | off          | —           
+ContainerNameOnly                                       stable       | stable       | —            | —           
+ContainerTimingPrepaintTraversal                        off          | —            | —            | —            dep:['ContainerTiming']
+CreateHTMLDocumentReadyState                            stable       | —            | —            | —           
+CssTextIndent                                           stable       | —            | —            | —           
+DOMActivateBubblesInheritance                           stable       | —            | —            | —           
+DisableReduceAcceptLanguage                             off          | —            | —            | —            OT:DisableReduceAcceptLanguage
+DisallowDisconnectedAreaNavigation                      stable       | —            | —            | —           
+DisallowPickerForReadonlyInputs                         stable       | —            | —            | —           
+DocumentActiveViewTransition                            stable       | —            | —            | —           
+DontLeakShadowTreesInDragEvents                         stable       | —            | —            | —           
+EditingLineMovementWithRubyFix                          stable       | —            | —            | —           
+ElementCanvasTransform                                  experimental | experimental | —            | —           
+EmailVerificationStatusIndicator                        {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off} | experimental | —            | —            OT:EmailVerificationProtocol dep:['EmailVerificationProtocol']
+EmojiMonochromeRendering                                stable       | —            | —            | —           
+FencedFramesDefaultMode                                 off          | —            | —            | —           
+FileColorPickerConsumeActivation                        stable       | stable       | —            | —           
+FirstLineOnListItem                                     stable       | —            | —            | —           
+FirstLineTextTransform                                  stable       | —            | —            | —           
+FixMarkerSuppressionForAppearanceAuto                   off          | off          | —            | —           
+FontFallbackForTabSize                                  stable       | stable       | —            | —           
+FrameSerializerNoWebEntities                            stable       | stable       | —            | —           
+GlobalPrivacyControlTest                                experimental | experimental | —            | —           
+HTMLInputElementDropWebkitClearButton                   stable       | stable       | —            | —           
+InterestGroupsInSharedStorageWorklet                    stable       | stable       | —            | —           
+KeySystemTrackConfigurationEncryptionScheme             stable       | stable       | —            | —           
+LayoutTableCellAlignmentSafe                            stable       | —            | —            | —           
+ListOwnerMustHaveCSSBox                                 stable       | stable       | —            | —           
+MergeFixedLayers                                        stable       | stable       | —            | —           
+MergeStickyLayers                                       stable       | stable       | stable       | —           
+NavigationId                                            experimental | —            | —            | —            OT:SoftNavigationHeuristics impl:['SoftNavigationHeuristics']
+NavigationState                                         experimental | —            | —            | —            impl:['RouteMatching']
+NormalizeNbspForPasteAndDrop                            stable       | stable       | —            | —           
+NormalizeNbspRichTextOnly                               stable       | stable       | —            | —            dep:['NormalizeNbspForPasteAndDrop']
+OverscrollGestures                                      experimental | experimental | —            | —           
+ProgressMaxIsPositive                                   stable       | —            | —            | —           
+ProtectedOriginTrialsSampleAPI                          off          | off          | —            | —            OT:Frobulate
+ProtectedOriginTrialsSampleAPIDependent                 off          | off          | —            | —            dep:['ProtectedOriginTrialsSampleAPI']
+ProtectedOriginTrialsSampleAPIImplied                   off          | off          | —            | —            OT:FrobulateImplied impl:['ProtectedOriginTrialsSampleAPI']
+QuoteFirstLineStyle                                     stable       | —            | —            | —           
+RecordSameDocumentPresentationTimeOnce                  stable       | stable       | —            | —           
+RemovePositionAnchorUAStyle                             stable       | —            | —            | —           
+RemoveTargetCurrent                                     stable       | stable       | —            | —           
+RequestMainFrameAfterFirstVideoFrame                    stable       | —            | —            | —           
+RequestStorageAccessFor                                 stable       | off          | off          | —           
+ScrollAnchorPriorityCandidateSubtree                    stable       | stable       | —            | —           
+ScrollToTextFragmentUniqueFragments                     stable       | stable       | —            | —           
+ScrollingContentsCullRectOnScrollNode                   stable       | stable       | —            | —            impl:['MergeStickyLayers']
+SelectAutofillPopoverPreview                            stable       | —            | —            | —           
+SelectedcontentSpec                                     stable       | stable       | —            | —           
+SelectiveClipboardFormatRead                            test         | test         | —            | —           
+ShadowContourFollowsBorder                              stable       | —            | —            | —           
+SharedStorageAPI                                        off          | off          | —            | —           
+SharedStorageWebLocks                                   off          | off          | —            | —            dep:['SharedStorageAPI']
+SkipOofItemForBreakCandidate                            stable       | —            | —            | —           
+SkipViewTransitionSnapshotResumeRendering               stable       | stable       | —            | —           
+SoftNavigationDetection                                 stable       | —            | —            | —           
+SoftNavigationDetectionIncludeReplaceState              stable       | —            | —            | —           
+SoftNavigationHeuristics                                stable       | —            | —            | —           
+SplitLargeTextNodes                                     off          | off          | —            | —           
+StickyPositionHasOverflowPerAxis                        stable       | stable       | stable       | —           
+StreamingSanitizer                                      stable       | stable       | —            | —           
+TabSizeAncestor                                         stable       | —            | —            | —           
+TabSizeWithSpacing                                      stable       | —            | —            | —           
+TableBorderColorNoImplicitBorder                        stable       | —            | —            | —           
+TestFeatureProtected                                    off          | off          | —            | —           
+TestFeatureProtectedDependent                           off          | off          | —            | —            dep:['TestFeatureProtectedImplied']
+TestFeatureProtectedImplied                             off          | off          | —            | —            impl:['TestFeatureProtected']
+TextAreaEmptyPlaceholderBreak                           stable       | —            | —            | —           
+TextEmphasisAsRuby                                      stable       | —            | —            | —           
+TextEmphasisLetterSpacing                               stable       | stable       | —            | —           
+TextEmphasisPunctuationExceptions                       stable       | stable       | —            | —           
+TextEmphasisWithRuby                                    stable       | stable       | —            | —           
+ThrottledHistoryAPIThrowsSecurityError                  test         | —            | —            | —           
+TransitionNavigationQuietSkip                           stable       | —            | —            | —           
+TreeRubyPlacement                                       stable       | stable       | —            | —           
+TrustedTypesHTML                                        stable       | stable       | —            | —           
+UnboundedElementOnTheOpenWeb                            off          | off          | —            | —           
+UseLargestPaintedImageForLCPCandidate                   stable       | stable       | —            | —           
+ViewTransitionAsyncFinished                             stable       | —            | —            | —           
+ViewTransitionDOMCallbackAfterCommit                    stable       | stable       | —            | —           
+ViewTransitionDelayUnpauseOnTeardown                    stable       | —            | —            | —           
+ViewTransitionHoistBackdropFilterEffect                 stable       | —            | —            | —           
+ViewTransitionUpdateLifecycleBeforeReady                stable       | —            | —            | —           
+ViewTransitionWaitUntil                                 stable       | —            | —            | —           
+WebAudioRustFft                                         stable       | —            | —            | —           
+WebMCPTesting                                           experimental | experimental | —            | —           
+WordSpacingWhiteSpacePre                                stable       | —            | —            | —           
+XPathShadowDOMSupport                                   stable       | —            | —            | —           
+AIPageContentTrackedElementsPassword                    test         | test         | stable       | stable      
+AISummarizationPerformancePreference                    off          | off          | {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off} | {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off}
+AdInterestGroupAPI                                      stable       | stable       | off          | off          OT:AdInterestGroupAPI impl:['Fledge', 'Parakeet']
+AvoidEmbeddedContentViewLocation                        stable       | test         | stable       | stable      
+CSSCounterStyleSymbolsFunction                          experimental | stable       | stable       | stable      
+CSSRandomFunction                                       experimental | experimental | stable       | stable      
+CSSScrollMarkerGroupModes                               experimental | stable       | stable       | stable      
+CSSScrollSnapTypePair                                   test         | experimental | stable       | stable      
+CSSTextDecorationInset                                  experimental | experimental | stable       | stable      
+CSSTextDecorationSkipSpaces                             experimental | stable       | stable       | experimental
+CSSTimelineScopeGlobal                                  off          | off          | experimental | experimental dep:['CSSTreeScopedScrollTimeline']
+CanvasDrawElement                                       experimental | experimental | stable       | stable       OT:HTMLInCanvas
+ColorSpacePredefinedLinearSpaces                        experimental | experimental | stable       | stable      
+DesktopPWAsAdditionalWindowingControls                  experimental | {ChromeOS:stable,default:experimental} | {ChromeOS:stable,default:experimental} | {ChromeOS:stable,default:experimental}
+EmailVerificationProtocol                               {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental,default:off} | experimental | experimental | experimental OT:EmailVerificationProtocol
+ExtensionScriptTagging                                  test         | test         | stable       | stable      
+EyeDropperAPI                                           {ChromeOS:stable,Linux:stable,Mac:stable,Win:stable} | {ChromeOS:stable,Linux:stable,Mac:stable,Win:stable} | {ChromeOS:stable,Linux:stable,Mac:stable,Win:stable} | {Android:stable,ChromeOS:stable,Linux:stable,Mac:stable,Win:stable}
+FirstLineTextMetrics                                    stable       | off          | off          | off         
+Fledge                                                  stable       | stable       | off          | off         
+ForwardReasonToFetchBodyAbort                           experimental | stable       | stable       | stable      
+FractionalScrollOffsets                                 off          | experimental | experimental | experimental impl:['FractionalScrollOffsetsForWebAPI']
+GenerateDragOverlayBeforeDragStart                      experimental | experimental | stable       | stable      
+HarfRustShaping                                         off          | test         | test         | test        
+JavaScriptImportText                                    experimental | experimental | stable       | stable      
+LanguageDetectionAPI                                    {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable,Android:test,default:off} | {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable,Android:test,default:off} | {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable,Android:stable,default:off} | {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable,Android:stable,default:off}
+LightDismissFromClick                                   experimental | stable       | stable       | stable      
+LineBreakerHanKerningEnd                                stable       | stable       | off          | off         
+MarginTrim                                              experimental | stable       | stable       | stable      
+MediaCaptionSettingsButton                              {Win:experimental,Mac:experimental,Linux:experimental,ChromeOS:experimental} | {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable} | {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable} | {Win:stable,Mac:stable,Linux:stable,ChromeOS:stable}
+MediaPlaybackWhileNotVisiblePermissionPolicy            test         | stable       | stable       | stable      
+NewHTMLSettingMethods                                   experimental | experimental | stable       | stable       dep:['SetHTMLCanRunScripts', 'TrustedTypesCreateParserOptions']
+RTCDiagnosticLogging                                    experimental | experimental | {Android:off,default:stable} | {Android:off,default:stable} OT:RTCDiagnosticLogging
+RasterInducingScroll                                    {Linux:stable,Win:stable,default:test} | {Linux:stable,Win:stable,default:test} | stable       | stable      
+ResponsiveIframes                                       experimental | stable       | stable       | stable      
+ServiceWorkerCodeCache                                  off          | off          | stable       | stable      
+SetHTMLCanRunScripts                                    experimental | stable       | stable       | stable      
+SingleAxisScrollContainers                              experimental | experimental | stable       | stable      
+SingleAxisScrollContainersForScrollSnap                 test         | experimental | experimental | experimental dep:['SingleAxisScrollContainers']
+SpellCheckChunking                                      {Android:experimental} | {Android:stable} | {Android:stable} | {Android:stable}
+TextOverflowString                                      experimental | experimental | stable       | stable      
+TrustedTypesCreateParserOptions                         experimental | experimental | stable       | stable       dep:['SanitizerAPI', 'SetHTMLCanRunScripts']
+WebCryptoPQC                                            off          | stable       | stable       | stable      
+WebHID                                                  {Android:off,default:stable} | {Android:experimental,default:stable} | {Android:experimental,default:stable} | stable      
+WebIdentityDigitalCredentialsCreation                   experimental | stable       | stable       | stable      
+WebTransportHeaders                                     experimental | experimental | stable       | stable      
+XMLRustForNonXslt                                       stable       | experimental | stable       | stable      
+XSLT                                                    stable       | stable       | stable       | off          OT:XSLT

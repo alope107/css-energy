@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width"><style>
+body{margin:0}
+#r{width:300px;margin:20px 0 0 20px}
+#r::-webkit-slider-thumb{anchor-name:--th}
+#ra{position:absolute;position-anchor:--th;left:anchor(--th left,7777px);top:60px;width:5px;height:5px;background:red}
+#ib{margin:100px 0 0 20px;width:120px;height:60px}
+.o{width:1px;height:4px;background:red}
+#ib:interest-source ~ #oi{width:40px}
+#tip{position:fixed;top:0;left:0}
+#ac:active ~ #oa{width:50px}
+#ac{display:block;width:120px;height:60px;margin:20px}
+</style></head><body>
+<input type=range id=r min=0 max=100 value=10><div id=ra></div>
+<button id=ib interestfor=tip>long-press</button><div id=tip popover=hint>tip</div><div class=o id=oi></div>
+<button id=ac>active</button><div class=o id=oa></div>
+</body></html>

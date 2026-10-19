@@ -1,0 +1,25 @@
+<!doctype html>
+<style>
+@property --v { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes setv { from { --v: 0 } to { --v: 100 } }
+#a { animation: setv 0s linear reverse both; animation-play-state: paused; }
+#b { }
+</style>
+<div id=a></div><div id=b></div>
+<script>
+window.log = [];
+const a = document.getElementById('a'), b = document.getElementById('b');
+const wb = b.animate([{ '--v': 0 }, { '--v': 100 }], { duration: 0, direction: 'reverse', fill: 'both' }); wb.pause();
+const r = (el, an) => `${getComputedStyle(el).getPropertyValue('--v')} ${an.playState}(${an.playbackRate}@${an.currentTime})`;
+let f = 0;
+const ca = a.getAnimations()[0];
+function tick() {
+  f++;
+  if (f == 3) { ca.reverse(); wb.reverse(); log.push('reverse()'); }
+  if (f == 6) { ca.reverse(); wb.reverse(); log.push('reverse() again'); }
+  if (f == 9) { ca.playbackRate = -1; ca.play(); wb.updatePlaybackRate(-1); log.push('rate -1 play'); }
+  log.push(`f${f} css: ${r(a, ca)} | waapi: ${r(b, wb)}`);
+  if (f < 12) requestAnimationFrame(tick); else window.done = true;
+}
+requestAnimationFrame(tick);
+</script>

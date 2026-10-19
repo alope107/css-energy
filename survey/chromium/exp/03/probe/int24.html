@@ -1,0 +1,10 @@
+<!doctype html><style>@property --xi{syntax:'<integer>';inherits:false;initial-value:0}
+@property --d{syntax:'<number>';inherits:false;initial-value:0}
+@property --xa{syntax:'<integer>';inherits:false;initial-value:0}
+#a{--xi:16777217;--d:calc(var(--xi) - 16777210)}
+#b{--xi:2147483647;--d:calc(var(--xi) - 2147483640)}
+#c{--d:calc(9007199254740993 - 9007199254740990)}
+#e{--d:calc((16777217.0 * 3) - 50331650)}
+@keyframes k{from{--xa:0}to{--xa:2000000000}}
+#f{animation:k 1s linear -0.123456789s paused both;--d:calc(var(--xa) - 246913570)}
+</style><i id=a></i><i id=b></i><i id=c></i><i id=e></i><i id=f></i>

@@ -1,0 +1,18 @@
+<!doctype html><meta charset=utf-8>
+<style>
+body{margin:0}
+#s{position:absolute;left:0;top:100px;width:400px;height:60px;overflow-x:scroll;display:flex;scroll-marker-group:after;scrollbar-width:none}
+#s>div{flex:0 0 100px;height:50px;background:#eee;border-right:1px solid #000;box-sizing:border-box}
+#s>div::scroll-marker{content:"";width:20px;height:20px;background:blue;display:inline-block}
+#s>div::scroll-marker:target-current{background:red}
+#s>div::scroll-marker:target-before{outline:1px solid green}
+#s::scroll-marker-group{position:fixed;left:0;top:0;width:800px;height:20px;display:flex;gap:10px}
+.snap #s{scroll-snap-type:x mandatory}
+.snap #s>div{scroll-snap-align:center}
+</style>
+<div id=s></div>
+<script>
+const s=document.getElementById('s');for(let i=0;i<20;i++){const d=document.createElement('div');d.textContent=i;s.appendChild(d);}
+window.cur=()=>{const out=[];const kids=[...s.children];kids.forEach((k,i)=>{const c=getComputedStyle(k,'::scroll-marker').backgroundColor;if(c==='rgb(255, 0, 0)')out.push(i);});
+ const before=kids.filter(k=>getComputedStyle(k,'::scroll-marker').outlineStyle==='solid').length;return {cur:out.join(','),before};};
+</script>

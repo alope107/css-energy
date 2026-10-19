@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Survey demos</title>
+<style>
+  body { font: 15px/1.55 system-ui, sans-serif; margin: 16px; max-width: 760px; color: #222; background: #fff; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  li { margin: 10px 0; }
+  a { font-weight: 600; }
+  code { background: #f2f2f2; padding: 0 3px; }
+  .ch { color: #666; font-size: 13px; }
+</style>
+<h1>Chromium survey: script-free demos</h1>
+<p>Small pages that show primitives the survey found (<code>survey/chromium/README.md</code>). None runs script. Open
+them in Chrome through the repo-root server (<code>python3 -m http.server 8765 --bind 127.0.0.1 --directory
+&lt;repo&gt;</code>).</p>
+<ol>
+  <li><a href="svg-channel.html">SVG child → parent</a>: an SVG document in an <code>&lt;object&gt;</code> computes a
+    number from its own state and the parent reads it with CSS. <span class="ch">Chapter 01 §1.8</span></li>
+  <li><a href="svg-channel-cross.html">The same, across processes</a>: the child comes from another site, so it runs in
+    its own renderer; open through <code>localhost</code>. <span class="ch">Chapter 01 §1.8, §2.3</span></li>
+  <li><a href="scroll-button.html">Scroll-button counter</a>: <code>::scroll-button</code> on a 1 px snapport adds 1
+    per click; a scroll timeline reads it. <span class="ch">Chapter 04 §1.8</span></li>
+  <li><a href="smil-latch.html">SMIL event latch</a>: <code>&lt;set begin="on.click"&gt;</code> writes a class that
+    <code>:has()</code> reads. <span class="ch">Chapter 04 §1.9</span></li>
+  <li><a href="accesskey.html">accesskey on a hidden checkbox</a>: Alt+R toggles a <code>display: none</code>
+    checkbox. <span class="ch">Chapter 08 §1.6</span></li>
+</ol>
+<p>Bug reproductions found during the survey are listed in <code>bugs/README.md</code> (files <code>bugs/chrome-*.html</code>).</p>

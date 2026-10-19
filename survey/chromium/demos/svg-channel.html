@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SVG child to parent</title>
+<link rel="stylesheet" href="reader.css">
+<h1>A child document sends a number to its parent</h1>
+<p>The teal box is an SVG document in an <code>&lt;object&gt;</code>. The parent animates its height (100, 200, 300,
+50 px, one step a second). The child sets its own <code>font-size: calc(50vh + 7px)</code> and its outer
+<code>&lt;svg width="1em"&gt;</code>, so it reports that as its natural width. The parent reads the width with
+<code>anchor-size()</code> and a size container and prints it with a counter. No script.</p>
+<p>Expected readings: <b>57, 107, 157, 32</b>, changing once a second.
+<a href="svg-channel-cross.html">Cross-process version</a>.</p>
+<object id="o" data="child.svg" type="image/svg+xml"></object>
+<div id="r"><div id="n"></div></div>
