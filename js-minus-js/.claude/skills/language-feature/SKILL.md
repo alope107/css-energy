@@ -33,7 +33,7 @@ CSS). Both change together, in this order.
 5. **`make fuzz`** (~1.5 min: the DSL against the reference on generated, reformatted and mutated programs, rejected
    ones included) and **`make l3`** (~40 s, in the background): every program must match the reference word for
    word. If the lexer or the page's chain changed, **`make fuzz-l3`** too (L3 on 300 fuzz programs).
-6. **If `lib_src.js` changed**, compare `python3 tools/traps.py tests/suite/fizzbuzz.js tests/programs/t*.js` before
+6. **If `lib_src.js` changed**, compare `python3 machine/csssim.py tests/suite/fizzbuzz.js` (and `tests/programs/t*.js`) before
    and after.
 7. **Rebuild and check the page**: `make page && make l5-smoke`, then `make dist`.
 8. **Docs**: the README's language, limits and error codes; `docs/BENCHMARKS.md` if a cost moved;

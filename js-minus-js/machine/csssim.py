@@ -1,4 +1,4 @@
-"""sim.py — the CSS CPU slice's design, pass by pass (the oracle for gen_css_cpu.py; python3 exp/csscpu/sim.py prog.js [K]).
+"""csssim.py — the CSS CPU's design, pass by pass (the oracle for gen_css.py; python3 machine/csssim.py prog.js [K]).
 
 Memory: ROM + RAM words (ref.load's image). Cache: 16 sets x 2 ways x 4 words, set = (b + b // 16 + b // 256) mod 16
 for block b, FIFO replacement (a per-set bit naming the next victim, flipped on each fill), a dirty bit per line,
@@ -19,8 +19,8 @@ resident at the end: without them three blocks in one set (code, stack top and a
 through the cache (ROMF: the font CPU has its ROM in the font too)."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ref
-from ref import OPN, AMASK, s20, BIN, BINF, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
+import cssref as ref
+from cssref import OPN, AMASK, s20, BIN, BINF, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
 from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC
 
 NSET, NWAY = 16, 2

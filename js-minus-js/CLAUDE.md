@@ -1,7 +1,8 @@
 # js-minus-js
 
-JavaScript compiled by CSS and run by a font. `dist/js_in_css.xhtml` is a static page: CSS reads back the text
-typed into its editor, CSS compiles it to bytecode, and a GSUB "CPU" font executes it while Chrome shapes text.
+JavaScript compiled and run by CSS. `dist/js_in_css.xhtml` is a static page: CSS reads back the text typed into its
+editor (through a readback font), CSS compiles it to bytecode, and a CPU made of style rules executes it, a chain of
+instructions per layout pass. (The CPU used to be a GSUB font, run while Chrome shaped text; it is deprecated.)
 `README.md` has the language, limits and error codes; `docs/` has ARCHITECTURE (how it works), ENGINE_NOTES (the
 Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead ends, open leads).
 
@@ -13,23 +14,24 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 - **Compilation happens at run time, in CSS.** Building the compiled program into the page at build time is not
   an acceptable shortcut.
 - **Test in a headless browser yourself.** Don't hand pages to the user to check; run the harnesses.
-- **Don't claim a speed-up without a measurement.** The machine model (`tools/traps.py`) predicts run time in
-  shapings, but only Chrome confirms it.
+- **Don't claim a speed-up without a measurement.** `machine/csssim.py` predicts passes, but only Chrome confirms
+  run time.
 
 ## Commands
 
 ```
 npm install && pip install -r requirements.txt     # once
-make page            # build/js_in_css.xhtml: lib -> image -> CPU font -> page (~25 s, reproducible)
+make page            # build/js_in_css.xhtml: lib -> image -> page (~40 s, reproducible)
 make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, L4, C1
 make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, L4 (~1.5 min; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~30 s)
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
-make c2              # the CSS CPU (exp/csscpu, no font) runs every quick program without objects to HALT (~25 s)
+make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
+make page-font       # the deprecated font CPU's page: build/js_in_font.xhtml
 make dist            # copy the built page to dist/
-python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
+python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
 SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 ```
@@ -44,9 +46,8 @@ SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
   `make l3`, `make l5-smoke`.
 - After a Chrome upgrade run `make engine-check` at the repo root (re-checks ENGINE_NOTES' probes).
 - Long browser runs exceed tool timeouts: run them in the background, write to a file, poll it.
-- `exp/csscpu/` is the pure-CSS CPU that is replacing the font CPU (its README): `gencpu.py` builds a page, `sim.py` is
-  its pass-by-pass oracle (C1 checks it against Node), C2 runs the pages. After changing either, `make test` and
-  `make c2`.
+- `exp/csscpu/README.md` has the CSS CPU's measurements and Blink's style costs (what a rule test, a declaration and
+  an `if()` cost); its tools (`chainbench.js`, `passcost.js`, `stylecount.js`) time the chain alone and per pass.
 
 ## Layout
 
@@ -54,8 +55,10 @@ SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same step as CSS)  ccpage5.py (compile chain)
            lib_src.js -> lib.json (runtime library)  rtlib.py (object runtime + GC in ROM)  layout.json (the memory map)
            mkimage.py (machine images: the page's, or `--ram` with the program in RAM)
-machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py (font)  gen_fvm4.py (page)  memtree.py (RAM)
-           ui_seq.js halttime.js trace.js (browser harnesses)  hbtest.py (font vs model in uharfbuzz)
+machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compiler)  csssim.py (its pass-by-pass model)
+           cssref.py (the ISA as a stepper)  memtree.py (RAM)  uipage.py (editor page parts)  uarch.py (ISA constants)
+           ui_seq.js halttime.js trace.js (browser harnesses)
+           deprecated font CPU: uarch4.py cpu4.py cpugen.py otl.py fvm_build.py gen_fvm4.py hbtest.py
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
 tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size)
@@ -75,34 +78,37 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
 4. `make fuzz` and `make l3` (`make fuzz-l3` too if the lexer or the page changed), then `make page && make l5-smoke`,
    then `make dist`.
 
-### Object instructions and runtime (`machine/uarch.py`, `compiler/rtlib.py`)
+### Instructions and runtime (`machine/gen_css.py`, `machine/csssim.py`, `compiler/rtlib.py`)
 
-- SCANI SCAN LDF PUTV NEW SETF ENDK OVER JNEG are defined twice: microcode in `uarch.py` (compiled into the font by
-  `cpu4.py`) and in `cc_ref.run()`. Change both together.
-- After changing them or `cpu4.py` / `cpugen.py`, run the font against the model on an object program, not only
-  FizzBuzz: `python3 compiler/mkimage.py --ram tests/suite/obj_tree.js img.json && CPUMOD=cpu4 python3 machine/hbtest.py img.json 16 32`
-  (stops at the first differing shaping). L4 only checks the model against itself.
-- S × subtables per cycle (fvm_build prints them) must stay ≤ 16,384, so ≤ 512 at S = 32. Past that, HarfBuzz drops
-  the last lookups without an error and the decoded state reads 0.
+- Every instruction is defined three times: `cc_ref.run()` (the reference), `csssim.py` (the CSS CPU's model, pass by
+  pass) and `gen_css.py`'s instruction classes. Change all three; `make test` (C1: csssim against Node on every suite
+  program) and `make c2` (the pages in Chrome) check them.
+- In `gen_css.py` an instruction belongs to one class (a container-query rule); inside it, `if()` on `--op` picks
+  addresses and results. An operand whose address comes from another read must name that read in the class's
+  `deps`, exactly: latches (a stalled instruction's operands kept for its re-execution) are what guarantee progress.
+- A value of a registered `<integer>` must be one term (`calc((a) * b)`, not `(a) * b`): Chrome takes the latter as
+  invalid and uses 0, silently. `gen_css.py` refuses to write such a page.
+- The deprecated font CPU's microcode is `uarch.py`'s `UCODE` (`cpu4.py` compiles it; L4 checks the model).
 
 ### Runtime-library change (`compiler/lib_src.js`)
 
-- The lib is baked into the CPU font; `make page` rebuilds lib → image → font → page.
-- Compare `tools/traps.py tests/suite/fizzbuzz.js tests/programs/t*.js` before and after. Shapings track wall time;
-  steps don't. User code sits in RAM behind a 16-line cache of 4-word lines; ROM never misses. A constant ≥ 8192
-  needs SHL13, which traps.
+- The lib is the ROM, a static table in the page's fetch rule; `make page` rebuilds lib → image → page.
+- Compare `python3 machine/csssim.py tests/suite/fizzbuzz.js` (and the `tests/programs/t*.js`) before and after:
+  passes track wall time, steps don't. Data sits in RAM behind a 32-line cache of 4-word lines (2-way); instructions
+  in ROM never miss.
 
 ### Machine or page change (`machine/`, `readback/`)
 
 - Run `make l5-smoke`, and `make l5-input` for anything touching the editor or the scan.
-- Speed claims: time FizzBuzz to HALT with `machine/ui_seq.js` before and after, back to back (noise ±0.05 s on
-  ~10.8 s), or interleave with `../shared/js/ab.js` after an A-vs-A run (`.claude/skills/benchmark`).
-- Frame profiles: keep the trace window inside the run, `RUN=1 RUNWAIT=3500 node machine/trace.js page 4`. FizzBuzz
-  halts ~10.8 s after Run; a window past HALT shows idle frames and flatters everything.
-- To separate machine costs from the UI's, time a CPU-only page (`gen_fvm4.py` without `UI=1` on a `mkimage.py --ram`
-  image; `machine/halttime.js`, which never presses Run): FizzBuzz 6.3 s from load vs 10.8 s after Run on the
-  page. **Without `UI=1` the page is HTML: name it `.html`.** As `.xhtml` Chrome parses it as XML, there is no `#cpu`,
-  and every harness fails on its first read.
+- Run `make c2` for anything touching the CPU.
+- Speed claims: time FizzBuzz to HALT with `machine/ui_seq.js` before and after, back to back, or interleave with
+  `../shared/js/ab.js` after an A-vs-A run (`.claude/skills/benchmark`).
+- Frame profiles: keep the trace window inside the run, `RUN=1 RUNWAIT=<ms> node machine/trace.js page 1`; a window
+  past HALT shows idle frames and flatters everything.
+- To separate machine costs from the UI's, time a CPU-only page (`gen_css.py` without `UI=1` on a `mkimage.py --ram`
+  image; `POLL=30 IMG=img.json node machine/halttime.js out.html`, which never presses Run): FizzBuzz ~1.0 s from
+  load. **Without `UI=1` the page is HTML: name it `.html`.** As `.xhtml` Chrome parses it as XML, there is no
+  `#cpu`, and every harness fails on its first read.
 
 ## Done means
 
@@ -132,7 +138,7 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
 - A fuzz failure is in `build/fuzz/`; `python3 tests/fuzz/show.py build/fuzz/<name>` replays it. Check it is inside
   the language (README Limits) before fixing the compiler: the shrinker drops lines, which can remove a declaration
   the generator relied on. A real one becomes a `tests/suite` regression test.
-- Label the CSS you add (`lbl.section` / `lbl.group` in gen_fvm4.py, ccpage5.py, ui_rb.py;
+- Label the CSS you add (`lbl.section` / `lbl.group` in gen_css.py, ccpage5.py, ui_rb.py;
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py build/js_in_css.xhtml` prints the
   page's outline.
 - Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed: `git checkout 91d73bc -- js-minus-js/archive`.

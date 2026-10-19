@@ -1,4 +1,4 @@
-// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every 250 ms; checks console output against IMG (harness only)
+// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every POLL ms (default 250); checks console output against IMG (harness only)
 const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const { consoleCodes, gridRows } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs');
@@ -9,7 +9,7 @@ const fs = require('fs');
   const t0 = Date.now(); await p.goto(fileUrl(pg), { timeout: 600000 }); const tl = Date.now() - t0;
   let r, first = null;
   while ((Date.now() - t0) / 1000 < +maxs) {
-    await p.waitForTimeout(250);
+    await p.waitForTimeout(+(process.env.POLL || 250));
     r = await p.evaluate(() => { const cs = getComputedStyle(document.querySelector('#cpu')); return { steps: +cs.getPropertyValue('--steps'), kind: +cs.getPropertyValue('--kind'), halted: +cs.getPropertyValue('--isHALT') === 1 }; });
     if (first === null && r.steps > 0) first = Date.now() - t0;
     if (r.halted) break;

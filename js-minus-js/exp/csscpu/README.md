@@ -1,20 +1,23 @@
 # A CPU in style alone
 
+Since 2026-10-19 this is the page's CPU (`machine/gen_css.py`, `machine/csssim.py`, `docs/ARCHITECTURE.md` §3); the font
+CPU is deprecated. This directory keeps how it was found and measured: the toy, the timing tools, Blink's style costs.
+
 Can CSS style recalc beat the font CPU (HarfBuzz) at running js-minus-js bytecode? Two stages: a toy that times
 instructions with nothing missing (`mkcpu.py`), then a CPU-only page that runs real programs to HALT
-(`gencpu.py`), timed against the font CPU's CPU-only page.
+(`machine/gen_css.py`), timed against the font CPU's CPU-only page.
 
-## The machine (`gencpu.py`, oracle `sim.py`)
+## The machine (`machine/gen_css.py`, oracle `machine/csssim.py`)
 
-`python3 exp/csscpu/gencpu.py image.json out.html` takes a `compiler/mkimage.py --ram` image, as `machine/gen_fvm4.py`
+`python3 machine/gen_css.py image.json out.html` takes a `compiler/mkimage.py --ram` image, as `machine/gen_fvm4.py`
 does, and builds a page with no font and no script. FizzBuzz, gcd, primes, array_sort, str_table, bool_print, putc
 and break_nested run to HALT with cc_ref's exact step counts and the expected console.
 
 ```
 python3 compiler/mkimage.py --ram tests/suite/fizzbuzz.js build/csscpu/fizz.json
-python3 exp/csscpu/gencpu.py build/csscpu/fizz.json build/csscpu/fizz.html        # K=32 ISSUE=2
+python3 machine/gen_css.py build/csscpu/fizz.json build/csscpu/fizz.html        # K=32 ISSUE=2
 POLL=30 node exp/csscpu/halt.js build/csscpu/fizz.html build/csscpu/fizz.json     # load -> HALT, checks the console
-python3 exp/csscpu/sim.py tests/suite/fizzbuzz.js 32                               # passes, checked against cc_ref
+python3 machine/csssim.py tests/suite/fizzbuzz.js 32                               # passes, checked against cc_ref
 ```
 
 A layout pass (two per frame, gen_fvm4's frame gate):
@@ -37,7 +40,7 @@ A layout pass (two per frame, gen_fvm4's frame gate):
 The console has its own trees and channels inside a `contain: strict` box, so output doesn't restyle the RAM trees. A
 channel keeps its cell until it takes another, rather than being cleared every pass (a channel change restyles its
 whole tree). A miss on the block the same pass writes back would read its leaf before the write lands, so that fill
-waits a pass (`sim.py` models it; FizzBuzz hits it once).
+waits a pass (`machine/csssim.py` models it; FizzBuzz hits it once).
 
 A stalled instruction keeps the operands it did read (latches: the fetched word, the stack words, the indirect reads,
 a string's block) for its re-execution as the next pass's first instruction; a read is kept only if the reads its
@@ -46,17 +49,16 @@ its written line resident at the end. Without them `str_escape.js` never finishe
 string were three blocks in one 2-way set, each fill evicting another. JNEG (emitted by the compiler for arrays) is
 in the jump class.
 
-`sim.py` is the design pass by pass: same cache, prefetch, stall rules, latches, PRINT chunking (uarch's print
+`machine/csssim.py` is the design pass by pass: same cache, prefetch, stall rules, latches, PRINT chunking (uarch's print
 service). It predicts the passes (FizzBuzz 36 at K = 32; the page latches every good read where sim keeps those before
 the first miss, so the page can take fewer).
 
 Checks (`make test` runs C1; `make c2`):
-- **C1** (`tests/csscpu_sim.py`): sim.py runs every suite program's image (the padded editor source, as L4) against
-  Node's output and cc_ref's step count, object programs included (sim.py has the object instructions; the page not
-  yet).
-- **C2** (`tests/csscpu_pages.py` builds, `tests/csscpu_pages.js` runs): a page per program without objects under
-  1,500 steps (100), each run to HALT in Chrome, console against Node's, steps against cc_ref's.
-- `gencpu.py` refuses to write a page in which a registered integer's value is more than one term (`--m: (a) * b`
+- **C1** (`tests/csscpu_sim.py`): csssim.py runs every suite program's image (the padded editor source, as L4)
+  against Node's output and cc_ref's step count.
+- **C2** (`tests/csscpu_pages.py` builds, `tests/csscpu_pages.js` runs): a page per program under 1,500 steps (111),
+  each run to HALT in Chrome, console against Node's, steps against cc_ref's.
+- `machine/gen_css.py` refuses to write a page in which a registered integer's value is more than one term (`--m: (a) * b`
   instead of `calc((a) * b)`): Chrome takes such a value as invalid and uses the initial value, 0, silently.
 
 ## Results (2026-10-19, headless Chromium 153, mini PC)
@@ -97,7 +99,7 @@ Per element, every chain level distinct (identical levels hit the matched-proper
 - A register subject costs ~4.5 µs of style a pass; the register animations little (128 fewer: ~0.3 ms).
 - Not in Chromium 153: `ident()` (an anchor name from a number would replace the muxes) and `inherit()`.
 
-`chainbench.js` (with `gencpu.py BENCH=1`, `STALL=1`, `DUP=name`) times the chain alone from a real pass's start
+`chainbench.js` (with `machine/gen_css.py BENCH=1`, `STALL=1`, `DUP=name`) times the chain alone from a real pass's start
 state; `DUP` copies a declaration under a new name to price it without changing results. `passcost.js` and
 `stylecount.js` (`PER=1`) give per-pass costs and what restyled, `dbg.js` the registers each frame.
 
@@ -117,7 +119,8 @@ The font CPU costs ~8.6 ms per instruction on the page (BENCHMARKS §11 on branc
 counter, which the program overwrites in its first instructions, so only a few levels were recomputed and some pages
 timed at 8 µs per instruction. A trial must change every later state, and the harness must check that it did.
 
-## Not done
+## Where time goes now
 
-The object instructions (SCANI … JNEG and the GC), and with them the UI page (editor, readback, compile chain). The
-chain's executing levels (~340 µs) and per-pass fixed costs (~6 ms) are where time goes now.
+The chain's executing levels (~340 µs each) and per-pass fixed costs (~6 ms). Programs that miss on most passes
+(deep recursion, heap allocation: every victim dirty, so no prefetch) run one block per pass; a second write set per
+pass, prefetching into dirty victims, or allocating a push's block above `sp` without reading it would help them.

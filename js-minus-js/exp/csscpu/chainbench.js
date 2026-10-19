@@ -1,4 +1,4 @@
-// chainbench.js page.html — the CSS CPU's chain alone (gencpu.py BENCH=1). Checks the end state against page.html.json,
+// chainbench.js page.html — the CSS CPU's chain alone (machine/gen_css.py BENCH=1). Checks the end state against page.html.json,
 // then times full recalcs: each trial changes --steps in the root's inline style, which every level depends on, and reads
 // the end (style only, no layout). Harness only.
 const path = require('path');
