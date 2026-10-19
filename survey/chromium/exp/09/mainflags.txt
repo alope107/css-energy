@@ -1,0 +1,200 @@
+AnimationRangeRejectRelativeLengths                     main=experimental   153=—              
+AnimationWorklet                                        main=off            153=—              
+CSSAccentColorKeyword                                   main=dict:{'ChromeOS': 'stable', 'Linux': 'stable', 'Mac': 'stable', 'Win': 'stable', 'default': 'experimental'} 153=dict           
+CSSAnimationIterationComposite                          main=experimental   153=experimental   
+CSSArgumentGrammar                                      main=test           153=test           
+CSSAtRuleCounterStyleImageSymbols                       main=off            153=—              
+CSSAtRuleCounterStyleSpeakAsDescriptor                  main=test           153=test           
+CSSBackgroundLayerCountIndependence                     main=experimental   153=—              
+CSSCalcEarlyNaNAndInfFolding                            main=off            153=—              
+CSSCalcSimplificationAndSerialization                   main=off            153=—              
+CSSCaretColorWithOptionalSecondValue                    main=experimental   153=experimental   
+CSSCaseSensitiveSelector                                main=test           153=test           
+CSSColorTypedOM                                         main=experimental   153=experimental   
+CSSContainerProgressNotation                            main=experimental   153=experimental   
+CSSCornersShorthand                                     main=experimental   153=experimental   
+CSSCounterResetReversed                                 main=experimental   153=experimental   
+CSSCrossFade                                            main=experimental   153=experimental   
+CSSCustomHighlightUniversalSelector                     main=experimental   153=—              
+CSSCustomMedia                                          main=test           153=test           
+CSSFlowStartAndEnd                                      main=experimental   153=—              
+CSSFlowStartAndEndSerialization                         main=experimental   153=—            ['CSSFlowStartAndEnd']  
+CSSFontFamilySerialization                              main=experimental   153=experimental   
+CSSGridLanesLayout                                      main=experimental   153=experimental   
+CSSHangingPunctuation                                   main=test           153=test           
+CSSIdentFunction                                        main=test           153=test           
+CSSImageAnimation                                       main=test           153=test           
+CSSInheritFunction                                      main=experimental   153=experimental   
+CSSLangExtendedRanges                                   main=experimental   153=experimental   
+CSSLayoutAPI                                            main=experimental   153=experimental   
+CSSLineClamp                                            main=experimental   153=experimental   
+CSSLineClampAsShorthand                                 main=test           153=test         ['CSSLineClamp']  
+CSSLineClampLineBreakingEllipsis                        main=experimental   153=experimental ['CSSLineClamp']  
+CSSLinkParametersProperty                               main=experimental   153=—              
+CSSListCounterAccounting                                main=experimental   153=experimental   
+CSSLogicalCombinationPseudo                             main=off            153=—              
+CSSMediaElementPseudos                                  main=experimental   153=experimental   
+CSSMediaProgressNotation                                main=experimental   153=experimental   
+CSSMixins                                               main=experimental   153=experimental   
+CSSOMGetComputedStylePseudoElementRequiresColon         main=experimental   153=experimental   
+CSSPaintAPIArguments                                    main=experimental   153=experimental   
+CSSParserIgnoreCharsetForURLs                           main=off            153=—              
+CSSPositionStickyStaticScrollPosition                   main=test           153=test           
+CSSPrivate                                              main=experimental   153=—              
+CSSPseudoElementScrollButton                            main=experimental   153=—            ['CSSPseudoElementInterface']  
+CSSPseudoElementSelectorText                            main=experimental   153=—            ['CSSPseudoElementInterface']  
+CSSPseudoHasSlotted                                     main=experimental   153=experimental   
+CSSRandomFunctionTypedOM                                main=test           153=test         ['CSSRandomFunction']  
+CSSScopeImport                                          main=experimental   153=experimental   
+CSSScrollSnapEventConstructorExposed                    main=experimental   153=experimental   
+CSSScrollSnapStopBefore                                 main=test           153=—              
+CSSScrollTargetGroupAriaCurrent                         main=experimental   153=experimental   
+CSSStyleSheetInitBaseURL                                main=experimental   153=experimental   
+CSSSystemAccentColor                                    main=dict:{'ChromeOS': 'stable', 'Linux': 'stable', 'Mac': 'stable', 'Win': 'stable', 'default': 'experimental'} 153=dict           
+CSSTextAlignMatchParent                                 main=experimental   153=experimental   
+CSSTextDecorationSkipSpaces                             main=experimental   153=experimental   
+CSSTextSpacing                                          main=test           153=test           
+CSSTextTransformFullSizeKana                            main=experimental   153=experimental   
+CSSTextTransformFullWidth                               main=experimental   153=experimental   
+CSSTextTransformMultiKeyword                            main=experimental   153=experimental ['CSSTextTransformFullWidth', 'CSSTextTransformFullSizeKana']  
+CSSTimelineScopeAll                                     main=experimental   153=experimental   
+CSSTimelineScopeGlobal                                  main=experimental   153=—            ['CSSTreeScopedScrollTimeline']  
+CSSTreeScopedScrollTimeline                             main=experimental   153=—              
+CSSUserSelectContain                                    main=test           153=test           
+CSSVideoDynamicRangeMediaQueries                        main=experimental   153=experimental   
+CSSViewTransitionAutoName                               main=experimental   153=experimental   
+CacheControlRFC7234Parsing                              main=experimental   153=experimental   
+CacheControlRFC7234ParsingMetrics                       main=experimental   153=experimental   
+CacheStorageCodeCacheHint                               main=experimental   153=experimental  CacheStorageCodeCacheHint 
+Canvas2dCanvasFilter                                    main=experimental   153=experimental   
+Canvas2dDeferredFlush                                   main=experimental   153=—              
+Canvas2dLayers                                          main=off            153=—              
+Canvas2dLayersWithOptions                               main=experimental   153=experimental ['Canvas2dLayers']  
+Canvas2dMesh                                            main=test           153=test          Canvas2dMesh 
+CanvasGlobalHDRHeadroom                                 main=experimental   153=experimental   
+CanvasGradientCSSColor4                                 main=experimental   153=experimental   
+CanvasHDR                                               main=experimental   153=experimental   
+CanvasTextMetricsPreciseBounds                          main=experimental   153=experimental   
+CanvasToneMapping                                       main=experimental   153=experimental   
+ColorSpaceRec2100Linear                                 main=experimental   153=experimental   
+CompositeHoverStyle                                     main=off            153=—              
+CompositedSelectionUpdate                               main=dict:{'Android': 'stable', 'ChromeOS': 'stable', 'Fuchsia': 'stable', 'Linux': 'stable', 'Win': 'stable'} 153=dict           
+CompositingDecisionAtAnimationPhaseBoundaries           main=off            153=—              
+CompositionForegroundMarkers                            main=dict:{'Android': 'stable', 'default': ''} 153=dict           
+CompositorEventTrigger                                  main=off            153=—              
+CompressionDictionaryTransport                          main=off            153=—              
+ContainerTiming                                         main=experimental   153=experimental  ContainerTiming 
+ContentIndex                                            main=dict:{'Android': 'stable', 'default': 'experimental'} 153=dict           
+CssMaxContentSizing                                     main=test           153=test           
+CssTextFitReshaping                                     main=off            153=—              
+CustomizableCombobox                                    main=experimental   153=experimental ['AppearanceBase']  
+CustomizableSelectMultiplePopup                         main=experimental   153=experimental   
+CustomizableSelectNewUAStyles                           main=experimental   153=—              
+DialogCloseWhenOpenRemoved                              main=experimental   153=experimental   
+DialogNewFocusBehavior                                  main=experimental   153=experimental   
+DisplayContentsFocusable                                main=experimental   153=experimental   
+DisplayCutoutAPI                                        main=dict:{'Android': 'stable'} 153=dict           
+DocumentCookie                                          main=off            153=—              
+DocumentDomain                                          main=off            153=—              
+DocumentIsolationPolicy                                 main=experimental   153=experimental  DocumentIsolationPolicy 
+DocumentOpenOriginAliasRemoval                          main=experimental   153=experimental   
+DocumentPictureInPictureAPI                             main=dict:{'Android': '', 'default': 'stable'} 153=dict           
+DocumentPictureInPicturePreferInitialPlacement          main=dict:{'Android': '', 'default': 'stable'} 153=dict           
+DocumentPictureInPictureUserActivation                  main=dict:{'Android': '', 'default': 'stable'} 153=dict           
+DocumentPolicyDocumentDomain                            main=experimental   153=experimental   
+DocumentPolicyInDedicatedWorker                         main=experimental   153=experimental   
+DocumentPolicyJSProfilingMode                           main=experimental   153=experimental   
+DocumentPolicyNegotiation                               main=experimental   153=experimental  DocumentPolicyNegotiation 
+DocumentPolicyNetworkEfficiencyGuardrails               main=experimental   153=experimental   
+DocumentPolicySyncXHR                                   main=experimental   153=experimental   
+DocumentWrite                                           main=off            153=—              
+ElementCapture                                          main=dict:{'Android': 'experimental', 'iOS': '', 'default': 'stable'} 153=dict           
+ElementInternalsBehaviors                               main=experimental   153=experimental   
+ElementMatchContainer                                   main=test           153=test           
+EventTimingTargetSelector                               main=experimental   153=experimental   
+EventTrigger                                            main=experimental   153=experimental   
+FastPositionIterator                                    main=off            153=—              
+FocusResetEvent                                         main=experimental   153=—              
+FocusgroupV2                                            main=experimental   153=experimental ['Focusgroup']  
+FontAccess                                              main=dict:{'Android': '', 'default': 'stable'} 153=dict           
+FontDataServiceForCSSLocalFonts                         main=off            153=—              
+FontFamilyPostscriptMatchingCTMigration                 main=off            153=—              
+FontFamilyStyleMatchingCTMigration                      main=off            153=—              
+HTMLAreaHreflangType                                    main=test           153=test           
+HTMLCommandActionsV2                                    main=test           153=test           
+HTMLCommandForScrollCommands                            main=experimental   153=experimental   
+HTMLElementScrollParent                                 main=experimental   153=experimental   
+HTMLInterestForInterestButtonPseudo                     main=experimental   153=experimental   
+HTMLParserYieldAndDelayOftenForTesting                  main=off            153=—              
+HTMLParserYieldByUserTiming                             main=test           153=test           
+HTMLSwitchAttribute                                     main=experimental   153=experimental   
+HarfRustShaping                                         main=test           153=—              
+InlineContainingBlockSkipOpaque                         main=test           153=—              
+InlineScriptCacheHint                                   main=experimental   153=experimental   
+InputInSelect                                           main=experimental   153=experimental   
+InputMultipleFieldsUI                                   main=dict:{'Android': 'test', 'iOS': 'test', 'default': 'stable'} 153=dict           
+InputMultipleFieldsUIWithPointerChecks                  main=off            153=—              
+InputTypeColorEnhancements                              main=experimental   153=experimental   
+LayoutIgnoreMarginsForSticky                            main=off            153=—              
+LazyParseInlineStyleSheets                              main=off            153=—              
+LineBreakerHanKerningEnd                                main=off            153=stable         
+MathMLAnchorElement                                     main=test           153=test           
+MediaCapabilitiesEncodingInfo                           main=experimental   153=experimental   
+MediaCapabilitiesSpatialAudio                           main=test           153=test           
+MediaCaptionSettingsButton                              main=dict:{'Win': 'stable', 'Mac': 'stable', 'Linux': 'stable', 'ChromeOS': 'stable'} 153=dict           
+MediaCapture                                            main=dict:{'Android': 'stable'} 153=dict           
+MediaCaptureBackgroundBlur                              main=experimental   153=experimental  MediaCaptureBackgroundBlur 
+MediaCaptureCameraControls                              main=experimental   153=experimental   
+MediaCaptureConfigurationChange                         main=experimental   153=experimental  MediaCaptureBackgroundBlur 
+MediaCaptureVoiceIsolation                              main=experimental   153=experimental   
+MediaControlsExpandGesture                              main=dict:{'Android': 'stable'} 153=dict           
+MediaControlsOverlayPlayButton                          main=dict:{'Android': 'stable'} 153=dict           
+MediaElementMutedDefaultState                           main=experimental   153=experimental   
+MediaElementVolumeGreaterThanOne                        main=off            153=—              
+MediaEngagementBypassAutoplayPolicies                   main=off            153=—              
+MediaLatencyHint                                        main=test           153=test           
+MediaQueryNavigationControls                            main=off            153=—              
+MediaSourceExperimental                                 main=experimental   153=experimental   
+MediaSourceExtensionsForWebCodecs                       main=experimental   153=experimental  MediaSourceExtensionsForWebCodecs 
+MediaStreamTrackTransfer                                main=test           153=test           
+MediaStreamTrackWebSpeech                               main=dict:{'Linux': 'stable', 'Mac': 'stable', 'Win': 'stable', 'default': 'experimental'} 153=dict           
+NavigationEventTiming                                   main=off            153=—              
+NavigationTypeAndPhase                                  main=experimental   153=experimental ['RouteMatching']  
+OverscrollAreas                                         main=experimental   153=—            ['CSSScrollSnapTypePair'] OverscrollAreas 
+PaintUnderInvalidationChecking                          main=off            153=—              
+Prerender2CrossOriginIframes                            main=off            153=—             Prerender2CrossOriginIframes 
+PrerenderUntilScript                                    main=experimental   153=experimental  PrerenderUntilScript 
+RenderPriorityAttribute                                 main=off            153=—              
+RouteMatching                                           main=experimental   153=experimental   
+SVGEmbeddedAsReplacedElement                            main=experimental   153=experimental   
+SVGPathDataAPI                                          main=experimental   153=experimental   
+ScrollIntoViewAlignAuto                                 main=experimental   153=experimental   
+ScrollPerformanceTiming                                 main=test           153=test           
+ScrollTimelineCurrentTime                               main=experimental   153=experimental   
+SelectAudioOutput                                       main=dict:{'Android': '', 'default': 'test'} 153=dict           
+SelectUsesFlatTree                                      main=off            153=—              
+SelectedcontentMultiple                                 main=experimental   153=experimental ['CustomizableSelectMultiplePopup']  
+SelectedcontentelementAttribute                         main=experimental   153=experimental   
+SelectionAndFocusedVisiblePositionMatch                 main=experimental   153=experimental   
+SelectionSetBaseAndExtentNonNullNode                    main=experimental   153=experimental   
+SkipCallbacksWhenDevToolsNotOpen                        main=experimental   153=experimental   
+SnapshotScrollTimelinesPostLayout                       main=off            153=—            ['RunSnapshotPostLayoutStateSteps']  
+SpeculationMeasurement                                  main=experimental   153=experimental  SpeculationMeasurement 
+SpeculationRulesModerateViewportHeuristicsControl       main=experimental   153=experimental  SpeculationRulesModerateViewportHeuristicsControl 
+SvgCss3dTransforms                                      main=experimental   153=—              
+SvgInlineRootPixelSnappingScaleAdjustment               main=test           153=test           
+SvgNewZoom                                              main=off            153=—              
+SvgPathLengthCssProperty                                main=experimental   153=experimental   
+SvgSizingWithPreserveAspectRatioNone                    main=experimental   153=experimental   
+SvgSupportMediaFragments                                main=experimental   153=experimental   
+TextDetector                                            main=experimental   153=experimental   
+TextEmphasisPositionAuto                                main=experimental   153=experimental   
+TextFragmentAPI                                         main=experimental   153=experimental   
+TextFragmentTapOpensContextMenu                         main=dict:{'Android': 'stable'} 153=dict           
+TextSpacingTrimFallback2                                main=test           153=test         ['TextSpacingTrimFallback']  
+VariableSystemFontSupportOnWindows                      main=off            153=—              
+ViewTransitionLongCallbackTimeoutForTesting             main=test           153=test           
+VisibilityCollapseColumn                                main=off            153=—              
+XMLParsingRust                                          main=off            153=—              
+XMLSerializerConsistentDefaultNsDeclMatching            main=test           153=test           
+XMLViewerForIframes                                     main=experimental   153=experimental   

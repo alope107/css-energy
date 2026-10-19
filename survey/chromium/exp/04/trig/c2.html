@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset=utf-8>
+<style>
+@property --v { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes setv { from { --v: 0; width: 10px } to { --v: 100; width: 200px } }
+@keyframes movein { from { top: 2000px } to { top: 20px } }
+body { margin: 0 }
+#sc { height: 100px; width: 300px; overflow-y: scroll; position: relative; }
+#spacer { height: 5000px; }
+.subj { position: absolute; top: 2000px; height: 10px; width: 10px; }
+/* stage k: subject sk has trigger --tk; the animation on s(k+1) moves it into view */
+#s1 { left: 0;  timeline-trigger: --t1 view() cover 0% cover 100%; }
+#s2 { left: 20px; timeline-trigger: --t2 view() cover 0% cover 100%; animation: movein 1ms linear both; animation-trigger: --t1 play-forwards play-backwards; }
+#s3 { left: 40px; timeline-trigger: --t3 view() cover 0% cover 100%; animation: movein 1ms linear both; animation-trigger: --t2 play-forwards play-backwards; }
+#s4 { left: 60px; timeline-trigger: --t4 view() cover 0% cover 100%; animation: movein 1ms linear both; animation-trigger: --t3 play-forwards play-backwards; }
+#s5 { left: 80px; timeline-trigger: --t5 view() cover 0% cover 100%; animation: movein 1ms linear both; animation-trigger: --t4 play-forwards play-backwards; }
+#s6 { left: 100px; animation: movein 1ms linear both; animation-trigger: --t5 play-forwards play-backwards; }
+/* instant latch variants observed by width */
+.t { height: 5px; background: blue; }
+#z1 { animation: setv 0s linear both; animation-trigger: --t1 play-forwards play-backwards; }
+#z2 { animation: setv 1ms linear both; animation-trigger: --t1 play-forwards play-backwards; }
+#z3 { animation: setv 0s linear both; animation-trigger: --t1 play reset; }
+#z4 { animation: setv 0s linear both; animation-trigger: --t1 replay reset; }
+</style>
+<div id=sc><div id=spacer></div>
+<div id=s1 class=subj></div><div id=s2 class=subj></div><div id=s3 class=subj></div><div id=s4 class=subj></div><div id=s5 class=subj></div><div id=s6 class=subj></div></div>
+<div id=z1 class=t></div><div id=z2 class=t></div><div id=z3 class=t></div><div id=z4 class=t></div>
+<script>
+window.log = [];
+let frame = 0;
+const $ = id => document.getElementById(id);
+const tops = () => ['s2','s3','s4','s5','s6'].map(id => parseInt(getComputedStyle($(id)).top)).join(',');
+const zs = () => ['z1','z2','z3','z4'].map(id => getComputedStyle($(id)).getPropertyValue('--v')).join(',');
+const ro = new ResizeObserver(es => { for (const e of es) log.push(`  RO f${frame} ${e.target.id} w=${e.contentRect.width}`); });
+['z1','z2','z3','z4'].forEach(id => ro.observe($(id)));
+// position observer: a 1px-tall child inside each subject isn't resized by moves; use IntersectionObserver? use RO on a box whose size depends on subject top: not possible. Log tops in rAF instead.
+const plan = { 5: () => { $('s1').style.top = '20px'; return 'move s1 into view (layout, no scroll)'; },
+               15: () => { $('s1').style.top = '2000px'; return 'move s1 out'; } };
+function tick() {
+  frame++;
+  let note = '';
+  if (plan[frame]) note = plan[frame]();
+  log.push(`rAF f${frame} tops=${tops()} z=${zs()} ${note}`);
+  if (frame < 24) requestAnimationFrame(tick); else window.done = true;
+}
+requestAnimationFrame(tick);
+</script>

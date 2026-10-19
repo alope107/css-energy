@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@property --v { syntax: "<number>"; inherits: true; initial-value: 0; }
+body { margin: 0; }
+#w { height: 300px; overflow: hidden; } /* keep the huge object from mattering */
+#o { display: block; anchor-name: --o; animation: h 1s steps(1) infinite; border: 0; max-height: none; }
+@keyframes h { 0% { height: 100px } 25% { height: 200px } 50% { height: 9999px } 75% { height: 50px } }
+#r { position: absolute; left: 0; top: 400px; width: anchor-size(--o width); height: 10px; position-anchor: --o; container-type: inline-size; }
+#n { --v: calc(100cqw / 1px); }
+</style>
+<div id="w"><object id="o" data="CHILD" type="image/svg+xml"></object></div>
+<div id="r"><div id="n"></div></div>

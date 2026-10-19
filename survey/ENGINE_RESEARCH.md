@@ -2,6 +2,12 @@
 
 *Source reading only (Chromium M153 branch, HarfBuzz, OTS, HarfRust, chromestatus), no browser runs. `PRIMITIVES.md` says which of these were then measured.*
 
+> **Extended and corrected by [chromium/](chromium/README.md) (2026-10-18):** Q1 (`max_ops` is also charged by
+> `unsafe_to_break` spans and, since HarfBuzz 14.4.0, `move_to`; `HB_NO_BORING_EXPANSION` is dead, so avar2 is live:
+> chromium/06, 07); Q3 (the cap counts LookupList entries; shaper stages re-run one entry: chromium/07 §2.3); Q6 (the
+> loop-limit ResizeObserver round re-runs the lifecycle from 156: chromium/01, 09 §2.3); Q8 (the CORS-anonymous
+> dictionary fetch is the flagged path; the default is `cors` + `credentials: omit`: chromium/09 §2.10).
+
 Method: source read at the Chromium **M153 branch** (`refs/branch-heads/8010`, from
 `chromiumdash.appspot.com/fetch_milestones?mstone=153`) via `chromium.googlesource.com/.../+/refs/branch-heads/8010/<path>?format=TEXT`,
 plus `main` where noted; HarfBuzz/OTS/HarfRust from fresh GitHub clones (HarfBuzz 14.6.0 HEAD; M153 bundles

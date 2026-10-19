@@ -1,0 +1,22 @@
+const { chromium } = require('/workspaces/css-energy/css-physics/node_modules/playwright');
+const path = require('path');
+(async () => {
+  const browser = await chromium.launch({ executablePath: '/usr/local/bin/chromium', args: ['--no-sandbox'] });
+  const page = await browser.newPage();
+  await page.goto('file://' + path.join(__dirname, 'p2.html'));
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const m = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.filter(x => ['LayoutCount', 'RecalcStyleCount'].includes(x.name)).map(x => [x.name, x.value]));
+  await page.waitForTimeout(500);
+  let a = await m(); await page.waitForTimeout(2000); let b = await m();
+  console.log('frozen sets only, 2s:', b.LayoutCount - a.LayoutCount, 'layouts,', b.RecalcStyleCount - a.RecalcStyleCount, 'style recalcs');
+  await page.evaluate(() => document.getElementById('run').beginElement());
+  await page.waitForTimeout(200);
+  a = await m(); await page.waitForTimeout(2000); b = await m();
+  console.log('frozen sets + running <animate opacity> on another target, 2s:', b.LayoutCount - a.LayoutCount, 'layouts,', b.RecalcStyleCount - a.RecalcStyleCount, 'style recalcs');
+  await page.evaluate(() => { document.getElementById('s1').remove(); document.getElementById('s2').remove(); });
+  await page.waitForTimeout(200);
+  a = await m(); await page.waitForTimeout(2000); b = await m();
+  console.log('running <animate opacity> only, 2s:', b.LayoutCount - a.LayoutCount, 'layouts,', b.RecalcStyleCount - a.RecalcStyleCount, 'style recalcs');
+  await browser.close();
+})();

@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@property --w { syntax: "<number>"; inherits: true; initial-value: -1; }
+body { margin: 0; }
+#box { view-transition-name: box; width: 123px; height: 40px; background: teal; }
+::view-transition-group(box) { anchor-name: --g; animation-duration: 10s; animation-play-state: paused; }
+#probe { position: fixed; position-anchor: --g; left: 0; top: 200px; width: anchor-size(width, 7px); height: 5px; container-type: inline-size; }
+#probe > div { --w: calc(100cqw / 1px); }
+#probe2 { position: fixed; position-anchor: --g; left: anchor(left, 9px); top: 300px; width: 5px; height: 5px; }
+</style></head><body>
+<div id="box"></div>
+<div id="probe"><div id="pr"></div></div><div id="probe2"></div>
+</body></html>

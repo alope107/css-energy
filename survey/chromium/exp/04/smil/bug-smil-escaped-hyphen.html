@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SMIL: escaped hyphen-minus in a syncbase/event Id-value</title>
+<p>Both squares should turn green. Left: control (<code>begin="ab.begin"</code>, id has no hyphen).
+Right: <code>begin="a\-b.begin"</code> referencing <code>id="a-b"</code>.</p>
+<svg width="220" height="100">
+  <set id="ab" attributeName="visibility" to="visible" begin="0s"/>
+  <set id="a-b" attributeName="visibility" to="visible" begin="0s"/>
+  <rect x="0" y="0" width="100" height="100" fill="red">
+    <set attributeName="fill" to="green" begin="ab.begin" fill="freeze"/>
+  </rect>
+  <rect x="120" y="0" width="100" height="100" fill="red">
+    <set attributeName="fill" to="green" begin="a\-b.begin" fill="freeze"/>
+  </rect>
+</svg>
+<!--
+Observed (headless Chrome for Testing 153.0.8010.12, Linux): left green, right red.
+Chromium main (2026-10-18) has the same parser: SVGSMILElement::ParseCondition
+(third_party/blink/renderer/core/svg/animation/svg_smil_element.cc:554-558) splits the offset at the first
+'+' or '-' with parse_string.find(), ignoring a preceding '\'. FindUnescapedDot() (same file, 511-525)
+honours escapes only for '.'. So "a\-b.begin" becomes condition "a\" with offset "b.begin", the offset
+fails to parse and the whole condition is dropped. Event values ("my\-btn.click") fail the same way.
+Firefox: dom/smil/SMILParserUtils.cpp MoveToNextToken() skips escaped '+', '-' and '.'.
+
+Spec, SMIL 3.0 Timing, "Parsing timing specifiers"
+(https://www.w3.org/TR/SMIL3/smil-timing.html#Timing-ParsingTimingSpecifiers):
+"Id-values and Event-symbols are XML NMTOKEN values and as such are allowed to contain the full stop '.'
+and hyphen-minus '-' characters. The reverse solidus character '\' must be used to escape these
+characters within Id-values and Event-symbols, otherwise these characters will be interpreted as the
+full stop separator and hyphen-minus sign, respectively."
+
+Related: crbug.com/41291793 "SVG animation timing attributes are not being unescaped per SMIL spec"
+(2016, Blink>SVG; status code 8 in the tracker JSON, apparently closed as Obsolete in 2018).
+WPT svg/animations/syncbase-escaped-dots.html covers escaped dots only; no WPT for escaped hyphens found.
+-->

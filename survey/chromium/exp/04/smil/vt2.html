@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@property --q { syntax: "<number>"; inherits: true; initial-value: -1; }
+body { margin: 0; }
+#box { view-transition-name: box; width: 123px; height: 40px; background: teal; }
+::view-transition-group(box) { container-type: inline-size; animation-play-state: paused; }
+::view-transition-image-pair(box) { --q: calc(100cqw / 1px); animation-duration: calc(100cqw / 1px * 1ms); }
+</style></head><body><div id="box"></div></body></html>

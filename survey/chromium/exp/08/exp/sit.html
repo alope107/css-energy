@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset=utf-8><style>
+html{overflow-anchor:none} body{margin:0;height:5000px;position:relative}
+.t{position:absolute;left:0;width:10px;height:10px}
+#a{top:1000px} #b{top:3000px}
+#a{scroll-initial-target:nearest}
+#k:checked ~ #a{scroll-initial-target:none}
+#k:checked ~ #b{scroll-initial-target:nearest}
+#k{position:fixed;top:0;left:0} #k2{position:fixed;top:0;left:30px} #c{top:2000px} #k2:checked ~ #a, #k2:checked ~ #b{scroll-initial-target:none} #k2:checked ~ #c{scroll-initial-target:nearest}
+#sc{position:fixed;top:30px;left:0;width:100px;height:50px;overflow:scroll}
+#sc div{height:2000px;position:relative}
+#sc i{position:absolute;top:700px;width:5px;height:5px}
+#k:checked ~ #sc i{top:1200px}
+#sc i{scroll-initial-target:nearest}
+</style></head><body><input type=checkbox id=k><input type=checkbox id=k2><div class=t id=c></div><div class=t id=a></div><div class=t id=b></div><div id=sc><div><i></i></div></div></body></html>

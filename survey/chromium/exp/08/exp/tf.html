@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset=utf-8><style>
+.o{width:1px;height:4px;background:red}
+#h:not([hidden]) ~ #o1{width:30px}
+details:open ~ #o2{width:40px}
+</style></head><body>
+<a id=l href="#:~:text=zebra">find</a>
+<div style="height:3000px"></div>
+<div id=h hidden=until-found>alpha zebra</div>
+<details><summary>s</summary>beta quagga</details>
+<div class=o id=o1></div><div class=o id=o2></div>
+<a id=l2 href="#:~:text=quagga">find2</a>
+</body></html>

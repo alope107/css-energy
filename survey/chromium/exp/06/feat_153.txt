@@ -1,0 +1,12 @@
+BASE_FEATURE(kAndroidSystemFontPrewarming, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kCrashReportingAPIMoreContextData,
+BASE_FEATURE(kBoostFontLoadingTaskPriority, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kCSSFontComparisonFix, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kInitialWebUIWithoutExtensions, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLCPPFontURLPredictor, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kPreloadSystemFonts, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kPreferCompositingToLCDText,
+BASE_FEATURE(kPrefetchFontLookupTables,
+BASE_FEATURE(kRenderBlockingFonts, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kPausePagesPerBrowsingContextGroup,
+BASE_FEATURE(kWebFontsCacheAwareTimeoutAdaption,

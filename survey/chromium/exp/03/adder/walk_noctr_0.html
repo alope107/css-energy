@@ -1,0 +1,6 @@
+<!doctype html><style>@property --t{syntax:'<number>';inherits:true;initial-value:0}
+@keyframes t{from{--t:0}to{--t:100000}}
+body{margin:0}#c{animation:t 1000s linear infinite;contain:strict;width:100px;height:20px}
+#c span{font:10px monospace}
+.g{display:none}.v{contain:strict;height:10px;overflow:hidden}
+#c{--q:calc(var(--t) * 10)}#c span::after{content:'x'}</style><div id=c><span></span></div><div class=g></div><div class=v></div>

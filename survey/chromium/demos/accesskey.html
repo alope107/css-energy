@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>accesskey on a hidden checkbox</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; max-width: 720px; color: #222; background: #fff; }
+  kbd { border: 1px solid #aaa; border-radius: 3px; padding: 0 4px; background: #f6f6f6; }
+  .status { width: 240px; height: 60px; margin-top: 12px; background: #c33; color: #fff; font-weight: 600;
+            display: grid; place-items: center; }
+  .status::after { content: "Edit"; }
+  #run:checked ~ .status { background: #2a7a3a; }
+  #run:checked ~ .status::after { content: "Run"; }
+</style>
+<h1>Keyboard shortcut for a hidden control</h1>
+<p>Press <kbd>Alt</kbd>+<kbd>R</kbd> (Linux, Windows) or <kbd>Ctrl</kbd>+<kbd>Option</kbd>+<kbd>R</kbd> (Mac). The
+checkbox has <code>accesskey="r"</code> and the <code>hidden</code> attribute (<code>display: none</code>); Chrome still
+clicks it, which toggles <code>:checked</code>. js-minus-js's Run checkbox could take the same attribute.</p>
+<input type="checkbox" id="run" accesskey="r" hidden>
+<div class="status"></div>

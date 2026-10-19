@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset=utf-8>
+<style>
+body { margin: 0; font: 16px monospace }
+.box { position: relative; width: 400px; margin: 10px 0 }
+/* A: range thumb as an anchor */
+#r::-webkit-slider-thumb { anchor-name: --th }
+#r { width: 300px; margin: 0; }
+#ra { position: absolute; position-anchor: --th; left: anchor(--th left, 7777px); top: 30px; width: 5px; height: 5px; background: red }
+/* B: select typeahead */
+#outB { display: block; width: 1px; height: 4px; background: blue }
+#sel:has(option[value=q]:checked) ~ #outB { width: 17px }
+#sel:has(option[value=z]:checked) ~ #outB { width: 26px }
+/* C: number input with field-sizing */
+#num { field-sizing: content; font: 16px monospace; padding: 0; border: 0; min-width: 0 }
+#outC1 { width: 1px; height: 4px; background: green }
+#num:out-of-range ~ #outC1 { width: 50px }
+#outC2 { width: 1px; height: 4px; background: green }
+#num:invalid ~ #outC2 { width: 50px }
+/* D: pattern */
+#pat { font: 16px monospace }
+#outD { width: 1px; height: 4px; background: purple }
+#pat:valid ~ #outD { width: 10px }
+#pat:invalid ~ #outD { width: 20px }
+#outD2 { width: 1px; height: 4px; background: purple }
+#pat:user-invalid ~ #outD2 { width: 30px }
+/* E: accesskey on a display:none checkbox */
+#ak { display: none }
+#outE { width: 1px; height: 4px; background: orange }
+#ak:checked ~ #outE { width: 33px }
+/* F: keyboard scrolling with snap */
+#sc { width: 100px; height: 50px; overflow: scroll; scroll-snap-type: y mandatory }
+#sc div { height: 10px; scroll-snap-align: start }
+/* G: radios */
+#outG { width: 1px; height: 4px; background: teal }
+#g3:checked ~ #outG { width: 3px }
+#g0:checked ~ #outG { width: 10px }
+/* typed text width in an input with field-sizing */
+#txt { field-sizing: content; font: 16px monospace; padding: 0; border: 0; min-width: 0 }
+/* interestfor */
+#ib { interest-delay-start: 0.5s }
+#outI { width: 1px; height: 4px; background: brown }
+#ib:interest-source ~ #outI { width: 44px }
+/* focusgroup */
+#fg button:focus { outline: 3px solid red }
+/* customizable select */
+#cs, #cs::picker(select) { appearance: base-select }
+#cs option span { display: inline-block; height: 5px; background: black }
+</style></head><body>
+<div class=box><input type=range id=r min=0 max=100 value=30><div id=ra></div></div>
+<div class=box><select id=sel><option value=a>a</option><option value=q>q</option><option value=z>z</option></select><div id=outB></div></div>
+<div class=box><input type=number id=num min=0 max=12 step=3 value=6><div id=outC1></div><div id=outC2></div></div>
+<div class=box><input id=pat pattern="[a-z]+[0-9]"><div id=outD></div><div id=outD2></div></div>
+<div class=box><input type=checkbox id=ak accesskey=k><div id=outE></div></div>
+<div class=box><div id=sc tabindex=0><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+<div class=box><input type=radio name=g id=g0><input type=radio name=g id=g1 checked><input type=radio name=g id=g2><input type=radio name=g id=g3><div id=outG></div></div>
+<div class=box><input id=txt value=""></div>
+<div class=box><button id=ib interestfor=tip>hover</button><div id=tip popover=hint>tip</div><div id=outI></div></div>
+<div class=box id=fg focusgroup="toolbar wrap"><button id=f0>a</button><button id=f1>b</button><button id=f2>c</button></div>
+<div class=box><select id=cs><button><selectedcontent></selectedcontent></button><option value=1><span style="width:11px"></span>one</option><option value=2><span style="width:22px"></span>two</option></select></div>
+</body></html>

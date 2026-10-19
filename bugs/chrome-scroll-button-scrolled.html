@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>::scroll-button activation doesn't update scroll-state(scrolled)</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  #s { width: 300px; height: 40px; overflow-x: scroll; scrollbar-width: none; container-type: scroll-state; }
+  #s::scroll-button(right) { content: "scroll right"; font: inherit; margin: 6px 0; }
+  #c { width: 5000px; height: 40px; background: gray; }
+  /* scrolled away from the start, but scroll-state(scrolled) didn't see it: red */
+  @container scroll-state(scrollable: left) { #c { background: red; } }
+  /* the most recent relative scroll was to the right: green */
+  @container scroll-state(scrolled: right) { #c { background: green; } }
+</style>
+<p>Click the "scroll right" button: the gray bar should turn green.<br>
+Red means it scrolled but scroll-state(scrolled: right) didn't match. (Control: reload, then scroll the bar with the
+wheel or focus it and press the right arrow key: green.)</p>
+<div id="s" tabindex="0"><div id="c"></div></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless, clicking the button (Playwright mouse click): it scrolls
+by a page (scrollLeft 0 -> 262) and the bar turns red. The right arrow key or the wheel turn it green. Playwright's
+Firefox 157 supports neither ::scroll-button nor scroll-state queries.
+
+Spec: css-conditional-5 §6.3.5 (https://drafts.csswg.org/css-conditional-5/#scrolled): "the scrolled container
+feature queries the direction of its most recent relative scroll"; "right: The most recent relative scroll was to the
+right." css-overflow-5 §3.2 (https://drafts.csswg.org/css-overflow-5/#scroll-buttons): a scroll button's activation
+behavior is "to scroll their originating element by one "page" in their associated direction, similar to pressing
+PgUp/PgDn keys. ... Like those keys, this scroll has an intended direction and end position."
+css-scroll-snap-1 (https://drafts.csswg.org/css-scroll-snap-1/#relative-scroll) lists "paging operations such as
+the PgUp/PgDn keys (or equivalent operations on the scrollbar)" and "pressing an arrow button on the scrollbar" among
+relative scrolls.
+
+Likely cause (same in 153 and on main 22b3b159): the button's activation calls ScrollByPageWithSnap, which scrolls
+with ScrollSourceType::kNone (core/paint/paint_layer_scrollable_area.cc:1047), while UpdateLastScrolled only records a
+direction for kRelativeScroll (:560).
+-->

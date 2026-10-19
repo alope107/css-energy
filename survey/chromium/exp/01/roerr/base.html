@@ -1,0 +1,6 @@
+<!doctype html><meta charset="utf-8"><style>@property --n { syntax: '<integer>'; inherits: true; initial-value: 0; }
+@keyframes kn { from { --n: 100000; } to { --n: -1; } }
+#top { timeline-scope: --tn; animation: kn auto linear both; animation-timeline: --tn; }
+.sc { position: absolute; left: 0; top: 0; width: 1px; height: 100000px; overflow: hidden; visibility: hidden; }
+.sub { position: absolute; left: 0; width: 1px; height: 1px; view-timeline: --tn block; top: calc((mod(var(--n) + 1, 50000)) * 1px); }
+.out { counter-reset: n var(--n); font: 20px monospace; } .out::before { content: counter(n); }</style><div id="top"><div class="sc"><div class="sub"></div></div><div class="out"></div></div>

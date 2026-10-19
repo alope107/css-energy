@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SVG child to parent, cross-process</title>
+<link rel="stylesheet" href="reader.css">
+<h1>The same channel, across processes</h1>
+<p>Open this page through <code>http://localhost:8765/…</code>, not <code>127.0.0.1</code>. The child is
+loaded from <code>127.0.0.1:8765</code>, a different site, so site isolation puts it in its own renderer process
+(check <code>chrome://process-internals</code> or the Task Manager: a "Subframe: http://127.0.0.1" row). The parent
+still reads the child's natural width one frame after each height change.</p>
+<p>Expected readings: <b>57, 107, 157, 32</b>. If nothing shows, the page was opened under another host name.</p>
+<!-- The child URL must name the other host, so it is absolute: the repo-root path first, and as fallback content
+     (rendered only if that fails to load) the worktree path this page was written in. -->
+<object class="o" data="http://127.0.0.1:8765/survey/chromium/demos/child.svg" type="image/svg+xml">
+  <object class="o" data="http://127.0.0.1:8765/.claude/worktrees/chromium-survey/survey/chromium/demos/child.svg"
+          type="image/svg+xml"></object>
+</object>
+<div id="r"><div id="n"></div></div>

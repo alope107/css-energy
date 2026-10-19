@@ -1,0 +1,8 @@
+<!doctype html><style>@property --g{syntax:'<integer>';inherits:false;initial-value:300}
+@property --h{syntax:'<number>';inherits:false;initial-value:300}
+@property --g2{syntax:'<integer>';inherits:false;initial-value:200}
+i{display:block;--o:0}
+#cg{container-type:normal;--g:calc(299 + 1)} @container style(--g){#g{--o:1}}
+#ch{container-type:normal;--h:calc(299 + 1)} @container style(--h){#h{--o:1}}
+#cg2{container-type:normal;--g2:calc(199 + 1)} @container style(--g2){#g2{--o:1}}
+</style><div id=cg><i id=g></i></div><div id=ch><i id=h></i></div><div id=cg2><i id=g2></i></div>

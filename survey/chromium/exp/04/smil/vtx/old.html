@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@view-transition { navigation: auto; }
+#flag { width: 50px; height: 50px; background: red; }
+#cb:checked ~ #flag { view-transition-name: flag; }
+#cb2:checked ~ #flag { view-transition-class: long; }
+</style></head><body>
+<input type="checkbox" id="cb"><input type="checkbox" id="cb2">
+<div id="flag"></div>
+<a id="go" href="new.html">go</a>
+</body></html>

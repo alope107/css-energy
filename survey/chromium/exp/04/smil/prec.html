@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+#fo { width: 50px; }          /* author rule vs SMIL on the SVG-DOM path (width attr) */
+#g { visibility: visible; }   /* author rule vs SMIL on the CSS path (visibility) */
+#g2 { opacity: 0.25; transition: opacity 0s 1000s; } /* transition latch vs SMIL CSS path */
+</style></head><body>
+<svg width="300" height="100">
+  <foreignObject id="fo" width="100" height="20"><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>
+  <g id="g"/><g id="g2"/>
+  <set href="#fo" attributeName="width" to="300" begin="0s" fill="freeze"/>
+  <set href="#g" attributeName="visibility" to="hidden" begin="0s" fill="freeze"/>
+  <set href="#g2" attributeName="opacity" to="0.75" begin="0s" fill="freeze"/>
+</svg></body></html>

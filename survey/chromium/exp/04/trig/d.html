@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset=utf-8>
+<style>
+@property --v { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes setv { from { --v: 0 } to { --v: 100 } }
+body { margin: 0 }
+#sc { height: 100px; width: 300px; overflow-y: scroll; }
+#spacer { height: 5000px; timeline-trigger: --h scroll() 40% 60% / 20% 80%; }
+.t { height: 5px; }
+#h1 { animation: setv 1ms linear both; animation-trigger: --h play-forwards play-backwards; }
+#g1 { animation: setv 1ms linear both; animation-trigger: --h play-forwards play-backwards; animation-play-state: paused; }
+#p1 { animation: setv 100s linear both; animation-trigger: --h play pause; }
+</style>
+<div id=sc><div id=spacer></div></div>
+<div id=h1 class=t></div><div id=g1 class=t></div><div id=p1 class=t></div>
+<script>
+window.log = [];
+let frame = 0;
+const $ = id => document.getElementById(id);
+const ids = ['h1','g1','p1'];
+const v = () => ids.map(id => getComputedStyle($(id)).getPropertyValue('--v')).join(',');
+const st = () => ids.map(id => { const a = $(id).getAnimations()[0]; return a ? a.playState[0] + (a.pending?'*':'') + '@' + Math.round(a.currentTime) : '-'; }).join(' ');
+const sc = $('sc');
+const plan = { 4: () => { sc.scrollTop = 2000; return 'scroll 2000 (in activation 1960..2940)'; },
+               8: () => { sc.scrollTop = 1500; return 'scroll 1500 (out of activation, in active 980..3920)'; },
+               12: () => { sc.scrollTop = 500; return 'scroll 500 (out of active)'; },
+               16: () => { sc.scrollTop = 1500; return 'scroll 1500 (in active only, from inactive)'; },
+               20: () => { $('g1').style.animationPlayState = 'running'; return 'g1 play-state -> running'; },
+               24: () => { sc.scrollTop = 2000; return 'scroll 2000 (activation)'; },
+               28: () => { sc.scrollTop = 4000; return 'scroll 4000 (out of active, skipping over)'; } };
+function tick() {
+  frame++;
+  let note = plan[frame] ? plan[frame]() : '';
+  log.push(`f${frame} v=${v()} st=${st()} ${note}`);
+  if (frame < 32) requestAnimationFrame(tick); else window.done = true;
+}
+requestAnimationFrame(tick);
+</script>

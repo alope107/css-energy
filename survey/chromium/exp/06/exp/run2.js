@@ -1,0 +1,21 @@
+const { chromium } = require('/workspaces/css-energy/css-physics/node_modules/playwright');
+const path = require('path'), fs = require('fs');
+(async () => {
+  const file = process.argv[2], secs = +(process.argv[3] || 3);
+  const b = await chromium.launch({ executablePath: '/usr/local/bin/chromium', args: ['--no-sandbox', ...(process.env.FLAGS ? process.env.FLAGS.split(' ') : [])] });
+  const p = await b.newPage();
+  await p.goto('file://' + path.resolve(file));
+  await p.waitForTimeout(1500);
+  const w = await p.evaluate(() => document.getElementById('state').getBoundingClientRect().width);
+  const tp = path.resolve(file + '.trace.json');
+  await b.startTracing(p, { path: tp, categories: ['devtools.timeline', 'blink', 'blink_style'] });
+  await p.waitForTimeout(secs * 1000);
+  await b.stopTracing();
+  await b.close();
+  const ev = JSON.parse(fs.readFileSync(tp)).traceEvents;
+  const med = a => { a = a.slice().sort((x, y) => x - y); return a.length ? a[a.length >> 1] : 0; };
+  const pick = n => ev.filter(e => e.name === n && e.ph === 'X').map(e => e.dur / 1000);
+  const sh = pick('InlineNode::ShapeTextIncludingFirstLine'), lay = pick('Layout'), ult = pick('UpdateLayoutTree'), rs = pick('Document::recalcStyle'), rb = pick('Document::rebuildLayoutTree');
+  console.log(path.basename(file), `width=${w.toFixed(1)} shape n=${sh.length} med=${med(sh).toFixed(3)} ms; Layout n=${lay.length} med=${med(lay).toFixed(3)} ms; ULT med=${med(ult).toFixed(3)} ms (recalc ${med(rs).toFixed(2)}, rebuild ${med(rb).toFixed(2)})`);
+  fs.unlinkSync(tp);
+})();

@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- WARNING: opening this page (without #converge) hangs the tab in Chrome 153: the renderer loops forever inside
+     one frame. Close the tab, or use the browser's "Page unresponsive" dialog, to get out. -->
+<title>A same-process SVG object whose size feeds its own font size hangs the renderer</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  object { display: block; height: 20px; margin: 6px 0; }
+  .conv { display: none; }
+  #converge:target ~ .conv { display: block; }
+  #converge:target ~ .osc { display: none; }
+</style>
+<p><b>Warning: this page hangs the tab in Chrome 153.</b> Open it with <a href="#converge">#converge</a> in a
+<em>new</em> tab for the converging control.</p>
+<p>Pass: a green bar appears below and the page stays responsive (text can be selected). The bug: the bar never
+appears and the tab stops responding.</p>
+<div id="converge"></div>
+<!-- the SVG's font size is its viewport width + 1px when that width is even, - 1px when it is odd: as the object's
+     natural width (1em) it alternates between two values and never converges -->
+<object class="osc" type="image/svg+xml" data="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1em' height='100%25'><style>svg { font-size: calc(100vw + 1px - 2 * mod(100vw, 2px)); }</style><rect width='100%25' height='100%25' fill='green'/></svg>"></object>
+<!-- control (#converge): the font size is the viewport width + 1px, capped at 1000px; the bar grows to 1000px wide
+     within one frame (~700 iterations) -->
+<object class="conv" type="image/svg+xml" data="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1em' height='100%25'><style>svg { font-size: min(calc(100vw + 1px), 1000px); }</style><rect width='100%25' height='100%25' fill='green'/></svg>"></object>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless, from file:// and over HTTP: the load event fires, then no
+animation frame runs within 8 s (the renderer is stuck in one frame). With #converge: the bar is 1000px wide by the
+second frame (~85 ms after navigation). The same SVG served same-origin hangs the same way (the survey's
+exp/01/svgchan/osc.svg). Playwright's Firefox 157: no hang; either object stops at 301px
+(one update, no further feedback).
+
+The loop: the <object>'s width is the SVG document's natural width, 1em; the SVG's font size depends on its viewport
+width (100vw), which is the <object>'s width. Each change of the SVG's natural size marks the <object> for layout in
+the same process, and the lifecycle repeats inside the same frame until nothing needs layout, without a limit.
+
+Spec: HTML's "update the rendering" (https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering)
+has no step that repeats layout for a nested document's natural size; ResizeObserver, the one feedback loop it does
+repeat, has a depth limit so the loop ends and the rest waits for the next frame ("loop completed with undelivered
+notifications"). A natural size change would normally take effect at the next rendering update. Hanging the tab is
+wrong under any reading.
+
+Likely cause (same code in 153 and on main 22b3b159): LocalFrameView::RunPostLayoutIntersectionObserverSteps
+re-runs the lifecycle loop while any frame view NeedsLayout() after pre-paint
+(core/frame/local_frame_view.cc:1686-1689). A same-process SVG subdocument resizes after the parent's layout and
+re-dirties it through HTMLPlugInElement::NaturalSizingInfoChanged; nothing bounds the number of iterations.
+Impact: a self-DoS for same-site content; where a cross-site SVG in an <object> is same-process (Android without
+full site isolation), a third party could hang the embedder (inference). Cross-process objects update once per frame
+and don't hang.
+-->

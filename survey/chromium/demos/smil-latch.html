@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SMIL event latch</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; max-width: 720px; color: #222; background: #fff; }
+  code { background: #f2f2f2; padding: 0 3px; }
+  button { font: 600 15px system-ui, sans-serif; padding: 6px 14px; margin-right: 8px; }
+  .box { width: 240px; height: 60px; margin-top: 12px; background: #c33; color: #fff; font-weight: 600;
+         display: grid; place-items: center; }
+  .box::after { content: "off"; }
+  html:has(#flag.on) .box { background: #2a7a3a; }
+  html:has(#flag.on) .box::after { content: "on"; }
+</style>
+<h1>An event-driven latch with SMIL</h1>
+<p>The buttons are ordinary HTML buttons. Two SVG <code>&lt;set&gt;</code> elements listen for their clicks
+(<code>begin="on.click"</code>, <code>begin="off.click"</code>) and write the <code>class</code> of a hidden SVG
+rect; the box reads it with <code>:has()</code>. Nothing runs while idle.</p>
+<button id="on">On</button><button id="off">Off</button>
+<svg width="0" height="0" aria-hidden="true">
+  <rect id="flag" width="1" height="1">
+    <set attributeName="class" to="on" begin="on.click" fill="freeze"/>
+    <set attributeName="class" to="" begin="off.click" fill="freeze"/>
+  </rect>
+</svg>
+<div class="box"></div>

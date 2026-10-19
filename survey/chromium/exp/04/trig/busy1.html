@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset=utf-8>
+<title>timeline-trigger doesn't fire in an overflow:hidden scroller</title>
+<style>
+@keyframes come-in { to { top: 20px } }          /* moves the subject into the scrollport at 0.3s */
+@keyframes go-green { from, to { background: green } }
+.sc { position: relative; height: 100px; width: 260px; margin: 8px; border: 1px solid; }
+.sc.hidden { overflow: hidden }
+.sc.auto { overflow: auto }
+.spacer { height: 1000px }
+.subj { position: absolute; top: 600px; left: 0; width: 20px; height: 20px; background: gray;
+        animation: come-in 0.01s 0.3s forwards; }
+#s1 { timeline-trigger: --t1 view(); }
+#s2 { timeline-trigger: --t2 view(); }
+.out { width: 260px; height: 30px; margin: 8px; background: red; color: white; font: 14px sans-serif; padding: 4px; }
+#o1 { animation: go-green 1ms both; animation-trigger: --t1 play-forwards; }
+#o2 { animation: go-green 1ms both; animation-trigger: --t2 play-forwards; }
+/* fill both keeps the untriggered animation at its (green) from keyframe, so start red via the base style only: */
+#o1, #o2 { animation-fill-mode: forwards; }
+@keyframes blink { 50% { opacity: .5 } } @property --tick { syntax: "<number>"; inherits: false; initial-value: 0; } @keyframes tick { to { --tick: 1 } }
+.busy-c { animation: blink 1s infinite } .busy-m { animation: tick 1s infinite }
+</style><div class=busy-m>main-thread-animated</div>
+<div class="sc hidden"><div class=spacer></div><div class=subj id=s1></div></div>
+<div class=out id=o1>overflow: hidden (green = pass)</div>
+<div class="sc auto"><div class=spacer></div><div class=subj id=s2></div></div>
+<div class=out id=o2>overflow: auto (control, green)</div>
+<!--
+Observed, Chrome 153.0.8010.12 headless, default flags: hidden red, auto green (after 0.3 s).
+With --disable-blink-features=CompositorTimelineTrigger both are green.
+A JS-scrolled overflow:hidden scroller (scrollTop) fired the entry action but never the exit action; a
+view-timeline-driven animation in the same scroller tracked correctly.
+
+Spec (animation-triggers-1 ED, §3): "A timeline trigger is a trigger which is activated when some timeline enters
+the trigger's activation range, and deactivated when it leaves the trigger's active range." A view timeline in an
+overflow:hidden scroll container is an active timeline (scroll-animations-1: any scroll container), and the same
+timeline drives animations correctly.
+
+Likely cause: CompositorTimelineTrigger is status "stable" (platform/runtime_enabled_features.json5, 153/155/main).
+Once a cc::TimelineTrigger exists, TimelineTrigger::Update() returns early ("If a cc TimelineTrigger exists, it is
+the source of truth", core/animation/timeline_trigger.cc:63-69), so the main thread stops evaluating; the trigger is
+created whenever a cc timeline exists (TimelineTrigger::CreateCompositorTrigger, timeline_trigger.cc:191-229)
+without checking that the impl thread will update it. For a scroller that isn't composited (overflow:hidden,
+visibility:hidden) the impl-side trigger apparently never sees the new timeline position.
+-->

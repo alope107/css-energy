@@ -1,0 +1,16 @@
+MEASURED (153, shared machine, stylebench median UpdateLayoutTree):
+regcost (200 children, R unused registered <number> w/ initial-value):
+ inh R0 0.38 / R4000 0.40; steady anim R0 2.69 / R4000 2.60
+ trans restart every frame: R0 3.5 (2.25 rerun) / R4000 56.9 (51.4) / R4000 syntax'*' no initial 4.46
+ anim rebuild (animation-duration via if(style(--odd))) R0 2.93 / R4000 51.3 / R4000star 2.67
+ => 0.24-0.27 ms per restart at R=4000 = 0.06-0.067 us per registered prop w/ initial value
+ animation-delay: calc(var(--t) * -1ms) with --t inherited animated -> computed 0s (taint)
+chain (D levels, 8 paused animations each, named timeline via timeline-scope at root vs document timeline):
+ D100 doc 2.63 named 4.09 ; D200 4.88 / 10.08 ; D400 9.65 / 30.67 => extra 1.46/5.2/21 ms quadratic, ~33 ns per ancestor visit
+precision: V=100 subject top 50+k/64: --x(us) 800,799x4,798x4,797x4,796x3 -> truncation, 1/16 px
+ V=1e6 at 600000+k/64: 0,0,0,-1,-1,-1,-2... (float subject pos rounding 1/16 + trunc); at 100000 / 1000: pure 1/16 trunc
+latch (latch.html): k += 2 per frame; #C if(style(--w)) latch L=k-1 (written pass1, held pass2) = per-pass;
+ #E @container style() same; #G transition: calc((1-var(--w))*1e6s) with --w registered derived from animated --r: works (registered laundering)
+ #F animation-play-state: if(style(--w:1): running; else: paused) toggling per pass: never holds (tracks timeline)
+m_R*_K*: 100 children, K animations each rebuilt when --odd flips: R0K16 2.97 ms, R4000K16 138.7 ms => 85 us per animation rebuild = 0.021 us/prop/animation (HashSet amortised per element style); K1 median not flipping (max 42.7)
+scope: none/single/nest 840 names: all 2.2-2.7 ms medians, no difference

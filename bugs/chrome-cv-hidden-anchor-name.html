@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A content-visibility: hidden element's own anchor-name is not an anchor</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  .cb { position: relative; height: 40px; margin: 6px 0; }
+  .anchor { width: 50px; height: 10px; }
+  #a .anchor { anchor-name: --a; content-visibility: hidden; }
+  #b .anchor { anchor-name: --b; content-visibility: auto; contain-intrinsic-size: auto 50px 10px; } /* control */
+  /* reader: as wide as the anchor (7px if there is none), and a size container */
+  .reader { position: absolute; top: 10px; left: 0; height: 30px; container-type: inline-size; }
+  #a .reader { width: anchor-size(--a width, 7px); }
+  #b .reader { width: anchor-size(--b width, 7px); }
+  .box { width: 300px; height: 30px; background: red; }
+  @container (min-width: 40px) { .box { background: green; } }
+</style>
+<p>Both boxes should be green (each reads its anchor's width, 50px; 7px means no anchor was found).</p>
+<div class="cb" id="a"><div class="anchor"></div><div class="reader"><div class="box"></div></div></div>
+<div class="cb" id="b"><div class="anchor"></div><div class="reader"><div class="box"></div></div></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: first box red (anchor-size() falls back to 7px), second
+green (50px). Playwright's Firefox 157: both red (7px): it doesn't take the hidden element as an anchor either, nor
+the on-screen content-visibility: auto one (a separate oddity, not researched).
+An element *inside* a content-visibility: hidden element is (correctly) not an anchor either; only the case of the
+hidden element naming itself is in question.
+
+Spec: css-anchor-position-1 §2.1 (https://drafts.csswg.org/css-anchor-position-1/#name), a note: "While an element
+is in the skipped contents of another element (due to content-visibility: hidden, for instance), it's not an
+acceptable anchor element, effectively acting as if it had no names." The normative list in §2.3
+(https://drafts.csswg.org/css-anchor-position-1/#acceptable-anchor-element) only adds: "If possible anchor is in the
+skipped contents of another element, then positioned el is in the skipped contents of that same element." The element
+with content-visibility: hidden is not in the skipped contents of another element (it skips its own contents; its
+own box is laid out, like an element with size containment), so it should be an acceptable anchor.
+This reading is debatable: the spec doesn't say whether an element that skips its own contents can be an anchor, and
+no WPT covers it (css-anchor-position/anchored-c-v-hidden.html tests the anchored side only). Firefox behaves the
+same, so both engines may see it as intended; then it is a spec question (the spec should say so) rather than a bug.
+
+Likely cause: third_party/blink/renderer/core/layout/fragment_builder.cc:363-367 returns early for a
+display-locked child (content-visibility: hidden) before the child's own anchor names are added to the anchor map,
+the same early return that rightly skips its descendants' names. content-visibility: auto on screen isn't locked.
+Same code on main (22b3b159).
+-->

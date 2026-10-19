@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>if(style(--x)) is true for a registered property at its initial value</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  @property --f { syntax: '<number>'; inherits: true; initial-value: 0; }
+  @property --g { syntax: '<number>'; inherits: true; initial-value: 7; }
+  .box { width: 300px; height: 30px; margin: 6px 0; color: white; padding: 0 6px; }
+  /* a style feature without a value is true iff the computed value differs from the initial value */
+  #a .box { background: if(style(--f): red; else: green); }               /* --f not set: initial 0 */
+  #b { --g: 7; } #b .box { background: if(style(--g): red; else: green); } /* --g: 7, equal to initial 7 */
+  #c { --f: 1; } #c .box { background: if(style(--f): green; else: red); } /* --f: 1 differs: true */
+  /* control: the same query in @container style() */
+  #d .box { background: green; }
+  @container style(--f) { #d .box { background: red; } }
+</style>
+<p>All four boxes should be green.</p>
+<div id="a"><div class="box">if(style(--f)), --f at its initial value</div></div>
+<div id="b"><div class="box">if(style(--g)), --g set to its initial value</div></div>
+<div id="c"><div class="box">if(style(--f)), --f: 1</div></div>
+<div id="d"><div class="box">@container style(--f), --f at its initial value</div></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: the first two boxes red, the last two green.
+Playwright's Firefox 157 has no if() (the if() boxes are blank); its @container box is red, the
+known Firefox bug in firefox-style-boolean-registered.html.
+
+Spec: css-values-5 §8.3 (https://drafts.csswg.org/css-values-5/#if-notation): <if-test> = ... | style( <style-query> ).
+css-conditional-5 §6.2 (https://drafts.csswg.org/css-conditional-5/#style-container): "A style feature without a
+value (<style-feature-boolean>) evaluates to true if the computed value is different from the initial value for the
+given property." Chrome's @container style(--f) follows this (fourth box).
+
+Likely cause: third_party/blink/renderer/core/css/resolver/style_cascade.cc:2841 (StyleCascade::EvalIfStyleFeature),
+for a query without a value: `return computed_data ? kTrue : kFalse;`. A registered property always has data (its
+initial value), so the query is always true. MediaQueryEvaluator::EvalStyleFeature compares with the computed initial
+value instead (media_query_evaluator.cc:1875). Same code on main (22b3b159). WPT has no if() case for a registered
+property at its initial value.
+-->

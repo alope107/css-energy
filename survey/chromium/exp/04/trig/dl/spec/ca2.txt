@@ -1,0 +1,1307 @@
+
+  CSS Animations Module Level 2
+   CSS Animations Module Level 2
+   Editor’s Draft,
+    18 August 2026
+    More details about this document
+      This version:
+      https://drafts.csswg.org/css-animations-2/
+      Latest published version:
+      https://www.w3.org/TR/css-animations-2/
+      Previous Versions:
+      https://www.w3.org/TR/2023/WD-css-animations-2-20230602/
+      Feedback:
+      CSSWG Issues Repository
+      Inline In Spec
+      Editors:
+      L. David Baron (Google)
+      Brian Birtles (Invited Expert)
+      Suggest an Edit for this Spec:
+      GitHub Editor
+      Issues List:
+      https://github.com/w3c/csswg-drafts/labels/css-animations-2
+   Copyright © 2026 World Wide Web Consortium. W3C® liability, trademark and permissive document license rules apply.
+   Abstract
+   This CSS module describes a way for authors to animate the values of CSS properties over time, using keyframes. The behavior of these keyframe animations can be controlled by specifying their duration, number of repeats, and repeating behavior.
+CSS is a language for describing the rendering of structured documents
+(such as HTML and XML)
+on screen, on paper, etc.
+  Status of this document
+	This is a public copy of the editors’ draft.
+	It is provided for discussion only and may change at any moment.
+	Its publication here does not imply endorsement of its contents by W3C.
+	Don’t cite this document other than as work in progress.
+   Please send feedback
+	by filing issues in GitHub (preferred),
+	including the spec code “css-animations” in the title, like this:
+	“[css-animations] …summary of comment…”.
+	All issues and comments are archived.
+	Alternately, feedback can be sent to the (archived) public mailing list
+	www-style@w3.org.
+   This document is governed by the
+	18 August 2025 W3C Process Document.
+   Table of Contents
+    1 Delta specification
+     2 Animations
+      2.1 Owning element
+      2.2 Animation composite order
+     3 
+Assembling Keyframes
+      3.1 
+Declaring Keyframes: the @keyframes rule
+      3.2 
+Processing Keyframes
+     4 
+Declaring Animations
+      4.1 The animation-duration property
+      4.2 The animation-timing-function property
+      4.3 The animation-iteration-count property
+      4.4 The animation-direction property
+      4.5 The animation-play-state property
+      4.6 The animation-delay-start property
+      4.7 The animation-delay-end property
+      4.8 The animation-delay shorthand
+      4.9 The animation-fill-mode property
+      4.10 The animation-composition property
+      4.11 The animation-timeline property
+      4.12 The animation shorthand property
+     5 Animation Events
+      5.1 Event dispatch
+       5.2 The AnimationEvent Interface
+        5.2.1 IDL Definition
+        5.2.2 Attributes
+     6 DOM Interfaces
+      6.1 The CSSAnimation interface
+      6.2 Requirements on pending style changes
+    7 
+  Privacy Considerations
+    8 
+  Security Considerations
+     9 Changes
+      9.1 Recent Changes
+      9.2 Changes since CSS Animations, Level 1
+Conformance
+Document conventions
+Conformance classes
+Partial implementations
+Implementations of Unstable and Proprietary Features
+Non-experimental implementations
+      Index
+       Terms defined by this specification
+       Terms defined by reference
+      References
+       Normative References
+       Non-Normative References
+     Property Index
+     IDL Index
+     Issues Index
+   1. Delta specification
+   This is a delta specification, meaning that it currently contains
+only the differences from CSS Animations Level 1 [CSS3-ANIMATIONS].
+Once the Level 1 specification is closer to complete, it will be merged
+with the additions here into a complete level 2 specification.
+   2. Animations
+   Changes to any of the animation properties defined in this specification
+cause the corresponding CSSAnimation object and its associated objects
+to be updated according to the correspondence between these properties
+and Web Animations concepts defined in § 3 Assembling Keyframes.
+   However, if the author modifies the animation
+using the Web Animations programming interface,
+the changes from the programming interface take precedence as follows:
+     After a successful call to setKeyframes()
+on the KeyframeEffect associated with a CSSAnimation,
+any subsequent change to matching @keyframes rules or the resolved value
+of the animation-timing-function property for the target element
+will not be reflected in that animation.
+     However, if the last matching @keyframes rule is removed
+the animation must still be canceled.
+     After a successful call to updateTiming()
+on the KeyframeEffect associated with a CSSAnimation,
+for each property included in the
+timing parameter,
+any subsequent change to a corresponding animation property
+will not be reflected in that animation.
+     For example, calling
+cssAnimation.effect.updateTiming({ duration: 1000 })
+would cause subsequent changes to animation-duration to be ignored
+whilst changes to animation-delay would still be reflected
+in the KeyframeEffect’s timing.
+     After a successful call to play() or pause()
+on a CSSAnimation,
+any subsequent change to the animation-play-state will no longer
+cause the CSSAnimation to be played or paused
+as defined in § 4.5 The animation-play-state property.
+     After a successful call to reverse() on a CSSAnimation
+or after successfully setting the startTime
+on a CSSAnimation,
+if, as a result of that call the play state of the
+CSSAnimation changes to or from the paused play state,
+any subsequent change to the animation-play-state will no longer
+cause the CSSAnimation to be played or paused
+as defined in § 4.5 The animation-play-state property.
+     The requirement for a change to or from the paused state
+ensures that even after calling
+reverse() or setting the startTime
+on a running animation,
+the animation continues to observe changes in animation-play-state.
+     After successfully setting the effect of a CSSAnimation
+to null
+or some AnimationEffect other than the original KeyframeEffect,
+all subsequent changes to animation properties other than
+animation-name, animation-play-state, or animation-timeline
+will not be reflected in that animation.
+Similarly, any change to matching @keyframes rules will not be reflected
+in that animation.
+However, if the last matching @keyframes rule is removed
+the animation must still be canceled.
+   Note, the reference to a successful call in the above rules
+is necessary to ensure that
+when an exception is thrown by any of these methods,
+the override behavior is not applied.
+   2.1. Owning element
+   The owning element of an animation refers to the element or
+pseudo-element to which the animation-name property was applied that generated
+the animation.
+   If the display property of an element is set to none
+and its display value would compute to none when ignoring the Transitions and Animations cascade origins,
+then terminate running animations with this owning element.
+If an element has a display of none and
+its display value had computed to none when ignoring the Transitions and Animations cascade origins,
+updating display to a value other than none
+will start all animations applied to the element by the animation-name property.
+   Note: In practice, this means that an animation to a display value of none will not terminate running animations
+unless the style also computes to none without the effect of the animations.
+   If an animation generated using the markup defined in this specification is
+later disassociated from that markup by an update to the computed value of the
+animation-name property on the owning element, the animation is
+disassociated from its owning element (that is, it has no owning
+element from that point forwards).
+    In the example below, animation’s initial owning element
+is elem. animation is disassociated from
+element through an update to the computed value of
+elem’s animation-name property.
+elem.style.animation = 'spin 1s';
+let animation = elem.getAnimations()[0]; // animation's owning element is elem
+elem.style.animation = ""; // animation no longer has an owning element
+    Note that although the owning element is often equal to the
+target element of an animation’s associated effect,
+this is not always the case.
+The following example demonstrates some of the situations where these two
+elements may differ.
+elem.style.animation = 'move 1s';
+let animation = elem.getAnimations()[0];
+// animation.effect.target == elem == animation's owning element
+animation.effect.target = elem2;
+// animation.effect.target == elem2 != animation's owning element
+animation.effect = null;
+// animation.effect?.target is undefined != animation's owning element
+   2.2. Animation composite order
+   Animations generated from the markup defined in
+this specification have an animation class of ‘CSS
+Animation’.
+   CSS Animations with an owning element have a later
+composite order than CSS Transitions but an earlier composite order
+than animations without a specific animation class.
+   Within the set of CSS Animations with an owning element, two
+animations A and B are sorted in composite order (first to
+last) as follows:
+     If the owning element of A and B
+differs, sort A and B by tree order
+of their corresponding owning elements.
+With regard to pseudo-elements, the sort order is as follows:
+       element
+       ::marker
+       ::before
+       any other pseudo-elements not mentioned specifically in this list,
+sorted in ascending order by the Unicode codepoints that make up each selector
+       ::after
+       element children
+     Otherwise, sort A and B based on their position in the
+computed value of the animation-name property of the (common) owning
+element.
+   When determining the composite order in order
+to sort animation events
+where either or both of the events is an animationcancel event,
+treat the CSS Animation(s) for which the animationcancel event was generated
+as having an owning element corresponding to
+the owning element in use at the moment when the CSS Animation was cancelled.
+Furthermore,
+use the position of the animation in the animation-name property
+in effect at the time when the CSS Animation was cancelled
+sorting such that positions of cancelled animations sort
+before positions of animations that have not been cancelled.
+   The composite order of CSS Animations without an owning element
+is based on their position in the global animation list.
+    This differs from the behavior defined for transitions. We should
+probably sort transitions first, then animation, then use the global animation
+list. The reason being that when developer tools etc. hang on to orphaned
+animations and transitions in order to replay them, they should maintain
+roughly the same composite order.
+   CSS Animations generated using the markup defined in this specification are
+not added to the global animation list when they are created.
+Instead, these animations are appended to the global animation list at
+the first moment when they transition out of the idle play state
+after being disassociated from their owning element.
+CSS Animations that have been disassociated from their owning element
+but are still idle do not have a defined composite order.
+   Note, this behavior relies on the fact that disassociating an animation
+from its owning element always causes it to enter (or remain) in the
+idle play state.
+   3. 
+Assembling Keyframes
+   3.1. 
+Declaring Keyframes: the @keyframes rule
+   See CSS Animations 1 § 3 Declaring Keyframes.
+   3.2. 
+Processing Keyframes
+   For each animation effect defined by the Nth item
+in the coordinated value list of the animation-* properties
+on target (pseudo-)element element,
+its associated keyframes are generated as follows:
+     Set Defaults:
+       Let default timing function be the corresponding computed value
+of animation-timing-function on element.
+       Let default composite be the corresponding computed value
+of animation-composition on element.
+       Let keyframes be an empty sequence of keyframe objects,
+each possessing a
+keyframe offset,
+keyframe timing function,
+keyframe composite,
+and keyframe values.
+       Let animated properties be an empty set of CSS property names.
+     Collect Declared Keyframes:
+       Find the last @keyframes at-rule in document order
+with <keyframes-name> matching
+the corresponding animation-name value name.
+       If there is no @keyframes at-rule
+with <keyframes-name> matching name
+(or if name is none),
+abort this procedure.
+In this case no animation is generated,
+and any existing animation matching name is canceled.
+       Group together all <keyframe-block> declarations
+that share the same specified <keyframe-selector>
+(treating from as 0% and to as 100%),
+last declared animation-timing-function computed value
+(defaulting to default timing function if there is no such declaration),
+and last declared animation-composition computed value
+(defaulting to default composite if there is no such declaration).
+       For each such group of matching <keyframe-block> declarations,
+ordered by their earliest <keyframe-block> in the sorted order:
+         Cascade together all of its declaration blocks
+such that for each CSS property
+(except those that are “not animatable”, which must be ignored)
+the last declaration among all its <keyframe-block> declarations
+takes precedence.
+[CSS-CASCADE-4]
+         Note: The cascade will
+expand shorthand properties into their sub-properties
+and map together corresponding property pairs in each logical property group
+according to the element’s computed writing mode.
+         Append to keyframes a new empty keyframe
+with the group’s keyframe offset,
+keyframe timing function,
+and keyframe composite.
+Give its keyframe values
+the set of declared values resulting from this cascade.
+         Add each property name that was added to its cssRules
+to animated properties.
+     Generate Initial and Final Frames:
+       Find or create the initial keyframe,
+a keyframe with a keyframe offset of 0%,
+default timing function as its keyframe timing function,
+and default composite as its keyframe composite.
+       For any property in animated properties
+that is not otherwise present in a keyframe with an offset of 0%
+or one that would be positioned earlier in the used keyframe order,
+add the computed value of that property on element
+to initial keyframe’s keyframe values.
+       If initial keyframe’s keyframe values is not empty,
+prepend initial keyframe to keyframes.
+       Repeat for final keyframe,
+using an offset of 100%,
+considering keyframes positioned later in the used keyframe order,
+and appending to keyframes.
+     Sort Frames:
+       The specified order of keyframes
+is the order resulting from the steps above,
+i.e. document order with duplicate keyframes collapsed
+to the earliest position.
+       The computed order of keyframes—​which is the order returned by getKeyframes()—​is found by shifting any keyframes whose offset was specified as
+a <percentage>, from keyword, or to keyword
+to the front of the list (after the generated initial keyframe, if any),
+and performing a stable sort on these keyframes
+by their keyframe offsets.
+       The used order of keyframes—​which is the order used to interpolate and compute the actual animation frames—​is found by attaching the keyframes
+onto the animation effect’s timeline
+assuming an iteration count of 1
+and ordering them from earliest to latest,
+breaking ties by using the computed keyframe order.
+      Any specific requirements on sorting computed keyframes introduced by
+this spec should be integrated into
+Web Animations § 5.3.3 Calculating computed keyframes.
+Any specific requirements on used keyframes introduced by this spec
+should be integrated into
+Web Animations § 5.3.4 The effect value of a keyframe effect.
+The above description of the distinction between these sets of keyframes
+should be moved to an informative note.
+     Note: Although the computed keyframe order
+sorts keyframes with <percentage> offsets,
+it maintains keyframes specified with a <timeline-range-name>
+in their specified keyframe order—​after any <percentage> keyframes
+(other than a generated final keyframe),
+even if these come later in the used keyframe order.
+   4. 
+Declaring Animations
+   CSS Animations are defined by binding keyframes to an element
+    using the animation-* properties.
+    These list-valued properties,
+    which are all longhands of the animation shorthand,
+    form a coordinating list property group
+    with animation-name as the coordinating list base property
+    and each item in the coordinated value list
+    defining the properties of a single animation effect.
+   See CSS Values 4 § A Coordinating List-Valued Properties
+    for how the individual animation-* property values coordinate.
+   4.1. The animation-duration property
+      Name:
+      animation-duration
+      Value:
+      [ auto | <time [0s,∞]> ]#
+      Initial:
+      auto
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      list, each item either a time or the keyword auto
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   The animation-duration property specifies the iteration duration
+  of the animation’s associated animation effect.
+    auto
+      For time-driven animations,
+      equivalent to 0s.
+     For scroll-driven animations,
+      equivalent to the duration necessary to fill the timeline
+      in consideration of animation-range, animation-delay, and animation-iteration-count.
+      See Scroll-driven Animations § 4.1 Finite Timeline Calculations.
+    <time [0s,∞]>
+      For time-driven animations,
+      specifies the length of time that an animation takes to complete one cycle.
+      A negative <time> is invalid.
+     For scroll-driven animations,
+      treated as auto.
+   If the used animation-duration is 0s,
+  the animation itself still occurs (instantaneously).
+  The animation’s start and end events are still fired.
+  If animation-fill-mode is set to backwards or both,
+  the first frame of the animation
+  (as defined by animation-direction)
+  will be displayed during the animation-delay;
+  and if animation-fill-mode is set to forwards or both,
+  the last frame of the animation
+  (as defined by animation-direction)
+  will be displayed after the animation-delay.
+  However, if animation-fill-mode is set to none
+  the keyframes of the animation animation will have no noticeable effect.
+   For backwards-compatibility with Level 1,
+  when the computed value of animation-timeline is auto
+  (i.e. only one list value, and that value being auto),
+  the resolved value of auto for animation-duration
+  is 0s whenever its used value would also be 0s.
+   4.2. The animation-timing-function property
+   The animation-timing-function is used to determine the timing function
+applied to each keyframe as defined in § 3 Assembling Keyframes.
+   4.3. The animation-iteration-count property
+   The animation-iteration-count property specifies the iteration count
+of the animation’s associated animation effect.
+   4.4. The animation-direction property
+   The animation-direction property specifies the playback direction
+of the animation’s associated animation effect.
+   4.5. The animation-play-state property
+   The animation-play-state is used to pause or play the animation.
+   If at any time,
+including when the animation is first generated,
+the resolved value of animation-play-state
+corresponding to an animation is newly running,
+the implementation must run the procedure to play an animation
+for the given animation
+with the auto-rewind flag set to false.
+   If at any time,
+including when the animation is first generated,
+the resolved value of animation-play-state
+corresponding to an animation is newly paused,
+the implementation must run the procedure to pause an animation
+for the given animation.
+   The above requirements do not apply
+if the animation’s play state is being overridden by the Web Animations API
+as described in § 2 Animations.
+   4.6. The animation-delay-start property
+   The animation-delay-start property specifies the start delay of the
+  animation’s associated animation effect, which
+  defines when the animation will start. It allows an animation
+  to begin execution some time after it is applied,
+  or to appear to have begun execution some time before it is applied.
+      Name:
+      animation-delay-start
+      Value:
+      <time>#
+      Initial:
+      0s
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      list, each item a duration
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+    <time>
+      The <time> defines how long of a delay there is between the start of the animation
+      (when the animation is applied to the element via these properties)
+      and when it begins executing.
+      A delay of 0s (the initial value) means that the animation will execute as soon as it is applied.
+     A negative delay is valid.
+      Similar to a delay of 0s, it means that the animation executes immediately,
+      but is automatically progressed by the absolute value of the delay,
+      as if the animation had started the specified time in the past,
+      and so it appears to start partway through its active duration.
+      If an animation’s keyframes have an implied starting value,
+      the values are taken from the time the animation starts,
+      not some time in the past.
+   4.7. The animation-delay-end property
+   The animation-delay-end property specifies the end delay of the
+  animation’s associated animation effect, which
+  defines when the animation will start when it is reversed.
+      Name:
+      animation-delay-end
+      Value:
+      <time [0s,∞]>#
+      Initial:
+      0s
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      list, each item a duration
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+    Should animation-delay-end support negative values? If so, what would it mean?
+    Should animation-delay-end be added to the animation shorthand?
+   4.8. The animation-delay shorthand
+      Name:
+      animation-delay
+      Value:
+      [ <'animation-delay-start'> <'animation-delay-end'>? ]#
+      Initial:
+      see individual properties
+      Applies to:
+      see individual properties
+      Inherited:
+      see individual properties
+      Percentages:
+      see individual properties
+      Computed value:
+      see individual properties
+      Animation type:
+      see individual properties
+      Canonical order:
+      per grammar
+   The animation-delay property is a shorthand
+  that sets animation-delay-start and animation-delay-end
+  together in a single declaration. Specifying a single value will
+  set the animation-delay-start to that value, and will reset
+  animation-delay-end to its initial value, for backward compatibility with
+  the animation-delay previous longhand behavior.
+   4.9. The animation-fill-mode property
+   The animation-fill-mode property specifies the fill mode
+of the animation’s associated animation effect.
+   4.10. The animation-composition property
+   The animation-composition property defines the composite operation
+used when multiple animations affect the same property simultaneously.
+      Name:
+      animation-composition
+      Value:
+      <single-animation-composition>#
+      Initial:
+      replace
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      list, each item a keyword as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   <single-animation-composition> = replace | add | accumulate
+   The values of animation-composition have the meaning defined for the
+corresponding values of the composite operation defined in Web
+Animations [WEB-ANIMATIONS].
+   When specified in a keyframe, animation-composition defines the composite
+operation to use for each property specified in that keyframe until the next
+keyframe specifying each property.
+  For example, the following stylesheet defines two different animations
+  targeting the scale property.
+@keyframes heartbeat {
+  from {
+    scale: 1;
+    animation-timing-function: ease-out;
+  }
+  30% {
+    scale: 1.3;
+  }
+}
+.heartbeat {
+  animation: heartbeat 0.3s 2s infinite;
+}
+@keyframes throb {
+  50% {
+    scale: 1.8;
+  }
+}
+.icon:mouseover {
+  animation: throb 0.4s add;
+}
+    If these two animations are applied to the same element, normally only
+  one animation would apply, but by specifying add
+  as the animation-composition on the second animation, the result of
+  the two animations will be combined.
+    Since CSS Transitions [CSS3-TRANSITIONS] have a lower composite
+  order, it is possible to use animation-composition to combine CSS
+  Animations with underlying transitions as in the following example.
+.icon {
+  filter: blur(20px);
+  transition: filter 0.5s;
+}
+.icon:hover {
+  filter: blur(0px);
+  animation: brightness-pulse 3s infinite add;
+}
+@keyframes brightness-pulse {
+  0% {
+    scale: 1.1;
+    filter: brightness(130%);
+  }
+  10% {
+    scale: 1;
+    filter: brightness(100%);
+  }
+}
+     Create pictures of these examples and verify they make sense.
+   4.11. The animation-timeline property
+   The animation-timeline property defines the timeline used with the
+animation.
+   Note: This specification does not introduce any syntax to specify animation
+timelines but instead it is up to others specifications such as Scroll-linked
+Animations [SCROLL-ANIMATIONS] to do so.
+      Name:
+      animation-timeline
+      Value:
+      <single-animation-timeline>#
+      Initial:
+      auto
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      list, each item either
+the keyword none,
+the keyword auto,
+a case-sensitive css identifier,
+a computed scroll() function,
+or
+a computed view() function
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+<single-animation-timeline> = auto | none | <dashed-ident> | <scroll()> | <view()>
+   The animation-timeline property is similar to properties like animation-name
+and animation-duration in that it can have one or more values, each one
+imparting additional behavior to a corresponding animation on the element,
+with the timelines matched up with animations as described
+here.
+   Each value has type <single-animation-timeline>, whose possible values have
+the following effects:
+    " data-dfn-type="value" data-export id="valdef-animation-timeline-auto">auto
+     The animation’s timeline is a DocumentTimeline, more specifically
+the default document timeline.
+    " data-dfn-type="value" data-export id="valdef-animation-timeline-none">none
+     The animation is not associated with a timeline.
+    " data-dfn-type="value" data-export id="valdef-animation-timeline-dashed-ident"><dashed-ident>
+     If a named scroll progress timeline or view progress timeline
+is in scope on this element,
+use the referenced timeline
+as defined in Scroll-driven Animations §  Declaring a Named Timeline’s Scope: the timeline-scope property.
+     Otherwise the animation is not associated with a timeline.
+    " data-dfn-type="value" data-export id="valdef-animation-timeline-scroll"><scroll()>
+     Use the scroll progress timeline indicated by the given scroll() function.
+See Scroll-driven Animations § 2.2.1 The scroll() notation.
+    " data-dfn-type="value" data-export id="valdef-animation-timeline-view"><view()>
+     Use the view progress timeline indicated by the given view() function.
+See Scroll-driven Animations § 3.3.1 The view() notation.
+    Make it easier to use animation-name to select the timeline when
+animation-timeline is not specified. Allowing animation-name to be used for
+selecting timeline enables most common animations to have to use a single name
+for both their keyframes and timeline which is simple and ergonomics. The
+animation-timeline property gives authors additional control to independently
+select keyframes and timeline if necessary.
+   When multiple animation-* properties are set simultaneously,
+animation-timeline is updated first,
+so e.g. a change to animation-play-state applies
+to the simultaneously-applied timeline specified in animation-timeline.
+   4.12. The animation shorthand property
+   The animation shorthand property syntax is as follows:
+   <single-animation> = <'animation-duration'> || <easing-function> || <'animation-delay-start'> || <single-animation-iteration-count> || <single-animation-direction> || <single-animation-fill-mode> || <single-animation-play-state> || [ none | <keyframes-name> ] || <single-animation-timeline>
+   5. Animation Events
+   5.1. Event dispatch
+   Note, this is a more general description of event dispatch than that of CSS
+Animations Level 1 [CSS3-ANIMATIONS] since it must account for the
+possibility of animations being seeked or reversed using the Web Animations API
+[WEB-ANIMATIONS].
+   The target for a CSS animation event is
+the animation’s owning element.
+If there is no owning element, no CSS animation events are dispatched
+(although the animation playback events defined in Web Animations are still
+dispatched at the corresponding CSSAnimation object).
+   For the purpose of determining which events to dispatch, the
+phases defined in
+the Web Animations model are used. These definitions apply to an animation
+effect, however, for the purpose of dispatching events, we consider a
+CSS Animation to have the same phase as its associated effect.
+For example, a CSS Animation is in the before phase if its
+associated effect is in the before phase.
+   A CSS Animation that does not have an associated effect
+is considered to be in the idle phase
+if its current time is unresolved, in the
+before phase if its current time is less than zero,
+and in the after phase otherwise.
+   Similarly, subsequent references to the start delay, active
+duration, current iteration, iteration start, and
+iteration duration of a CSS animation should be understood to refer
+to the corresponding properties of the animation’s associated effect.
+   For calculating the elapsedTime of each event, the following
+definitions are used:
+     interval start =
+max(min(-start delay, active duration), 0)
+     interval end =
+max(min(associated effect end - start delay,
+              active duration), 0)
+   Each time a new animation frame is established and the animation does
+not have a pending play task or pending pause task,
+the events to dispatch are determined by
+comparing the animation’s phase before and after establishing the new
+animation frame as follows:
+      Change
+      Events dispatched
+      Elapsed time (ms)
+      idle or
+          before →
+          active
+      animationstart
+      interval start
+        idle or
+        before →
+        after ٭
+      animationstart
+      interval start
+      animationend
+      interval end
+      active →
+          before
+      animationend
+      interval start
+      active →
+          active
+          and
+          the current iteration of the animation’s associated effect
+          has changed since the previous animation frame
+      animationiteration
+      (See below)
+          †
+      active →
+          after
+      animationend
+      interval end
+      after →
+          active
+      animationstart
+      interval end
+      after →
+                      before ٭
+      animationstart
+      interval end
+      animationend
+      interval start
+      not idle and not
+          after →
+          idle
+      animationcancel
+      The active time of the animation at the moment it was cancelled
+          calculated using a fill mode of both.
+   ٭ Where multiple events are listed for
+a state change, all events are dispatched in the order listed and in immediate
+succession.
+   † The elapsed time for
+an animationiteration event is defined as follows:
+     Let previous current iteration be the current iteration
+from the previous animation frame.
+     If previous current iteration is greater than current
+iteration, let iteration boundary be current
+iteration + 1, otherwise let it be current iteration.
+     The elapsed time is the result of evaluating
+(iteration boundary - iteration start) ×
+iteration duration).
+   Since the elapsed time defined in the table and procedure above is
+expressed in milliseconds, it must be divided by 1,000 to produce a value in
+seconds before being assigned to the elapsedTime member of
+the AnimationEvent.
+   5.2. The AnimationEvent Interface
+   5.2.1. IDL Definition
+   Add animation to the AnimationEvent interface and AnimationEventInit dictionary as follows:
+[Exposed=Window]
+partial interface AnimationEvent {
+  readonly attribute CSSAnimation? animation;
+};
+partial dictionary AnimationEventInit {
+  CSSAnimation? animation = null;
+};
+   5.2.2. Attributes
+   Add attribute descriptions as follows:
+    animation,  of type CSSAnimation, readonly, nullable
+    The CSS Animation that fired the event.
+   6. DOM Interfaces
+   6.1. The CSSAnimation interface
+[Exposed=Window]
+interface CSSAnimation : Animation {
+  readonly attribute CSSOMString animationName;
+};
+    animationName,  of type CSSOMString, readonly
+     The key used to find matching keyframes rules that define the
+associated effect at the point when the animation was created.
+This is the value of the animation-name property that caused this
+object to be generated.
+   6.2. Requirements on pending style changes
+   Various operations may affect the computed values of
+properties on elements. User agents may, as an optimization, defer recomputing
+these values until it becomes necessary.
+However, all operations included in programming interface defined in this
+specification, as well as those operations defined in Web Animations
+[WEB-ANIMATIONS] that may return objects or animation state defined by this
+specification, must produce a result consistent with having fully processed
+any such pending changes to computed values.
+As an example, in the following code fragment, when the specified style of
+elem is initially updated, a user agent may defer recalculating
+the computed value of the animation property.
+    However, the getAnimations() method called on elem
+is specified by Web Animations and can return CSSAnimation objects as
+defined in this specification.
+Hence, as result of the requirements in this section, the user agent must
+calculate the updated value of elem’s animation property and
+create the requested CSSAnimation object before returning its result.
+elem.style.animation = 'fadeOut 1s';
+elem.getAnimations()[0].pause();
+    Similarly, reading playState may depend on pending style
+changes.
+elem.style.animation = 'fadeOut 1s paused';
+const anim = elem.getAnimations()[0];
+elem.style.animationPlayState = 'running';
+console.log(anim.playState); // Should be 'running'.
+   7. 
+  Privacy Considerations
+   No privacy concerns have been reported on this specification.
+   8. 
+  Security Considerations
+   No security concerns have been reported on this specification.
+   9. Changes
+   9.1. Recent Changes
+   Changes since the 2 June 2023 Working Draft:
+    Moved the animation-trigger property to a new spec, animation-triggers-1
+    (PR 13571)
+    Define trigger scope.  Flattened tree; removed anchor-scope reference
+    (PR 13241)
+    Added play-once animation-action
+    (Issue 12611)
+    Defined that event triggers can be defined to have enter/exit pairs, like timelines.
+    Separated trigger concept from trigger instance
+    Changed initial value of the exit ranges to auto, to match the start ranges
+    Changed "animation-trigger-behavior" to "animation-trigger" and largely rewrote the definition
+    (PR 13009)
+    Changed animation-trigger-type to animation-trigger-behavior
+    (PR 12223)
+    Clarified that setting "effect" should not prevent the timeline to set "set" via animation-timeline
+    (PR 11812)
+    Defined animation-trigger-* as reset-only sub-properties of animation
+    (PR 11653)
+    Added note to Animation Frames about running the updating animation trigger state procedure
+    Added algorithm for Setting a Trigger of an Animation
+    Added the AnimationTrigger interface
+    Moved all new definitions from web-animations-1 to web-animations-2
+    Specified the animation-trigger property
+    (Issue 8942)
+    Defined order for sorting animationcancel events
+    (Issue 11064)
+    Made animation-duration:auto resolve to 0s, for legacy compat
+    (Issue 6530)
+    Switched timeline names from <custom-ident> to <dashed-ident>
+    (Issue 8746)
+   Changes since the 2 March 2023 Working Draft:
+    Added auto as the initial value of animation-duration.
+      (Issue 6530)
+    Rewrote § 3.2 Processing Keyframes
+      to re-use the cascade,
+      to handle non-percentage keyframe offsets,
+      to handle keyframes with offsets outside the [0,1] range,
+      and to use the value of animation-composition as the default composite.
+    Reduced the cases where display: none cancel an animation.
+      (Issue 6429)
+    Cross-linked to CSS Values 4 § A Coordinating List-Valued Properties to define how the various animation-* properties interact.
+    Clarified that among the animation properties, animation-timeline is applied first.
+   9.2. Changes since CSS Animations, Level 1
+    The interaction between CSS Animations and Web Animations is defined,
+    and the concepts of the owning element and animation composite order
+    are introduced.
+    Generation of keyframe objects is described in detail.
+    The animation-composition property is introduced,
+    which defines the composite operation used
+    when multiple animations affect the same property simultaneously.
+    The animation-timeline property is introduced,
+    which defines the timeline used with the animation.
+    The animation shorthand property is updated
+    to account for these new properties.
+    Dispatch of animation events is described.
+    The CSSAnimation interface is added.
+    Requirements on pending style changes are described.
+Conformance
+Document conventions
+  Conformance requirements are expressed with a combination of
+    descriptive assertions and RFC 2119 terminology. The key words “MUST”,
+    “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”,
+    “RECOMMENDED”, “MAY”, and “OPTIONAL” in the normative parts of this
+    document are to be interpreted as described in RFC 2119.
+    However, for readability, these words do not appear in all uppercase
+    letters in this specification.
+  All of the text of this specification is normative except sections
+    explicitly marked as non-normative, examples, and notes. [RFC2119]
+  Examples in this specification are introduced with the words “for example”
+    or are set apart from the normative text with class="example",
+    like this:
+   This is an example of an informative example.
+  Informative notes begin with the word “Note” and are set apart from the
+    normative text with class="note", like this:
+  Note, this is an informative note.
+  Advisements are normative sections styled to evoke special attention and are
+    set apart from other normative text with <strong class="advisement">, like
+    this:
+        UAs MUST provide an accessible alternative.
+   Tests
+   Tests relating to the content of this specification
+                     may be documented in “Tests” blocks like this one.
+                     Any such block is non-normative.
+Conformance classes
+  Conformance to this specification
+    is defined for three conformance classes:
+   style sheet
+   A CSS
+            style sheet.
+   renderer
+   A UA
+            that interprets the semantics of a style sheet and renders
+            documents that use them.
+   authoring tool
+   A UA
+            that writes a style sheet.
+  A style sheet is conformant to this specification
+    if all of its statements that use syntax defined in this module are valid
+    according to the generic CSS grammar and the individual grammars of each
+    feature defined in this module.
+  A renderer is conformant to this specification
+    if, in addition to interpreting the style sheet as defined by the
+    appropriate specifications, it supports all the features defined
+    by this specification by parsing them correctly
+    and rendering the document accordingly. However, the inability of a
+    UA to correctly render a document due to limitations of the device
+    does not make the UA non-conformant. (For example, a UA is not
+    required to render color on a monochrome monitor.)
+  An authoring tool is conformant to this specification
+    if it writes style sheets that are syntactically correct according to the
+    generic CSS grammar and the individual grammars of each feature in
+    this module, and meet all other conformance requirements of style sheets
+    as described in this module.
+Partial implementations
+  So that authors can exploit the forward-compatible parsing rules to
+    assign fallback values, CSS renderers must
+    treat as invalid (and ignore
+    as appropriate) any at-rules, properties, property values, keywords,
+    and other syntactic constructs for which they have no usable level of
+    support. In particular, user agents must not selectively
+    ignore unsupported component values and honor supported values in a single
+    multi-value property declaration: if any value is considered invalid
+    (as unsupported values must be), CSS requires that the entire declaration
+    be ignored.
+Implementations of Unstable and Proprietary Features
+  To avoid clashes with future stable CSS features,
+        the CSSWG recommends following best practices for the implementation of unstable features and proprietary extensions to CSS.
+Non-experimental implementations
+  Once a specification reaches the Candidate Recommendation stage,
+    non-experimental implementations are possible, and implementors should
+    release an unprefixed implementation of any CR-level feature they
+    can demonstrate to be correctly implemented according to spec.
+  To establish and maintain the interoperability of CSS across
+    implementations, the CSS Working Group requests that non-experimental
+    CSS renderers submit an implementation report (and, if necessary, the
+    testcases used for that implementation report) to the W3C before
+    releasing an unprefixed implementation of any CSS features. Testcases
+    submitted to W3C are subject to review and correction by the CSS
+    Working Group.
+  Further information on submitting testcases and implementation reports
+    can be found from on the CSS Working Group’s website at
+    http://www.w3.org/Style/CSS/Test/.
+    Questions should be directed to the
+    public-css-testsuite@w3.org
+    mailing list.
+  Index
+  Terms defined by this specification
+    animation
+     attribute for AnimationEvent, in § 5.2.2
+     dict-member for AnimationEventInit, in § 5.2.1
+   animation-composition, in § 4.10
+   animation-delay, in § 4.8
+   animation-delay-end, in § 4.7
+   animation-delay-start, in § 4.6
+   animation-duration, in § 4.1
+   animationName, in § 6.1
+   animation-timeline, in § 4.11
+    auto
+     value for animation-duration, in § 4.1
+     value for animation-timeline, <single-animation-timeline>, in § 4.11
+   computed keyframe order, in § 3.2
+   CSSAnimation, in § 6.1
+   <dashed-ident>, in § 4.11
+   Elapsed time, in § 5.1
+   interval end, in § 5.1
+   interval start, in § 5.1
+   none, in § 4.11
+   owning element, in § 2.1
+   <scroll()>, in § 4.11
+   <single-animation>, in § 4.12
+   <single-animation-composition>, in § 4.10
+   <single-animation-timeline>, in § 4.11
+   specified keyframe order, in § 3.2
+   <time>, in § 4.6
+   <time [0s,∞]>, in § 4.1
+   used keyframe order, in § 3.2
+   <view()>, in § 4.11
+  Terms defined by reference
+    [CSS-CASCADE-5] defines the following terms:
+     computed value
+     declared value
+     initial value
+     longhand
+     shorthand
+     shorthand property
+     specified value
+     sub-property
+     used value
+    [CSS-CASCADE-6] defines the following terms:
+     cascade
+     cascade origin
+    [CSS-DISPLAY-4] defines the following terms:
+     display
+     none
+    [CSS-EASING-2] defines the following terms:
+     <easing-function>
+     timing function
+    [CSS-LOGICAL-1] defines the following terms:
+     logical property group
+    [CSS-TRANSFORMS-2] defines the following terms:
+     scale
+    [CSS-VALUES-4] defines the following terms:
+     #
+     <custom-ident>
+     <dashed-ident>
+     <percentage>
+     <time>
+     ?
+     coordinated value list
+     coordinating list base property
+     coordinating list property group
+     CSS identifier
+     |
+     ||
+    [CSS-WRITING-MODES-4] defines the following terms:
+     writing mode
+    [CSS2] defines the following terms:
+     declaration block
+    [CSS3-ANIMATIONS] defines the following terms:
+     <keyframe-block>
+     <keyframe-selector>
+     <keyframes-name>
+     <single-animation-direction>
+     <single-animation-fill-mode>
+     <single-animation-iteration-count>
+     <single-animation-play-state>
+     @keyframes
+     AnimationEvent
+     AnimationEventInit
+     animation
+     animation-direction
+     animation-fill-mode
+     animation-iteration-count
+     animation-name
+     animation-play-state
+     animation-timing-function
+     animationcancel
+     animationend
+     animationiteration
+     animationstart
+     cssRules
+     elapsedTime
+     none (for animation-fill-mode)
+     none (for animation-name)
+     paused
+     running
+    [CSSOM-1] defines the following terms:
+     CSSOMString
+     property name
+     resolved value
+    [DOM] defines the following terms:
+     event target
+     tree order
+    [SCROLL-ANIMATIONS] defines the following terms:
+     <timeline-range-name>
+     animation-range
+     scroll progress timelines
+     scroll()
+     scroll-driven animations
+     view progress timelines
+     view()
+    [WEB-ANIMATIONS] defines the following terms:
+     Animation
+     AnimationEffect
+     DocumentTimeline
+     KeyframeEffect
+     active duration
+     active phase
+     active time
+     after phase
+     animation
+     animation class
+     animation effect
+     animation frame
+     animation playback events
+     associated effect
+     associated effect end
+     before phase
+     composite operation
+     current iteration
+     current time
+     default document timeline
+     effect
+     end delay
+     fill mode
+     getAnimations()
+     getKeyframes()
+     global animation list
+     idle
+     idle phase
+     iteration count
+     iteration duration
+     iteration start
+     keyframe
+     pause an animation
+     pause()
+     paused
+     pending pause task
+     pending play task
+     play an animation
+     play state
+     play()
+     playState
+     playback direction
+     reverse()
+     setKeyframes(keyframes)
+     start delay
+     target element
+     timeline
+     timing
+     unresolved
+     updateTiming()
+    [WEB-ANIMATIONS-2] defines the following terms:
+     startTime
+    [WEBIDL] defines the following terms:
+     Exposed
+  References
+  Normative References
+   [CSS-CASCADE-5]
+   Elika Etemad; Miriam Suzanne; Tab Atkins Jr.. CSS Cascading and Inheritance Level 5. URL: https://drafts.csswg.org/css-cascade-5/
+   [CSS-CASCADE-6]
+   Elika Etemad; Miriam Suzanne; Tab Atkins Jr.. CSS Cascading and Inheritance Level 6. URL: https://drafts.csswg.org/css-cascade-6/
+   [CSS-DISPLAY-4]
+   Elika Etemad; Tab Atkins Jr.. CSS Display Module Level 4. URL: https://drafts.csswg.org/css-display-4/
+   [CSS-EASING-2]
+   CSS Easing Functions Level 2. URL: https://drafts.csswg.org/css-easing/
+   [CSS-VALUES-4]
+   Tab Atkins Jr.; Elika Etemad. CSS Values and Units Module Level 4. URL: https://drafts.csswg.org/css-values-4/
+   [CSS2]
+   Bert Bos; et al. Cascading Style Sheets Level 2 Revision 1 (CSS 2.1) Specification. URL: https://drafts.csswg.org/css2/
+   [CSS3-ANIMATIONS]
+   David Baron; et al. CSS Animations Level 1. URL: https://drafts.csswg.org/css-animations/
+   [CSSOM-1]
+   Daniel Glazman; Emilio Cobos Álvarez. CSS Object Model (CSSOM). URL: https://drafts.csswg.org/cssom/
+   [DOM]
+   Anne van Kesteren. DOM Standard. Living Standard. URL: https://dom.spec.whatwg.org/
+   [RFC2119]
+   S. Bradner. Key words for use in RFCs to Indicate Requirement Levels. March 1997. Best Current Practice. URL: https://datatracker.ietf.org/doc/html/rfc2119
+   [SCROLL-ANIMATIONS]
+   Brian Birtles; et al. Scroll-driven Animations. URL: https://drafts.csswg.org/scroll-animations-1/
+   [WEB-ANIMATIONS]
+   Brian Birtles; et al. Web Animations. URL: https://drafts.csswg.org/web-animations-1/
+   [WEB-ANIMATIONS-2]
+   Brian Birtles; Robert Flack. Web Animations Module Level 2. URL: https://drafts.csswg.org/web-animations-2/
+   [WEBIDL]
+   Edgar Chen; Timothy Gu. Web IDL Standard. Living Standard. URL: https://webidl.spec.whatwg.org/
+  Non-Normative References
+   [CSS-CASCADE-4]
+   Elika Etemad; Tab Atkins Jr.. CSS Cascading and Inheritance Level 4. URL: https://drafts.csswg.org/css-cascade-4/
+   [CSS-LOGICAL-1]
+   Elika Etemad; Rossen Atanassov. CSS Logical Properties and Values Module Level 1. URL: https://drafts.csswg.org/css-logical-1/
+   [CSS-TRANSFORMS-2]
+   Tab Atkins Jr.; et al. CSS Transforms Module Level 2. URL: https://drafts.csswg.org/css-transforms-2/
+   [CSS-WRITING-MODES-4]
+   Elika Etemad; Koji Ishii. CSS Writing Modes Level 4. URL: https://drafts.csswg.org/css-writing-modes-4/
+   [CSS3-TRANSITIONS]
+   Chris Marrin; et al. CSS Transitions Module Level 1. URL: https://drafts.csswg.org/css-transitions/
+  Property Index
+      Name
+      Value
+      Initial
+      Applies to
+      Inh.
+      %ages
+      Anim­ation type
+      Canonical order
+      Com­puted value
+      animation-composition
+      <single-animation-composition>#
+      replace
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      list, each item a keyword as specified
+      animation-delay
+      [ <'animation-delay-start'> <'animation-delay-end'>? ]#
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      per grammar
+      see individual properties
+      animation-delay-end
+      <time [0s,∞]>#
+      0s
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      list, each item a duration
+      animation-delay-start
+      <time>#
+      0s
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      list, each item a duration
+      animation-duration
+      [ auto | <time [0s,∞]> ]#
+      auto
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      list, each item either a time or the keyword auto
+      animation-timeline
+      <single-animation-timeline>#
+      auto
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      list, each item either
+the keyword none,
+the keyword auto,
+a case-sensitive css identifier,
+a computed scroll() function,
+or
+a computed view() function
+  IDL Index
+[Exposed=Window]
+partial interface AnimationEvent {
+  readonly attribute CSSAnimation? animation;
+};
+partial dictionary AnimationEventInit {
+  CSSAnimation? animation = null;
+};
+[Exposed=Window]
+interface CSSAnimation : Animation {
+  readonly attribute CSSOMString animationName;
+};
+  Issues Index
+    This differs from the behavior defined for transitions. We should
+probably sort transitions first, then animation, then use the global animation
+list. The reason being that when developer tools etc. hang on to orphaned
+animations and transitions in order to replay them, they should maintain
+roughly the same composite order. ↵
+    Any specific requirements on sorting computed keyframes introduced by
+this spec should be integrated into
+Web Animations § 5.3.3 Calculating computed keyframes.
+Any specific requirements on used keyframes introduced by this spec
+should be integrated into
+Web Animations § 5.3.4 The effect value of a keyframe effect.
+The above description of the distinction between these sets of keyframes
+should be moved to an informative note. ↵
+    Should animation-delay-end support negative values? If so, what would it mean? ↵
+    Should animation-delay-end be added to the animation shorthand? ↵
+    Create pictures of these examples and verify they make sense. ↵
+    Make it easier to use animation-name to select the timeline when
+animation-timeline is not specified. Allowing animation-name to be used for
+selecting timeline enables most common animations to have to use a single name
+for both their keyframes and timeline which is simple and ergonomics. The
+animation-timeline property gives authors additional control to independently
+select keyframes and timeline if necessary. ↵
+   ✔MDN
+   ✔MDN
+   ✔MDN
+   ⚠MDN
+   MDN
