@@ -146,14 +146,15 @@ function serve(root, port, routes = {}, opts = {}) {
       const type = TYPES[path.extname(f)] || 'application/octet-stream';
       res.writeHead(200, { 'Content-Type': type, ...NOSTORE });
       if (opts.net === false || !/html/.test(type)) return fs.createReadStream(f).pipe(res);
-      // a page with the modem: the modem goes to the other one of 127.0.0.1 / localhost, a different site, so Chrome runs it
-      // in its own process (site isolation) instead of between the page's frames on its main thread; the gateway resolves
-      // the page's relative URLs against this URL (the modem's referrer would be only the origin, cross-site)
+      // a page with the modem, opened at 127.0.0.1: the modem goes to localhost, a different site, so Chrome runs it in
+      // its own process (site isolation) instead of between the page's frames on its main thread (ENGINE_NOTES 55). Only
+      // then: through a port forward, localhost may be all that reaches the server. The gateway resolves the page's
+      // relative URLs against this URL (a cross-site modem's referrer is only the origin)
       fs.readFile(f, 'utf8', (e2, text) => {
-        const host = (req.headers.host || '').split(':')[0], other = host === 'localhost' ? '127.0.0.1' : 'localhost';
+        const host = (req.headers.host || '').split(':')[0];
         if (text.includes('src="/net/modem.html"')) {
           gw.setBase(`http://${req.headers.host}${u.pathname}`);
-          if (opts.oopif !== false && (host === 'localhost' || host === '127.0.0.1')) text = text.replace('src="/net/modem.html"', `src="http://${other}:${srv.address().port}/net/modem.html"`);
+          if (opts.oopif !== false && host === '127.0.0.1') text = text.replace('src="/net/modem.html"', `src="http://localhost:${srv.address().port}/net/modem.html"`);
         }
         res.end(text);
       });

@@ -267,8 +267,9 @@ protocol):
   sequence bit. Relative URLs resolve against the page's URL. The modem reloads at once while requests come, and
   once a second after 3 s without one. Past a height of 2^24 px it goes through a non-opted-in page, which resets
   the iframe to 150 px.
-- **Out of process**: the server rewrites the iframe's URL to the other one of 127.0.0.1 / localhost, so the modem
-  runs in its own renderer (site isolation) rather than between the page's frames (ENGINE_NOTES 55).
+- **Out of process**: for a page opened at 127.0.0.1 the server rewrites the iframe's URL to localhost, so the modem
+  runs in its own renderer (site isolation) rather than between the page's frames (ENGINE_NOTES 55). A page opened at
+  localhost keeps it in process (a port forward may reach the server only as localhost): about 0.7 s per word.
 
 A word takes about 3 page frames, about 0.5 s (BENCHMARKS §12).
 

@@ -169,7 +169,8 @@ mode, so the modem has no doctype (the page itself is XHTML, which has no quirks
 
 ```
 node net/server.js .. 8767        # serve the repo root with the gateway (from js-minus-js/)
-# then open http://127.0.0.1:8767/js-minus-js/dist/js_in_css.xhtml in Chrome 155+
+# then open http://127.0.0.1:8767/js-minus-js/dist/js_in_css.xhtml in Chrome 155+ (at localhost the modem shares
+# the page's process: slower, but it works through a port forward)
 # (Chrome 153: start it with --enable-blink-features=ResponsiveIframes)
 ```
 
