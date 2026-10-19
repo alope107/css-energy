@@ -25,6 +25,14 @@ const { record, CATS, durations, median } = require(path.join(__dirname, '..', '
     const nm = (names[e.args.data.nodeId] || '?') + (e.args.data.pseudoId ? '::' + e.args.data.pseudoId : '');
     const k = inside(e, lay) ? 'layout' : inside(e, rs) ? 'recalc' : 'other'; cnt[k][nm] = (cnt[k][nm] || 0) + 1;
   }
+  // per style recalc (UpdateLayoutTree): resolves and their top node names
+  const ult = events.filter(e => e.ph === 'X' && e.name === 'UpdateLayoutTree').sort((a, b) => a.ts - b.ts);
+  const rs2 = events.filter(e => e.name === 'StyleResolver::ResolveStyle');
+  if (process.env.PER) for (const u of ult) {
+    const c = {}; for (const e of rs2) if (e.tid === u.tid && e.ts >= u.ts && e.ts <= u.ts + u.dur) { const nm = names[e.args.data.nodeId] || '?'; c[nm] = (c[nm] || 0) + 1; }
+    const tot = Object.values(c).reduce((a, b) => a + b, 0);
+    console.log((u.dur / 1000).toFixed(1).padStart(6), 'ms', String(tot).padStart(6), Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, k]) => n + ':' + k).join(' '));
+  }
   const L = durations(events, 'Layout'), R = durations(events, 'Document::recalcStyle');
   console.log(`Layout n=${L.length} median ${median(L).toFixed(1)} ms; recalcStyle n=${R.length} median ${median(R).toFixed(1)} ms`);
   for (const k of Object.keys(cnt)) {

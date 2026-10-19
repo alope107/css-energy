@@ -3,17 +3,22 @@
 Memory: ROM + RAM words (ref.load's image). Cache: 16 sets x 2 ways x 4 words, set = (b + b // 16 + b // 256) mod 16
 for block b, FIFO replacement (a per-set bit naming the next victim, flipped on each fill), a dirty bit per line,
 write-allocate by filling first. A pass: if a miss is pending, fill its block into the set's victim way (a dirty victim
-is written back: the pass's one RAM write set); then up to K instructions, each executed only if every word it reads
+is written back: the pass's one RAM write set), and prefetch the next block into its own set's victim way if that block is
+absent and the victim is clean (PREF); then up to K instructions, each executed only if every word it reads
 or writes hits and, for a PRINT chunk, the pass's write set is free. The first instruction that can't run ends the
-pass (its miss, if any, is pending). PRINT is chunked like uarch.Machine.print_service: up to 4 console cells per
+pass (its miss, if any, is pending). Output has its own write set (the console's own cells and channels, so a write-back
+doesn't hold it up). PRINT is chunked like uarch.Machine.print_service: up to 4 console cells per
 instruction execution, a string chunk ends at its block; the instruction repeats (pst carries the position) until done.
-The console is RAM written through the write set, never cached."""
+The console is RAM written through the output write set, never cached. Instructions in ROM are fetched from a static table, not
+through the cache (ROMF: the font CPU has its ROM in the font too)."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ref
 from ref import OPN, AMASK, s20, BIN, BINF, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
 
 NSET, NWAY = 16, 2
+ROMF = PREF = True
+BLKS = (ref.ROMN + ref.LA['ram_size']) // 4
 def setof(b): return (b + b // 16 + b // 256) % NSET
 STR_LO, STR_HI = LA['data_base'] + SDATA, LA['data_base'] + 2 * SDATA
 
@@ -26,7 +31,7 @@ class Sim:
         self.st['pst'] = 0
         self.tag = [[None] * NWAY for _ in range(NSET)]; self.dirty = [[0] * NWAY for _ in range(NSET)]
         self.words = [[[0] * 4 for _ in range(NWAY)] for _ in range(NSET)]; self.fifo = [0] * NSET
-        self.pending = None; self.passes = 0; self.ram_writes = []
+        self.pending = None; self.passes = 0; self.wbacks = 0
     def way(self, b):
         s = setof(b)
         for w in range(NWAY):
@@ -39,9 +44,13 @@ class Sim:
         if self.dirty[s][w]:
             vt = self.tag[s][w]
             for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
-            cw = 1
+            self.wbacks += 1
         self.tag[s][w] = b; self.dirty[s][w] = 0; self.fifo[s] ^= 1
         self.words[s][w] = [self.st['mem'].get(4 * b + j, 0) for j in range(4)]
+        nb = b + 1; s = setof(nb); w = self.fifo[s]
+        if PREF and nb < BLKS and nb not in self.tag[s] and not self.dirty[s][w]:
+            self.tag[s][w] = nb; self.fifo[s] ^= 1
+            self.words[s][w] = [self.st['mem'].get(4 * nb + j, 0) for j in range(4)]
         return cw
     def chunk(self, op, v):
         """one PRINT execution: (cells written, newline after, done, next pst); reads may stall"""
@@ -72,7 +81,7 @@ class Sim:
             a &= AMASK; s, w = self.way(a // 4); mem_w[(s, w, a % 4)] = s20(v)
         rd = self.rd
         pc, sp, fp = st['pc'], st['sp'], st['fp']
-        word = rd(pc); op, imm = OPN[word // 8192], word % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
+        word = st['mem'].get(pc, 0) if ROMF and pc < ref.ROMN else rd(pc); op, imm = OPN[word // 8192], word % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
         out = None
         if op == 'NOP': pass
         elif op == 'PUSHI': wr(sp, imm); sp += 1
