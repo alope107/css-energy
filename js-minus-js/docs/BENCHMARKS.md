@@ -263,7 +263,18 @@ Chromium 153, mini PC.
 | `str_table.js` | 165 | 656–695 ms | 2,682–2,779 ms | 4.0× |
 | `bool_print.js` | 46 | 392–400 ms | 1,097–1,127 ms | 2.8× |
 
-**Long programs** (one run each, one browser): LONGROWS
+**Long programs**, load → HALT (one run each, one browser; CSS pages by `tests/csscpu_pages.js`, font pages by
+`exp/csscpu/halt.js`):
+
+| Program | Steps | CSS CPU | Font CPU | Speed-up |
+|---|---|---|---|---|
+| `fib.js` | 8,353 | 8.6 s | 81.7 s | 9.6× |
+| `deep_recursion.js` | 8,445 | 56.1 s | 196.5 s | 3.5× |
+| `obj_gc_small.js` | 12,432 | 40.1 s | 152.0 s | 3.8× |
+| `obj_gc.js` | 40,443 | 287.2 s | not halted at 900 s (30,042 steps) | > 3.1× |
+
+(`halt.js` compares the console with the raw output, so it reports fib's wrapped console as wrong on the font page;
+its step count was exact.)
 
 - Correctness: L5 164/164 and L5-input 14/14 on the CSS CPU page; C2 111/111 (every suite program under 1,500 steps,
   objects included) and the nine longer ones; C1 120/120.
