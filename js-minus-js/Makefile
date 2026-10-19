@@ -4,6 +4,8 @@ NODE  ?= node
 B     := build
 CC    := compiler
 SPECK ?= mtv
+# browsers the browser levels (l3, fuzz-l3, the l5s) run in at once; their verdicts don't depend on it (SHARDS=1 for timing)
+SHARDS ?= 6
 # reproducible builds: stable @property order (Python set iteration) and font timestamps (fontTools)
 export PYTHONHASHSEED := 0
 export SOURCE_DATE_EPOCH := 0
@@ -29,12 +31,12 @@ UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNE
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
-	@echo "make test           fast levels, no browser: Node oracle, L1 reference, quick fuzz, L2 DSL, L4 machine model (~15 s)"
-	@echo "make fuzz           differential tests against Node on thousands of programs, L1 + L2 + L4 (a few minutes)"
-	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~1.5 min)"
-	@echo "make fuzz-l3        L3 on 300 generated and mutated programs (~5 min)"
-	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~1 min)"
-	@echo "make test-ui        L5 on every quick program (~10 min)"
+	@echo "make test           fast levels, no browser: Node oracle, L1 reference, quick fuzz, L2 DSL, L4 machine model (~10 s)"
+	@echo "make fuzz           differential tests against Node on thousands of programs, L1 + L2 + L4 (~1.5 min)"
+	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~40 s)"
+	@echo "make fuzz-l3        L3 on 300 generated and mutated programs (~2 min)"
+	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~30 s)"
+	@echo "make test-ui        L5 on every quick program (~5.5 min)"
 	@echo "make dist           copy the built page to dist/"
 
 all: page
@@ -69,19 +71,19 @@ l1:                                       # reference compiler + 20-bit simulato
 	$(PY) tests/suite_ref.py
 l2: $(L2)                                 # DSL (page's specialised variants) vs reference, level by level
 	$(call report,$<,3)
-$(L2): tests/cmp_dsl.py $(PYSRC) $(SUITE) $(RERUN_IF)
+$(L2): tests/cmp_dsl.py tests/par.py $(PYSRC) $(SUITE) $(RERUN_IF)
 	SPEC=1 SPECK=$(SPECK) $(LOGGED) $@ -t 3 -p '^ALL OK' -- $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js
 l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
 l4:                                       # font CPU model (uarch4) runs every compiled image vs Node
 	$(PY) tests/suite_machine.py
 # differential tests against Node without a browser (tests/fuzz/fuzz.py): the suite reformatted, generated programs,
-# one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and L4 too, a few minutes)
+# one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and L4 too, ~1.5 min)
 fuzz-quick:
 	$(PY) tests/fuzz/fuzz.py fmt && $(PY) tests/fuzz/fuzz.py gen -n 500 && $(PY) tests/fuzz/fuzz.py mut -n 1000
 fuzz: $(FUZZ)
 	$(call report,$<,6)
-$(FUZZ): tests/fuzz/fuzz.py tests/fuzz/progen.py tests/fuzz/oracle.js tests/fuzz/all.sh tests/cmp_dsl.py $(PYSRC) $(SUITE) $(RERUN_IF)
+$(FUZZ): tests/fuzz/fuzz.py tests/fuzz/progen.py tests/fuzz/oracle.js tests/fuzz/all.sh tests/cmp_dsl.py tests/par.py $(PYSRC) $(SUITE) $(RERUN_IF)
 	$(LOGGED) $@ -p '^ALL OK' -- sh tests/fuzz/all.sh
 $(B)/suite_css.xhtml: $(wildcard $(CC)/*.py) $(CC)/lib.json tests/suite_css.py
 	REBUILD=1 $(PY) tests/suite_css.py $@ > /dev/null
@@ -94,11 +96,11 @@ fuzz-l3: $(FUZZL3)
 $(FUZZL3): $(B)/suite_css.xhtml tests/suite_css.py tests/suite_css.js tests/fuzz/fuzz.py tests/fuzz/progen.py $(PYSRC) $(HARNESS) $(RERUN_IF)
 	$(PY) tests/fuzz/fuzz.py dump -n $(or $(N),150) --dir $(B)/fuzz-l3 && ln -sf suite_css.xhtml $(B)/fuzz-l3.xhtml && \
 	  $(PY) tests/suite_css.py $(B)/fuzz-l3.xhtml $(B)/fuzz-l3 > /dev/null
-	$(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/suite_css.js $(B)/fuzz-l3.xhtml
+	SHARDS=$(SHARDS) $(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/suite_css.js $(B)/fuzz-l3.xhtml
 l3: $(L3)                                 # generated CSS compiler in Chrome vs reference, word for word
 	$(call report,$<,25)
 $(L3): $(B)/suite_css.xhtml $(B)/suite_css.xhtml.exp.json tests/suite_css.js $(HARNESS) $(RERUN_IF)
-	$(LOGGED) $@ -t 25 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/suite_css.js $(B)/suite_css.xhtml
+	SHARDS=$(SHARDS) $(LOGGED) $@ -t 25 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/suite_css.js $(B)/suite_css.xhtml
 # the initial program (tests/fizz.js = tests/suite/fizzbuzz.js) is checked against Node's output too (EXP1)
 # suite_ui.py writes the expected consoles to build/ui_exp and prints ui_seq.js's arguments: args-<maxsteps>-<limit>.txt
 $(B)/ui_exp/args-%.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
@@ -109,15 +111,15 @@ UI   := $(B)/js_in_css.xhtml machine/ui_seq.js $(HARNESS) $(SUITE) $(RERUN_IF)
 l5: $(B)/l5.$(UICONF).log                 # the real page, typed like a user; console vs Node
 	$(call report,$<,4)
 $(B)/l5.$(UICONF).log: $(B)/ui_exp/args-1500-1000000.txt $(UI)
-	EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
+	SHARDS=$(SHARDS) EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
 l5-smoke: $(B)/l5-smoke.$(UICONF).log
 	$(call report,$<,4)
 $(B)/l5-smoke.$(UICONF).log: $(B)/ui_exp/args-400-6.txt $(UI)
-	EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
+	SHARDS=$(SHARDS) EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
 l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what the scan reads is what the editor shows
 	$(call report,$<,2)
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)
-	EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
+	SHARDS=$(SHARDS) EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
 
 test: expect l1 fuzz-quick l2 l4
 test-browser: l3

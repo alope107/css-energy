@@ -1,5 +1,5 @@
 // selftest.js — checks that selftest/site reports a correct host as all PASS and lights the right test for each
-// simulated host fault (serve.js --fault). ~1 min.
+// simulated host fault (serve.js --fault). ~40 s, ~10 s with SHARDS=4 (below).
 //
 //   node tools/selftest.js
 //
@@ -19,9 +19,17 @@ const EXPECT = {
   vary:   { ta: 'PASS', tb: 'PASS', tc: 'PASS', td: 'STALE' },
 };
 
+// SHARDS=N checks N hosts at once (make test-selftest does), each with its own server, profile and browser; lines print in
+// the order above. The correct host's all-PASS then shows the waits were long enough under that load.
 (async () => {
   let bad = 0;
-  for (const fault of Object.keys(EXPECT)) {
+  const faults = Object.keys(EXPECT), lines = []; let printed = 0, next = 0;
+  const flush = () => { while (printed < faults.length && lines[printed] !== undefined) console.log(lines[printed++]); };
+  const shards = Math.max(1, Math.min(+(process.env.SHARDS || 1), faults.length));
+  await Promise.all(Array.from({ length: shards }, async () => { for (let i; (i = next++) < faults.length;) { lines[i] = await host(faults[i]); flush(); } }));
+  process.exit(bad ? 1 : 0);
+
+  async function host(fault) {
     const srv = await serve(path.join(PAINT, 'selftest', 'site'), ...(fault === 'none' ? [] : ['--fault', fault]));
     const prof = await profileDir();
     try {
@@ -35,9 +43,8 @@ const EXPECT = {
       await sleep(2000); got.td = await pg.evaluate(LIGHT, 'td');
       const ok = Object.keys(EXPECT[fault]).every(t => got[t] === EXPECT[fault][t]);
       if (!ok) bad++;
-      console.log(`${ok ? 'ok  ' : 'FAIL'} ${fault.padEnd(6)} A ${got.ta}  B ${got.tb}  C ${got.tc}  D ${got.td}`);
       await c.close();
+      return `${ok ? 'ok  ' : 'FAIL'} ${fault.padEnd(6)} A ${got.ta}  B ${got.tb}  C ${got.tc}  D ${got.td}`;
     } finally { srv.stop(); prof.remove(); }
   }
-  process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });

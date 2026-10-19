@@ -6,15 +6,17 @@ B  := build
 JS := tools/lib.js serve.js $(wildcard $(SHARED)/js/*.js)
 # what the tests depend on outside the repo, and the environment variables their scripts read (build/physics.<config>.id)
 C  := $(call id,$(B)/physics,physics,tools/selftest.js tools/e2e.js tools/goaway.js $(JS))
+# hosts the self-test checks at once, each with its own server, profile and browser (tools/selftest.js)
+SHARDS ?= 4
 
 help:
 	@echo "make serve          the site on http://localhost:8080/ (node serve.js site)"
 	@echo "make build          rebuild site/ (python3 build.py; keeps site/d/*.png)"
 	@echo "make selftest-site  rebuild selftest/site/"
-	@echo "make test           test-selftest, then test-e2e (~7 min)"
-	@echo "make test-selftest  the self-test page against simulated host faults (~1 min)"
-	@echo "make test-e2e       the canvas end to end with real clicks (~6 min)"
-	@echo "make test-goaway    reads over HTTP/2 that ends connections like Cloudflare; the retry recovers (~4 min)"
+	@echo "make test           test-selftest, then test-e2e (~1.5 min)"
+	@echo "make test-selftest  the self-test page against simulated host faults, four hosts at once (~10 s)"
+	@echo "make test-e2e       the canvas end to end with real clicks (~1.5 min)"
+	@echo "make test-goaway    reads over HTTP/2 that ends connections like Cloudflare; the retry recovers (~2 min)"
 
 serve:
 	node serve.js site
@@ -30,7 +32,7 @@ test: test-selftest test-e2e
 test-selftest: $(B)/selftest.$(C).log
 	$(call report,$<,5)
 $(B)/selftest.$(C).log: tools/selftest.js $(JS) $(shell find selftest/site) $(RERUN_IF)
-	@$(LOGGED) $@ -- node tools/selftest.js
+	@SHARDS=$(SHARDS) $(LOGGED) $@ -- node tools/selftest.js
 
 test-e2e: $(B)/e2e.$(C).log
 	$(call report,$<,13)

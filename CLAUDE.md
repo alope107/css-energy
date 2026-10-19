@@ -29,6 +29,9 @@ their techniques.
 - **The evidence before a merge is a real run: `RERUN=1`** (`RERUN=1 make l3`, `RERUN=1 bash tools/smoke.sh 16`).
   Use it for a suspected flake too. When you paste an `up to date` result while iterating, say it wasn't re-run.
 - `shared/README.md#checks-in-make` says what each check depends on and what make can't see.
+- js-minus-js's checks and paint's self-test run in parallel (`JOBS`, `SHARDS`), with the serial run's verdicts.
+  css-physics's `smoke.sh` runs in real time, one check at a time: start it alone, with no other browser job or fuzz
+  running beside it (`shared/README.md#parallel-runs`).
 
 ## Browser bugs
 

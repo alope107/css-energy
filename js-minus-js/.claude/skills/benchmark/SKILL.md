@@ -10,7 +10,7 @@ and the noise floor are in `docs/BENCHMARKS.md`.
 | Question | Tool | Notes |
 |---|---|---|
 | Will the page run this program faster? | `python3 tools/traps.py prog.js` | Model only, instant. Shapings track wall time; traps end shapings. `MISS=1` prints misses by cache line. |
-| How long does the CSS compiler take? | `make l3` (per-program `ms`), or `node tests/suite_css.js build/suite_css.xhtml` | Run → done, without readback. |
+| How long does the CSS compiler take? | `node tests/suite_css.js build/suite_css.xhtml` (per-program `ms`), or `make l3 SHARDS=1` (`make l3` runs 6 browsers at once: its `ms` aren't timings) | Run → done, without readback. |
 | How long does the real page take? | `EXP1=build/ui_exp/fizzbuzz.grid node machine/ui_seq.js build/js_in_css.xhtml` (run `python3 tests/suite_ui.py` once to write the grid), or `make l5-smoke` | `compiledMs` includes the readback sweep; `haltMs` is Run → HALT (the page's `--isHALT`). |
 | The CPU without editor and compile chain? | `python3 compiler/mkimage.py --ram prog.js img.json`, `python3 machine/gen_fvm4.py img.json build/f4cc_16 out.html`, `IMG=img.json node machine/halttime.js out.html` | Name the page `.html`. `halttime.js` never presses Run. |
 | Is B faster than A, beyond the noise? | `EXP1=build/ui_exp/fizzbuzz.grid node ../shared/js/ab.js -p haltMs 'node machine/ui_seq.js {}' a.xhtml b.xhtml` (CPU-only: `-p haltMs 'IMG=img.json node machine/halttime.js {} 60'`) | Interleaved rounds, fresh browser per run; ratio to A per round (median, IQR). Run A against A first. |

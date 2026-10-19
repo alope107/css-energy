@@ -1,4 +1,4 @@
-// goaway.js — reads under connection churn: 480 random cells, then reloads, each checked after the retry (~3 min).
+// goaway.js — reads under connection churn: 480 random cells, then reloads, each checked after the retry (~2 min).
 //
 //   node tools/goaway.js [loads] [base]       (default 5 loads; base defaults to a local serve.js)
 //

@@ -75,7 +75,7 @@ const latchRows = p => p.evaluate(() => [...document.querySelectorAll('.probe')]
 const trimEnd = rows => { const r = [...rows]; while (r.length && !r.at(-1)) r.pop(); return r; };
 const status = p => p.evaluate(() => getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''));
 
-async function runCase(b, page, name, c, exp) {
+async function runCase(b, page, name, c, exp, log = console.log) {
   const { edit, known } = typeof c === 'function' ? { edit: c } : c;
   const p = await b.newPage({ viewport: { width: 1300, height: 950 } });
   await p.goto(fileUrl(page), { timeout: 600000 }); await p.waitForTimeout(500);
@@ -93,8 +93,8 @@ async function runCase(b, page, name, c, exp) {
     out = gridText(await consoleCodes(p)) === exp.replace(/\s+$/, '');
   }
   const ok = wysiwyg && warned === nested && out !== false;
-  console.log(JSON.stringify({ case: name, ok, known: !!known, wysiwyg, nested, warned, status: st.replace(/ +counter\(\w+\) +/g, ' n '), ...(out === null ? {} : { output: out }) }));
-  if (!wysiwyg) console.log('  editor shows:\n' + seen.map((r, i) => `  ${String(i).padStart(2)}|${r}`).join('\n') + '\n  scan read:\n' + read.map((r, i) => `  ${String(i).padStart(2)}|${r}`).join('\n'));
+  log(JSON.stringify({ case: name, ok, known: !!known, wysiwyg, nested, warned, status: st.replace(/ +counter\(\w+\) +/g, ' n '), ...(out === null ? {} : { output: out }) }));
+  if (!wysiwyg) log('  editor shows:\n' + seen.map((r, i) => `  ${String(i).padStart(2)}|${r}`).join('\n') + '\n  scan read:\n' + read.map((r, i) => `  ${String(i).padStart(2)}|${r}`).join('\n'));
   await p.close();
   return { ok, known: !!known };
 }
@@ -121,12 +121,20 @@ async function highlightCase(b, page) {
   return { ok: changed === 0, known: false };
 }
 
+// SHARDS=N runs the cases in N browsers at once (make l5-input does), each taking the next case as it finishes one; the
+// lines print in the cases' order. The highlight case counts frames, so it runs after them, alone.
 (async () => {
   const [page, ...only] = process.argv.slice(2);
   const exp = process.env.EXP ? fs.readFileSync(process.env.EXP, 'utf8') : null;
-  const b = await launch({});
-  const res = [];
-  for (const [name, c] of Object.entries(CASES)) if (!only.length || only.includes(name)) res.push(await runCase(b, page, name, c, exp));
+  const cases = Object.entries(CASES).filter(([name]) => !only.length || only.includes(name));
+  const shards = Math.max(1, Math.min(+(process.env.SHARDS || 1), cases.length));
+  const res = [], logs = []; let printed = 0, next = 0;
+  const flush = () => { while (printed < cases.length && logs[printed] && res[printed]) { logs[printed].forEach(l => console.log(l)); printed++; } };
+  const browsers = await Promise.all(Array.from({ length: shards }, () => launch({})));
+  await Promise.all(browsers.map(async b => {
+    for (let i; (i = next++) < cases.length;) { logs[i] = []; res[i] = await runCase(b, page, ...cases[i], exp, l => logs[i].push(l)); flush(); }
+  }));
+  const b = browsers.pop(); await Promise.all(browsers.map(x => x.close()));
   if (!only.length || only.includes('highlight while editing')) res.push(await highlightCase(b, page));
   await b.close();
   const must = res.filter(r => !r.known), kn = res.filter(r => r.known);
