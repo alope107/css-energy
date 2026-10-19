@@ -21,19 +21,20 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 ```
 npm install && pip install -r requirements.txt     # once
 make page            # build/js_in_css.xhtml: lib -> image -> CPU font -> page (~25 s, reproducible)
-make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, L4
+make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, L4, C1
 make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, L4 (~1.5 min; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~30 s)
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
+make c2              # the CSS CPU (exp/csscpu, no font) runs every quick program without objects to HALT (~25 s)
 make dist            # copy the built page to dist/
 python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
 SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 ```
 
-- `l2`, `fuzz`, `fuzz-l3`, `l3`, `l5*` skip while nothing they depend on changed (`up to date`); `RERUN=1` forces a run
+- `l2`, `fuzz`, `fuzz-l3`, `l3`, `l5*`, `c2` skip while nothing they depend on changed (`up to date`); `RERUN=1` forces a run
   (`../shared/README.md#checks-in-make`).
 - The Python levels use every CPU (`tests/par.py`, `JOBS=N`) and the browser levels 6 browsers (`SHARDS=N`), with the
   serial run's verdicts. The harness scripts run alone default to 1 browser: time with them, not through make
@@ -43,6 +44,9 @@ SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
   `make l3`, `make l5-smoke`.
 - After a Chrome upgrade run `make engine-check` at the repo root (re-checks ENGINE_NOTES' probes).
 - Long browser runs exceed tool timeouts: run them in the background, write to a file, poll it.
+- `exp/csscpu/` is the pure-CSS CPU that is replacing the font CPU (its README): `gencpu.py` builds a page, `sim.py` is
+  its pass-by-pass oracle (C1 checks it against Node), C2 runs the pages. After changing either, `make test` and
+  `make c2`.
 
 ## Layout
 
