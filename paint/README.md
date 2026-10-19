@@ -17,7 +17,7 @@ Live: https://paint.auberon.workers.dev/ (pushing to `main` deploys `site/`, `..
 ```bash
 node serve.js site                    # http://localhost:8080/, applying site/_headers and site/_redirects
 npm install                           # test tools only: Playwright
-make test                             # self-test site against simulated host faults, then the end-to-end test (~7 min)
+make test                             # self-test site against simulated host faults, then the end-to-end test (~1.5 min)
 pip install -r requirements.txt       # zstandard, only to rebuild
 python3 build.py 24 20                # W H (at most 490 cells) -> site/, keeping the existing dictionaries
 ```

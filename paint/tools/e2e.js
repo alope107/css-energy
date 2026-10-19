@@ -1,4 +1,4 @@
-// e2e.js — end-to-end test of the paint site with real clicks, in headless Chromium (~6 min).
+// e2e.js — end-to-end test of the paint site with real clicks, in headless Chromium (~1.5 min).
 //
 //   node tools/e2e.js [seed] [site]          (site defaults to paint/site)
 //

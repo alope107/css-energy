@@ -88,8 +88,13 @@ def check(text):
     ok = not diff and code == rcode and data == ref.data and lab == rlab
     return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}')
 if __name__ == '__main__':                       # (tests/fuzz/fuzz.py imports check())
-    for f in sys.argv[1:]:
-        ok, msg = check(open(f).read().rstrip('\n') + '\n'); allok &= ok
+    from par import pmap                         # one program per worker process; the counts come back with it
+    def one(f):
+        w, s, v = work, steps, set(variants); ok, msg = check(open(f).read().rstrip('\n') + '\n')
+        return ok, msg, work - w, steps - s, set(variants) - v
+    tw = ts = 0; used = set()
+    for f, (ok, msg, w, s, v) in zip(sys.argv[1:], pmap(one, sys.argv[1:])):
+        allok &= ok; tw += w; ts += s; used |= v
         print(f, msg)
-    print(f'parser steps {steps}, temps evaluated {work} ({work // max(steps, 1)}/step); variants {len(variants)}')
+    print(f'parser steps {ts}, temps evaluated {tw} ({tw // max(ts, 1)}/step); variants {len(used)}')
     print('ALL OK' if allok else 'FAILURES')
