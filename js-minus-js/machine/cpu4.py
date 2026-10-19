@@ -29,7 +29,7 @@ D16 = [(d, 0) for d in range(16)]
 D48 = [(d, c) for c in range(3) for d in range(16)]
 BAV = [(d, e) for e in (0, 1) for d in range(16)]
 BIT = [0, 1]
-EXTOPS = ['MUL', 'DIV', 'MOD', 'SHL13'] + PRINTOPS
+EXTOPS = ['MUL', 'DIV', 'MOD', 'SHL13'] + PRINTOPS + ['NET']
 CVALS = [('S',), ('F', 0)] + [(n, u) for n in OPN for u in range(len(UCODE[n]))] + \
         [('T', k) for k in ['MISS', 'WFAIL', 'PUTC', 'HALT'] + ['EXT_' + e for e in EXTOPS]]
 OKV = ['ok', 'miss', 'wfail', 'wait']

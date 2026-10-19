@@ -80,6 +80,7 @@ class Prog(Base):
         variant with a container query, so each level evaluates only the code reachable from that mode"""
         self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
         self.getx_fn, self.setx_fn = lib['getx'], lib['setx']
+        self.fetch_fn, self.read_fn = lib['fetch'], lib['read']
         self.spec_mode, self.spec_tk, self.spec_tv = mode, tk, tv
         X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2'])
         X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), scA=K(0), scAl=K(0), scO=K(0), scOl=K(0))
@@ -434,12 +435,13 @@ class Prog(Base):
         with block(R.S_NAMEE):
             pn1, pn2 = self.m(self.v('pn1'), 'pn1'), self.m(self.v('pn2'), 'pn2')
             iscon = self.m(and_(eq(pn1, KW['console'][0]), eq(pn2, KW['console'][1])), 'iscon')
-            isputc = self.m(and_(eq(pn1, KW['putc'][0]), eq(pn2, KW['putc'][1])), 'isputc')
+            isb = [self.m(and_(eq(pn1, KW[k][0]), eq(pn2, KW[k][1])), 'is' + k) for k in ('putc', 'fetch', 'read')]
+            isputc = self.m(or_(*isb), 'isputc')                # a builtin: putc / fetch / read (R.BUILTIN)
             with self.when(iscon):
                 with self.when(not_(P(46))): self.fail(30)
                 with self.when(P(46)): self.set('mode', R.S_CONLOG); self.done()
             with self.when(and_(not_(iscon), P(40))):
-                with self.when(isputc): self.push_op(R.M_PUTC)
+                with self.when(isputc): self.push_op(R.M_PUTC, add(mul(isb[1], R.B_FETCH), mul(isb[2], R.B_READ)))
                 with self.when(not_(isputc)):
                     fi, _, fb = self.fnfind(pn1, pn2); self.push_op(R.M_CALL, add(fi, mul(fb, 16)))
                 self.set('mode', R.S_OPND); self.done()
@@ -721,6 +723,7 @@ class Prog(Base):
                 tc, tvv = self.top_op()
                 t = self.top()
                 cA = self.m(and_(P(41), gt(self.v('osp'), 0), eq(tc, R.M_CALL)), 'oA')
+                cR = self.m(and_(P(41), gt(self.v('osp'), 0), eq(tc, R.M_PUTC), eq(tvv, R.B_READ)), 'oR')     # read()
                 cB = self.m(and_(not_(cA), or_(P(59), PNL, PRB), eq(t[0], R.C_RETURN), eq(self.v('osp'), 0)), 'oB')
                 cC = self.m(and_(not_(cA), not_(cB), P(59), eq(t[0], R.C_FORCOND), eq(self.v('osp'), 0)), 'oC')
                 cN = self.m(and_(not_(cB), PNL), 'oN')
@@ -731,7 +734,9 @@ class Prog(Base):
                     self.emit(R.PUSHI, 0); self.set('f_expr', 1)
                     with self.when(PRB): self.set('f_asic', 1)
                 with self.when(cC): self.emit(R.PUSHI, 1); self.set('f_expr', 1)
-                with self.when(and_(not_(cA), not_(cB), not_(cC), not_(cN))): self.fail(3)
+                with self.when(cR):
+                    self.set('osp', self.v('osp') - 1); self.emit(R.CALL, self.read_fn, b=3); self.set('mode', R.S_OPER); self.done()
+                with self.when(and_(not_(cA), not_(cB), not_(cC), not_(cN), not_(cR))): self.fail(3)
         # ---- S_OPER
         with block(R.S_OPER):
             # pm is set only on the way out of S_OPER (S_DOT, x[k]'s ']'): a variant starting in another mode knows it is 0
@@ -820,9 +825,10 @@ class Prog(Base):
                     vasg = self.m(and_(eq(osp0, 0), eq(self.top()[0], R.C_ASSIGN), ne(self.top()[3], 0)), 'vasg')
                     with self.when(eq(t, R.M_PRINT)): self.print_call(32); self.set_top_op(R.M_PRINT, 2); self.set('mode', R.S_CONFIRST); self.done()
                     with self.when(eq(t, R.M_CALL)): self.set_top_op(R.M_CALL, tvv + 64)       # count the arguments
-                    with self.when(anyeq(t, (R.M_CALL, R.M_PUTC))): self.set('mode', R.S_OPND); self.done()
+                    cputc = self.m(and_(eq(t, R.M_PUTC), eq(tvv, R.B_PUTC)), 'cputc')      # (fetch / read take one / no argument)
+                    with self.when(or_(eq(t, R.M_CALL), cputc)): self.set('mode', R.S_OPND); self.done()
                     with self.when(vasg): self.set('f_expr', 1)
-                    with self.when(not_(or_(anyeq(t, (R.M_PRINT, R.M_CALL, R.M_PUTC)), vasg))): self.fail(44)
+                    with self.when(not_(or_(anyeq(t, (R.M_PRINT, R.M_CALL)), cputc, vasg))): self.fail(44)
                 with self.when(P(93)):
                     with self.when(anyeq(t, (R.M_IDXG, R.M_IDXL))):
                         self.set('osp', osp0 - 1); self.emit(ite(eq(t, R.M_IDXL), R.IDXL, R.IDX), tvv); self.done()
@@ -831,7 +837,11 @@ class Prog(Base):
                 with self.when(P(41)):
                     with self.when(eq(t, R.M_PAREN)): self.set('osp', osp0 - 1); self.done()
                     with self.when(eq(t, R.M_CALL)): self.set('osp', osp0 - 1); self.call_end(tvv, 1)
-                    with self.when(eq(t, R.M_PUTC)): self.set('osp', osp0 - 1); self.emit(R.PUTC); self.emit(R.PUSHI, 0); self.done()
+                    with self.when(eq(t, R.M_PUTC)):
+                        self.set('osp', osp0 - 1)
+                        with self.when(eq(tvv, R.B_PUTC)): self.emit(R.PUTC); self.emit(R.PUSHI, 0); self.done()
+                        with self.when(eq(tvv, R.B_FETCH)): self.emit(R.CALL, self.fetch_fn, b=3); self.done()
+                        with self.when(eq(tvv, R.B_READ)): self.fail(76)
                     with self.when(eq(t, R.M_PRINT)): self.set('osp', osp0 - 1); self.print_call(10); self.print_end()
                     other = self.m(not_(anyeq(t, (R.M_PAREN, R.M_CALL, R.M_PUTC, R.M_PRINT))), 'o41')
                     with self.when(and_(other, gt(osp0, 0))): self.fail(46)

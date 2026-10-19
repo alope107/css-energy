@@ -133,3 +133,42 @@ chats.
     Hence `nowrap` and `&nbsp;`.
 49. **An inline `div` is a separate shaping run** (UA `unicode-bidi: isolate`), which the scan's GSUB chain can't
     cross. `unicode-bidi: normal` (or `all: unset`) fixes it.
+
+## The network modem (`NET`, `net/server.js`)
+
+50. **A quirks-mode page applies a same-origin stylesheet whatever its Content-Type**: `application/json`,
+    `text/plain`, `text/html`, even `image/png`. A standards-mode or XHTML page applies only `text/css`, no
+    Content-Type, or `application/x-unknown-content-type`. `X-Content-Type-Options: nosniff` still blocks it.
+    (`StyleSheetContents::ParseAuthorStyleSheet`: lax iff quirks mode and CORS-same-origin;
+    `CSSStyleSheetResource::CanUseSheet`.) The page is XHTML, which has no quirks mode, so the gateway's answers are
+    read in the modem, an HTML iframe without a doctype. *(measured 2026-10-19; probe: `quirks-lax-css`)*
+51. **Responsive iframes carry a number from a child document to the page**: `frame-sizing: content-height` on the
+    iframe, `<meta name="responsive-embedded-sizing">` in an HTML child. Chrome 153 needs
+    `--enable-blink-features=ResponsiveIframes` and reads the meta's content as the allowed origins (`*`); 155 has the
+    feature on and reads `allow-origins=*`. The modem has both metas; each version ignores the other's. The height is
+    recorded at DOMContentLoaded and at load (or by script, `requestResize()`), not as the content changes: the child
+    must load again to report again. Each report marks the iframe for layout, changed or not. It works cross-site,
+    with the child in its own process. *(measured; probe: `responsive-iframe`)*
+52. **The reported height is measured with the viewport the child document started with**, which is the iframe's
+    height then (`LocalFrameView::NaturalSizeLayoutScope`, "consistent ICB"): content shorter than that reports the
+    viewport, so a reported height never shrinks. The modem reports `100vh + mod(R - 100vh, 4096px)`, which grows the
+    iframe by less than 4096 px to the next height that is R mod 4096, and the page reads it mod 4096. A document that
+    isn't opted in clears the size (the iframe falls back to 150 px): `/net/reset.html`, past 2^24 px. *(measured)*
+53. **An `<object>` or a lazy iframe fetches when first shown, and only then**: under `display: none` neither is
+    fetched; showing it fetches; hiding and showing it again reuses the frame and fetches nothing
+    (`HTMLPlugInElement::AttachLayoutTree`: "re-use it now. We do not want to reload the frame"); Firefox doesn't re-fetch
+    either, WebKit does, and the spec's re-fetch is an open issue (`../../bugs/README.md`). So CSS fires each
+    such element's request once. A 404 shows the object's fallback content. An SVG's natural size comes from its
+    `width` / `height` attributes (`SVGSVGElement::IntrinsicWidth`), not from CSS. A non-lazy iframe is fetched even
+    under `display: none`. Repeatable requests need a document that reloads itself: `<meta http-equiv="refresh"
+    content="0">` reloads about 75 times a second beside an idle page. *(measured)*
+54. **There is no `src()`: a CSS URL can't be computed**, so every URL the page can request is in its CSS. What CSS
+    can choose is which one: `background-image: if(style(--x: v): url(…); …)` requests the chosen URL in each fresh
+    document (with `Cache-Control: no-store`), while `@import` and `<link>` are fetched whatever their media.
+    *(measured)*
+55. **A same-process child gets few loads when the page's frames are heavy, and a cross-site child slows the page's
+    frames.** Beside the CPU page the modem loaded about 3 times a second in process (the page at 11–13 frames/s,
+    0.7–0.8 s per word). Cross-site (the page on 127.0.0.1, the modem on localhost: `net/server.js` rewrites the
+    iframe's URL) it loads about 40 times a second in its own process, but the page dropped to 5–6 frames/s; still
+    0.5 s per word, about 3 frames. Pacing the modem to 9 loads/s gave 14.5 frames/s but 1.06 s per word; layout
+    containment around the iframe changed nothing. *(measured 2026-10-19)*

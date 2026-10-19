@@ -27,6 +27,8 @@ make l3              # the generated CSS compiler in Chrome vs the reference (~1
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~1 min)
 make l5              # every program under 1,500 steps (~10 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~1.5 min)
+make l5-net          # the network programs (tests/suite/net_*) on the page, served with the gateway (~1.5 min)
+node net/server.js .. 8767   # serve the repo root with the network gateway (fetch / read need it; see README Network)
 make dist            # copy the built page to dist/
 python3 tools/traps.py tests/suite/fizzbuzz.js     # code words, steps, shapings, traps (no browser)
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
@@ -52,6 +54,8 @@ machine/   uarch.py/uarch4.py (CPU model)  cpu4.py cpugen.py otl.py fvm_build.py
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
 tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size)
+net/       server.js (web server + network gateway, the modem's protocol)  device.py shim.js (the same protocol for the tests)
+           probe/ (exploratory probes: what CSS can request and read back)
 ```
 
 ## How to make changes
@@ -100,7 +104,7 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
 ## Done means
 
 - `make test` passes; `make l3` and `make fuzz` for any compiler change; `make l5-smoke` for any change that reaches
-  the page.
+  the page; `make l5-net` for any change to `NET`, the modem (`gen_fvm4.py`) or `net/`.
 - `dist/` is rebuilt if the page changed.
 - Measured effects are in `docs/BENCHMARKS.md`; new Chrome behaviour is in `docs/ENGINE_NOTES.md`.
 - Paste the tests' summary lines as evidence; don't just say they pass.
@@ -129,3 +133,8 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py build/js_in_css.xhtml` prints the
   page's outline.
 - Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed: `git checkout 91d73bc -- js-minus-js/archive`.
+- The network (`NET`, ARCHITECTURE §3.6): the gateway's protocol exists four times, `net/server.js` (the page),
+  `net/device.py` (the model, L1, L4, fuzz), `net/shim.js` (Node) and `lib_src.js`'s words; change them together.
+  Chrome 153 needs `--enable-blink-features=ResponsiveIframes` (`ui_seq.js` adds it with `NETROOT`); 155+ has it. The
+  repo-root `http.server` has no gateway: there `fetch` waits 20 s and returns -1. The modem's height only grows
+  (ENGINE_NOTES 52): read it mod 4096.

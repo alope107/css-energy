@@ -12,7 +12,8 @@ export SOURCE_DATE_EPOCH := 0
 # of the Node, Python, browser and environment variables it runs with (build/<py|fontcpu|ui>.<config>.id).
 include ../shared/make/checks.mk
 SUITE   := tests/suite tests/suite_err tests/fizz.js $(wildcard tests/suite/*.js tests/suite/*.out tests/suite_err/*.js)
-PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py) $(SHARED)/py/csslabel.py
+PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py) net/device.py $(SHARED)/py/csslabel.py
+NET     := net/server.js net/shim.js $(wildcard tests/net/* tests/net/*/*)   # the network gateway and its test files
 HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
 # what the checks depend on outside the repo, and the environment variables their scripts read
 L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
@@ -25,7 +26,7 @@ L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
 UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
 
 .PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input fuzz fuzz-quick fuzz-l3 clean
+        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input l5-net fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
@@ -35,6 +36,7 @@ help:
 	@echo "make fuzz-l3        L3 on 300 generated and mutated programs (~5 min)"
 	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~1 min)"
 	@echo "make test-ui        L5 on every quick program (~10 min)"
+	@echo "make l5-net         L5 on the network programs, the page served with the gateway (net/server.js, ~4 min)"
 	@echo "make dist           copy the built page to dist/"
 
 all: page
@@ -81,7 +83,7 @@ fuzz-quick:
 	$(PY) tests/fuzz/fuzz.py fmt && $(PY) tests/fuzz/fuzz.py gen -n 500 && $(PY) tests/fuzz/fuzz.py mut -n 1000
 fuzz: $(FUZZ)
 	$(call report,$<,6)
-$(FUZZ): tests/fuzz/fuzz.py tests/fuzz/progen.py tests/fuzz/oracle.js tests/fuzz/all.sh tests/cmp_dsl.py $(PYSRC) $(SUITE) $(RERUN_IF)
+$(FUZZ): tests/fuzz/fuzz.py tests/fuzz/progen.py tests/fuzz/oracle.js tests/fuzz/all.sh tests/cmp_dsl.py $(PYSRC) $(SUITE) $(NET) $(RERUN_IF)
 	$(LOGGED) $@ -p '^ALL OK' -- sh tests/fuzz/all.sh
 $(B)/suite_css.xhtml: $(wildcard $(CC)/*.py) $(CC)/lib.json tests/suite_css.py
 	REBUILD=1 $(PY) tests/suite_css.py $@ > /dev/null
@@ -114,6 +116,14 @@ l5-smoke: $(B)/l5-smoke.$(UICONF).log
 	$(call report,$<,4)
 $(B)/l5-smoke.$(UICONF).log: $(B)/ui_exp/args-400-6.txt $(UI)
 	EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
+# the net_* programs: the page and tests/net/ served by the network gateway (ui_seq.js NETROOT), so fetch has something to GET
+l5-net: $(B)/l5-net.$(UICONF).log
+	$(call report,$<,7)
+$(B)/ui_exp/net-args.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
+	@mkdir -p $(@D); NET=1 $(PY) tests/suite_ui.py > $@.tmp && mv $@.tmp $@
+$(B)/l5-net.$(UICONF).log: $(B)/ui_exp/net-args.txt $(UI) $(NET)
+	rm -rf $(B)/net-www && mkdir -p $(B)/net-www && cp -r tests/net/. $(B)/net-www/ && ln -s ../js_in_css.xhtml $(B)/net-www/js_in_css.xhtml
+	NETROOT=$(B)/net-www EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/net-www/js_in_css.xhtml $$(cat $<)
 l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what the scan reads is what the editor shows
 	$(call report,$<,2)
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)

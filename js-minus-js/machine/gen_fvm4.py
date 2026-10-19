@@ -40,6 +40,8 @@ ci = lambda *v: CV.index(tuple(v))
 I_START, I_MISS, I_WFAIL, I_PUTC, I_HALT = ci('S'), ci('T', 'MISS'), ci('T', 'WFAIL'), ci('T', 'PUTC'), ci('T', 'HALT')
 I_EXT = {op: ci('T', 'EXT_' + op) for op in ['MUL', 'DIV', 'MOD', 'SHL13']}
 I_PR = {op: ci('T', 'EXT_' + op) for op in PRINTOPS}     # the PRINT family: serviced below, up to PRINT_CHUNK console cells per shaping
+I_NET = ci('T', 'EXT_NET')                                  # NET: serviced through the modem iframe (see NET below)
+NWAIT = 2400                                                # passes NET waits for an answer before it gives up with -1 (~20 s)
 assert PRINT_CHUNK == 4
 
 def eq(x, c): return f"calc(1 - min(1, max(({x}) - ({c}), ({c}) - ({x}))))"     # 1 iff x == c (integers; both may be compound expressions)
@@ -52,7 +54,8 @@ M20 = 1 << 20
 # registered <integer> by its serialization, which has 6 significant digits, so 1048575 (= -1) became 1048580.
 A15 = 32768     # 15-bit addresses
 regs = [("CR", 512, 0), ("PC", A15, 0), ("SP", A15, 0), ("FP", A15, 0), ("MAR", A15, 0), ("T1", M20, M20 // 2), ("T2", M20, M20 // 2),
-        ("RES", M20, M20 // 2), ("init", 2, 0), ("optr", 256, 0), ("pst", A15, 0), ("k", 16, 0), ("par", 2, 0), ("tprev", 65536, 0), ("steps", 1 << 21, 0), ("fok", 2, 0), ("nsh", 1 << 21, 0)]
+        ("RES", M20, M20 // 2), ("init", 2, 0), ("optr", 256, 0), ("pst", A15, 0), ("k", 16, 0), ("par", 2, 0), ("tprev", 65536, 0), ("steps", 1 << 21, 0), ("fok", 2, 0), ("nsh", 1 << 21, 0),
+        ("nseq", 2, 0), ("nwait", 4096, 0)]
 regs += [(f"A{k}", 32768, 0) for k in range(N)] + [(f"V{k}_{s}", 32768, 0) for k in range(N) for s in range(7)]   # one H: a pair shares a scroller
 if UI: regs.append(("ccok", 2, 0))
 regs += [(f"wa{w}{c}", BANKN + 1, 0) for w in range(WB) for c in CH] + [(f"wd{w}{c}", 1 << 21, 1 << 20) for w in range(WB) for c in CH]
@@ -61,12 +64,14 @@ for k in range(N):
     readback[f"A{k}"] = [f"L{k}A"]
     for s in range(7): readback[f"V{k}_{s}"] = [f"L{k}V{s}"]
 
-scalar = ["t", "fresh", "go", "chan", "kind", "resvin", "isMISS", "isWFAIL", "isPUTC", "isHALT", "isEXT", "isMUL", "isDIV", "isMOD", "isSHL",
+scalar = ["t", "fresh", "go0", "go", "chan", "kind", "resvin", "isMISS", "isWFAIL", "isPUTC", "isHALT", "isEXT", "isMUL", "isDIV", "isMOD", "isSHL",
           "v0", "v1", "vtag", "ch", "nl", "a2", "b1", "bs", "q", "ext", "mblk", "thany", "victim", "missv",
           "resT", "resvT", "rb", "rbh", "rbl", "ni", "first", "PCe", "SPe", "FPe", "RESe", "rbv", "rblo", "rbhi",
           # PRINT service (see svc / svc_inner below)
           "isPR", "prLN", "prSP", "prB", "pv", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "pa", "pneg", "pL", "ptot", "pph", "pbase",
-          "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "pstT", "isOut"]
+          "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "pstT", "isOut",
+          # NET service
+          "isNET", "nreq", "nlive", "netin", "nvalid", "nrseq", "nd", "ndata", "nmatch", "ntime", "nok", "resX"]
 scalar += [f"{x}{i}" for i in range(4) for x in ["pg", "pnb", "pb", "pc", "pr", "pch"]]
 scalar += [f"{x}{w}" for w in range(WB) for x in ["vval", "vdirty", "doWB", "doWrite", "waddr", "wval", "Wb", "mval", "pi", "doPut", "pchw"]]
 scalar += [f"{x}{k}" for k in range(N) for x in ["Ae", "vf", "vd", "tag", "st", "present", "th", "isv", "fillv", "fillh", "clean", "tagT", "vdT", "vfT"]]
@@ -100,7 +105,7 @@ for k in range(N):
             f"--vd{k}: calc(var(--present{k}) + min(1, calc(" + " + ".join(f"var(--dirty{k}_{w})" for w in range(WB)) + ")));"]
 # ---------------- frame gate (gen_vm)
 gate = ["--fresh: calc(min(1, max(var(--t) - var(--tprev), var(--tprev) - var(--t))));",
-        f"--go: calc(var(--fok){' * var(--ccok) * var(--run)' if UI else ''} * min(1, var(--fresh) + min(1, max(0, {K} - var(--k)))));",
+        f"--go0: calc(var(--fok){' * var(--ccok) * var(--run)' if UI else ''} * min(1, var(--fresh) + min(1, max(0, {K} - var(--k)))));",
         f"--chan: calc({K} * var(--par) + (1 - var(--fresh)) * var(--k));"]
 # ---------------- trap service
 svc = [f"--isMISS: {eq('var(--kind)', I_MISS)};", f"--isWFAIL: {eq('var(--kind)', I_WFAIL)};", f"--isPUTC: {eq('var(--kind)', I_PUTC)};",
@@ -150,6 +155,13 @@ svc += ["--thany: calc(" + " + ".join(f"var(--th{k})" for k in range(N)) + ");",
         "--missv: calc(var(--isMISS) * (1 - var(--thany)));",          # miss on an absent block: the victim takes it
         "--victim: calc(var(--missv) + var(--isWFAIL));",
         "--ch: mod(var(--T1), 256);", f"--nl: {eq('var(--ch)', 10)};", "--isOut: calc(var(--isPUTC) + var(--isPR));"]
+# ---- NET: the modem iframe (net/server.js has the protocol) is 1 + K px wide, K = 2 Q + nseq: Q = 1 + (T1 mod 4096) while
+# NET waits, else 0 (idle). The gateway answers K through the iframe's height h: h mod 4096 = valid + 2 seq + 4 (answer mod
+# 1024), read by the .np / .nvp reader around the read ports. An answer counts when it is valid with seq = nseq; nseq then
+# flips, so the next request differs from this one even when the word is the same. Without an answer for NWAIT passes
+# (no gateway: a file: URL, a static server) NET gives -1. The passes in between would only trap again: --go (on .nvp,
+# which can see the answer; --go0 is the frame gate) skips them, so they shape without CPU cycles and keep every register.
+svc += [f"--isNET: {eq('var(--kind)', I_NET)};", "--nreq: calc(1 + 2 * var(--isNET) * (mod(var(--T1), 4096) + 1) + var(--nseq));"]
 for w in range(WB):
     svc += [f"--vval{w}: calc(" + " + ".join(f"var(--isv{k}) * var(--val{k}_{w})" for k in range(N)) + ");",
             f"--vdirty{w}: calc(" + " + ".join(f"var(--isv{k}) * var(--dirty{k}_{w})" for k in range(N)) + ");",
@@ -158,7 +170,7 @@ svc += [# EXT: a = T2, b = T1 (signed); SHL13 uses T1
         f"--a2: {sgn20('var(--T2)')};", f"--b1: {sgn20('var(--T1)')};",
         f"--bs: calc(var(--b1) + {eq('var(--b1)', 0)});", "--q: round(to-zero, var(--a2) / var(--bs));",
         f"--ext: calc(var(--isMUL) * var(--a2) * var(--b1) + (1 - {eq('var(--b1)', 0)}) * (var(--isDIV) * var(--q) + var(--isMOD) * (var(--a2) - var(--b1) * var(--q))) + var(--isSHL) * var(--b1) * 8192);",
-        f"--resT: calc(var(--isEXT) * var(--ext) + (1 - var(--isEXT)) * var(--RESe));",
+        f"--resX: calc(var(--isEXT) * var(--ext) + (1 - var(--isEXT)) * var(--RESe));",
         # read ports (block fill on MISS): RAM block mblk, one port per bank
         f"--rb: calc(min({BANKN - 1}, max(0, var(--mblk) - {ROM // 4})));",
         "--rbh: round(down, var(--rb) / 64);", "--rbl: calc(var(--rb) - 64 * var(--rbh));"]
@@ -196,7 +208,8 @@ svc_inner += ["--pe: calc((1 - var(--pdone)) * (var(--pr0) + var(--pr1) + var(--
               "--pfin: calc(var(--isStr) * var(--ptNul) + (1 - var(--isStr)) * clamp(0, var(--pbase) + 5 - var(--ptot), 1));",
               "--pnl: calc(var(--isStr) * (var(--ptNL) + var(--ptNul) * var(--prLN)) + (1 - var(--isStr)) * var(--pfin) * var(--prLN) + var(--isPUTC) * var(--nl));",
               "--pstT: calc(var(--isStr) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)) + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pph) + 1));",
-              "--resvT: min(1, calc(var(--resvin) + var(--isEXT) + var(--isPUTC) + var(--isPR) * var(--pfin)));"]
+              "--resT: calc(var(--isNET) * (var(--nmatch) * var(--ndata) - var(--ntime)) + (1 - var(--isNET)) * var(--resX));",
+              "--resvT: min(1, calc(var(--resvin) + var(--isEXT) + var(--isPUTC) + var(--isPR) * var(--pfin) + var(--nok)));"]
 for i in range(4):
     svc_inner.append(f"--pch{i}: calc(var(--isStr) * (var(--pr{i}) * var(--pb{i}) + {eq('var(--pe)', i)} * var(--ptNul) * var(--prSP) * 32)"
                      f" + (1 - var(--isStr)) * clamp(0, var(--pn) - {i}, 1) * var(--pnb{i}) + var(--isPUTC) * {eq(i, 0)} * var(--ch));")
@@ -234,7 +247,10 @@ nx = ["--next-tprev: var(--t);", "--next-nsh: calc(var(--nsh) + var(--go));",
       hold("init", "1"), hold("RES", "var(--resT)"),
       # after pn cells the cursor is at optr + pn; a newline moves it to the next row's start (as the simulator does)
       hold("optr", f"var(--isOut) * mod(var(--pnl) * (round(down, (var(--optr) + var(--pn)) / {COLS}) + 1) * {COLS} + (1 - var(--pnl)) * (var(--optr) + var(--pn)), {OUT_SIZE}) + (1 - var(--isOut)) * var(--optr)"),
-      hold("pst", "var(--isPR) * var(--pstT) + (1 - var(--isPR)) * var(--pst)")]
+      hold("pst", "var(--isPR) * var(--pstT) + (1 - var(--isPR)) * var(--pst)"),
+      hold("nseq", "var(--nseq) + var(--nok) * (1 - 2 * var(--nseq))"),
+      # (counted on the passes NET waits in, which --go skips)
+      f"--next-nwait: calc(var(--go0) * var(--isNET) * (1 - var(--nok)) * min({NWAIT}, var(--nwait) + 1) + (1 - var(--go0)){RUN} * var(--nwait));"]
 for w in range(WB):
     for i, c in enumerate(CH):
         sel = f"var(--go) * {eq('var(--chan)', i)}"
@@ -265,6 +281,16 @@ css.append(lbl.group(f'Read ports: one per RAM bank ({WB})', 'a two-level if() p
 for w in range(WB):
     css.append(f"#cpu {{ --sR{w}: " + mux("rb", BANKN, lambda b, w=w: f"--c{4 * b + w}", f"--c{w}") + "; }")
     css.append(f".rp{w} {{ width: anchor-size(var(--sR{w}) width, {WOFF}px); }} .vp{w} {{ --mval{w}: calc(100cqi / 1px - {WOFF}); }}")   # no anchor: an unwritten cell, 0
+css.append(lbl.group('NET: the modem iframe and its answer', 'the iframe\'s width is the request; its height, read around the read ports, the answer'))
+css += [".nlatch { height: 0; --nlive: var(--isNET); transition: --nlive 0s calc((1 - var(--isNET)) * 1000000s); }   /* live from the first NET on */",
+        ".modem { display: if(style(--nlive: 1): block; else: none); position: fixed; left: 0; top: 0; border: 0; visibility: hidden;"
+        " frame-sizing: content-height; anchor-name: --modem; width: calc(var(--nreq) * 1px); }",
+        ".np { position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; container-type: inline-size; width: anchor-size(--modem height, 0px); }",
+        ".nvp { visibility: visible; --netin: mod(round(100cqi / 1px), 4096); --nvalid: mod(var(--netin), 2); --nrseq: mod(round(down, var(--netin) / 2), 2);"
+        " --nd: round(down, var(--netin) / 4); --ndata: calc(var(--nd) - 1024 * clamp(0, var(--nd) - 511, 1));"
+        f" --nmatch: calc(var(--isNET) * var(--nvalid) * {eq('var(--nrseq)', 'var(--nseq)')});"
+        f" --ntime: calc(var(--isNET) * (1 - var(--nmatch)) * clamp(0, var(--nwait) - {NWAIT - 1}, 1));"
+        " --nok: calc(var(--nmatch) + var(--ntime)); --go: calc(var(--go0) * (1 - var(--isNET) + var(--nok))); }"]
 css.append(lbl.group('Inside the innermost port: write-backs, state-line inputs, next state'))
 css.append(".vp3 { " + "\n  ".join(svc_inner + inp + nx) + " }")
 # writes
@@ -429,6 +455,8 @@ page = f"""<!doctype html>
 {console}
 <div id="clk"><div id="cpu">
 {mem_inner}
+<div class="nlatch"><iframe class="modem" loading="lazy" src="/net/modem.html" title="network modem" aria-hidden="true"></iframe></div>
+<div class="np"><div class="nvp">
 <div class="rp rp0"><div class="vp vp0"><div class="rp rp1"><div class="vp vp1"><div class="rp rp2"><div class="vp vp2"><div class="rp rp3"><div class="vp vp3">
 <div id="sent"><span style="anchor-name: --a-SENT">{sent}</span></div>
 <div id="state">{''.join(spans_html)}</div>
@@ -444,6 +472,7 @@ page = f"""<!doctype html>
 {local_html}
 </div>
 </div></div></div></div></div></div></div></div>
+</div></div>
 </div></div>
 </html>
 """
@@ -523,7 +552,8 @@ if UI:
              f"layout pass shapes the machine state as text and HarfBuzz executes {S} micro-cycles in GSUB. Output appears in the console on the left.</p>"
              f"<p>The language is a small JavaScript subset: <code>var</code>, <code>function</code>, <code>if</code>/<code>else</code>, "
              f"<code>while</code>, <code>for</code>, <code>return</code>, integer arithmetic, string literals, array literals, "
-             f"<code>console.log(x)</code> and <code>putc(c)</code>. Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
+             f"<code>console.log(x)</code>, <code>putc(c)</code>, and <code>fetch(url)</code> / <code>read()</code> when the page is served "
+             f"by its network gateway (<code>js-minus-js/net/server.js</code>). Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
              f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine.</p>")
     page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
@@ -563,6 +593,8 @@ if UI:
 {console}
 <div id="clk"><div id="cpu">
 {mem_inner}
+<div class="nlatch"><iframe class="modem" loading="lazy" src="/net/modem.html" title="network modem" aria-hidden="true"></iframe></div>
+<div class="np"><div class="nvp">
 <div class="rp rp0"><div class="vp vp0"><div class="rp rp1"><div class="vp vp1"><div class="rp rp2"><div class="vp vp2"><div class="rp rp3"><div class="vp vp3">
 <div id="sent"><span style="anchor-name: --a-SENT">{sent}</span></div>
 <div id="state">{''.join(spans_html)}</div>
@@ -575,6 +607,7 @@ if UI:
 {local_html}
 </div>
 </div></div></div></div></div></div></div></div>
+</div></div>
 </div></div></div>
 </body>
 </html>

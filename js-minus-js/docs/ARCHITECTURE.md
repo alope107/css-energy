@@ -17,7 +17,7 @@ back, CSS compiles it to bytecode, and a font executes it while Chrome shapes te
    ▼
  font CPU: the machine state is a line of text; Blink shapes it with      machine/gen_fvm4.py, cpu4.py
    a GSUB font that runs 32 micro-cycles per shaping; CSS services traps   machine/memtree.py (RAM)
-   (cache misses, write-backs, MUL/DIV/MOD/SHL13, PRINT, PUTC)
+   (cache misses, write-backs, MUL/DIV/MOD/SHL13, PRINT, PUTC, NET)
    ▼
  console: 8 × 16 RAM cells shown with a counter-style font
 ```
@@ -161,7 +161,7 @@ in-flow overlays `.ovs` named after their RAM cell.
   shaping runs S = 32 micro-cycles (`font-feature-settings: "cv01" var(--go)`).
 - An instruction commits PC, SP, FP and its memory write only in its last micro-cycle, so a trap simply restarts it.
   A trap sets the control glyph to `('T', kind)`; the rest of the shaping does nothing. Kinds: MISS, WFAIL (dirty
-  victim), EXT (MUL, DIV, MOD, SHL13, the six PRINT ops), PUTC, HALT. A PRINT trap repeats until the whole value is
+  victim), EXT (MUL, DIV, MOD, SHL13, the six PRINT ops, NET), PUTC, HALT. A PRINT trap repeats until the whole value is
   written (RESV).
 - Cache: a ring of 16 lines with a victim pointer; data never moves between lines. A MISS writes back the victim's
   dirty words (one per bank) and fills the whole block. ROM fetch is a font lookup and never traps.
@@ -236,6 +236,42 @@ HP and GCLIM start at 0, so the first NEW sets up the heap.
 **Font budget**: 148 control values; 392 subtables per cycle of the 512 allowed at S = 32, thanks to
 `cpu4.merge_digits` (an expression's digits in one subtable). Costs: BENCHMARKS §10.
 
+### 3.6 The network: `NET` and the modem
+
+`fetch(url)` and `read()` (ROM routines in `lib_src.js`) are made of one instruction, `NET`: pop a word, push the
+gateway's answer. Its microcode is SHL13's (a unary EXT trap); the model and `cc_ref.run()` answer at once from
+`net/device.py`, which serves `tests/net/`. The words: `256 + b` appends a URL byte, `512` GETs the URL (the status),
+`768` reads the body's next byte (`-1` past its end); answers are 10-bit signed. `fetch` sends the URL's bytes from the
+string area, one `NET` each.
+
+On the page the CSS service can't make requests itself, so it drives a modem (`net/server.js` serves it and has the
+protocol):
+
+- **Request**: `.modem`, an `<iframe loading="lazy" src="/net/modem.html">` in `#cpu`, is `1 + K` px wide:
+  `K = 2 Q + nseq`, with `Q = 1 + (T1 mod 4096)` while `NET` waits and 0 otherwise. `nseq` is a register that flips
+  when a `NET` completes, so the next request always differs from the last. The iframe shows from the first `NET` on
+  (`.nlatch`, a transition latch); before that, nothing loads.
+- **The modem document** has no doctype (quirks mode) and reloads itself (`<meta http-equiv="refresh">`). Each load
+  reads `K` from `100vw` and requests four hex digits of it plus a check digit as
+  `background-image: if(style(--x: …): url(/net/d/<i>/<nonce>/<v>); …)`. It loads `/net/rx`, served as
+  `application/json`, as a stylesheet (ENGINE_NOTES 50), and makes its content height `100vh + mod(R - 100vh,
+  4096px)` with `R = valid + 2 seq + 4 (answer mod 1024)`.
+- **Answer**: responsive iframes (`frame-sizing: content-height`; ENGINE_NOTES 51) make that the iframe's height,
+  which only grows (52). `.np` (width = `anchor-size(--modem height)`) and `.nvp` around the read ports read it mod
+  4096. `--nmatch` = valid and seq = `nseq`. Then `RES` = the answer, `RESV` is raised and `nseq` flips. After 2,400
+  passes without one (about 20 s: no gateway) the answer is -1.
+- **Waiting is cheap**: `--go` is `--go0` (the frame gate, on `#cpu`) times "not waiting, or answered", computed on
+  `.nvp`. Passes that would only trap again shape without CPU cycles and hold every register.
+- **The gateway** acts on a load's request when every digit came once with a matching check digit (a load that saw
+  the width change restyles and sends a second value). It acts once per distinct `K`, and answers with `K`'s
+  sequence bit. Relative URLs resolve against the page's URL. The modem reloads at once while requests come, and
+  once a second after 3 s without one. Past a height of 2^24 px it goes through a non-opted-in page, which resets
+  the iframe to 150 px.
+- **Out of process**: the server rewrites the iframe's URL to the other one of 127.0.0.1 / localhost, so the modem
+  runs in its own renderer (site isolation) rather than between the page's frames (ENGINE_NOTES 55).
+
+A word takes about 3 page frames, about 0.5 s (BENCHMARKS §12).
+
 ---
 
 ## 4. Editor readback (`readback/ui_rb.py`)
@@ -265,8 +301,10 @@ HP and GCLIM start at 0, so the first NEW sets up the heap.
 | L3 | `make l3`, `make fuzz-l3` | the generated CSS compiler in Chrome (`build/suite_css.xhtml`, programs written into the latch cells) | the reference, word for word; `suite_err` must be rejected (any nonzero error) |
 | L4 | `make l4` | `uarch4.Machine4` runs every compiled image | Node output |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
+| L5 net | `make l5-net` | the `net_*` programs on the real page, served with the gateway (`net/server.js`) over HTTP | Node output, with `net/shim.js`'s fetch / read |
 
-- `make test` = oracle, L1, quick fuzz, L2, L4. `tests/suite/` has 120 programs (each must fit the editor, or
+- `make test` = oracle, L1, quick fuzz, L2, L4. Programs that use the network get `tests/net/` from every level's
+  gateway: `net/device.py` (L1, L4, fuzz), `net/shim.js` (Node), `net/server.js` (L5 net). `tests/suite/` has 120 programs (each must fit the editor, or
   `suite_ref.py` fails it), `tests/suite_err/` 46; `tests/programs/` has the demos t1–t4.
 - **Differential tests** (`tests/fuzz/fuzz.py`; `make test` runs a quick fixed-seed set, `make fuzz` the full one,
   `make fuzz-l3` 300 of them through L3 in Chrome). Node is the oracle; each program goes through L1, L1 on the

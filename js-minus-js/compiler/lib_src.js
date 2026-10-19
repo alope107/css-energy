@@ -13,3 +13,11 @@ function addc(a, b) {
   if (s) { prn(a); prn(b); return __DATA_BASE__ + 256 - k; }
   return a + b;
 }
+// fetch(url): send the URL's bytes to the network gateway, one NET word each (256 + byte), then GET it (512): the HTTP
+// status, or -1 if it failed. read(): the body's next byte, -1 at its end (768). The protocol: net/device.py.
+function fetch(s) {
+  var p = s + peek(__DATA_BASE__); var c = peek(p);
+  while (c) { net(256 + c); p++; c = peek(p); }
+  return net(512);
+}
+function read() { return net(768); }

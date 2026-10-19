@@ -69,6 +69,18 @@ Not spec violations: costs the projects pay that the engine could avoid. Candida
   three times.
 - **`media` on `<link rel=compression-dictionary>` is ignored** (paint): spec gap; the keyword isn't in HTML yet
   ([whatwg/html#11620](https://github.com/whatwg/html/pull/11620)).
+- **An `<object>` isn't re-fetched when a `display: none` ancestor is shown again** (js-minus-js `net/probe`): the
+  letter of HTML's object element steps says otherwise. "The element changes from being rendered to not being
+  rendered" re-runs them, and a not-rendered element jumps to "fallback", which says "Destroy a child navigable". So
+  showing the ancestor again would fetch again. Chrome 153 keeps the nested frame while the ancestor is hidden and
+  reuses it (`HTMLPlugInElement::AttachLayoutTree`, `html_plugin_element.cc:223`). Firefox 157 doesn't re-fetch
+  either, and it fetches under a `display: none` ancestor from the start. WebKit (Playwright's 27.2) re-fetches on
+  every show, and web developers reported that as a regression:
+  [230688](https://bugs.webkit.org/show_bug.cgi?id=230688) (2021, still New). These steps are a known spec issue,
+  [whatwg/html#2692](https://github.com/whatwg/html/issues/2692) (open since 2017). It calls the reload "really
+  weird", says nobody needs it for web compat, and proposes matching the majority. That makes this a spec question,
+  not a Chrome bug. No WPT test covers showing the ancestor again; `object-in-display-none-load-event.html` covers only
+  the load event.
 - **~7,700 in-flight requests fail without retry** (paint): `kMaxOutstandingRequestsPerProcess = 2700`, then
   `ERR_INSUFFICIENT_RESOURCES`. A limit, not a bug.
 - **Stale view timelines re-run style and layout in the same frame** (Chrome): specified (scroll-animations-1 §5.1).

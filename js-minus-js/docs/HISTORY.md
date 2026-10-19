@@ -31,6 +31,11 @@ Numbers for superseded code come from raw logs and earlier chats on other machin
   version needed 531 subtables per cycle; gated rule groups and `merge_digits` got 392. Fixed on the way: 16 copies of
   every self-update rule (HarfBuzz −6%), comparisons overflowing for operands 2^19 apart (`tests/suite/cmp_far.js`),
   the model's 20-bit address mask. FizzBuzz within 1% on the page.
+- **12, the network (2026-10-19).** `fetch(url)` / `read()` through one `NET` instruction and a modem iframe
+  (ARCHITECTURE §3.6). The pieces: `<object>`s fire their request when first shown but never again (ENGINE_NOTES 53).
+  A quirks-mode child reads any same-origin body as CSS (50). Responsive iframes return its height to the page (51),
+  but the height never shrinks (52). A self-reloading child repeats requests. The first version took 1.7 s per word.
+  Then the modem went out of process, waiting passes stopped shaping, and the debounce went: 0.5 s per word.
 
 ## Dead ends and superseded approaches
 
@@ -76,6 +81,11 @@ Numbers for superseded code come from raw logs and earlier chats on other machin
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
 | 39 | NEW zero-filling its chunk | 12 micro-cycles, two lines per object | NEW zeroes nothing; ENDK |
 | 40 | Every identifier writing its bytes to the string area | FizzBuzz compiled ~7% slower | only after `.`, `{` or `,` |
+| 41 | `<object>`s as the request primitive, toggled by `display` | each fetches once; re-showing reuses its frame (ENGINE_NOTES 53) | a self-reloading modem iframe |
+| 42 | An SVG `<object>`'s natural size as the return channel | set by the `width` / `height` attributes, not CSS; and SVG is XML, so no quirks mode | responsive iframes (ENGINE_NOTES 51) |
+| 43 | The modem in the page's process | ~3 loads/s beside the CPU page: 0.7–1.7 s per word | cross-site, its own process: 0.5 s |
+| 44 | Acting on a request seen in two consecutive loads | one more load per word, no faster on the page | one clean load (each digit once) |
+| 45 | Pacing the modem (9–18 loads/s) for fewer relayouts; containment around it | 10.5–14.5 frames/s, but 0.6–1.06 s per word; containment: no change | full speed while in use |
 
 ## Open leads (untried)
 
@@ -96,5 +106,8 @@ Numbers for superseded code come from raw logs and earlier chats on other machin
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
+- **Network**: more than one byte per word, from answers wider than 10 bits (the modulus is 4096) or several modems
+  read in one pass. A word costs about 3 page frames whatever its size. Also: POST, request headers and response
+  headers (more words); a gateway on the deployed site (a Worker with state per page).
 - **Language**: a wider console; built strings; printing objects, `undefined`, `in` / `delete`, prototypes; booleans
   as parameters; specific error codes on the page.

@@ -1,13 +1,18 @@
 // ui_seq.js page.xhtml [prog expected]... — act like a user (harness only): wait for the scan, Run the initial program,
 // then for each further program: Edit, retype the editor, Run, and check the console (or the status, for 'ERR:text').
+// NETROOT=dir: serve dir with the network gateway (net/server.js) and open the page there (http, not file:), with
+// responsive iframes on (Chrome 155+ has them by default): the NET instruction's modem needs both.
 const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const { consoleCodes, gridText, typeLines } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs'), path = require('path');
 (async () => {
   const [pg, ...rest] = process.argv.slice(2);
-  const b = await launch({ extraArgs: envArgs('FLAGS') });
+  const NR = process.env.NETROOT;
+  const srv = NR && await require(path.join(__dirname, '..', 'net', 'server.js')).serve(path.resolve(NR), 0);
+  const b = await launch({ extraArgs: [...envArgs('FLAGS'), ...(NR ? ['--enable-blink-features=ResponsiveIframes'] : [])] });
   const p = await b.newPage(process.env.FLAGS ? { viewport: null } : { viewport: { width: 1300, height: 950 } });
-  const t0 = Date.now(); await p.goto(fileUrl(pg), { timeout: 600000 }); console.log('load ms', Date.now() - t0);
+  const at = NR ? `http://127.0.0.1:${srv.address().port}/${path.relative(NR, pg)}` : fileUrl(pg);
+  const t0 = Date.now(); await p.goto(at, { timeout: 600000 }); console.log('load ms', Date.now() - t0);
   const st = () => p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'),
     halted: +c.getPropertyValue('--isHALT') === 1,
     status: getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''), n: getComputedStyle(document.querySelector('.cstv')).getPropertyValue('--csn') }; });
@@ -30,5 +35,5 @@ const fs = require('fs'), path = require('path');
   await p.waitForTimeout(+(process.env.INITWAIT || 3000));
   await run('initial', process.env.EXP1 ? fs.readFileSync(process.env.EXP1, 'utf8') : 'ERR:compiled');
   for (let i = 0; i < rest.length; i += 2) { await type(rest[i]); const w = rest[i + 1].startsWith('ERR:') ? rest[i + 1] : fs.readFileSync(rest[i + 1], 'utf8'); await run(path.basename(rest[i]), w); }
-  await b.close();
+  await b.close(); if (srv) srv.close();
 })();

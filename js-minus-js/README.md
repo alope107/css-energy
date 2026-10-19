@@ -65,6 +65,8 @@ Open `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome. Elsewhere th
 - **Assignment**: `=`, `+= -= *= /= %=` and `++ --` (also on `a[i]`) as statements; `x++ x-- ++x --x` also inside
   expressions (`a[i++]`, `while (n--)`).
 - **Output**: `console.log(a, b, ...)` and `putc(code)`.
+- **Network**: `fetch(url)` GETs a URL and returns the HTTP status (`-1` if the request failed); `read()` then returns
+  the body's next byte, `-1` past its end. Both need the page served by the gateway (see [Network](#network)).
 - **Comments**: `//` and `/* */`.
 - **Strings are interned**: equal literals are one value, so `===` compares them by content.
 - **Semicolons**: optional where JavaScript inserts them. A newline after a complete statement ends it unless it is
@@ -119,6 +121,10 @@ costs time per live object. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md
 - **Not supported**: `undefined`, nested functions or closures, string comparison by content, expression statements
   starting with a literal or `(`.
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
+- **Network**: one request at a time, GET only, no headers; a status above 511 reads as 511. Each URL byte and each
+  body byte is one round trip through the modem, about 0.5 s on the page. Without the gateway (`file:`, a static
+  server) `fetch` returns `-1` after about 20 s. `fetch` and `read` are builtins: a function of either name is never
+  called.
 
 ### Error codes
 
@@ -150,3 +156,24 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.
+
+## Network
+
+`fetch` and `read` work without script on the page. Each network word is one `NET` instruction, which traps, and CSS
+services it through a "modem": an iframe whose document reloads itself all the time. The page sets the iframe's width
+to the request. Each reload reads that width and sends it as a few `background-image` URLs that CSS chooses. It
+loads the gateway's answer as a stylesheet, and reports the answer as its content height (responsive iframes). The
+page reads that height. The answer is served as `application/json`. A stylesheet may have that type only in quirks
+mode, so the modem has no doctype (the page itself is XHTML, which has no quirks mode). The protocol:
+`net/server.js`. How the page services it: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.6.
+
+```
+node net/server.js .. 8767        # serve the repo root with the gateway (from js-minus-js/)
+# then open http://127.0.0.1:8767/js-minus-js/dist/js_in_css.xhtml in Chrome 155+
+# (Chrome 153: start it with --enable-blink-features=ResponsiveIframes)
+```
+
+Relative URLs resolve against the page; absolute `http(s)` URLs go through the gateway, so they aren't subject to
+CORS. The gateway is a local tool: it fetches whatever the page asks for. The site the repo deploys to is static, so
+it has no gateway, and `fetch` there returns `-1`. The modem starts at the program's first `fetch` and reloads about
+40 times a second while it is in use, then once a second.

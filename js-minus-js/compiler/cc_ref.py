@@ -29,6 +29,8 @@ wrong guess costs nothing for non-negative numbers and still prints correctly). 
 are followed by PUSHI 32 PUTC.
 """
 import sys, json, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'net'))
+from device import Device
 
 # the memory map (compiler/layout.json): ROM 0..rom_size-1 (the lib); RAM from rom_size = data_base; see layout.json's _doc
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
@@ -39,7 +41,8 @@ AMASK = 32767                           # addresses are 15-bit (the font's addre
 # opcodes (jsc.js)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
     JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL, \
-    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG = range(54)
+    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, NET = range(55)
+# NET (machine/uarch.py): pop a word, push the network gateway's answer (net/device.py); the lib's fetch / read are made of it
 # PRINT family (serviced by CSS on the page, machine/uarch.py in the model): pop a value and print it. A tagged string pointer
 # prints its bytes, anything else prints in decimal; the B forms print 0 / 1 as false / true (the static type says
 # boolean). SP / LN add a space / newline. PRINT_OP[sep] + (type == boolean) is the opcode.
@@ -66,7 +69,7 @@ def h1h2(s):
     a = b = 0
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
     return a, b
-KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
+KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'fetch', 'read', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length']}
 
 # punctuation codes: single chars by ASCII; two-char ops: == 1, != 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
@@ -101,6 +104,9 @@ M_CADD = 50
 M_TELSE = 51
 # OPS markers (codes >= 100)
 M_PAREN, M_CALL, M_IDXG, M_IDXL, M_PUTC, M_PRINT, M_IDXA, M_TERN = 100, 101, 102, 103, 104, 105, 107, 108
+# builtins (M_PUTC's value): putc(c) is PUTC, then 0 as its value; fetch(url) and read() call the lib (net/device.py)
+B_PUTC, B_FETCH, B_READ = 0, 1, 2
+BUILTIN = {KW['putc']: B_PUTC, KW['fetch']: B_FETCH, KW['read']: B_READ}
 # object literal: NEW, then its first pairs (string keys) stored in place (SETF) and the keys ended there (ENDK), the rest the
 # general way, as o.x = v / o[n] = v. M_OBJ (value: the pairs stored in place + 4 once the keys are ended), and above it while
 # a value is parsed M_OKEY (value: 0 a SETF pair, 1 a number key (SETX), else the key for PUTV); x[k] on a value: M_INDEX
@@ -139,6 +145,7 @@ class Compiler:
         """lib: the runtime library's entry addresses (lib.json)"""
         self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
         self.getx_fn, self.setx_fn = lib['getx'], lib['setx']
+        self.fetch_fn, self.read_fn = lib['fetch'], lib['read']
         # lexer. An identifier that may be a property name (after '.', '{' or ','; kpos 2 / 1 / 1) writes its bytes to the
         # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
@@ -369,7 +376,7 @@ class Compiler:
                 if not isP(46): return self.fail(30)
                 self.mode = S_CONLOG; return
             if isP(40):
-                if h == KW['putc']: self.push_op(M_PUTC)
+                if h in (KW['putc'], KW['fetch'], KW['read']): self.push_op(M_PUTC, BUILTIN[h])
                 else:
                     k = self.fnfind(h); self.push_op(M_CALL, k + 16 * self.fn[k][3])
                 self.mode = S_OPND; return
@@ -605,6 +612,8 @@ class Compiler:
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
             if isP(41) and self.top_op()[0] == M_CALL:      # f() (or f(a, ) with a trailing comma)
                 self.osp -= 1; self.call_end(self.opv[self.osp], 0); self.mode = S_OPER; return
+            if isP(41) and self.top_op() == (M_PUTC, B_READ):    # read()
+                self.osp -= 1; self.emit(CALL, self.read_fn, b=3); self.mode = S_OPER; return
             if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:     # return;
                 self.emit(PUSHI, 0)
                 if isP(125): return self.asi_close(lambda: self.end_expr_stmt('P', T_NL))
@@ -675,7 +684,7 @@ class Compiler:
                 if isP(44):
                     if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return     # (2: after a ',')
                     if t == M_CALL: self.opv[self.osp - 1] += 64      # count the arguments
-                    if t in (M_CALL, M_PUTC): self.mode = S_OPND; return
+                    if t == M_CALL or (t == M_PUTC and tv == B_PUTC): self.mode = S_OPND; return
                     if self.osp == 0 and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
                     return self.fail(44)
                 if isP(93):
@@ -684,7 +693,11 @@ class Compiler:
                     return self.fail(45)
                 if t == M_PAREN: self.osp -= 1; return
                 if t == M_CALL: self.osp -= 1; return self.call_end(tv, 1)
-                if t == M_PUTC: self.osp -= 1; self.emit(PUTC); self.emit(PUSHI, 0); return
+                if t == M_PUTC:
+                    self.osp -= 1
+                    if tv == B_PUTC: self.emit(PUTC); self.emit(PUSHI, 0); return
+                    if tv == B_FETCH: self.emit(CALL, self.fetch_fn, b=3); return
+                    return self.fail(76)                       # read(x)
                 if t == M_PRINT: self.osp -= 1; self.print_call(10); return self.print_end()
                 if self.osp: return self.fail(46)
                 return self.end_expr_stmt(kind, v)             # ')' closing a statement-level paren
@@ -876,10 +889,12 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator (= build.js run())
-def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False):
+def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, net=None):
     """strict: check the stack discipline the compiler promises: statements leave the stack as they found it, so sp
-    never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced')"""
+    never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced').
+    net: the NET instruction's gateway (default: net/device.py's, which serves tests/net/)"""
     if out_base is None: out_base = LAYOUT['out_base']
+    if net is None: net = Device()
     mem = [0] * (AMASK + 1)
     for i, w in enumerate(rom): mem[i] = w
     for a, v in mem_init.items(): mem[a] = v
@@ -959,6 +974,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == OVER: mem[sp] = mem[sp - 2]; sp += 1
         elif op == JNEG:
             if mem[sp - 2] < 0: pc = imm
+        elif op == NET: mem[sp - 1] = s20(net(mem[sp - 1]))
         elif PRINT <= op <= PRINTBLN:
             sp -= 1; v = mem[sp]; p = v + STRTAG; sep = PRINT_SEP[op]
             if LAYOUT["data_base"] + SDATA <= p < LAYOUT["data_base"] + 2 * SDATA:   # a tagged string (data_base + SDATA: the lib's DONE marker, empty)

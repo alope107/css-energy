@@ -7,12 +7,14 @@ trap or the end of a shaping simply restarts it.
 
 Memory: N-line FIFO cache held in the glyph string. Read miss -> trap MISS. Write miss allocates by
 shifting the lines left (oldest falls off) unless the oldest is dirty -> trap WFAIL.
-Traps: MISS(addr) WFAIL EXT(op,a,b) for MUL DIV MOD SHL13, PUTC(c), HALT. Values are 20-bit two's
+Traps: MISS(addr) WFAIL EXT(op,a,b) for MUL DIV MOD SHL13 NET, PUTC(c), HALT. Values are 20-bit two's
 complement (the compiler never needs more; asserted).
 
 CSS-side service (modelled in `service`): write back / read RAM, compute EXT, print.
 """
 import json, sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'net'))
+from device import Device
 
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'compiler', 'layout.json')))
 ROM = LAYOUT['rom_size']                    # RAM starts here
@@ -28,7 +30,9 @@ PRINTOPS = ['PRINT', 'PRINTB', 'PRINTSP', 'PRINTBSP', 'PRINTLN', 'PRINTBLN']
 # allocates an 8-word chunk, ENDK ends its keys; OVER copies the word under the top, JNEG branches on the sign of that word
 # (array or object)
 OBJOPS = 'SCANI SCAN LDF PUTV NEW SETF ENDK OVER JNEG'.split()
-OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS + OBJOPS
+# NET: pop a word, push the network gateway's answer (net/device.py has the protocol). On the page CSS services the trap
+# through a modem iframe (machine/gen_fvm4.py) and RESV waits for the answer; in the model the answer is immediate.
+OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS + OBJOPS + ['NET']
 OP = {n: i for i, n in enumerate(OPN)}
 STRTAG = 262144                             # a string value is its address - STRTAG (cc_ref.STRTAG)
 STR_LO, STR_HI = LAYOUT['data_base'] + 256, LAYOUT['data_base'] + 512   # string area (cc_ref: data_base + SDATA .. + 2 * SDATA); STR_LO itself is the DONE marker
@@ -99,6 +103,7 @@ UCODE = {
     'HALT':   [dict(halt=True)],
     'JMPI':   [dict(mem=R('SP-1'), t={'T1': 'MDR'}), dict(commit={'SP': 'SP-1', 'PC': 'T1'})],
     'SHL13':  [dict(mem=R('SP-1'), t={'T1': 'MDR'}), dict(ext='SHL13', mem=W('SP-1', 'RES'), commit={'PC': 'PC+1'})],
+    'NET':    [dict(mem=R('SP-1'), t={'T1': 'MDR'}), dict(ext='NET', mem=W('SP-1', 'RES'), commit={'PC': 'PC+1'})],
     'INCG':   [dict(mem=R('IMM'), t={'T1': 'MDR'}), dict(mem=W('IMM', 'T1+1'), commit={'PC': 'PC+1'})],
     'INCL':   [dict(mem=R('FP+SIM'), t={'T1': 'MDR'}), dict(mem=W('FP+SIM', 'T1+1'), commit={'PC': 'PC+1'})],
     'IDX':    [dict(mem=R('IMM'), t={'T1': 'MDR'}), dict(mem=R('SP-1'), t={'T2': 'MDR'}), dict(mem=R('T1+T2'), t={'T3': 'MDR'}),
@@ -132,7 +137,7 @@ UCODE = {
     # like PUTC, but the service may take several shapings: RESV is raised only when the whole value has been printed
     **{n: [dict(mem=R('SP-1'), t={'T1': 'MDR'}), dict(ext=n, commit={'SP': 'SP-1', 'PC': 'PC+1'})] for n in PRINTOPS},
 }
-def ext_a(name): return name == 'SHL13' or name in PRINTOPS      # unary EXT ops: the operand is T1 (binary ones: a = T2, b = T1)
+def ext_a(name): return name in ('SHL13', 'NET') or name in PRINTOPS      # unary EXT ops: the operand is T1 (binary ones: a = T2, b = T1)
 assert set(UCODE) == set(OPN), set(OPN) - set(UCODE)
 
 def ev(e, r):
@@ -169,6 +174,7 @@ class Machine:
         self.steps = self.cycles = self.shapings = self.traps = 0
         self.trapkinds = {}
         self.halted = False
+        self.net = Device()                # the NET instruction's gateway (net/device.py)
 
     # ---- cache, exactly as the glyph string will behave: N lines in a ring, victim pointer `vp`
     # (None once an in-font allocation used the last line; CSS puts it back on line 0).
@@ -256,6 +262,8 @@ class Machine:
                 self.vp = (self.vp + 1) % self.N
         elif k == 'EXT' and t[1] in PRINTOPS:
             self.print_service(t[1], t[3])
+        elif k == 'EXT' and t[1] == 'NET':
+            self.res = s20(self.net(t[2])); self.resv = 1
         elif k == 'EXT':
             self.res = s20(EXTF[t[1]](t[2], t[3])); self.resv = 1
             assert abs(EXTF[t[1]](t[2], t[3])) < (1 << 19), t

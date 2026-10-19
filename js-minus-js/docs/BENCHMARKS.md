@@ -235,3 +235,34 @@ Model (`tools/traps.py`), steps / shapings / misses: obj_basic 365 / 77 / 47; ob
 - On the page (L5, loaded machine; FizzBuzz 12.6 s in the same run), Run → HALT: obj_basic 13.8 s, obj_list 15.0 s,
   obj_func 18.0 s, obj_nested 24.1 s, obj_keys 24.4 s; `obj_gc_small` (500 objects through the 384-chunk heap) 216 s,
   output and step count exact.
+
+## 12. The network (2026-10-19)
+
+`fetch` / `read` through the modem (ARCHITECTURE §3.6). Headless Chromium 153 with
+`--enable-blink-features=ResponsiveIframes`, page and gateway on one machine (`net/server.js`).
+
+| Measure | Value |
+|---|---|
+| A word, the modem beside a trivial page (`net/probe/probe3.js`, harness as the CPU) | median 31–55 ms; the first after idle ~1 s (the idle reload is 1 s) |
+| 600 random bytes through `read()`, same probe | 609 words, 24.4 s, byte for byte |
+| `net_fetch.js` on the page, Run → HALT (`make l5-net`) | 15.2 s (FizzBuzz 11.1 s in the same run); 29 words |
+| A word on the page (`net/probe/pagenet.js`), modem out of process | ~0.5 s: median 416 ms between requests, ~3 frames; the page at 5–6 frames/s, the modem ~40 loads/s |
+| Same, modem in the page's process | 0.7–0.8 s per word; 11–13 frames/s but ~3 modem loads/s |
+| First version (in process, waiting passes still shaping) | 1.7 s per word (`net_fetch` 56.6 s) |
+
+What it costs programs that don't use it (FizzBuzz, `ab.js` interleaved, fresh browser per run, `ui_seq.js`):
+
+| Measure | Before (`4e2f35d`) | After | Ratio (median, IQR) |
+|---|---|---|---|
+| A vs A (noise), Run → HALT, 4 rounds | 10.21 s | 10.16 s | 0.995 (0.984–0.997) |
+| Run → HALT, 6 rounds | 10.48 s | 10.71 s | 1.023 (1.004–1.038) |
+| Run → compiled, 6 rounds | 2,606 ms | 2,623 ms | 0.990 (0.985–1.007) |
+| Parser variants / rules; subtables per cycle | 330 / 198; 392 | 330 / 198; 392 | |
+
+About 2% on the run, just past the noise: probably the `.np` / `.nvp` reader level now around every read port (the
+modem itself is `display: none` until the first `NET`). Not chased; moving the reader inside `.vp3` is untried.
+
+A word costs about 3 page frames: one to run the CPU to the next `NET` (a `putc` between two `read()`s is a second
+trap), then the modem's round trip (2 loads) plus the height reaching the page, which lands in a frame already
+running. Waiting passes no longer shape (`--go`): 63 shapings for `net_fetch` instead of 152. Faster needs more bytes
+per word (HISTORY open leads).
