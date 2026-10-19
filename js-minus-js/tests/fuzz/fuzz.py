@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(os.pat
 sys.path[:0] = [HERE] + [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback')]
 import cc_ref as R, progen
 from ccpage5 import padded_source
+sys.path.insert(0, os.path.join(ROOT, 'tests')); from par import pmap
 LIB = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 LIMIT_ERRS = {20, 21, 22, 23, 24, 25, 26, 61, 62, 68}          # the compiler's documented limits
 OUT = os.path.join(ROOT, 'build', 'fuzz')
@@ -95,10 +96,16 @@ def check(name, src, nres, opts, res, expect_reject=False, mutated=False):
     res.c['ok'] += 1
     return None
 
+def check_all(opts, res, jobs):
+    """check() on each job (name, src, nres, kwargs) in worker processes (tests/par.py), adding their counts to res;
+    yields each job's failure description or None, in order"""
+    def one(j): r = Res(); return check(j[0], j[1], j[2], opts, r, **j[3]), r.c
+    for why, c in pmap(one, jobs): res.c.update(c); yield why
+
 dsl_check = None
 def load_l2():
     global dsl_check
-    os.environ['SPEC'] = '1'; sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    os.environ['SPEC'] = '1'
     import cmp_dsl; dsl_check = cmp_dsl.check
 
 def l4(src):
@@ -143,8 +150,8 @@ def mode_gen(opts, res):
         o, n = progen.generate(seed, opts.size * random.Random(seed).uniform(0.3, 1.2))     # small ones fit the page (padded text, L4)
         progs.append((seed, '\n'.join(o) + '\n', '\n'.join(n) + '\n'))
     nres = node([(n, progen.PRELUDE) for _, _, n in progs])
-    for (seed, o, n), nr in zip(progs, nres):
-        why = check(f'gen{seed}', o, nr, opts, res)
+    whys = check_all(opts, res, [(f'gen{seed}', o, nr, {}) for (seed, o, _), nr in zip(progs, nres)])
+    for (seed, o, n), why in zip(progs, whys):
         if why:
             def fails_with(ol, nl):
                 r2 = node([('\n'.join(nl) + '\n', progen.PRELUDE)])[0]
@@ -181,8 +188,8 @@ def suite_programs():
 def mode_fmt(opts, res):
     items = [(f'{name}.{v}', s) for name, src in suite_programs() for v, s in variants(src).items()]
     nres = node([(s, '') for _, s in items])
-    for (name, s), nr in zip(items, nres):
-        why = check(name, s, nr, opts, res, mutated=name.endswith('.tokenlines'))
+    whys = check_all(opts, res, [(name, s, nr, dict(mutated=name.endswith('.tokenlines'))) for (name, s), nr in zip(items, nres)])
+    for (name, s), why in zip(items, whys):
         if why:
             def fails_with(ol, nl):
                 t = '\n'.join(ol) + '\n'; r2 = node([(t, '')])[0]
@@ -210,8 +217,8 @@ def mode_mut(opts, res):
             else: ts[i] = r.choice(INS)
         items.append((f'mut{opts.seed}_{k}_{name}', ''.join(ts)))
     nres = node([(s, '') for _, s in items])
-    for (name, s), nr in zip(items, nres):
-        why = check(name, s, nr, opts, res, mutated=True)
+    whys = check_all(opts, res, [(name, s, nr, dict(mutated=True)) for (name, s), nr in zip(items, nres)])
+    for (name, s), why in zip(items, whys):
         if why and kind(why).startswith('L1 output differs') and not opts.strict:
             # a mutant can leave the language in ways no filter sees (a string compared with a number, + on a string in
             # a parameter): saved and listed for a look, not a failure (--strict makes it one)

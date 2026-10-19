@@ -85,9 +85,10 @@ All halted with correct output. *(derived)* FizzBuzz:
 
 ### 4a. L3 suite
 
-`make l3`: one page; each program is written into the latch cells, Run pressed, Run → done anchor timed, every word
-checked against `cc_ref`. 104/104 pass (90 valid, 14 error programs). Valid: min 229 / median 380 / max 1,488 ms
-(`else_if_long`, 137 words); ms ≈ 189 + 7.6 × words (r = 0.90) *(derived)*. FizzBuzz 580 ms. Errors: 187–522 ms.
+`make l3 SHARDS=1` (one browser; `make l3` runs 6 at once): one page; each program is written into the latch cells,
+Run pressed, Run → done anchor timed, every word checked against `cc_ref`. 104/104 pass (90 valid, 14 error
+programs). Valid: min 229 / median 380 / max 1,488 ms (`else_if_long`, 137 words); ms ≈ 189 + 7.6 × words (r = 0.90)
+*(derived)*. FizzBuzz 580 ms. Errors: 187–522 ms.
 
 ### 4b. (removed)
 
@@ -142,7 +143,8 @@ An array literal's length word costs 16 steps once, when the ROM's startup copie
 
 ### 5b. The L5 suite
 
-`make l5`: acts as a user (Edit, retype, Run, poll every 100 ms). 101 of 101 ok (87 run to HALT, 14 errors); 11.4 min.
+`make l5 SHARDS=1` (one browser): acts as a user (Edit, retype, Run, poll every 100 ms). 101 of 101 ok (87 run to
+HALT, 14 errors); 11.4 min.
 
 - Compile, valid programs: 1,708 / 2,199 / 5,847 ms (min / median / max); ≈ 1,562 + 26.0 × words (r = 0.90).
 - Error detection: 1,662–2,502 ms, median 1,720.

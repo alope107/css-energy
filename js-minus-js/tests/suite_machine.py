@@ -9,16 +9,21 @@ from uarch4 import Machine4
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 d = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, 'suite')
 N, S = 16, 32
-ok = 0; tot = 0
-for f in sorted(glob.glob(d + '/*.js')):
-    name = os.path.basename(f)[:-3]; want = open(f[:-3] + '.out').read(); tot += 1
+def one(f):
+    """-> (passed, lines to print)"""
+    name = os.path.basename(f)[:-3]; want = open(f[:-3] + '.out').read()
     try: image = R.image(C.padded_source(open(f).read().rstrip('\n'), 24, 64), lib, ram=True)
-    except ValueError as e: print(f'{name:22} COMPILE-ERR {e}'); continue
+    except ValueError as e: return False, [f'{name:22} COMPILE-ERR {e}']
     m = Machine4(image, N)
     try: m.run(S)
-    except Exception as e: print(f'{name:22} CRASH {e}'); continue
+    except Exception as e: return False, [f'{name:22} CRASH {e}']
     got = ''.join(map(chr, m.out))
-    if got == want: ok += 1
-    else: print(f'{name:22} WRONG {got[:60]!r} want {want[:60]!r}')
-    if os.environ.get('V'): print(f'{name:22} steps {m.steps} shapings {m.shapings}')
-print(f'{ok}/{tot} pass')
+    out = [] if got == want else [f'{name:22} WRONG {got[:60]!r} want {want[:60]!r}']
+    if os.environ.get('V'): out.append(f'{name:22} steps {m.steps} shapings {m.shapings}')
+    return got == want, out
+from par import pmap                    # one program per worker process
+fs = sorted(glob.glob(d + '/*.js')); ok = 0
+for passed, out in pmap(one, fs):
+    ok += passed
+    for ln in out: print(ln)
+print(f'{ok}/{len(fs)} pass')
