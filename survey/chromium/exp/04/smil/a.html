@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@property --w { syntax: "<number>"; inherits: true; initial-value: -1; }
+@property --s { syntax: "<number>"; inherits: true; initial-value: -1; }
+@property --c { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --h { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --e { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --k { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --f { syntax: "<number>"; inherits: true; initial-value: -1; }
+body { margin: 0; }
+/* (a1) foreignObject width read by an HTML size container inside it */
+#cq { container-type: inline-size; width: 100%; height: 10px; }
+#cqread { --w: calc(100cqw / 1px); }
+/* (a2) outer <svg> width read via anchor-size() into a size container */
+#s2 { anchor-name: --s2; display: block; }
+#s2probe { position: absolute; position-anchor: --s2; left: anchor(left); top: anchor(bottom);
+  width: anchor-size(width); height: 5px; container-type: inline-size; }
+#s2read { --s: calc(100cqw / 1px); }
+/* (b) class set on an SVG element, read anywhere via :has() */
+html:has(#flag.on) #out { --c: 1; }
+#flag.on { fill: red; }
+/* (d) html button begin */
+html:has(#flagh.on) #out { --h: 1; }
+/* escaped hyphen id */
+html:has(#flage.on) #out { --e: 1; }
+/* animationend from CSS animation as SMIL begin */
+html:has(#flagk.on) #out { --k: 1; }
+#anim { animation: blip 300ms 1 linear; width: 10px; height: 10px; }
+@keyframes blip { to { opacity: 0.5; } }
+/* font-size on a <g> inherited into foreignObject HTML (em-based width) */
+#fcq { container-type: inline-size; width: 1em; height: 5px; }
+#fread { --f: calc(100cqw / 1px); }
+</style></head>
+<body>
+<svg id="s1" width="400" height="120" style="display:block">
+  <rect id="r" x="0" y="0" width="50" height="50" fill="blue"/>
+  <rect id="r2" x="60" y="0" width="50" height="50" fill="green"/>
+  <foreignObject id="fo" x="0" y="60" width="100" height="20">
+    <div xmlns="http://www.w3.org/1999/xhtml" id="cq"><div id="cqread">x</div></div>
+  </foreignObject>
+  <g id="flag" class="off"></g>
+  <g id="flagh" class="off"></g>
+  <g id="flage" class="off"></g>
+  <g id="flagk" class="off"></g>
+  <g id="fg" font-size="10">
+    <foreignObject x="200" y="0" width="150" height="20">
+      <div xmlns="http://www.w3.org/1999/xhtml" id="fcq"><div id="fread">y</div></div>
+    </foreignObject>
+  </g>
+  <set id="setfo" href="#fo" attributeName="width" to="300" begin="r.click" fill="freeze"/>
+  <set id="setflag" href="#flag" attributeName="class" to="on" begin="r.click" fill="freeze"/>
+  <set href="#flagh" attributeName="class" to="on" begin="hb.click" fill="freeze"/>
+  <set href="#flage" attributeName="class" to="on" begin="my\-btn.click" fill="freeze"/>
+  <set href="#flagk" attributeName="class" to="on" begin="anim.animationend" fill="freeze"/>
+  <set href="#fg" attributeName="font-size" to="77" begin="r2.click" fill="freeze"/>
+</svg>
+<svg id="s2" width="100" height="20"><set attributeName="width" to="250" begin="r.click" fill="freeze"/><rect width="100%" height="100%" fill="#ccc"/></svg>
+<div id="s2probe"><div id="s2read"></div></div>
+<button id="hb" style="position:absolute; left:10px; top:200px; width:80px; height:30px">hb</button>
+<button id="my-btn" style="position:absolute; left:110px; top:200px; width:80px; height:30px">my-btn</button>
+<div id="anim"></div>
+<div id="out"></div>
+</body></html>

@@ -1,0 +1,8 @@
+<!doctype html>
+<style>
+@keyframes k { to { opacity: 0 } }
+#s { timeline-trigger: --t view(); height: 10px; }
+#a { animation: k 1s both; animation-trigger: --t play-alternate; }
+</style>
+<div id=s></div><div id=a></div>
+<script>window.log = ['parsed: ' + getComputedStyle(document.getElementById('a')).animationTrigger]; requestAnimationFrame(() => requestAnimationFrame(() => { log.push('alive after 2 frames'); window.done = true; }));</script>

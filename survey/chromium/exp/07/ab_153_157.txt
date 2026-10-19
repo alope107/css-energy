@@ -1,0 +1,10 @@
+153 shapings 94 reps 3  ms/shaping min 31.581 med 32.064  checksum 2f47b82e4a249f0d
+157 shapings 94 reps 3  ms/shaping min 33.910 med 34.294  checksum 2f47b82e4a249f0d
+153 shapings 94 reps 3  ms/shaping min 33.125 med 33.460  checksum 2f47b82e4a249f0d
+157 shapings 94 reps 3  ms/shaping min 37.067 med 41.004  checksum 2f47b82e4a249f0d
+153 shapings 94 reps 3  ms/shaping min 33.239 med 33.923  checksum 2f47b82e4a249f0d
+157 shapings 94 reps 3  ms/shaping min 37.010 med 37.690  checksum 2f47b82e4a249f0d
+153 shapings 94 reps 3  ms/shaping min 34.021 med 34.039  checksum 2f47b82e4a249f0d
+157 shapings 94 reps 3  ms/shaping min 34.846 med 35.630  checksum 2f47b82e4a249f0d
+153 shapings 94 reps 3  ms/shaping min 31.900 med 33.072  checksum 2f47b82e4a249f0d
+157 shapings 94 reps 3  ms/shaping min 34.300 med 34.624  checksum 2f47b82e4a249f0d

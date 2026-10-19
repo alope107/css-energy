@@ -1,0 +1,7 @@
+<!doctype html><style>@property --acc{syntax:'<integer>';inherits:true;initial-value:0}
+@property --nacc{syntax:'<integer>';inherits:false;initial-value:0}
+@property --op{syntax:'<number>';inherits:false;initial-value:-99}
+div{--acc:calc(inherit(--acc) + 1);--nacc:calc(inherit(--nacc, 100) + 10)}
+#x{--pc:3;--m3:13;--op:var(ident("--m" var(--pc)))}
+#y{--k:2;--q2:22;--op:var(ident("--q" var(--k)), -1)}
+</style><div><div><div><div id=d4 data-read="--acc --nacc"></div></div></div></div><i id=x data-read="--op"></i><i id=y data-read="--op"></i>

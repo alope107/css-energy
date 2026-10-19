@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head>
+<body>
+<svg width="200" height="100">
+  <!-- 16ms two-phase oscillator (syncbase cycle a.end -> b, b.end -> a) -->
+  <rect id="t16" x="0" y="0" width="10" height="10"/>
+  <set id="a16" href="#t16" attributeName="x" to="1" begin="0s;b16.end" dur="16ms"/>
+  <set id="b16" href="#t16" attributeName="x" to="2" begin="a16.end" dur="16ms"/>
+  <!-- 1ms oscillator: sub-frame periods -->
+  <rect id="t1" x="0" y="20" width="10" height="10"/>
+  <set id="a1" href="#t1" attributeName="x" to="1" begin="0s;b1.end" dur="1ms"/>
+  <set id="b1" href="#t1" attributeName="x" to="2" begin="a1.end" dur="1ms"/>
+  <!-- counter: accumulate=sum, discrete, 10ms per step -->
+  <rect id="tc" x="0" y="40" width="10" height="10"/>
+  <animate id="cnt" href="#tc" attributeName="x" from="0" to="1" dur="10ms" calcMode="discrete"
+           accumulate="sum" repeatCount="indefinite" values="1;1"/>
+</svg>
+</body></html>

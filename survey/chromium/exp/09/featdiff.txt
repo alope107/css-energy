@@ -1,0 +1,39 @@
+kAutoResizeMinimumPageScaleFactor                            —      | on     | on     | —     
+kAdHighlightLabel                                            —      | —      | —      | off   
+kAndroidDesktopUACPUArch                                     —      | off    | off    | off   
+kAndroidHandlePdfInIframe                                    —      | off    | off    | off   
+kBackForwardCacheCCNSAllowlist                               —      | off    | off    | off   
+kCanvas2DAutoFlushParams                                     —      | —      | off    | off   
+kClipboardOnExtensionServiceWorker                           —      | —      | on     | on    
+kEnforcePdfBlobRestrictions                                  —      | —      | on     | on    
+kFetchErrorCategoryLogging                                   —      | —      | —      | on    
+kFlushGpuChannelOnLayerTreeViewRelease                       —      | —      | on     | on    
+kFontAccessCheckFrameIsActive                                —      | on     | on     | on    
+kHeapVectorPromptlyFree                                      —      | —      | on     | on    
+kIsolatedWorldEventSourceAndBeaconsSkipServiceWorker         —      | —      | on     | on    
+kOffscreenCanvasSyncAnimationState                           —      | —      | —      | on    
+kPaintTimingIngnoreOutOfLifecyclePaints                      —      | on     | on     | on    
+kRegionCaptureOfClonedTracks                                 —      | —      | on     | on    
+kRequiresLoadIgnoreLimitsForDomWindowsOnly                   —      | —      | off    | off   
+kServiceWorkerDatabaseDoomOnMissingNextId                    —      | off    | off    | off   
+kWebRtcMacSharedImageEncode                                  —      | —      | off    | off   
+kWebRtcSuppressDtlsStateChangeOnClose                        —      | on     | on     | on    
+kCSSFontComparisonFix                                        on     | —      | —      | —     
+kDetectZhVariants                                            on     | —      | —      | —     
+kDevToolsWebMCPSupport                                       on     | —      | —      | —     
+kDirectCompositorThreadIpc                                   cond:BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS on off | —      | —      | —     
+kForceSkExifCppParsing                                       off    | off    | —      | —     
+kForceSkcmsICCParsing                                        off    | off    | —      | —     
+kFrequencyCappingForLargeStickyAdDetection                   on     | on     | —      | —     
+kPopulateDOMNodeIdInFocusedNodeDetails                       on     | on     | —      | —     
+kPreloadingHeuristicsMLModel                                 off    | off    | —      | —     
+kRenderBlockingFonts                                         on     | on     | —      | —     
+kRustyBmpFeature                                             on     | —      | —      | —     
+kSpeculationRulesRendererSideHeuristics                      on     | on     | —      | —     
+kWebAppMigrationApi                                          on     | —      | —      | —     
+kDecodeScriptsInBlink                                        off    | off    | on     | on    
+kJXLImageFormat                                              off    | on     | on     | on    
+kPreloadingEagerViewportHeuristics                           cond:BUILDFLAG(IS_ANDROID) on off | cond:BUILDFLAG(IS_ANDROID) on off | on     | on    
+kPreloadingModerateViewportHeuristics                        cond:BUILDFLAG(IS_ANDROID) on off | cond:BUILDFLAG(IS_ANDROID) on off | on     | on    
+kRestrictLinkHeaderOnSubresource                             off    | off    | on     | on    
+kWebRtcUseMediaThreadTypes                                   off    | off    | on     | on    

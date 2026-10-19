@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@view-transition { navigation: auto; }
+@property --t { syntax: "<number>"; inherits: false; initial-value: 0; }
+::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 100ms; }
+::view-transition-old(flag) { animation-duration: 600ms; }
+::view-transition-old(*.long) { animation-duration: 1200ms; }
+#meter { animation: meter 10s linear forwards paused; }
+:root:active-view-transition #meter { animation-play-state: running; }
+@keyframes meter { to { --t: 10000; } }
+</style></head><body>
+<div id="meter">meter</div>
+</body></html>

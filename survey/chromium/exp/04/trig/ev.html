@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset=utf-8>
+<style>
+@property --n { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes inc { from { --n: 0 } to { --n: 1 } }
+#b { width: 100px; height: 30px; }
+#k1 { animation: inc 1ms linear both; }
+#k2 { animation: inc 1ms linear both; animation-composition: accumulate; }
+#k3 { animation: inc 1000ms steps(10, jump-end) both; }
+</style>
+<button id=b>b</button><div id=k1></div><div id=k2></div><div id=k3></div>
+<script>
+window.log = [];
+const $ = id => document.getElementById(id);
+const v = () => ['k1','k2','k3'].map(id => getComputedStyle($(id)).getPropertyValue('--n') + ':' + $(id).getAnimations()[0].playState).join(' ');
+window.setup = () => {
+  const hasCtor = typeof EventTrigger === 'function';
+  log.push('EventTrigger ctor: ' + hasCtor);
+  if (!hasCtor) return;
+  const t1 = new EventTrigger({ eventType: 'click', eventTarget: $('b') });
+  const a1 = $('k1').getAnimations()[0]; a1.pause(); a1.currentTime = 0;
+  t1.addAnimation(a1, 'replay');
+  const t3 = new EventTrigger({ eventType: 'click', eventTarget: $('b') });
+  const a3 = $('k3').getAnimations()[0]; a3.pause(); a3.currentTime = 0;
+  try { t3.addAnimation(a3, 'play'); } catch (e) { log.push('t3: ' + e.message); }
+  // second trigger on same animation -> expected NotSupportedError
+  try { new EventTrigger({ eventType: 'keydown', eventTarget: document.body }).addAnimation(a1, 'play'); } catch (e) { log.push('2nd trigger: ' + e.name); }
+  b.addEventListener('click', () => log.push('JS listener sees: ' + v()));
+  log.push('setup: ' + v());
+};
+window.snap = (tag) => log.push(tag + ': ' + v());
+</script>

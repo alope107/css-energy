@@ -1,0 +1,1269 @@
+
+  Animation Triggers
+   Animation Triggers
+   Editor’s Draft,
+    16 October 2026
+    More details about this document
+      This version:
+      https://drafts.csswg.org/animation-triggers-1/
+      Latest published version:
+      https://www.w3.org/TR/animation-triggers-1/
+      Feedback:
+      CSSWG Issues Repository
+      Inline In Spec
+      Editors:
+      Robert Flack (Google)
+      David Awogbemila (Google)
+      Yehonatan Daniv (Wix.com)
+      Suggest an Edit for this Spec:
+      GitHub Editor
+      Test Suite:
+      https://wpt.fyi/results/web-animations/
+   Copyright © 2026 World Wide Web Consortium. W3C® liability, trademark and permissive document license rules apply.
+   Abstract
+   Defines CSS properties and an API for creating mechanisms that affect animation
+playback, based on DOM events resulting from user interaction, or on entry/exit
+of ranges on animation timelines.
+CSS is a language for describing the rendering of structured documents
+(such as HTML and XML)
+on screen, on paper, etc.
+  Status of this document
+	This is a public copy of the editors’ draft.
+	It is provided for discussion only and may change at any moment.
+	Its publication here does not imply endorsement of its contents by W3C.
+	Don’t cite this document other than as work in progress.
+   Please send feedback
+	by filing issues in GitHub (preferred),
+	including the spec code “animation-triggers” in the title, like this:
+	“[animation-triggers] …summary of comment…”.
+	All issues and comments are archived.
+	Alternately, feedback can be sent to the (archived) public mailing list
+	www-style@w3.org.
+   This document is governed by the
+	18 August 2025 W3C Process Document.
+   Table of Contents
+     1 Introduction
+      1.1 Relationship to other specifications
+      1.2 Value Definitions
+     2 Triggers
+      2.1 Trigger Actions
+      2.2 Trigger Internal State
+      2.3 Trigger Name Scoping: the trigger-scope property
+     3 Timeline Triggers
+      3.1 Timeline Trigger Ranges
+      3.2 Naming the Trigger: the timeline-trigger-name property
+      3.3 Linking a Timeline: the timeline-trigger-source property
+      3.4 The Activation Range: the timeline-trigger-activation-range property
+      3.5 The Active Range: the timeline-trigger-active-range property
+      3.6 The timeline-trigger-range Shorthand
+      3.7 The timeline-trigger Shorthand
+     4 Event Triggers
+      4.1 Naming the Trigger: the event-trigger-name property
+       4.2 Linking an Event: the event-trigger-source property
+        4.2.1 Event Functions
+      4.3 The event-trigger Shorthand
+     5 Triggered Animations
+      5.1 The animation-trigger property
+     6 Programming interface
+      6.1 The AnimationTrigger interface<
+      6.2 The AnimationTriggerOptions dictionary
+    7 Privacy Considerations
+    8 Security Considerations
+Conformance
+Document conventions
+Conformance classes
+Partial implementations
+Implementations of Unstable and Proprietary Features
+Non-experimental implementations
+      Index
+       Terms defined by this specification
+       Terms defined by reference
+      References
+       Normative References
+     Property Index
+     IDL Index
+     Issues Index
+   1. Introduction
+   This specification defines mechanisms for
+	affecting an animation’s playback
+	based on various user interactions invoking a specified trigger.
+	By specifying a trigger for an animation, that animation
+	becomes a triggered animation, making its
+	playback start delayed until that trigger occurs.
+	These triggers can be attached to certain Events defined in [DOM],
+	or be timeline based, such as view progress timelines. [SCROLL-ANIMATIONS-1]
+   This module provides both an imperative API building on the
+	Web Animations API as well as a declarative API building
+	on CSS Animations. [CSS-ANIMATIONS-2] [WEB-ANIMATIONS-1]
+   1.1. Relationship to other specifications
+   Web Animations [WEB-ANIMATIONS-1] defines
+	an abstract conceptual model for animations on the Web platform,
+	with elements of the model including animations and timelines,
+	and associated programming interfaces.
+	This specification extends the Web Animations model
+	by defining triggered animation
+	and allowing to perform playback rate functions
+	on them using triggers.
+   This specification introduces both
+	programming interfaces for interacting with these concepts,
+	as well as CSS properties that apply these concepts
+	to CSS Animations [CSS-ANIMATIONS-2].
+	To the extent the behavior of these CSS properties is described
+	in terms of the programming interfaces,
+	User Agents that do not support scripting
+	may still conform to this specification
+	by implementing the CSS features to behave
+	as if the underlying programming interfaces were in place.
+   This specification uses the timeline and ranges concept introduced
+	in the Scroll-Driven Animations module [SCROLL-ANIMATIONS-1] for
+	specifying progress-based timelines and animations.
+   Like most operations in CSS besides selector matching,
+	features in this specification operate over
+	the flattened element tree.
+   1.2. Value Definitions
+   This specification follows the
+	CSS property definition conventions
+	from [CSS2]
+	using the value definition syntax
+	from [CSS-VALUES-3].
+	Value types not defined in this specification
+	are defined in CSS Values & Units [CSS-VALUES-3].
+	Combination with other CSS modules may expand the definitions of these value types.
+   In addition to the property-specific values listed in their definitions,
+	all properties defined in this specification
+	also accept the CSS-wide keywords as their property value.
+	For readability they have not been repeated explicitly.
+   2. Triggers
+   Triggers allow connecting a user-interaction
+	on one element, to applying a specified action on another (or same) element.
+   Currently, two types of triggers are defined:
+     timeline triggers, managed by the timeline-trigger properties,
+which allow actions to be triggered by entering or leaving certain timeline ranges.
+(Usually, view progress timelines,
+so, for example, an animation can be started when an element comes on-screen.)
+     event triggers, managed by the event-trigger properties,
+which allow actions to be triggered by certain user-interaction events,
+such as clicking an element or pressing certain keys.
+   A trigger is defined on some specific triggering element.
+	All triggers have a trigger name,
+	and the specific type of trigger dictates how and when it’s activated.
+   Once a trigger is defined, a trigger instance, of that
+	specific type, is created in the scope managed by the trigger-scope property.
+	For each specified triggering element, a trigger attachment
+	is created on the instance with a matching name
+	and trigger-scope.
+   The specific "type" of the trigger attachment dictates the "grouping" of associated
+	instances. Meaning, event trigger attachments,
+	with same name and scope, will group into a single
+	instance, and correspondingly, timeline triggers, will be
+	grouped separately.
+	However, a defined trigger name inside the same scope, of a different type,
+	will override a previously defined trigger name.
+   A trigger is used on potentially any element,
+	creating an association with a trigger instance
+	of the same name on that element.
+	(For example, animation-trigger associates a trigger instance
+	with a specific animation on the element.)
+	The trigger-using element specifies what actions to take
+	when its associated trigger activates or deactivates.
+   Note: This design for triggers and trigger instances,
+	and the way they’re associated with triggered animations and <animation-action>s,
+	is intentionally somewhat generic,
+	intended to support using triggers for other purposes in the future.
+	For now, though, triggered animations are the only user of this feature.
+   2.1. Trigger Actions
+   A trigger can have one or two actions associated with it
+	when used as a trigger on an element
+	(such as by animation-trigger).
+	If two are specified, the first is the trigger’s entry action,
+	which is the action the trigger applies when it is activated.
+	The second is the trigger’s exit action,
+	which is the action the trigger applies when it is deactivated.
+   2.2. Trigger Internal State
+   A trigger instance trigger has an internal boolean did trigger flag,
+	which is initially false, and an internal state
+	with these possible values:
+    pending
+			The initial state of trigger while its did trigger flag is set to false.
+    active
+			When switched to this value the trigger applies its specified entry action.
+    inactive
+			When switched to this value the trigger applies its specified exit action.
+   2.3. Trigger Name Scoping: the trigger-scope property
+   Trigger names are global by default,
+	usable by other elements regardless of their position.
+	(Though they are tree-scoped names,
+	so have interactions with shadow roots).
+	If multiple elements declare triggers with the same trigger name
+	they are combined together as separate attachments
+	for the same trigger instance with the same trigger name and type.
+   The trigger-scope property can limit the scope of a name
+	to a subtree of the document,
+	so elements outside won’t see the chosen trigger name,
+	and elements inside will only see the version of the trigger name
+	defined inside the scope.
+      Name:
+      trigger-scope
+      Value:
+      none | all | <dashed-ident>#
+      Initial:
+      none
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      n/a
+      Computed value:
+      as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   This property scopes trigger names to the subtree of the matching element.
+	Its values are:
+    none
+			No changes in trigger name scope.
+    all
+			Specifies that all trigger names defined by this element or its descendants—​whose scope is not already limited by a descendant using trigger-scope—​to be in scope only for this element’s flat tree descendants;
+			and limits descendants to only match trigger names
+			to triggers within this subtree.
+     This value only affects trigger names in the same tree scope,
+			as if it were a strictly matched tree-scoped name.
+			(That is, trigger-scope: all acts identically
+			to trigger-scope: --foo, --bar, ...,
+			listing all relevant trigger names.)
+    <dashed-ident>
+			Specifies that a matching trigger name defined by this element or its descendants—​whose scope is not already limited by a descendant using trigger-scope—​to be in scope only for this element’s flat tree descendants;
+			and limits descendants to only match these trigger names
+			to triggers within this subtree.
+     The <dashed-ident> represents a strictly matched tree-scoped name,
+			i.e. it can only match against trigger names in the same shadow tree.[CSS-SCOPING-1]
+   3. Timeline Triggers
+   A timeline trigger is a trigger
+	which is activated when some timeline
+	enters the trigger’s activation range,
+	and deactivated when it leaves the trigger’s active range.
+	It is defined on an element with the timeline-trigger shorthand property,
+	or its longhands. When defined on an element it
+	forms an attachment to a trigger instance with
+	the specified name and scope.
+   An element can define multiple timeline triggers,
+	using the same timeline (potentially with different ranges)
+	or different ones.
+	The set of timeline-trigger longhands
+	form a coordinating list property group,
+	with timeline-trigger-name as the coordinating list base property,
+	and each item in the coordinated value list
+	defining the properties of a single timeline trigger.
+   3.1. Timeline Trigger Ranges
+   A timeline trigger attachment can have one or more associated timelines.
+	When all of the attachment’s associated
+	activation range are entered it
+	activates its associated trigger instance,
+	setting its state to active.
+	When one of the attachment’s associated
+	active range is exited it deactivates
+	its associated trigger instance, setting its state
+	to inactive.
+	Thus, essentially, forming a logical OR of the states of all
+	the timelines associated with a trigger. For example, when an element enters
+	a cross-section of a vertical AND a horizontal scrolling area.
+   Note: By default, the active range is the same as the activation range;
+	even when manually specified,
+	the active range is always a superset of the activation range.
+	The two ranges allow, for example,
+	an animation-trigger to start an animation
+	when an element is scrolled close to the center of the screen
+	(using a view progress timeline with a relatively small window as the activation range),
+	but not to stop it until the element is fully off-screen
+	(using cover as the active range).
+   3.2. Naming the Trigger: the timeline-trigger-name property
+      Name:
+      timeline-trigger-name
+      Value:
+      none | <dashed-ident>#
+      Initial:
+      none
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   If none is specified,
+	the element does not define any timeline triggers.
+   If the same <dashed-ident> appears multiple times in the list,
+	only the last one defines a timeline trigger;
+	the preceding ones have no effect.
+   3.3. Linking a Timeline: the timeline-trigger-source property
+      Name:
+      timeline-trigger-source
+      Value:
+      [ none | auto | [ <dashed-ident> | <scroll()> | <view()> ]+ ]#
+      Initial:
+      auto
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   The timeline-trigger-source property
+	specifies the timeline trigger’s associated timeline.
+	Values have the same meaning as those of animation-timeline.
+   Note: With none,
+	the trigger is not associated with a timeline. 
+	A timeline trigger with no timeline is not able to perform any <animation-action> 
+	as it is not able to monitor or change state.
+   3.4. The Activation Range: the timeline-trigger-activation-range property
+      Name:
+      timeline-trigger-activation-range
+      Value:
+      [ <'timeline-trigger-activation-range-start'> <'timeline-trigger-activation-range-end'>? ]#
+      Initial:
+      see individual properties
+      Applies to:
+      see individual properties
+      Inherited:
+      see individual properties
+      Percentages:
+      see individual properties
+      Computed value:
+      see individual properties
+      Animation type:
+      see individual properties
+      Canonical order:
+      per grammar
+   The timeline-trigger-activation-range property is a shorthand property
+	that sets timeline-trigger-activation-range-start and timeline-trigger-activation-range-end
+	together in a single declaration.
+	It has the same syntax as the animation-range property.
+   The behavior of timeline-trigger-activation-range is defined in § 3.1 Timeline Trigger Ranges.
+      Name:
+      timeline-trigger-activation-range-start, timeline-trigger-activation-range-end
+      Value:
+      [ normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+      Initial:
+      normal
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      relative to the specified named timeline range if one was specified, else to the entire timeline
+      Computed value:
+      list, each item either the keyword normal or a timeline range and progress percentage
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   The timeline-trigger-activation-range-start and timeline-trigger-activation-range-end properties
+	specify the timeline trigger’s associated activation range.
+	Values have the same meaning as animation-range-start and animation-range-end.
+   3.5. The Active Range: the timeline-trigger-active-range property
+      Name:
+      timeline-trigger-active-range
+      Value:
+      [ <'timeline-trigger-active-range-start'> <'timeline-trigger-active-range-end'>? ]#
+      Initial:
+      see individual properties
+      Applies to:
+      see individual properties
+      Inherited:
+      see individual properties
+      Percentages:
+      see individual properties
+      Computed value:
+      see individual properties
+      Animation type:
+      see individual properties
+      Canonical order:
+      per grammar
+   The timeline-trigger-active-range property is a shorthand property
+	that sets timeline-trigger-active-range-start and timeline-trigger-active-range-end
+	together in a single declaration.
+	It has the same syntax as the animation-range property.
+   The behavior of timeline-trigger-active-range is defined in § 3.1 Timeline Trigger Ranges.
+      Name:
+      timeline-trigger-active-range-start, timeline-trigger-active-range-end
+      Value:
+      [ auto | normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+      Initial:
+      auto
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      relative to the specified named timeline range if one was specified, else to the entire timeline
+      Computed value:
+      list, each item either the keyword normal or a timeline range and progress percentage
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   The timeline-trigger-active-range-start and timeline-trigger-active-range-end properties
+	specify the timeline trigger’s associated active range.
+	Values have the same meaning as animation-range-start and animation-range-end,
+	with the following addition:
+    auto
+     The start (for timeline-trigger-active-range-start)
+or end (for timeline-trigger-active-range-end)
+is equal to the start/end of the timeline trigger’s activation range.
+   3.6. The timeline-trigger-range Shorthand
+      Name:
+      timeline-trigger-range
+      Value:
+      [ <'timeline-trigger-activation-range'> [ / <'timeline-trigger-active-range'> ]? ]#
+      Initial:
+      see individual properties
+      Applies to:
+      see individual properties
+      Inherited:
+      see individual properties
+      Percentages:
+      see individual properties
+      Computed value:
+      see individual properties
+      Animation type:
+      see individual properties
+      Canonical order:
+      per grammar
+   The timeline-trigger-range property is a shorthand property
+	that sets timeline-trigger-activation-range and timeline-trigger-active-range
+	together in a single declaration.
+   3.7. The timeline-trigger Shorthand
+      Name:
+      timeline-trigger
+      Value:
+      none | [ <'timeline-trigger-name'> <'timeline-trigger-source'> [ <'timeline-trigger-range'> ]? ]#
+      Initial:
+      see individual properties
+      Applies to:
+      see individual properties
+      Inherited:
+      see individual properties
+      Percentages:
+      see individual properties
+      Computed value:
+      see individual properties
+      Animation type:
+      see individual properties
+      Canonical order:
+      per grammar
+   The timeline-trigger shorthand property
+	sets all of timeline-trigger-name,
+	timeline-trigger-source,
+	and optionally the timeline-trigger-range shorthand
+	(which, in turn, sets timeline-trigger-activation-range
+	and timeline-trigger-active-range) at once.
+   A value of none
+	is equivalent to none none normal.
+   Note: Due to significant potential ambiguities in the syntax
+	(timeline-trigger-name vs timeline names in timeline-trigger-source;
+	activation ranges vs active ranges),
+	this shorthand’s values must be given in the specified order,
+	rather than being settable in any order as is more common.
+   4. Event Triggers
+   An event trigger is a trigger
+	which is activated when certain Events are fired at the element.
+	It is defined on an element with the event-trigger shorthand property,
+	or its longhands.
+   An event trigger can be defined as either stateless or stateful:
+     If stateless, it has a single set of enter events
+that activate it.
+     If stateful, it has two sets of events, its enter events
+and another set of exit events.
+   Event triggers are activated when one of its associated Events are fired on the page
+	with the trigger-defining element as its target.
+	If it’s stateful,
+	it has a binary trigger state associated with it,
+	initially "inactive":
+	while "inactive", it only activates when the defining element receives one of its enter events,
+	performing an associated enter action
+	and switching its trigger state to "active";
+	while "active", it only deactivates when it receives one of its exit events,
+	performing an associated exit action
+	and switching its trigger state back to "inactive".
+   A stateless event trigger must be given exactly one action for its trigger instance.
+	A stateful one can be given one or two:
+	the first is its enter action,
+	and the second, if provided, is its exit action;
+	if the second is not provided,
+	the exit action is to do nothing.
+   Note: A stateful and stateless event trigger act differently
+	even if you only assign a single action;
+	a single-action stateful event trigger will effectively "turn off"
+	until it receives one of its exit events,
+	ignoring any of the enter events after the first,
+	while a stateless one will repeatedly trigger for every enter event.
+   An element can define multiple event triggers,
+	using the same Events or different ones.
+	The set of event-trigger longhands
+	form a coordinating list property group,
+	with event-trigger-name as the coordinating list base property,
+	and each item in the coordinated value list
+	defining the properties of a single event trigger.
+    The proposal I drew this text from
+	specified that it only cares if the element is the target of the event.
+	We probably want to allow for bubbling and/or capturing,
+	possibly as an opt in/out.
+   4.1. Naming the Trigger: the event-trigger-name property
+      Name:
+      event-trigger-name
+      Value:
+      none | <dashed-ident>#
+      Initial:
+      none
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   If none is specified,
+	the element does not define any event triggers.
+   If the same <dashed-ident> appears multiple times in the list,
+	only the last one defines an event trigger;
+	the preceding ones have no effect.
+   4.2. Linking an Event: the event-trigger-source property
+      Name:
+      event-trigger-source
+      Value:
+      [ none | <event-function>+ [ / <event-function>+ ]? ]#
+      Initial:
+      none
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   The event-trigger-source property
+	specifies what event or events activate the event trigger.
+	Its values are:
+    none
+     The corresponding entry in the coordinated value list does not define a trigger.
+    <event-function>+ [ / <event-function>+ ]?
+     Defines what event(s) the event trigger responds to.
+     If a / is used in the value,
+the event trigger is stateful;
+the set of events before the / are the event trigger’s enter events,
+while those after the / are the exit events.
+(The same events can occur in both sets.)
+     Otherwise,
+the event trigger is stateless,
+and the provided events are its enter events.
+   4.2.1. Event Functions
+<event-function> = <click()> | <dblclick()> | <pointerenter()> | <pointerleave()> | <pointerup()>
+  | <pointerdown()> | <keypress()> | <focusin()> | <focusout()> | <input()> | <change()>
+click() = click()
+dblclick() = dblclick()
+pointerenter() = pointerenter()
+pointerleave() = pointerleave()
+pointerup() = pointerup()
+pointerdown() = pointerdown()
+focusin() = focusin()
+focusout() = focusout()
+input() = input()
+change() = change()
+   Each of click(), dblclick(), pointerenter(), pointerleave(),
+	pointerup(), pointerdown(), focusin(), focusout(),
+	input(), and change() activates or deactivates the trigger
+	when the element receives the corresponding Event type.
+" data-dfn-type="function" data-export id="funcdef-event-function-keypress">keypress() = keypress( <string>? )
+			Activates or deactivates the trigger on a keypress KeyboardEvent.
+			The optional <string> argument
+			specifies which KeyboardEvent.key
+			values the trigger responds to,
+			as a space-separated list.
+			If the value is a single space (" "),
+			it is interpreted as the "Space" key.
+			If the value is an empty string (""),
+			it is interpreted as missing.
+   4.3. The event-trigger Shorthand
+      Name:
+      event-trigger
+      Value:
+      none | [ <'event-trigger-name'> <'event-trigger-source'> ]#
+      Initial:
+      none
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      as specified
+      Animation type:
+      not animatable
+      Canonical order:
+      per grammar
+   The event-trigger shorthand property
+	sets both event-trigger-name and event-trigger-source at once.
+   A value of none
+	is equivalent to none none.
+   5. Triggered Animations
+   While CSS animations are, by default,
+	automatically run as soon as the appropriate animation values have been set on an element,
+	the animation-trigger property allows the animation’s start to be delayed
+	until an appropriate trigger occurs,
+	and even paused, restarted, or reset by triggers
+	(making it a triggered animation).
+   5.1. The animation-trigger property
+      Name:
+      animation-trigger
+      Value:
+      [ none | [ <dashed-ident> <animation-action>+ ]+ ]#
+      Initial:
+      none
+      Applies to:
+      all elements
+      Inherited:
+      no
+      Percentages:
+      N/A
+      Computed value:
+      as specified
+      Canonical order:
+      per grammar
+      Animation type:
+      not animatable
+   The animation-trigger property
+	specifies whether the animation is a triggered animation,
+	and if it is,
+	what trigger it responds to
+	and what actions it takes in response.
+	animation-trigger is a reset-only sub-property of the animation shorthand.
+	Its values are:
+    none
+     The corresponding animation is not a triggered animation.
+    [ <dashed-ident> <animation-action>+ ]+
+     The corresponding animation is a triggered animation,
+responding to the triggers named by each <dashed-ident>,
+and responding by taking the action named by the corresponding <animation-action>.
+(See § 2.3 Trigger Name Scoping: the trigger-scope property for how <dashed-ident>s are resolved to triggers.)
+     How many <animation-action>s a trigger accepts,
+and what exactly activates them,
+is determined by the type of the trigger.
+(Event triggers take one and possibly an optional second, depending on whether they’re stateless or stateful;
+timeline triggers take one and optionally a second.)
+Specifying the wrong number of actions
+(too many or too few)
+is valid syntactically,
+but causes the trigger to have no effect.
+     If multiple triggers occur simultaneously,
+they take effect in the order specified.
+     If the same <dashed-ident> is specified multiple times,
+all but the last have no effect.
+   The possible <animation-action> values,
+	and what effect they have in each animation state:
+			If there is an "effect",
+			it happens regardless of the current state,
+			before the state-specific action
+      Keyword
+      Extra Effect
+      initial
+      playing
+      paused
+      finished
+      " data-dfn-type="value" data-export id="valdef-animation-action-none">none
+      —
+      —
+      —
+      —
+      —​
+      " data-dfn-type="value" data-export id="valdef-animation-action-play">play
+      —
+      play()
+      —
+      play()
+      play()
+      " data-dfn-type="value" data-export id="valdef-animation-action-play-once">play-once
+      —
+      play()
+      —
+      play()
+      —​
+      " data-dfn-type="value" data-export id="valdef-animation-action-play-forwards">play-forwards
+      set playback rate to positive
+      play()
+      —
+      play()
+      play()
+      " data-dfn-type="value" data-export id="valdef-animation-action-play-backwards">play-backwards
+      set playback rate to negative
+      play()
+      —
+      play()
+      play()
+      " data-dfn-type="value" data-export id="valdef-animation-action-pause">pause
+      —
+      —
+      pause()
+      —
+      —​
+      " data-dfn-type="value" data-export id="valdef-animation-action-reset">reset
+      set progress to 0
+      —
+      pause()
+      pause()
+      pause()
+      " data-dfn-type="value" data-export id="valdef-animation-action-replay">replay
+      set progress to 0
+      play()
+      —
+      play()
+      play()
+   6. Programming interface
+   6.1. The AnimationTrigger interface<
+[Exposed=Window]
+interface AnimationTrigger {
+  constructor(optional AnimationTriggerOptions options = {});
+  attribute AnimationTimeline timeline;
+  attribute AnimationTriggerBehavior behavior;
+  attribute any activationRangeStart;
+  attribute any activationRangeEnd;
+  attribute any activeRangeStart;
+  attribute any activeRangeEnd;
+};
+    Tests
+     constructor.html (live test) (source)
+     AnimationTrigger(options)
+      Creates a new AnimationTrigger object using the following procedure:
+        Create a new AnimationTrigger object, trigger.
+        Set trigger.did trigger to false.
+        Set trigger.state to pending.
+        Set activation range of trigger using options.activationRangeStart and options.activationRangeEnd,
+following the same rules as the KeyframeAnimationOptions
+rangeStart and rangeEnd members respectively.
+        Set active range of trigger using options.activeRangeStart and options.activeRangeEnd,
+following the same rules above for activation range, unless they are set to
+"auto", in which case they are set to their corresponding side
+of the activation range.
+        Set trigger.timeline to options.timeline.
+        options
+         Configuration parameters for the newly-created trigger.
+     timeline,  of type AnimationTimeline
+      Returns the timeline for this trigger
+or null if this timeline is inactive.
+     activationRangeStart,  of type any
+      Returns the activation range’s start of this trigger.
+     activationRangeEnd,  of type any
+      Returns the activation range’s end of this trigger.
+     activeRangeStart,  of type any
+      Returns the active range’s start of this trigger.
+     activeRangeEnd,  of type any
+      Returns the active range’s end of this trigger.
+   6.2. The AnimationTriggerOptions dictionary
+dictionary AnimationTriggerOptions {
+  AnimationTimeline? timeline;
+  AnimationTriggerBehavior? behavior = "once";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activationRangeStart = "normal";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activationRangeEnd = "normal";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activeRangeStart = "auto";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activeRangeEnd = "auto";
+};
+     timeline,  of type AnimationTimeline, nullable
+      The timeline to which the trigger is associated.
+If not specified, the trigger is associated with default document timeline.
+     activationRangeStart,  of type (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString), defaulting to "normal"
+      The start of the trigger’s activation range.
+If not specified, the activation range’s start is set to "normal".
+     activationRangeEnd,  of type (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString), defaulting to "normal"
+      The end of the trigger’s activation range.
+If not specified, the activation range’s end is set to "normal".
+     activeRangeStart,  of type (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString), defaulting to "auto"
+      The start of the trigger’s active range.
+If not specified, the active range’s start is set to "auto".
+     activeRangeEnd,  of type (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString), defaulting to "auto"
+      The end of the trigger’s active range.
+If not specified, the active range’s end is set to "auto".
+   7. Privacy Considerations
+   There are no known privacy impacts of the features in this specification.
+   8. Security Considerations
+   There are no known security impacts of the features in this specification.
+Conformance
+Document conventions
+  Conformance requirements are expressed with a combination of
+    descriptive assertions and RFC 2119 terminology. The key words “MUST”,
+    “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”,
+    “RECOMMENDED”, “MAY”, and “OPTIONAL” in the normative parts of this
+    document are to be interpreted as described in RFC 2119.
+    However, for readability, these words do not appear in all uppercase
+    letters in this specification.
+  All of the text of this specification is normative except sections
+    explicitly marked as non-normative, examples, and notes. [RFC2119]
+  Examples in this specification are introduced with the words “for example”
+    or are set apart from the normative text with class="example",
+    like this:
+   This is an example of an informative example.
+  Informative notes begin with the word “Note” and are set apart from the
+    normative text with class="note", like this:
+  Note, this is an informative note.
+  Advisements are normative sections styled to evoke special attention and are
+    set apart from other normative text with <strong class="advisement">, like
+    this:
+        UAs MUST provide an accessible alternative.
+   Tests
+   Tests relating to the content of this specification
+                     may be documented in “Tests” blocks like this one.
+                     Any such block is non-normative.
+Conformance classes
+  Conformance to this specification
+    is defined for three conformance classes:
+   style sheet
+   A CSS
+            style sheet.
+   renderer
+   A UA
+            that interprets the semantics of a style sheet and renders
+            documents that use them.
+   authoring tool
+   A UA
+            that writes a style sheet.
+  A style sheet is conformant to this specification
+    if all of its statements that use syntax defined in this module are valid
+    according to the generic CSS grammar and the individual grammars of each
+    feature defined in this module.
+  A renderer is conformant to this specification
+    if, in addition to interpreting the style sheet as defined by the
+    appropriate specifications, it supports all the features defined
+    by this specification by parsing them correctly
+    and rendering the document accordingly. However, the inability of a
+    UA to correctly render a document due to limitations of the device
+    does not make the UA non-conformant. (For example, a UA is not
+    required to render color on a monochrome monitor.)
+  An authoring tool is conformant to this specification
+    if it writes style sheets that are syntactically correct according to the
+    generic CSS grammar and the individual grammars of each feature in
+    this module, and meet all other conformance requirements of style sheets
+    as described in this module.
+Partial implementations
+  So that authors can exploit the forward-compatible parsing rules to
+    assign fallback values, CSS renderers must
+    treat as invalid (and ignore
+    as appropriate) any at-rules, properties, property values, keywords,
+    and other syntactic constructs for which they have no usable level of
+    support. In particular, user agents must not selectively
+    ignore unsupported component values and honor supported values in a single
+    multi-value property declaration: if any value is considered invalid
+    (as unsupported values must be), CSS requires that the entire declaration
+    be ignored.
+Implementations of Unstable and Proprietary Features
+  To avoid clashes with future stable CSS features,
+        the CSSWG recommends following best practices for the implementation of unstable features and proprietary extensions to CSS.
+Non-experimental implementations
+  Once a specification reaches the Candidate Recommendation stage,
+    non-experimental implementations are possible, and implementors should
+    release an unprefixed implementation of any CR-level feature they
+    can demonstrate to be correctly implemented according to spec.
+  To establish and maintain the interoperability of CSS across
+    implementations, the CSS Working Group requests that non-experimental
+    CSS renderers submit an implementation report (and, if necessary, the
+    testcases used for that implementation report) to the W3C before
+    releasing an unprefixed implementation of any CSS features. Testcases
+    submitted to W3C are subject to review and correction by the CSS
+    Working Group.
+  Further information on submitting testcases and implementation reports
+    can be found from on the CSS Working Group’s website at
+    http://www.w3.org/Style/CSS/Test/.
+    Questions should be directed to the
+    public-css-testsuite@w3.org
+    mailing list.
+  Index
+  Terms defined by this specification
+   activation range, in § 3.1
+    activationRangeEnd
+     attribute for AnimationTrigger, in § 6.1
+     dict-member for AnimationTriggerOptions, in § 6.2
+    activationRangeStart
+     attribute for AnimationTrigger, in § 6.1
+     dict-member for AnimationTriggerOptions, in § 6.2
+   active, in § 2.2
+   active range, in § 3.1
+    activeRangeEnd
+     attribute for AnimationTrigger, in § 6.1
+     dict-member for AnimationTriggerOptions, in § 6.2
+    activeRangeStart
+     attribute for AnimationTrigger, in § 6.1
+     dict-member for AnimationTriggerOptions, in § 6.2
+   all, in § 2.3
+   <animation-action>, in § 5.1
+   animation-trigger, in § 5.1
+   AnimationTrigger, in § 6.1
+   AnimationTrigger(), in § 6.1
+   AnimationTrigger(options), in § 6.1
+   AnimationTriggerOptions, in § 6.2
+   auto, in § 3.5
+    behavior
+     attribute for AnimationTrigger, in § 6.1
+     dict-member for AnimationTriggerOptions, in § 6.2
+   change(), in § 4.2.1
+   click(), in § 4.2.1
+   constructor(), in § 6.1
+   constructor(options), in § 6.1
+   <dashed-ident>, in § 2.3
+   [ <dashed-ident> <animation-action>+ ]+, in § 5.1
+   dblclick(), in § 4.2.1
+   did trigger, in § 2.2
+   enter action, in § 4
+   enter event, in § 4
+   entry action, in § 2.1
+   <event-function>, in § 4.2.1
+   <event-function>+ [ / <event-function>+ ]?, in § 4.2
+   event trigger, in § 4
+   event-trigger, in § 4.3
+   event-trigger-name, in § 4.1
+   event-trigger-source, in § 4.2
+    exit action
+     dfn for event trigger, in § 4
+     dfn for trigger, in § 2.1
+   exit event, in § 4
+   focusin(), in § 4.2.1
+   focusout(), in § 4.2.1
+   inactive, in § 2.2
+   input(), in § 4.2.1
+   keypress(), in § 4.2.1
+    none
+     value for <animation-action>, in § 5.1
+     value for animation-trigger, in § 5.1
+     value for event-trigger, in § 4.3
+     value for event-trigger-source, in § 4.2
+     value for timeline-trigger, in § 3.7
+     value for trigger-scope, in § 2.3
+   pause, in § 5.1
+   pending, in § 2.2
+   play, in § 5.1
+   play-backwards, in § 5.1
+   play-forwards, in § 5.1
+   play-once, in § 5.1
+   pointerdown(), in § 4.2.1
+   pointerenter(), in § 4.2.1
+   pointerleave(), in § 4.2.1
+   pointerup(), in § 4.2.1
+   replay, in § 5.1
+   reset, in § 5.1
+    timeline
+     attribute for AnimationTrigger, in § 6.1
+     dict-member for AnimationTriggerOptions, in § 6.2
+   timeline trigger, in § 3
+   timeline-trigger, in § 3.7
+   timeline-trigger-activation-range, in § 3.4
+   timeline-trigger-activation-range-end, in § 3.4
+   timeline-trigger-activation-range-start, in § 3.4
+   timeline-trigger-active-range, in § 3.5
+   timeline-trigger-active-range-end, in § 3.5
+   timeline-trigger-active-range-start, in § 3.5
+   timeline-trigger-name, in § 3.2
+   timeline-trigger-range, in § 3.6
+   timeline-trigger-source, in § 3.3
+   trigger, in § 2
+   trigger attachment, in § 2
+   triggered animation, in § 1
+   trigger instance, in § 2
+   trigger name, in § 2
+   trigger-scope, in § 2.3
+   trigger state, in § 2.2
+  Terms defined by reference
+    [] defines the following terms:
+     playback rate
+    [CSS-ANIMATIONS-1] defines the following terms:
+     animation
+    [CSS-ANIMATIONS-2] defines the following terms:
+     animation-timeline
+    [CSS-CASCADE-5] defines the following terms:
+     reset-only sub-property
+     shorthand property
+    [CSS-SHADOW-1] defines the following terms:
+     flat tree
+     flattened element tree
+     strictly matched
+     tree-scoped name
+    [CSS-TYPED-OM-1] defines the following terms:
+     CSSKeywordValue
+     CSSNumericValue
+    [CSS-VALUES-4] defines the following terms:
+     #
+     +
+     <dashed-ident>
+     <length-percentage>
+     <string>
+     ?
+     coordinated value list
+     coordinating list base property
+     coordinating list property group
+     CSS-wide keywords
+     |
+    [DOM] defines the following terms:
+     Event
+     shadow root
+     target
+    [INFRA] defines the following terms:
+     user agent
+    [SCROLL-ANIMATIONS-1] defines the following terms:
+     <timeline-range-name>
+     animation-range
+     animation-range-end
+     animation-range-start
+     cover
+     named timeline range
+     scroll()
+     view progress timelines
+     view()
+    [SELECTORS-4] defines the following terms:
+     selector
+    [UIEVENTS] defines the following terms:
+     KeyboardEvent
+     key
+    [WEB-ANIMATIONS-1] defines the following terms:
+     AnimationTimeline
+     KeyframeAnimationOptions
+     animation
+     default document timeline
+     inactive timeline
+     pause()
+     play()
+     timeline
+    [WEB-ANIMATIONS-2] defines the following terms:
+     AnimationTriggerBehavior
+     TimelineRangeOffset
+     rangeEnd
+     rangeStart
+    [WEBIDL] defines the following terms:
+     DOMString
+     Exposed
+     any
+  References
+  Normative References
+   [CSS-ANIMATIONS-1]
+   David Baron; et al. CSS Animations Level 1. URL: https://drafts.csswg.org/css-animations/
+   [CSS-ANIMATIONS-2]
+   David Baron; Brian Birtles. CSS Animations Level 2. URL: https://drafts.csswg.org/css-animations-2/
+   [CSS-CASCADE-5]
+   Elika Etemad; Miriam Suzanne; Tab Atkins Jr.. CSS Cascading and Inheritance Level 5. URL: https://drafts.csswg.org/css-cascade-5/
+   [CSS-SCOPING-1]
+   Tab Atkins Jr.; Elika Etemad. CSS Scoping Module Level 1. URL: https://drafts.csswg.org/css-scoping/
+   [CSS-SHADOW-1]
+   CSS Shadow Module Level 1. Editor's Draft. URL: https://drafts.csswg.org/css-shadow-1/
+   [CSS-TYPED-OM-1]
+   Tab Atkins Jr.; François Remy. CSS Typed OM Level 1. URL: https://drafts.css-houdini.org/css-typed-om-1/
+   [CSS-VALUES-3]
+   Tab Atkins Jr.; Elika Etemad. CSS Values and Units Module Level 3. URL: https://drafts.csswg.org/css-values-3/
+   [CSS-VALUES-4]
+   Tab Atkins Jr.; Elika Etemad. CSS Values and Units Module Level 4. URL: https://drafts.csswg.org/css-values-4/
+   [CSS2]
+   Bert Bos; et al. Cascading Style Sheets Level 2 Revision 1 (CSS 2.1) Specification. URL: https://drafts.csswg.org/css2/
+   [DOM]
+   Anne van Kesteren. DOM Standard. Living Standard. URL: https://dom.spec.whatwg.org/
+   [INFRA]
+   Anne van Kesteren; Domenic Denicola. Infra Standard. Living Standard. URL: https://infra.spec.whatwg.org/
+   [RFC2119]
+   S. Bradner. Key words for use in RFCs to Indicate Requirement Levels. March 1997. Best Current Practice. URL: https://datatracker.ietf.org/doc/html/rfc2119
+   [SCROLL-ANIMATIONS-1]
+   Brian Birtles; et al. Scroll-driven Animations. URL: https://drafts.csswg.org/scroll-animations-1/
+   [SELECTORS-4]
+   Elika Etemad; Tab Atkins Jr.. Selectors Level 4. URL: https://drafts.csswg.org/selectors/
+   [UIEVENTS]
+   Xiaoqian Wu. UI Events. URL: https://w3c.github.io/uievents/
+   [WEB-ANIMATIONS-1]
+   Brian Birtles; et al. Web Animations. URL: https://drafts.csswg.org/web-animations-1/
+   [WEB-ANIMATIONS-2]
+   Brian Birtles; Robert Flack. Web Animations Module Level 2. URL: https://drafts.csswg.org/web-animations-2/
+   [WEBIDL]
+   Edgar Chen; Timothy Gu. Web IDL Standard. Living Standard. URL: https://webidl.spec.whatwg.org/
+  Property Index
+      Name
+      Value
+      Initial
+      Applies to
+      Inh.
+      %ages
+      Anim­ation type
+      Canonical order
+      Com­puted value
+      animation-trigger
+      [ none | [ <dashed-ident> <animation-action>+ ]+ ]#
+      none
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      as specified
+      event-trigger
+      none | [ <'event-trigger-name'> <'event-trigger-source'> ]#
+      none
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      as specified
+      event-trigger-name
+      none | <dashed-ident>#
+      none
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      as specified
+      event-trigger-source
+      [ none | <event-function>+ [ / <event-function>+ ]? ]#
+      none
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      as specified
+      timeline-trigger
+      none | [ <'timeline-trigger-name'> <'timeline-trigger-source'> [ <'timeline-trigger-range'> ]? ]#
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      per grammar
+      see individual properties
+      timeline-trigger-activation-range
+      [ <'timeline-trigger-activation-range-start'> <'timeline-trigger-activation-range-end'>? ]#
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      per grammar
+      see individual properties
+      timeline-trigger-activation-range-end
+      [ normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+      normal
+      all elements
+      no
+      relative to the specified named timeline range if one was specified, else to the entire timeline
+      not animatable
+      per grammar
+      list, each item either the keyword normal or a timeline range and progress percentage
+      timeline-trigger-activation-range-start
+      [ normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+      normal
+      all elements
+      no
+      relative to the specified named timeline range if one was specified, else to the entire timeline
+      not animatable
+      per grammar
+      list, each item either the keyword normal or a timeline range and progress percentage
+      timeline-trigger-active-range
+      [ <'timeline-trigger-active-range-start'> <'timeline-trigger-active-range-end'>? ]#
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      per grammar
+      see individual properties
+      timeline-trigger-active-range-end
+      [ auto | normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+      auto
+      all elements
+      no
+      relative to the specified named timeline range if one was specified, else to the entire timeline
+      not animatable
+      per grammar
+      list, each item either the keyword normal or a timeline range and progress percentage
+      timeline-trigger-active-range-start
+      [ auto | normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+      auto
+      all elements
+      no
+      relative to the specified named timeline range if one was specified, else to the entire timeline
+      not animatable
+      per grammar
+      list, each item either the keyword normal or a timeline range and progress percentage
+      timeline-trigger-name
+      none | <dashed-ident>#
+      none
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      as specified
+      timeline-trigger-range
+      [ <'timeline-trigger-activation-range'> [ / <'timeline-trigger-active-range'> ]? ]#
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      see individual properties
+      per grammar
+      see individual properties
+      timeline-trigger-source
+      [ none | auto | [ <dashed-ident> | <scroll()> | <view()> ]+ ]#
+      auto
+      all elements
+      no
+      N/A
+      not animatable
+      per grammar
+      as specified
+      trigger-scope
+      none | all | <dashed-ident>#
+      none
+      all elements
+      no
+      n/a
+      not animatable
+      per grammar
+      as specified
+  IDL Index
+[Exposed=Window]
+interface AnimationTrigger {
+  constructor(optional AnimationTriggerOptions options = {});
+  attribute AnimationTimeline timeline;
+  attribute AnimationTriggerBehavior behavior;
+  attribute any activationRangeStart;
+  attribute any activationRangeEnd;
+  attribute any activeRangeStart;
+  attribute any activeRangeEnd;
+};
+dictionary AnimationTriggerOptions {
+  AnimationTimeline? timeline;
+  AnimationTriggerBehavior? behavior = "once";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activationRangeStart = "normal";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activationRangeEnd = "normal";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activeRangeStart = "auto";
+  (TimelineRangeOffset or CSSNumericValue or CSSKeywordValue or DOMString) activeRangeEnd = "auto";
+};
+  Issues Index
+    The proposal I drew this text from
+	specified that it only cares if the element is the target of the event.
+	We probably want to allow for bubbling and/or capturing,
+	possibly as an opt in/out. ↵

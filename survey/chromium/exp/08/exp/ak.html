@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset=utf-8><style>
+#h { display: none }
+.o { width: 1px; height: 4px; background: red }
+#h:checked ~ #oh { width: 20px } #v:checked ~ #ov { width: 30px }
+#x:target { width: 40px }
+details[open] ~ #od { width: 50px }
+#p:popover-open { display:block }
+</style></head><body>
+<input type=checkbox id=h accesskey=h><input type=checkbox id=v accesskey=v>
+<a href="#x" accesskey=t>t</a><details><summary accesskey=e>d</summary>x</details>
+<button commandfor=p command=toggle-popover accesskey=p>p</button><div id=p popover>pop</div>
+<div class=o id=oh></div><div class=o id=ov></div><div class=o id=x></div><div class=o id=od></div>
+</body></html>

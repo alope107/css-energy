@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="100%">
+  <!-- The child's state: its own viewport height. Its natural width is 1em, so it reports
+       font-size = 50vh + 7px to the embedding page as its width. -->
+  <style>
+    svg { font-size: calc(50vh + 7px); }
+    text { font: 14px/1 sans-serif; fill: white; }
+  </style>
+  <rect width="100%" height="100%" fill="teal"/>
+  <text x="6" y="20">child</text>
+</svg>

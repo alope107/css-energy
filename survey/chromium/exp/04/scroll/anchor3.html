@@ -1,0 +1,29 @@
+<!doctype html><meta charset=utf-8>
+<style>
+body{margin:0}
+#s{height:200px;width:300px;overflow-y:scroll}
+#g{height:0;background:orange}
+#w .r{height:20px;border-bottom:1px solid #ccc}
+@keyframes mirror{from{height:0}to{height:100px}}
+#g{animation:mirror 1s linear infinite alternate}
+@keyframes tconst{from{transform:none}to{transform:none}}
+@keyframes tconst2{from{transform:translateX(1px)}to{transform:translateX(1px)}}
+@keyframes pconst{from{padding-right:0}to{padding-right:0}}
+@keyframes tstep{0%{transform:none}50%{transform:none}100%{transform:translateX(1px)}}
+.tconst #w{animation:tconst 1s linear infinite}
+.tconst2 #w{animation:tconst2 1s linear infinite}
+.pconst #w{animation:pconst 1s linear infinite}
+.static #w{transform:translateX(1px)}
+.tstep #w{animation:tstep 1s linear infinite}
+@keyframes tstep0{0%{transform:translateX(0px)}50%{transform:translateX(0px)}100%{transform:translateX(1px)}}
+@keyframes trstep{0%{translate:0px}50%{translate:0px}100%{translate:1px}}
+@keyframes pstep{0%{padding-right:0}50%{padding-right:0}100%{padding-right:1px}}
+.tstep0 #w{animation:tstep0 1s linear infinite}
+.trstep #w{animation:trstep 1s linear infinite}
+.pstep #w{animation:pstep 1s linear infinite}
+.tstepWC #w{animation:tstep 1s linear infinite;will-change:auto}
+</style>
+<div id=s><div id=g></div><div id=w></div></div>
+<script>
+const w=document.getElementById('w');let h='';for(let i=0;i<3000;i++)h+='<div class=r>'+i+'</div>';w.innerHTML=h;
+</script>

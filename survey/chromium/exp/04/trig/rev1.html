@@ -1,0 +1,19 @@
+<!doctype html>
+<style>@property --v { syntax: '<number>'; inherits: false; initial-value: 0; }</style>
+<div id=a></div><div id=b></div>
+<script>
+window.log = [];
+const a = document.getElementById('a'), b = document.getElementById('b');
+const mk = el => { const x = el.animate([{ '--v': 0, opacity: 0.2 }, { '--v': 100, opacity: 0.8 }], { duration: 0, fill: 'both' }); x.pause(); return x; };
+const A = mk(a);              // reversed after creation
+const r = (el, an) => `v=${getComputedStyle(el).getPropertyValue('--v')} op=${getComputedStyle(el).opacity} progress=${an.effect.getComputedTiming().progress} ${an.playState}(${an.playbackRate}@${an.currentTime})`;
+log.push('A before: ' + r(a, A));
+A.reverse();
+log.push('A after reverse(), same task: ' + r(a, A));
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  log.push('A +2 frames: ' + r(a, A));
+  const B = b.animate([{ '--v': 0, opacity: 0.2 }, { '--v': 100, opacity: 0.8 }], { duration: 0, fill: 'both' });
+  B.playbackRate = -1; B.pause(); B.currentTime = 0;
+  requestAnimationFrame(() => requestAnimationFrame(() => { log.push('B fresh rate -1 @0 (reference): ' + r(b, B)); B.currentTime = 0; log.push('B after currentTime=0 again: ' + r(b, B)); A.currentTime = 0; log.push('A after currentTime=0: ' + r(a, A)); window.done = true; }));
+}));
+</script>

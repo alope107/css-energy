@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- WARNING: the projects depend on this bug (see the closing comment). A fix would break css-physics's owner names
+     and js-minus-js's latches; weigh that before filing. -->
+<title>Registered custom properties drop animation taint</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  @property --m { syntax: '<custom-ident>'; inherits: false; initial-value: unnamed; }
+  /* --n is set only by an animation, so it is animation-tainted */
+  @keyframes set-n { from, to { --n: ok; } }
+  .c { animation: set-n 1s infinite; container-type: inline-size; margin: 6px 0; }
+  /* container-name isn't animatable: var() of an animation-tainted property makes it invalid (none) */
+  #reg { --m: var(--n); container-name: var(--m); }    /* --m registered: should be tainted too */
+  #unreg { --u: var(--n); container-name: var(--u); }  /* --u unregistered (control) */
+  .box { width: 300px; height: 30px; background: green; color: white; padding: 0 6px; }
+  @container ok (min-width: 0px) { .box { background: red; } }
+</style>
+<p>Both boxes should be green (neither element is a container named "ok").</p>
+<div class="c" id="reg"><div class="box">via a registered property</div></div>
+<div class="c" id="unreg"><div class="box">via an unregistered property</div></div>
+<!--
+*** Before filing: css-physics's owner names (container-name: var(--AN), src/gen3d.py) and js-minus-js's
+transition latches (transition: ... calc((1 - var(--wnow)) * 1000000s), machine/memtree.py; the same with --rbhit,
+readback/ui_rb.py) depend on this deviation: their registered properties launder animated values. A fix would
+break both; weigh that first. The robust form for latches is a literal branch (if(style(--w: 1): 0s; else: ...) or
+an @container style() gate), which isn't tainted. ***
+
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: the first box red (#reg is a container named "ok"),
+the second green. The same holds when the animated value is inherited from an animated ancestor, and for
+transition-* (the survey's exp/04/latch/latch.html, #G). Playwright's Firefox 157: both red (no
+taint for container-name at all).
+
+Spec (css-variables-2, https://drafts.csswg.org/css-variables-2/#animation-tainted, §2): "any custom property used
+in a @keyframes rule becomes animation-tainted" ... "Animation-tainted is "infectious": custom properties which
+reference animation-tainted properties also become animation-tainted." §3, replace a var() function: "If the custom
+property named by the var()'s first argument is animation-tainted, and the var() is being used in a property that is
+not animatable, set result to the guaranteed-invalid value." container-name is not animatable (css-conditional-5).
+The spec makes no exception for registered properties.
+
+Likely cause (same code in 153 and on main 22b3b159): core/css/properties/longhands/custom_property.cc:194-195
+sets is_animation_tainted from `value_mode & kAnimated` only, i.e. only for values applied by an animation; a
+registered property declared with var() of a tainted value is re-serialized from its computed value untainted. The
+next lines propagate attr() taint from the declaration's data; animation taint isn't. Unregistered properties keep
+the tainted CSSVariableData, so the control is right. CascadeResolver::AllowSubstitution (cascade_resolver.cc:20)
+refuses tainted data in Blink's "animation-affecting" properties (animation-*, transition-*, container-name, …).
+-->

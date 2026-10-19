@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset=utf-8>
+<style>
+@property --v { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes setv { from { --v: 0; width: 10px } to { --v: 100; width: 200px } }
+body { margin: 0; timeline-scope: --sv }
+#sc { height: 100px; width: 300px; overflow: hidden; position: relative; }
+#spacer { height: 5000px; }
+.subj { position: absolute; left: 0; top: 2000px; height: 10px; width: 10px; background: red; }
+#s1 { view-timeline: --sv; timeline-trigger: --t1 view() cover 0% cover 100%; }
+.t { height: 5px; background: blue; }
+/* V1: 1ms linear both, play-forwards / play-backwards */
+#a1 { animation: setv 1ms linear both; animation-trigger: --t1 play-forwards play-backwards; }
+/* V2: 0s reverse both, play-backwards / play-forwards */
+#a2 { animation: setv 0s linear reverse both; animation-trigger: --t1 play-backwards play-forwards; }
+/* V3: 1s linear forwards, play / reset (replays each entry?) */
+#a3 { animation: setv 1s linear both; animation-trigger: --t1 replay reset; }
+/* V4: plain play, no exit action */
+#a4 { animation: setv 1ms linear both; animation-trigger: --t1 play; }
+</style>
+<div id=sc><div id=spacer></div><div id=s1 class=subj></div></div>
+<div id=a0 class=t style="animation: setv linear both; animation-timeline: --sv; animation-range: cover 0% cover 100%"></div><div id=a1 class=t></div><div id=a2 class=t></div><div id=a3 class=t></div><div id=a4 class=t></div>
+<script>
+window.log = [];
+let frame = 0;
+const ids = ["a0",'a1','a2','a3','a4'];
+const v = () => ids.map(id => getComputedStyle(document.getElementById(id)).getPropertyValue('--v')).join(',');
+const st = () => ids.map(id => { const a = document.getElementById(id).getAnimations()[0]; return a ? a.playState[0] + (a.pending?'*':'') + '(' + a.playbackRate + '@' + (a.currentTime==null?'null':Math.round(a.currentTime)) + ')' : '-'; }).join(' ');
+const ro = new ResizeObserver(es => { for (const e of es) log.push(`RO f${frame} ${e.target.id} w=${e.contentRect.width}`); });
+ids.forEach(id => ro.observe(document.getElementById(id)));
+const sc = document.getElementById('sc');
+// schedule: frame -> action
+const plan = { 5: () => { sc.scrollTop = 1950; return 'scroll in'; },
+               12: () => { sc.scrollTop = 0; return 'scroll out'; },
+               19: () => { sc.scrollTop = 1950; return 'scroll in again'; },
+               26: () => { sc.scrollTop = 1500; return 'scroll near (hysteresis test: outside)'; },
+               30: () => {}, };
+function tick() {
+  frame++;
+  let note = '';
+  if (plan[frame]) { const before = v(); note = plan[frame]() || ''; note += ` | same-task after scroll: ${v()} (before ${before})`; }
+  log.push(`rAF f${frame} v=${v()} st=${st()} ${note}`);
+  if (frame < 32) requestAnimationFrame(tick); else window.done = true;
+}
+requestAnimationFrame(tick);
+</script>

@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset=utf-8>
+<title>timeline-trigger doesn't fire after a layout change while the page is otherwise idle</title>
+<style>
+@keyframes come-in { to { top: 20px } }          /* moves the subject into the scrollport at 0.3s */
+@keyframes go-green { from, to { background: green } }
+.sc { position: relative; height: 100px; width: 260px; margin: 8px; border: 1px solid; }
+.sc.auto { overflow: auto }
+.spacer { height: 1000px }
+.subj { position: absolute; top: 600px; left: 0; width: 20px; height: 20px; background: gray;
+        animation: come-in 0.01s 0.3s forwards; }
+#s2 { timeline-trigger: --t2 view(); }
+.out { width: 260px; height: 30px; margin: 8px; background: red; color: white; font: 14px sans-serif; padding: 4px; }
+#o2 { animation: go-green 1ms forwards; animation-trigger: --t2 play-forwards; }
+</style>
+<div class="sc auto"><div class=spacer></div><div class=subj id=s2></div></div>
+<div class=out id=o2>overflow: auto, no other animation (green = pass)</div>
+<!--
+Observed, Chrome 153.0.8010.12 headless, default flags: red. Green with
+--disable-blink-features=CompositorTimelineTrigger, and green (default flags) when another main-thread animation
+runs on the page (e.g. an infinite animation of a registered custom property); an infinite compositor-only opacity
+animation doesn't help. The subject is moved into the scrollport by a CSS animation of `top` (a layout change, no
+scroll); after it ends nothing else on the page produces main frames.
+
+Spec (animation-triggers-1 ED, §3): "A timeline trigger is a trigger which is activated when some timeline enters
+the trigger's activation range". The view timeline did enter it (a view-timeline-driven animation on the same
+subject updates).
+
+Likely cause: with CompositorTimelineTrigger (status "stable" in 153/155/main) the main thread stops evaluating
+the trigger once a cc::TimelineTrigger exists (core/animation/timeline_trigger.cc:63-69); activation then reaches
+Blink only through TimelineTrigger::NotifyActivated (timeline_trigger.cc:231-245), and the impl thread
+evaluates cc triggers only inside AnimationHost::TickAnimations (cc/animation/animation_host.cc:744-753), i.e. when
+something is ticking; the activation event apparently doesn't reach Blink until something else requests a main
+frame.
+-->

@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>if(style(--n: 1048580)) matches a registered number 1048575</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  @property --n { syntax: '<number>'; inherits: true; initial-value: 0; }
+  :root { --n: 1048575; }
+  .box { width: 300px; height: 30px; margin: 6px 0; color: white; padding: 0 6px; }
+  #a .box { background: if(style(--n: 1048580): red; else: green); }
+  #b .box { background: if(style(--n: 1048575): green; else: red); }     /* control: the right value matches */
+  #c .box { background: green; }                                         /* control: @container style() */
+  @container style(--n: 1048580) { #c .box { background: red; } }
+</style>
+<p>All three boxes should be green. --n is a registered &lt;number&gt; set to 1048575.</p>
+<div id="a"><div class="box">if(style(--n: 1048580))</div></div>
+<div id="b"><div class="box">if(style(--n: 1048575))</div></div>
+<div id="c"><div class="box">@container style(--n: 1048580)</div></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: the first box red, the others green.
+Playwright's Firefox 157 has no if() (the if() boxes are blank); the @container box is green.
+
+Spec: css-values-5 §8.3 (https://drafts.csswg.org/css-values-5/#if-notation): <if-test> = ... | style( <style-query> ).
+css-conditional-5 §6.2 (https://drafts.csswg.org/css-conditional-5/#style-container): "A <style-feature-plain>
+evaluates to true if the computed value of the given property on the query container matches the given value (which
+is also computed with respect to the query container), and false otherwise." 1048575 and 1048580 are different
+computed <number>s.
+
+Likely cause: StyleCascade::EvalIfStyleFeature (third_party/blink/renderer/core/css/resolver/style_cascade.cc:2880)
+compares the property's substitution text with the query value parsed, computed and serialized
+(ResolveTypedExpression, :2185), i.e. text. Numbers serialize with 6 significant digits (`%.6g`,
+css_numeric_literal_value.cc:198), so both sides are "1.04858e+06". @container style() compares CSSValues
+(media_query_evaluator.cc:1924) and gets it right. Fixing the serialization (crbug 40266999) would fix this too. Same
+code on main (22b3b159).
+-->

@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Scroll-button counter</title>
+<style>
+  @property --c { syntax: "<integer>"; inherits: true; initial-value: 0; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; max-width: 720px; color: #222; background: #fff;
+         timeline-scope: --s; }
+  code { background: #f2f2f2; padding: 0 3px; }
+  /* A 400 px scroller with scroll-padding 399 px has a 1 px snapport, so one "page" is int(0.875 * 1) -> 1 px. */
+  .sc { width: 400px; height: 48px; overflow-x: auto; scrollbar-width: none; scroll-padding-left: 399px;
+        scroll-timeline: --s x; border: 1px solid #888; anchor-name: --sc; }
+  .sc > div { width: 10400px; height: 1px; }
+  .sc::scroll-button(right) { content: "+1"; font: 600 16px system-ui, sans-serif; padding: 6px 14px; margin: 8px 8px 0 0; }
+  .sc::scroll-button(left)  { content: "−1"; font: 600 16px system-ui, sans-serif; padding: 6px 14px; margin: 8px 8px 0 0; }
+  /* The scroll offset becomes a registered integer (0..10000 over the 10000 px range) and is printed by a counter. */
+  #out { animation: c linear both; animation-timeline: --s; counter-reset: c var(--c);
+         font: 600 28px/1.6 system-ui, sans-serif; }
+  #out::after { content: "count: " counter(c); }
+  @keyframes c { from { --c: 0 } to { --c: 10000 } }
+</style>
+<h1>A script-free counter from <code>::scroll-button</code></h1>
+<p>Each click on +1 (or Enter/Space on the focused button, which auto-repeats) scrolls the hidden scroller by one
+pixel. A scroll timeline turns the offset into a number. Stable since Chrome 135; the counter starts at 0.</p>
+<div class="sc"><div></div></div>
+<div id="out"></div>

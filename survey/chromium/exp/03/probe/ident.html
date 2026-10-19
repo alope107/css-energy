@@ -1,0 +1,6 @@
+<!doctype html><style>@property --op{syntax:'<number>';inherits:false;initial-value:-99}
+#a{--m3:13;--op:var(ident("--m" 3))}
+#b{--m2:22;--op:var(ident("--m" sibling-index()))}
+#c{--k:3;--m3:33;--nm:ident("--m" var(--k));--op:var(var(--nm), -1)}
+#d{--pc:3;--m3:13;--op:var(ident("--m" var(--pc)))}
+</style><i id=a data-read="--op"></i><i id=b data-read="--op"></i><i id=c data-read="--op --nm"></i><i id=d data-read="--op"></i>

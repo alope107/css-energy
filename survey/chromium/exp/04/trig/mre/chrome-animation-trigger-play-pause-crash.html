@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset=utf-8>
+<title>animation-trigger: play-pause / play-alternate crash the renderer</title>
+<p style="background:green;color:white;padding:8px">PASS if this text is visible (the tab did not crash).</p>
+<div style="animation-trigger: --t play-pause"></div>
+<!--
+Observed: Chrome 153.0.8010.12 (headless, default flags) - renderer crash ("Aw, Snap!" / Playwright "Page crashed")
+while loading. Same with `play-alternate`, with or without a timeline-trigger or animation. `--t play-forwards`
+loads fine.
+
+Spec (animation-triggers-1 ED 2026-10-16, §5.1): animation-trigger = [ none | [ <dashed-ident> <animation-action>+ ]+ ]#
+with <animation-action> = none | play | play-once | play-forwards | play-backwards | pause | reset | replay.
+play-pause and play-alternate are not in the grammar (removed in csswg-drafts#12611), so the declaration should be
+invalid at parse time.
+
+Likely cause (Chromium main 2026-10-18, same in 153):
+- css/properties/css_parsing_utils.cc:4752-4760 ConsumeAnimationTriggerBehavior still accepts
+  CSSValueID::kPlayAlternate and kPlayPause;
+- css/css_value_id_mappings.h:554-575 CssValueIDToPlatformEnum<EAnimationTriggerBehavior> has no case for them:
+  `default: NOTREACHED();` (fatal in release), reached from css/resolver/css_to_style_map.cc:835-846
+  MapSingleAnimationTriggerAttachment during style building.
+- EAnimationTriggerBehavior is the IDL enum (animation_trigger.idl:8-17), which lacks both values.
+WPT: scroll-animations/animation-trigger/parsing/animation-trigger-parsing.tentative.html tests neither keyword.
+AnimationTrigger/TimelineTrigger are status "stable" in 153, 155 and main, so this is reachable from any page.
+-->

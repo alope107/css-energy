@@ -1,0 +1,27 @@
+<!doctype html><meta charset=utf-8>
+<style>
+body{margin:0}
+#s{position:absolute;left:20px;top:100px;width:400px;height:60px;overflow-x:scroll;overflow-y:hidden;white-space:nowrap;scrollbar-width:none}
+#s .c{display:inline-block;height:50px;background:linear-gradient(90deg,red,blue);vertical-align:top}
+#s::scroll-button(right){content:">";position:fixed;left:500px;top:20px;width:40px;height:40px}
+#s::scroll-button(left){content:"<";position:fixed;left:560px;top:20px;width:40px;height:40px}
+#s::scroll-button(*):disabled{background:gray}
+</style>
+<div id=s></div>
+<script>
+// Configured by query string: snap=<spacing px or 0>, smooth=0/1, pad=<scroll-padding-left px>, w=<scroller width>
+const q=new URLSearchParams(location.search);
+const s=document.getElementById('s');
+const snap=+q.get('snap')||0, W=+(q.get('w')||400), pad=+(q.get('pad')||0), N=+(q.get('n')||20000);
+s.style.width=W+'px';
+if(q.get('smooth')==='1') s.style.scrollBehavior='smooth';
+if(pad) s.style.scrollPaddingLeft=pad+'px';
+if(snap){
+  s.style.scrollSnapType='x mandatory';
+  const f=document.createDocumentFragment();
+  for(let i=0;i<N;i++){const d=document.createElement('div');d.className='c';d.style.width=(q.get("aw")||snap)+"px";d.style.marginRight=(snap-(+(q.get("aw")||snap)))+"px";d.style.scrollSnapAlign='start';f.appendChild(d);}
+  s.appendChild(f);
+} else {
+  const d=document.createElement('div');d.className='c';d.style.width='1000000px';s.appendChild(d);
+}
+</script>

@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@property --x { syntax: "<integer>"; inherits: false; initial-value: 0; }
+@keyframes k { from { --x: 0; } to { --x: 100000; } }
+#big i { display: block; height: 0; }
+.s { animation: k 1s linear infinite; display: inline-block; width: calc(var(--x) * 0.01px); } .s::before { content: "7"; }
+</style></head><body><span class="s"></span><div id="big"></div></body></html>

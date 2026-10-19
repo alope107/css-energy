@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="100%">
+<style>
+@property --v { syntax: "&lt;number&gt;"; inherits: true; initial-value: 0; }
+svg { timeline-scope: --t; animation: rd linear both; animation-timeline: --t; font-size: calc(10px + var(--v) * 1px); }
+@keyframes rd { from { --v: 1000; } to { --v: 0; } }
+.sc { position: absolute; left: 0; top: 0; width: 10px; height: 1000px; overflow: hidden; }
+.sub { position: absolute; left: 0; width: 1px; height: 1px; view-timeline: --t block; animation: mv 2s steps(4) infinite; }
+@keyframes mv { from { top: 0px } to { top: 1000px } }
+</style>
+<foreignObject x="0" y="0" width="20" height="20">
+  <div xmlns="http://www.w3.org/1999/xhtml" class="sc"><div class="sub"></div></div>
+</foreignObject>
+</svg>

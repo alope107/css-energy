@@ -1,0 +1,22 @@
+<!doctype html><meta charset=utf-8>
+<style>
+body{margin:0}
+#s{height:200px;width:300px;overflow-y:scroll}
+#g{height:0;background:orange}
+#w .r{height:20px;border-bottom:1px solid #ccc}
+@keyframes mirror{from{height:0}to{height:100px}}
+@keyframes grow{0%{height:0}50%{height:100px}100%{height:0}}
+@keyframes sup{0%{padding-right:0}50%{padding-right:0}100%{padding-right:10px}}
+@keyframes saw{0%{height:0}99.9%{height:100px}100%{height:0}}
+.mirror #g{animation:mirror 1s linear infinite alternate}
+.ratchet #g{animation:grow 1s linear infinite}
+.ratchet #w{animation:sup 1s linear infinite}
+.saw #g{animation:saw 1s linear infinite}
+.ratchetT #g{animation:grow 1s linear infinite}
+.ratchetT #w{animation:supT 1s linear infinite}
+@keyframes supT{0%{transform:none}50%{transform:none}100%{transform:translateX(1px)}}
+</style>
+<div id=s><div id=g></div><div id=w></div></div>
+<script>
+const w=document.getElementById('w');let h='';for(let i=0;i<3000;i++)h+='<div class=r>'+i+'</div>';w.innerHTML=h;
+</script>

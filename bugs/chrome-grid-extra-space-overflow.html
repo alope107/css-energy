@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Grid: extra space shared among 1,000 auto tracks overflows int32</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  .clip { position: relative; width: 300px; height: 30px; overflow: hidden; margin: 6px 0; }
+  .g { display: grid; grid-template-columns: repeat(2000, auto); width: max-content; }
+  /* the wide item spans all 2,000 tracks; the empty item in column 1001 makes the spanned tracks two sets of
+     1,000 and 999 (track 1001 is frozen at 0), so column 1001 should start at 1,000/1,999 of the wide item */
+  .wide { grid-row: 1; grid-column: 1 / 2001; height: 1px; }
+  .col1001 { grid-row: 2; grid-column: 1001; height: 1px; }
+  #a .wide { width: 70000px; } #a .col1001 { anchor-name: --a; } /* should start at 35,017.5 px */
+  #b .wide { width: 60000px; } #b .col1001 { anchor-name: --b; } /* control: should start at 30,015 px */
+  /* reader: as wide as column 1001's offset, and a size container */
+  .reader { position: absolute; top: 0; left: 0; container-type: inline-size; }
+  #a + .reader { right: anchor(--a left); }
+  #b + .reader { right: anchor(--b left); }
+  .box { width: 300px; height: 30px; background: red; }
+  @container (min-width: 25000px) { .box { background: green; } }
+</style>
+<p>Both boxes should be green.</p>
+<div class="clip">
+  <div class="g" id="a"><div class="wide"></div><div class="col1001"></div></div>
+  <div class="reader"><div class="box"></div></div>
+</div>
+<div class="clip">
+  <div class="g" id="b"><div class="wide"></div><div class="col1001"></div></div>
+  <div class="reader"><div class="box"></div></div>
+</div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: first box red (column 1001 starts at 1,446 px instead
+of 35,017.5), second green (30,015 px). Playwright's Firefox 157: both green (35,018 and 30,017 px).
+Correct while 64 * width * 1,000 < 2^32 (up to ~67,108 px), wrong above.
+
+Spec (https://drafts.csswg.org/css-grid-2/#extra-space), 12.5.1 "Distributing Extra Space Across Spanned Tracks":
+"Distribute space up to limits: Find the item-incurred increase for each affected track by: distributing the space
+equally among these tracks, freezing a track's item-incurred increase as its affected size + item-incurred increase
+reaches its limit (and continuing to grow the unfrozen tracks as needed). For base sizes, the limit is its growth
+limit". Track 1001's growth limit is 0 (the empty item's max-content contribution), so the other 1,999 tracks get
+70,000 / 1,999 px each and column 1001 starts at 1,000 of those.
+
+Likely cause: third_party/blink/renderer/core/layout/grid/grid_track_sizing_algorithm.cc:686-687,
+DistributeExtraSpaceToSets:
+    extra_space_share = LayoutUnit::FromRawValue(
+        (extra_space.RawValue() * set_share_ratio) / share_ratio_sum);
+RawValue() is int32_t (1/64 px) and set_share_ratio is wtf_size_t (uint32_t, the set's track count for equal
+distribution), so the product is computed modulo 2^32: 70,000 * 64 * 1,000 = 4.48e9. Widening to int64 (as the
+MulDiv paths elsewhere do) would fix it. Same code on main (22b3b159).
+-->

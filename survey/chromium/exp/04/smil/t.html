@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+body { margin: 0; }
+@property --t1 { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --t2 { syntax: "<number>"; inherits: true; initial-value: 0; }
+html:has(#f1.on) #out { --t1: 1; }
+html:has(#f2.on) #out { --t2: 1; }
+#sc { position: absolute; left: 0; top: 300px; width: 100px; height: 60px; overflow: auto; }
+#tr { width: 10px; height: 10px; transition: width 100ms; }
+#tr:hover, #tr.wide { width: 20px; }
+</style></head>
+<body>
+<svg width="400" height="120" style="display:block">
+  <!-- T1: single set, begin and end on the same click, restart=whenNotActive -->
+  <rect id="b1" x="0" y="0" width="50" height="50" fill="blue"/>
+  <g id="f1" class="off"/>
+  <set href="#f1" attributeName="class" to="on" begin="b1.click" end="b1.click" restart="whenNotActive"/>
+  <!-- T2: hit-test routed flip-flop: on-button stacked above off-button -->
+  <rect id="off2" x="100" y="0" width="50" height="50" fill="gray"/>
+  <rect id="on2" x="100" y="0" width="50" height="50" fill="orange"/>
+  <g id="f2" class="off"/>
+  <set href="#f2" attributeName="class" to="on" begin="on2.click" end="off2.click"/>
+  <set href="#on2" attributeName="pointer-events" to="none" begin="on2.click" end="off2.click"/>
+  <!-- other DOM events as begin conditions -->
+  <g id="ev" class="x"/>
+  <set href="#ev" attributeName="font-size" to="1" begin="cb.change" fill="freeze"/>
+  <set href="#ev" attributeName="letter-spacing" to="1" begin="det.toggle" fill="freeze"/>
+  <set href="#ev" attributeName="word-spacing" to="1" begin="inp.input" fill="freeze"/>
+  <set href="#ev" attributeName="stroke-width" to="3" begin="sc.scrollend" fill="freeze"/>
+  <set href="#ev" attributeName="stroke-dashoffset" to="1" begin="tr.transitionend" fill="freeze"/>
+  <set href="#ev" attributeName="opacity" to="0.5" begin="inp.focus" fill="freeze"/>
+  <set href="#ev" attributeName="fill-opacity" to="0.5" begin="inp.keydown" fill="freeze"/>
+  <set href="#ev" attributeName="stroke-opacity" to="0.5" begin="accessKey(q)" fill="freeze"/>
+  <set href="#ev" attributeName="stroke-miterlimit" to="7" begin="wallclock(2000-01-01T00:00:00Z)" fill="freeze"/>
+</svg>
+<input type="checkbox" id="cb" style="position:absolute; left:0; top:150px">
+<details id="det" style="position:absolute; left:50px; top:150px"><summary>s</summary>x</details>
+<input id="inp" style="position:absolute; left:120px; top:150px; width:80px">
+<div id="tr" style="position:absolute; left:250px; top:150px"></div>
+<div id="sc"><div style="height:600px">scroll</div></div>
+<div id="out"></div>
+</body></html>

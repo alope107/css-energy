@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>An outer svg width of calc(1em + 0px) doesn't resize its object when the font size changes</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  /* red underneath the first 100px: a too-narrow object leaves red showing; the SVG paints red past 100px, so a
+     too-wide one shows red too */
+  .slot { width: 300px; height: 30px; overflow: hidden; margin: 6px 0;
+          background: linear-gradient(to right, red 100px, transparent 100px); }
+  object { display: block; height: 30px; }
+</style>
+<p>Both bars should be green and 100px wide, with no red, after half a second. Each &lt;object&gt; holds an SVG
+document whose font size goes from 50px to 100px at 0.5 s. First: <code>&lt;svg width="calc(1em + 0px)"&gt;</code>.
+Second (control): <code>&lt;svg width="1em"&gt;</code>.</p>
+<div class="slot"><object type="image/svg+xml" data="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='calc(1em + 0px)' height='100%25'><style>svg { font-size: 50px; animation: f 0.01s 0.5s forwards; } @keyframes f { to { font-size: 100px; } }</style><rect width='100' height='100%25' fill='green'/><rect x='100' width='1000' height='100%25' fill='red'/></svg>"></object></div>
+<div class="slot"><object type="image/svg+xml" data="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1em' height='100%25'><style>svg { font-size: 50px; animation: f 0.01s 0.5s forwards; } @keyframes f { to { font-size: 100px; } }</style><rect width='100' height='100%25' fill='green'/><rect x='100' width='1000' height='100%25' fill='red'/></svg>"></object></div>
+<!--
+Observed (Linux, 2026-10-18): Chrome 153.0.8010.12 headless: the first bar stays half red (the object keeps its first
+width, 50px), the second turns green (100px). The same with the SVG served as a file, same-origin (same process) or
+cross-origin (out-of-process): a data: URL doesn't change the behaviour. The same with the font size driven by the
+object's viewport (font-size: calc(50vh + 7px) and an animated object height). An inline <svg> in HTML with
+width="calc(1em + 0px)" updates correctly (its own relayout re-resolves the length). Playwright's Firefox 157:
+first bar 300px wide (the default object size: it ignores calc() there), second stays 50px (it doesn't update for
+1em either).
+
+Spec: SVG 2 (https://svgwg.org/svg2-draft/coords.html#SizingSVGInCSS), for an svg element embedded by reference:
+"The intrinsic dimensions must also be determined from the width and height sizing properties." css-values-4 §6.1.1
+(https://drafts.csswg.org/css-values-4/#em): em is "Equal to the computed value of the font-size property of the
+element on which it is used." calc(1em + 0px) and 1em are the same length, so the embedding object should resize
+in both cases.
+
+Likely cause (same in 153 and on main 22b3b159): LayoutSVGRoot::IntrinsicSizeIsFontMetricsDependent decides whether a
+font change must re-notify the embedder, using SVGLength::IsFontRelative, which only recognises numeric literals
+(core/svg/svg_length.h:106-111, with "TODO(crbug.com/979895) ... might have revealed an existing bug with calculated
+lengths"). A calc() length is never font-relative there, so HTMLPlugInElement's natural size isn't updated.
+-->

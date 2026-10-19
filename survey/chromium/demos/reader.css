@@ -1,0 +1,10 @@
+/* Shared by the two channel demos: read the <object>'s width with CSS only and print it. */
+@property --v { syntax: "<integer>"; inherits: true; initial-value: 0; }
+body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; max-width: 720px; color: #222; background: #fff; }
+code { background: #f2f2f2; padding: 0 3px; }
+#o, .o { display: block; anchor-name: --o; border: 0; animation: h 4s steps(1) infinite; }
+@keyframes h { 0% { height: 100px } 25% { height: 200px } 50% { height: 300px } 75% { height: 50px } }
+/* anchor-size() -> size container -> a registered <integer> -> a counter: no script anywhere */
+#r { position: fixed; left: 16px; bottom: 16px; width: anchor-size(--o width); height: 40px; container-type: inline-size; }
+#n { --v: calc(100cqw / 1px); counter-reset: v var(--v); font: 600 20px/40px system-ui, sans-serif; white-space: nowrap; }
+#n::after { content: "parent reads: " counter(v) " px"; }
