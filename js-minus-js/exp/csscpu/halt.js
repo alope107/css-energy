@@ -1,6 +1,6 @@
 // halt.js page.html image.json [maxSec] — time from navigation to HALT on a CPU-only page, the CSS CPU's (--halt) or the
 // font CPU's (--isHALT), polled every POLL ms (default 250, as machine/halttime.js); checks the console against the image's
-// expected output. DEBUG=1 logs the registers at each poll; FRAMES=1 counts frames (a rAF loop). Harness only.
+// expected output. DEBUG=1 logs the registers at each poll; FRAMES=1 counts frames (a rAF loop); DPR sets the device scale. Harness only.
 const path = require('path');
 const { launch, fileUrl, envArgs } = require(path.join(__dirname, '..', '..', 'tools', 'browser.js'));
 const { consoleCodes, gridRows } = require(path.join(__dirname, '..', '..', 'tools', 'page.js'));
@@ -9,7 +9,7 @@ const fs = require('fs');
   const [pg, img, maxs = '120'] = process.argv.slice(2); const im = JSON.parse(fs.readFileSync(img));
   const poll = +(process.env.POLL || 250);
   const b = await launch({ extraArgs: envArgs('FLAGS') });
-  const p = await b.newPage({ viewport: { width: 1200, height: 800 } });
+  const p = await b.newPage({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: +(process.env.DPR || 1) });
   if (process.env.FRAMES) await p.addInitScript(() => { window.__fr = []; const f = t => { window.__fr.push(t); requestAnimationFrame(f); }; requestAnimationFrame(f); });
   const t0 = Date.now(); await p.goto(fileUrl(pg), { timeout: 600000 }); const tl = Date.now() - t0;
   let r, first = null;
