@@ -38,7 +38,7 @@ OUT_BASE, ROWS, COLS = image['outBase'], image['rows'], image['cols']; OUT_SIZE 
 assert OUT_BASE % 4 == 0 and ROM % 4 == 0
 WOFF = M20 = 1 << 20; A15 = 32768
 NSET, NWAY = 16, 2; NL = NSET * NWAY
-CH = 'ABCD'[:2 * ISSUE]; sp0 = image['sp0']
+CH = 'ABCDEFGHIJKL'[:2 * ISSUE]; sp0 = image['sp0']
 
 def eq(x, c): return f"calc(1 - min(1, max(({x}) - ({c}), ({c}) - ({x}))))"     # 1 iff x == c (integers)
 def s20(e): return f"calc(mod({e} + {1 << 19}, {M20}) - {1 << 19})"
