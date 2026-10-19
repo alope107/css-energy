@@ -39,8 +39,25 @@ channel keeps its cell until it takes another, rather than being cleared every p
 whole tree). A miss on the block the same pass writes back would read its leaf before the write lands, so that fill
 waits a pass (`sim.py` models it; FizzBuzz hits it once).
 
-`sim.py` is the design pass by pass: same cache, prefetch, stall rules, PRINT chunking (uarch's print service). It
-predicts the passes (FizzBuzz 36 at K = 32) and is checked against cc_ref's steps and output.
+A stalled instruction keeps the operands it did read (latches: the fetched word, the stack words, the indirect reads,
+a string's block) for its re-execution as the next pass's first instruction; a read is kept only if the reads its
+address depends on were good. So an instruction always completes (each pass adds at least one operand) and needs only
+its written line resident at the end. Without them `str_escape.js` never finished: its PRINT's code, stack top and
+string were three blocks in one 2-way set, each fill evicting another. JNEG (emitted by the compiler for arrays) is
+in the jump class.
+
+`sim.py` is the design pass by pass: same cache, prefetch, stall rules, latches, PRINT chunking (uarch's print
+service). It predicts the passes (FizzBuzz 36 at K = 32; the page latches every good read where sim keeps those before
+the first miss, so the page can take fewer).
+
+Checks (`make test` runs C1; `make c2`):
+- **C1** (`tests/csscpu_sim.py`): sim.py runs every suite program's image (the padded editor source, as L4) against
+  Node's output and cc_ref's step count, object programs included (sim.py has the object instructions; the page not
+  yet).
+- **C2** (`tests/csscpu_pages.py` builds, `tests/csscpu_pages.js` runs): a page per program without objects under
+  1,500 steps (100), each run to HALT in Chrome, console against Node's, steps against cc_ref's.
+- `gencpu.py` refuses to write a page in which a registered integer's value is more than one term (`--m: (a) * b`
+  instead of `calc((a) * b)`): Chrome takes such a value as invalid and uses the initial value, 0, silently.
 
 ## Results (2026-10-19, headless Chromium 153, mini PC)
 

@@ -9,14 +9,19 @@ or writes hits and, for a PRINT chunk, the pass's write set is free. The first i
 pass (its miss, if any, is pending). Output has its own write set (the console's own cells and channels, so a write-back
 doesn't hold it up). PRINT is chunked like uarch.Machine.print_service: up to 4 console cells per
 instruction execution, a string chunk ends at its block; the instruction repeats (pst carries the position) until done.
+Object instructions follow cc_ref.run: their reads below RAM give 0 and their writes there are dropped (no cache access);
+NEW and ENDK write two words, one per execution (--pst = 1 between them, as PRINT keeps its position there).
 The console is RAM written through the output write set, never cached. The read ports read a miss's block (and the
 next) in the pass that misses, so a miss on the block that pass writes back would read it stale: then the fill waits a
-pass (the chain re-misses and the ports read it again); a prefetch of that block is skipped. Instructions in ROM are fetched from a static table, not
+pass (the chain re-misses and the ports read it again); a prefetch of that block is skipped. A stalled instruction keeps
+the words it did read (latches) for its re-execution at the start of the next pass, so it needs only its written line
+resident at the end: without them three blocks in one set (code, stack top and a string) evicted each other forever. Instructions in ROM are fetched from a static table, not
 through the cache (ROMF: the font CPU has its ROM in the font too)."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ref
 from ref import OPN, AMASK, s20, BIN, BINF, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
+from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC
 
 NSET, NWAY = 16, 2
 ROMF = PREF = True
@@ -34,13 +39,17 @@ class Sim:
         self.tag = [[None] * NWAY for _ in range(NSET)]; self.dirty = [[0] * NWAY for _ in range(NSET)]
         self.words = [[[0] * 4 for _ in range(NWAY)] for _ in range(NSET)]; self.fifo = [0] * NSET
         self.pending = None; self.passes = 0; self.wbacks = 0; self.stale = self.pstale = False; self.wb = None
+        self.latch = {}; self.reads = {}; self.first = False
     def way(self, b):
         s = setof(b)
         for w in range(NWAY):
             if self.tag[s][w] == b: return s, w
         raise Stall(b)
     def rd(self, a):
-        a &= AMASK; s, w = self.way(a // 4); return self.words[s][w][a % 4]
+        a &= AMASK
+        if self.first and a in self.latch: v = self.latch[a]
+        else: s, w = self.way(a // 4); v = self.words[s][w][a % 4]
+        self.reads[a] = v; return v
     def fill(self, b, cw):
         s = setof(b); w = self.fifo[s]
         if self.dirty[s][w]:
@@ -83,8 +92,9 @@ class Sim:
             a &= AMASK; s, w = self.way(a // 4); mem_w[(s, w, a % 4)] = s20(v)
         rd = self.rd
         pc, sp, fp = st['pc'], st['sp'], st['fp']
+        self.reads = {}
         word = st['mem'].get(pc, 0) if ROMF and pc < ref.ROMN else rd(pc); op, imm = OPN[word // 8192], word % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
-        out = None
+        out = None; partial = False
         if op == 'NOP': pass
         elif op == 'PUSHI': wr(sp, imm); sp += 1
         elif op == 'LOADG': wr(sp, rd(imm)); sp += 1
@@ -106,6 +116,34 @@ class Sim:
         elif op == 'DUP': wr(sp, rd(sp - 1)); sp += 1
         elif op == 'HALT': pc -= 1; st['halt'] = True
         elif op == 'JMPI': sp -= 1; pc = rd(sp)
+        elif op == 'JNEG': pc = imm if rd(sp - 2) < 0 else pc
+        elif op in ('SCANI', 'SCAN', 'LDF', 'PUTV', 'NEW', 'SETF', 'ENDK', 'OVER'):
+            rd0 = lambda a: 0 if a & AMASK < ref.ROMN else rd(a)
+            def wr0(a, v):
+                if a & AMASK >= ref.ROMN: wr(a, v)
+            if op in ('SCANI', 'SCAN'):
+                key = imm if op == 'SCANI' else rd(KEYCELL); t3 = rd(sp - 1); t2 = rd0(t3)
+                if not (t2 == key or t2 == 0): wr(sp - 1, t2 if t2 < 0 else t3 + 2); pc -= 1
+            elif op == 'LDF': wr(sp - 1, rd0(rd(sp - 1) + imm))
+            elif op == 'PUTV':
+                v = rd(sp - 1); c = rd(sp - 2)
+                if rd0(c) != 0: wr0(c + 1, v); sp -= 2
+                else: wr0(c + 1, pc - 1); pc = PUTVEC
+            elif op == 'SETF': v = rd(sp - 1); wr0(rd(sp - 2) + imm, v); sp -= 1
+            elif op == 'OVER': wr(sp, rd(sp - 2)); sp += 1
+            elif op == 'ENDK':
+                wr0(rd(sp - 1) + imm + st['pst'], 0)
+                if st['pst'] == 0: pc -= 1; partial = True
+            elif op == 'NEW':
+                t2 = rd(HP); t1 = rd(GCLIM); lt = s20(t2 - t1) < 0
+                if st['pst'] == 0:
+                    if lt: wr(sp, t2 + HEAP0 - OBJTAG)
+                    else: wr(GCSP, sp)
+                    pc -= 1; partial = True
+                else:
+                    if lt: wr(HP, t2 + 8)
+                    else: wr(RETCELL, pc - 1); pc = GCVEC
+                    sp += 1
         elif op == 'SHL13': wr(sp - 1, rd(sp - 1) * 8192)
         elif op == 'INCG': wr(imm, rd(imm) + 1)
         elif op == 'INCL': wr(fp + simm, rd(fp + simm) + 1)
@@ -130,7 +168,8 @@ class Sim:
                 st['mem'][OUT_BASE + st['optr']] = ch; st['out'].append(ch); st['optr'] = (st['optr'] + 1) % (COLS * ROWS)
             if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
             if cells: cw = 1
-        st['pc'], st['sp'], st['fp'] = pc, sp, fp; st['steps'] += 0 if out and not done else 1
+        if op in ('ENDK', 'NEW'): st['pst'] = 1 if partial else 0
+        st['pc'], st['sp'], st['fp'] = pc, sp, fp; st['steps'] += 0 if (out and not done) or partial else 1
         return cw
     def run_pass(self, K):
         """one pass: (instructions executed, why it ended)"""
@@ -139,10 +178,12 @@ class Sim:
         self.pending = None
         n = 0; why = 'halt'
         while n < K and not self.st['halt']:
+            self.first = n == 0
             try: cw = self.execute(cw); n += 1
             except Stall as e:
-                self.pending = e.miss; why = 'miss' if e.miss is not None else 'write'; break
-        else: why = 'halt' if self.st['halt'] else 'K'
+                self.pending = e.miss; why = 'miss' if e.miss is not None else 'write'; self.latch = dict(self.reads); break
+        else: why = 'halt' if self.st['halt'] else 'K'; self.latch = {}
+        self.first = False
         self.stale = self.pending is not None and self.pending == self.wb
         self.pstale = self.pending is not None and self.pending + 1 == self.wb
         return n, why

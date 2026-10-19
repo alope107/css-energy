@@ -21,13 +21,15 @@ L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
 FUZZ     := $(B)/fuzz.$(call id,$(B)/py,-,tests/cmp_dsl.py tests/fuzz/fuzz.py tests/fuzz/oracle.js tests/fuzz/all.sh $(PYSRC)).log
 # The browser's part needs `npm install`. Goals that launch no browser skip it (CI deploys with `make dist` and no
 # npm packages: ../deploy/README.md), and those checks' logs get a name no pass is ever written under.
-NOBROWSER := help all lib image font page dist expect l1 l2 l2-generic l4 fuzz fuzz-quick test clean
+NOBROWSER := help all lib image font page dist expect l1 l2 l2-generic l4 c1 fuzz fuzz-quick test clean
 BCONF     = $(if $(filter-out $(NOBROWSER),$(MAKECMDGOALS)),$(call id,$(1),fontcpu,$(2)),no-browser)
 L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
 UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
+C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
+CSSCPU   := $(wildcard exp/csscpu/gencpu.py exp/csscpu/sim.py exp/csscpu/ref.py)
 
 .PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input fuzz fuzz-quick fuzz-l3 clean
+        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input c1 c2 fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
@@ -37,6 +39,7 @@ help:
 	@echo "make fuzz-l3        L3 on 300 generated and mutated programs (~2 min)"
 	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~30 s)"
 	@echo "make test-ui        L5 on every quick program (~5.5 min)"
+	@echo "make c2             the CSS CPU (exp/csscpu) runs every quick program without objects to HALT (~25 s)"
 	@echo "make dist           copy the built page to dist/"
 
 all: page
@@ -77,6 +80,15 @@ l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
 l4:                                       # font CPU model (uarch4) runs every compiled image vs Node
 	$(PY) tests/suite_machine.py
+c1:                                       # the CSS CPU's design (exp/csscpu/sim.py) runs every compiled image vs Node
+	$(PY) tests/csscpu_sim.py
+# C2: a CSS CPU page per program (exp/csscpu/gencpu.py) runs to HALT in Chrome; console vs Node, steps vs cc_ref
+$(B)/c2/list.txt: tests/csscpu_pages.py tests/csscpu_sim.py $(CSSCPU) $(PYSRC) $(SUITE)
+	$(PY) tests/csscpu_pages.py $(B)/c2
+c2: $(C2)
+	$(call report,$<,3)
+$(C2): $(B)/c2/list.txt tests/csscpu_pages.js $(HARNESS) $(RERUN_IF)
+	SHARDS=$(SHARDS) $(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/csscpu_pages.js $(B)/c2
 # differential tests against Node without a browser (tests/fuzz/fuzz.py): the suite reformatted, generated programs,
 # one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and L4 too, ~1.5 min)
 fuzz-quick:
@@ -121,7 +133,7 @@ l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what th
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)
 	SHARDS=$(SHARDS) EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
 
-test: expect l1 fuzz-quick l2 l4
+test: expect l1 fuzz-quick l2 l4 c1
 test-browser: l3
 test-ui: l5
 test-ui-smoke: l5-smoke

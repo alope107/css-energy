@@ -51,6 +51,7 @@ def by_op(cases, default):
     return "if(" + " ".join(f"style(--op: {OP[o]}): {e};" for o, e in cases.items()) + f" else: {default})"
 def setof(b): return f"mod({b} + round(down, {b} / 16) + round(down, {b} / 256), 16)"
 
+LATCH = {"f": 1, "s1": 2, "s2": 4, "ra": 8, "rb": 16, "p": 32}    # the latchable reads and their bits (reads, below)
 # ---------------- registers: (name, H, OFF), value range [-OFF, H - OFF); the subject's expression at the chain's end
 regs = [("pc", A15, 0, "var(--pc)"), ("rsp", A15, 0, "var(--sp)"), ("rfp", A15, 0, "var(--fp)"), ("optr", 256, 0, "var(--optr)"),
         ("pst", A15, 0, "var(--pst)"), ("steps", 1 << 21, 0, "var(--steps)"), ("halt", 2, 0, "var(--halt)"), ("pend", 8192, 0, "var(--pend)"),
@@ -68,6 +69,8 @@ if 'noW' in os.environ.get('ABL', ''): regs = [r for r in regs if not r[0].start
 # the read ports' words (their subjects sit in the ports, so no expression here), and a miss on the block this pass writes
 # back (its leaf isn't written until the next pass, so the ports read it stale: the fill waits a pass; sim.py)
 regs += [(f"mv{i}", M20, M20 // 2, None) for i in range(2 * WB)]
+regs += [("rLm", 64, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n})") for n in LATCH if n != "p"] + \
+        [(f"rLp{j}", M20, M20 // 2, f"var(--Lp{j})") for j in range(4)]
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
 regs += WREGS
@@ -94,6 +97,7 @@ cpu = ["--first: calc(1 - var(--init));",
        "--gabs: " + sel("gs", NSET, lambda s: f"calc(1 - {eq(f'round(down, var(--T{2 * s}) / 2)', 'var(--fb) + 2')} - {eq(f'round(down, var(--T{2 * s + 1}) / 2)', 'var(--fb) + 2')})") + ";",
        f"--gk1: calc(var(--fon) * (1 - var(--pstale)) * var(--gabs) * (1 - mod(var(--gT), 2)) * clamp(0, {BLKS - 1} - var(--fb), 1) * (var(--gk) + 1));"]
 cpu += [f"--fwd{w}: " + sel("fk", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
+cpu += [f"--Lb{n}: mod(round(down, var(--rLm) / {b}), 2);" for n, b in LATCH.items()]
 HOT = range(256, 768)     # the blocks runs mostly read: globals, strings, code, the bottom of the stack (read ports, below)
 
 # ---------------- reads: a word through the cache. For read n of address A: block b, word u, set z, hits h (way 0) and
@@ -103,9 +107,14 @@ def lookup(n, A):
     hit = lambda way: sel(f"z{n}", NSET, lambda s: eq(f"round(down, var(--T{2 * s + way}) / 2)", f"{b} + 1"))
     return [f"--b{n}: round(down, ({A}) / 4);", f"--u{n}: mod({A}, 4);", f"--z{n}: {setof(b)};", f"--h{n}: {hit(0)};", f"--H{n}: {hit(1)};"]
 def word(n, k): return sel(f"u{n}", 4, lambda j: f"var(--W{k}_{j})")
+# A stalled instruction's operands are kept (latches: registers rL<n>, valid if bit n of rLm) for its re-execution as the
+# next pass's first instruction (--lat: 1 until the first commit), so it needs only its written line resident at the end
+# (sim.py: without them three blocks in one set evicted each other forever). The write's own lookup (w) isn't latched.
+def latched(n, e): return f"if(style(--lat: 1) and style(--Lb{n}: 1): var(--rL{n}); else: {e})"
 def read(n, A):
-    return lookup(n, A) + [f"--v{n}: " + sel(f"z{n}", NSET, lambda s: f"if(style(--H{n}: 1): {word(n, 2 * s + 1)}; else: {word(n, 2 * s)})") + ";"]
-def miss(n): return f"(1 - var(--h{n}) - var(--H{n}))"
+    return lookup(n, A) + [f"--v{n}: " + latched(n, sel(f"z{n}", NSET, lambda s: f"if(style(--H{n}: 1): {word(n, 2 * s + 1)}; else: {word(n, 2 * s)})")) + ";"]
+def miss(n):
+    return f"(1 - var(--h{n}) - var(--H{n}))" + (f" * (1 - var(--lat) * var(--Lb{n}))" if n in LATCH else "")
 LOOKUP = ("b", "u", "z", "h", "H")
 READS = ("f", "s1", "s2", "ra", "rb", "w", "p")
 
@@ -142,10 +151,11 @@ CLASSES = {
              {'sp': by_op({'INCG': sp, 'INCL': sp}, f"calc({sp} + 1)")}),
     'bin': (BINOPS, [("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None)], (None, by_op({o: BINE[o] for o in BINOPS[:-1]}, BINE[BINOPS[-1]]), "s2"),
             {'sp': f"calc({sp} - 1)"}),
-    'jump': (['JZ', 'JMP', 'JNZ', 'POP', 'JMPI', 'NOP', 'HALT'], [("s1", f"{sp} - 1", ['JZ', 'JNZ', 'JMPI'])], None,
+    'jump': (['JZ', 'JMP', 'JNZ', 'POP', 'JMPI', 'NOP', 'HALT', 'JNEG'], [("s1", f"{sp} - 1", ['JZ', 'JNZ', 'JMPI']), ("s2", f"{sp} - 2", ['JNEG'])], None,
              {'sp': by_op({'JZ': f"calc({sp} - 1)", 'JNZ': f"calc({sp} - 1)", 'POP': f"calc({sp} - 1)", 'JMPI': f"calc({sp} - 1)"}, sp),
               'pc': by_op({'JZ': f"calc({z1} * {imm} + (1 - {z1}) * ({pc} + 1))", 'JMP': imm, 'JNZ': f"calc((1 - {z1}) * {imm} + {z1} * ({pc} + 1))",
-                           'JMPI': "mod(var(--vs1), 32768)", 'HALT': pc}, f"calc({pc} + 1)")}),
+                           'JMPI': "mod(var(--vs1), 32768)", 'HALT': pc, 'JNEG': f"calc(clamp(0, -1 * var(--vs2), 1) * {imm} + (1 - clamp(0, -1 * var(--vs2), 1)) * ({pc} + 1))"},
+                          f"calc({pc} + 1)")}),
     'store': (['STOREG', 'STOREL', 'STOREI'], [("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", ['STOREI'])],
               (by_op({'STOREL': fpo, 'STOREI': "mod(var(--vs2), 32768)"}, imm), "var(--vs1)", None),
               {'sp': by_op({'STOREI': f"calc({sp} - 2)"}, f"calc({sp} - 1)")}),
@@ -169,6 +179,10 @@ cls_rules = {}
 for c, (ops, rds, wr, nx) in CLASSES.items():
     d, acc = [], []
     for n, A, ops_n in rds: d += read(n, A); acc.append((n, need(ops_n)))
+    # a read is kept only if the reads its address depends on were good (index: ra on s1 for LOADI, rb on ra and s1)
+    deps = {'ra': ['s1'] if c == 'index' else [], 'rb': ['s1', 'ra']}
+    good = {n: f"(1 - {miss(n)})" + "".join(f" * (1 - {miss(m)})" for m in deps.get(n, [])) for n, _, _ in rds}
+    d.append("--hm: calc(1 - var(--mf)" + "".join(f" + {LATCH[n]} * {g}" for n, g in good.items()) + ");")
     if wr:
         A, V, reuse = wr
         if reuse is None: d += lookup("w", A); acc.append(("w", "")); wn = "w"
@@ -195,7 +209,8 @@ pr = read("s1", f"{sp} - 1") + [
     "--pq: calc(min(1, var(--pst)) * var(--pst) + (1 - min(1, var(--pst))) * var(--pp));",
     f"--pdone: calc(var(--isStr) * {eq('var(--pq)', STR_LO)});", "--pj0: mod(var(--pq), 4);"]
 pr += lookup("p", "var(--pq)")
-pr += [f"--pw{j}: " + sel("zp", NSET, lambda s, j=j: f"if(style(--Hp: 1): var(--W{2 * s + 1}_{j}); else: var(--W{2 * s}_{j}))") + ";" for j in range(4)]
+pr += [f"--pw{j}: if(style(--lat: 1) and style(--Lbp: 1): var(--rLp{j}); else: " + sel("zp", NSET, lambda s, j=j: f"if(style(--Hp: 1): var(--W{2 * s + 1}_{j}); else: var(--W{2 * s}_{j}))") + ");" for j in range(4)]
+pr.append(f"--hm: calc(1 - var(--mf) + 2 * (1 - {miss('s1')}) + 32 * (1 - {miss('p')}) * (1 - {miss('s1')}));")
 pr += [f"--mpp: calc(var(--isStr) * (1 - var(--pdone)) * {miss('p')});",
        f"--pa: max({pv}, -1 * {pv});", f"--pneg: clamp(0, -1 * {pv}, 1);",
        "--pL: calc(1 + " + " + ".join(f"clamp(0, var(--pa) - {10 ** dd - 1}, 1)" for dd in range(1, 6)) + ");",
@@ -239,7 +254,7 @@ for w in range(WB):
            f"--nwD{w}: calc(" + " + ".join(f"{eq(f'var(--pi{w})', i)} * var(--pch{i})" for i in range(4)) + ");"]
 cls_rules['out'] = (PRINTOPS + ['PUTC'], pr)
 CLS = {c: i + 1 for i, c in enumerate(cls_rules)}
-assert sorted(o for ops, _ in cls_rules.values() for o in ops) == sorted(OPN[:OP[PRINTOPS[0]] + 6]), 'every non-object op in one class'
+assert set(OPN[:OP[PRINTOPS[0]] + 6]) <= {o for ops, _ in cls_rules.values() for o in ops}, 'every non-object op in one class'
 FREQ = ['PUSHI', 'LOADG', 'JZ', 'MOD', 'EQ', 'JMP', 'ADD', 'STOREG', 'LE', 'PRINTLN', 'LOADL']   # FizzBuzz's most frequent first
 opcls = {o: CLS[c] for c, (ops, _) in cls_rules.items() for o in ops}
 cls_of = "if(" + " ".join(f"style(--op: {OP[o]}): {opcls[o]};" for o in FREQ + [o for o in opcls if o not in FREQ]) + " else: 0)"
@@ -256,8 +271,8 @@ P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "in
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
-     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl"]
-P += [r[0] for r in regs if r[0] not in P]
+     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm"]
+P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
 P += [f"n{r[0]}" for r in WREGS]
@@ -265,10 +280,10 @@ P += [x + n for n in READS for x in LOOKUP] + [f"v{n}" for n in READS if n not i
 P = list(dict.fromkeys(P))
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
-LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {f"v{n}" for n in ("s1", "s2", "ra", "rb")} | {"uf", "zf", "hf", "Hf", "vf", "rom", "rh", "rl"}
+LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "zf", "hf", "Hf", "rh", "rl"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
-LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pw", "pi", "dp")}
+LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
 props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; initial-value: --c0; }}' for i in range(2 * WB)]   # a port's leaf name
 
@@ -303,7 +318,9 @@ for i in range(2 * WB):
     css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(BLKS)) - set(HOT), leaf, f'--c{w}')}; }} }}")
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
-css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0;\n  " +
+css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0; --lat: 1;"
+           f" --rom: clamp(0, {ROM} - var(--pc), 1); --Lm: calc((1 - var(--go)) * var(--rLm));"
+           + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
 css += [f"@container style(--fk1: {k + 1}) {{ .fl {{ --T{k}: calc(2 * var(--fb) + 2); --F{k // 2}: {1 - k % 2}; " +
         " ".join(f"--W{k}_{j}: var(--mv{j});" for j in range(4)) + " } }" for k in range(NL)]
@@ -314,16 +331,20 @@ css.append(lbl.section('Instructions', f'{K} levels of .f (fetch, decode) > .x (
 css.append(lbl.group('.f: fetch the word at pc unless the chain has stopped', 'ROM from a static table, RAM through the cache; a miss stalls'))
 css.append(".f { --op: 255; --cls: 0; --ok: 2; --pout: 0; --wz: 0; }")
 css.append("@container style(--stop: 0) { .f { " + " ".join(lookup("f", pc)) +
-           f" --rom: clamp(0, {ROM} - var(--pc), 1); --rh: round(down, var(--pc) / 32); --rl: mod(var(--pc), 32);"
-           f" --vf: if(style(--rom: 1): {rom_table}; else: " + sel("zf", NSET, lambda s: f"if(style(--Hf: 1): {word('f', 2 * s + 1)}; else: {word('f', 2 * s)})") + ");"
-           f" --mf: calc((1 - var(--rom)) * {miss('f')}); --ok: calc(2 - 2 * var(--mf)); --mb: var(--bf);"
+           f" --vf: " + latched("f", sel("zf", NSET, lambda s: f"if(style(--Hf: 1): {word('f', 2 * s + 1)}; else: {word('f', 2 * s)})")) + ";"
+           f" --mf: calc({miss('f')}); --ok: calc(2 - 2 * var(--mf)); --mb: var(--bf); --hm: calc(1 - var(--mf));"
            " --op: calc(var(--mf) * 255 + (1 - var(--mf)) * round(down, var(--vf) / 8192)); --imm: mod(var(--vf), 8192);"
            f" --simm: calc(var(--imm) - 8192 * min(1, round(down, var(--imm) / 4096))); --cls: {cls_of}; }} }}")
+# (a large if() costs its whole text wherever it is evaluated, so the ROM table gets a rule of its own: README)
+css.append("@container style(--stop: 0) and style(--rom: 1) { .f { --rh: round(down, var(--pc) / 32); --rl: mod(var(--pc), 32);"
+           f" --vf: {rom_table}; --mf: 0; }} }}")
 css.append(lbl.group('.x: execute', 'one rule per instruction class; if() on --op inside it'))
 css += [f"@container style(--cls: {CLS[c]}) {{ .x {{ {' '.join(d)} }} }}" for c, (_, d) in cls_rules.items()]
 css.append(lbl.group('.c: commit', 'registers on success; the stall (stop, the missing block); output; the written word\'s cache set'))
-css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --sp: var(--nsp); --fp: var(--nfp); --steps: var(--nsteps); --stop: var(--nstop); --halt: var(--nhalt); } }")
-css.append("@container style(--ok: 0) { .c { --stop: 1; --pend: calc(var(--mb) + 1); } }")
+css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --sp: var(--nsp); --fp: var(--nfp); --steps: var(--nsteps); --stop: var(--nstop); --halt: var(--nhalt);"
+           f" --lat: 0; --rom: clamp(0, {ROM} - var(--npc), 1); }} }}")
+css.append("@container style(--ok: 0) { .c { --stop: 1; --pend: calc(var(--mb) + 1); --Lm: var(--hm);"
+           + " ".join(f" --L{n}: var(--v{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--pw{j});" for j in range(4)) + " } }")
 css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --pst: var(--npst); --cw: var(--ncw); " +
            " ".join(f"--cA{w}: var(--nwA{w}); --cD{w}: var(--nwD{w});" for w in range(WB)) + " } }")
 css += [f"@container style(--wz: {s + 1}) {{ .c {{ " + " ".join(f"--W{2 * s + i // 4}_{i % 4}: var(--n{i});" for i in range(8)) +
@@ -467,6 +488,24 @@ page = f"""<!doctype html>
 </html>
 """
 import re, collections
+def lint(text, ints):
+    """a registered <integer> whose value isn't one term (a number, or one function: calc(), if(), var(), …) is invalid at
+    computed-value time and silently takes its initial value, 0: `--m: (1 - a) * b` must be `calc((1 - a) * b)`"""
+    bad = []
+    for m in re.finditer(r'(?:[{;]|^)\s*--([\w-]+): ', text, re.M):     # declarations only (not style(--x: v) conditions)
+        if m.group(1) not in ints: continue
+        i, d = m.end(), 0
+        while i < len(text) and (d or text[i] not in ';}'): d += {'(': 1, ')': -1}.get(text[i], 0); i += 1
+        val = text[m.end():i].strip()
+        if re.fullmatch(r'-?\d+', val): continue
+        f = re.match(r'[a-z-]+\(', val)
+        if not f: bad.append(f'--{m.group(1)}: {val[:60]}'); continue
+        j, d = f.end(), 1
+        while d: d += {'(': 1, ')': -1}.get(val[j], 0); j += 1
+        if j != len(val): bad.append(f'--{m.group(1)}: {val[:60]}')
+    return bad
+_bad = lint("\n".join(css), set(re.findall(r'@property --([\w-]+) \{ syntax: "<integer>"', "\n".join(props))))
+assert not _bad, f'registered integers with more than one term: {_bad[:5]}'
 _dup = [n for n, c in collections.Counter(re.findall(r'@property (--[\w-]+)', page)).items() if c > 1]
 assert not _dup, f'properties registered twice (memtree.py has its own): {_dup}'
 open(outp, 'w').write(page)

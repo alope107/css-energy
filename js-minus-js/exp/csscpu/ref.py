@@ -27,6 +27,12 @@ def load(path, lib=None):
     mem.update(R.image_mem(c, words, data, lib['init']))
     return {'pc': 0, 'sp': LA['sp0'], 'fp': LA['sp0'], 'optr': 0, 'mem': mem, 'out': [], 'halt': False, 'steps': 0}
 
+def from_image(im):
+    """the same, from a mkimage-style image (rom + ram lists)"""
+    mem = {i: w for i, w in enumerate(im['rom']) if w}
+    mem.update({im['romSize'] + i: w for i, w in enumerate(im['ram']) if w})
+    return {'pc': 0, 'sp': im['sp0'], 'fp': im['sp0'], 'optr': 0, 'mem': mem, 'out': [], 'halt': False, 'steps': 0}
+
 class Machine:
     def __init__(self, st, on_read=None, on_write=None):
         self.st = st; self.on_read = on_read; self.on_write = on_write
