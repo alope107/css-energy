@@ -9,7 +9,9 @@ or writes hits and, for a PRINT chunk, the pass's write set is free. The first i
 pass (its miss, if any, is pending). Output has its own write set (the console's own cells and channels, so a write-back
 doesn't hold it up). PRINT is chunked like uarch.Machine.print_service: up to 4 console cells per
 instruction execution, a string chunk ends at its block; the instruction repeats (pst carries the position) until done.
-The console is RAM written through the output write set, never cached. Instructions in ROM are fetched from a static table, not
+The console is RAM written through the output write set, never cached. The read ports read a miss's block (and the
+next) in the pass that misses, so a miss on the block that pass writes back would read it stale: then the fill waits a
+pass (the chain re-misses and the ports read it again); a prefetch of that block is skipped. Instructions in ROM are fetched from a static table, not
 through the cache (ROMF: the font CPU has its ROM in the font too)."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,7 +33,7 @@ class Sim:
         self.st['pst'] = 0
         self.tag = [[None] * NWAY for _ in range(NSET)]; self.dirty = [[0] * NWAY for _ in range(NSET)]
         self.words = [[[0] * 4 for _ in range(NWAY)] for _ in range(NSET)]; self.fifo = [0] * NSET
-        self.pending = None; self.passes = 0; self.wbacks = 0
+        self.pending = None; self.passes = 0; self.wbacks = 0; self.stale = self.pstale = False; self.wb = None
     def way(self, b):
         s = setof(b)
         for w in range(NWAY):
@@ -44,11 +46,11 @@ class Sim:
         if self.dirty[s][w]:
             vt = self.tag[s][w]
             for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
-            self.wbacks += 1
+            self.wbacks += 1; self.wb = vt
         self.tag[s][w] = b; self.dirty[s][w] = 0; self.fifo[s] ^= 1
         self.words[s][w] = [self.st['mem'].get(4 * b + j, 0) for j in range(4)]
         nb = b + 1; s = setof(nb); w = self.fifo[s]
-        if PREF and nb < BLKS and nb not in self.tag[s] and not self.dirty[s][w]:
+        if PREF and nb < BLKS and nb not in self.tag[s] and not self.dirty[s][w] and not self.pstale:
             self.tag[s][w] = nb; self.fifo[s] ^= 1
             self.words[s][w] = [self.st['mem'].get(4 * nb + j, 0) for j in range(4)]
         return cw
@@ -132,14 +134,18 @@ class Sim:
         return cw
     def run_pass(self, K):
         """one pass: (instructions executed, why it ended)"""
-        self.passes += 1; cw = 0
-        if self.pending is not None: cw = self.fill(self.pending, cw); self.pending = None
-        n = 0
+        self.passes += 1; cw = 0; self.wb = None
+        if self.pending is not None and not self.stale: self.fill(self.pending, cw)
+        self.pending = None
+        n = 0; why = 'halt'
         while n < K and not self.st['halt']:
             try: cw = self.execute(cw); n += 1
             except Stall as e:
-                self.pending = e.miss; return n, 'miss' if e.miss is not None else 'write'
-        return n, 'halt' if self.st['halt'] else 'K'
+                self.pending = e.miss; why = 'miss' if e.miss is not None else 'write'; break
+        else: why = 'halt' if self.st['halt'] else 'K'
+        self.stale = self.pending is not None and self.pending == self.wb
+        self.pstale = self.pending is not None and self.pending + 1 == self.wb
+        return n, why
 
 if __name__ == '__main__':
     path = sys.argv[1]; K = int(sys.argv[2]) if len(sys.argv) > 2 else 64

@@ -4,14 +4,17 @@ the instructions; layout only fills the cache and moves the registers. The desig
 
 A pass (ISSUE passes per frame, gen_fvm4's frame gate):
   #cpu      the registers (view timelines, as gen_fvm4's), the frame gate, the pending miss's victim lines
-  .rp/.vp   eight read ports read the pending block's words and the next block's (one port per bank and block) from the
-            ROM and RAM leaves
-  .fl       the fill: the victim line takes the block (a dirty victim's words go to the write set first); the next block
-            is prefetched if it is absent and its victim is clean
+  .fl       the fill: the victim line takes the block the last pass missed, whose words the read ports left in registers
+            (a dirty victim's words go to the write set first); the next block is prefetched if it is absent and its
+            victim is clean
   K levels  .f fetch (ROM from a static table, RAM through the cache) and decode > .x execute > .c commit. An instruction
             runs only if every word it touches is cached (and, for output, the write set is free); the first that can't
             stops the chain, noting its missing block (--pend) for the next pass's fill
-  .ex       the registers' view-timeline subjects at the chain's final state; the write set goes to the RAM channels
+  .ex       the registers' view-timeline subjects at the chain's final state; the write set goes to the RAM channels;
+            eight read ports (gen_fvm4's readback readers) read the missing block's words and the next block's (one port
+            per bank and block) from the ROM and RAM leaves into registers for the next pass's fill
+Nothing above the chain is a size container, so a pass styles the chain once. (Ports above it, as first built, restyled
+the whole chain once per port whose size changed: 7 times in a fill pass.)
 Cache: 16 sets x 2 ways x 4 words, set (b + b / 16 + b / 256) mod 16 of block b; --T<line> = 2 * (block + 1) + dirty
 (0: empty), --F<set> the next victim way, --W<line>_<word> the words, line = 2 * set + way. RAM is memtree.py's, the
 console gen_fvm4's.
@@ -62,6 +65,11 @@ KN = OUT_SIZE // WB
 WREGS += [(f"wak{w}{c}", KN + 1, 0, f"var(--nwak{w}{c})") for w in range(WB) for c in CH] + \
          [(f"wdk{w}{c}", 256, 0, f"var(--nwdk{w}{c})") for w in range(WB) for c in CH]
 if 'noW' in os.environ.get('ABL', ''): regs = [r for r in regs if not r[0].startswith('W')]
+# the read ports' words (their subjects sit in the ports, so no expression here), and a miss on the block this pass writes
+# back (its leaf isn't written until the next pass, so the ports read it stale: the fill waits a pass; sim.py)
+regs += [(f"mv{i}", M20, M20 // 2, None) for i in range(2 * WB)]
+regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
+         ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
 regs += WREGS
 WNAMES = [r[0] for r in WREGS]
 
@@ -74,23 +82,19 @@ cpu = ["--first: calc(1 - var(--init));",
        f"--nk: calc(var(--fresh) + (1 - var(--fresh)) * min({ISSUE}, var(--k) + 1));",   # saturates, so frames settle (ENGINE_NOTES 16)
        "--npar: calc(var(--fresh) * (1 - var(--par)) + (1 - var(--fresh)) * var(--par));",
        # the fill: block fb into set fs's victim way fv (line fk); a dirty victim (block fvb) is written back
-       "--fon: calc(var(--go) * min(1, var(--pend)));", "--fb: max(0, var(--pend) - 1);",
+       "--fon: calc(var(--go) * min(1, var(--pend)) * (1 - var(--stale)));", "--fb: max(0, var(--pend) - 1);",
        f"--fs: {setof('var(--fb)')};",
        "--fv: " + sel("fs", NSET, lambda s: f"var(--F{s})") + ";", "--fk: calc(2 * var(--fs) + var(--fv));",
        "--fT: " + sel("fk", NL, lambda k: f"var(--T{k})") + ";",
        "--fd: calc(var(--fon) * mod(var(--fT), 2));", "--fvb: calc(round(down, var(--fT) / 2) - 1);",
        "--fk1: calc(var(--fon) * (var(--fk) + 1));", "--pend0: calc((1 - var(--fon)) * var(--pend));",
-       f"--rb: clamp(0, var(--fb), {BLKS - 1});", "--rbh: round(down, var(--rb) / 64);", "--rbl: calc(var(--rb) - 64 * var(--rbh));",
        # the prefetch: block fb + 1 into its set's victim way (line gk), if absent there and the victim is clean
        f"--gs: {setof('(var(--fb) + 1)')};", "--gv: " + sel("gs", NSET, lambda s: f"var(--F{s})") + ";", "--gk: calc(2 * var(--gs) + var(--gv));",
        "--gT: " + sel("gk", NL, lambda k: f"var(--T{k})") + ";",
        "--gabs: " + sel("gs", NSET, lambda s: f"calc(1 - {eq(f'round(down, var(--T{2 * s}) / 2)', 'var(--fb) + 2')} - {eq(f'round(down, var(--T{2 * s + 1}) / 2)', 'var(--fb) + 2')})") + ";",
-       f"--gk1: calc(var(--fon) * var(--gabs) * (1 - mod(var(--gT), 2)) * clamp(0, {BLKS - 1} - var(--fb), 1) * (var(--gk) + 1));",
-       f"--qb: clamp(0, var(--fb) + 1, {BLKS - 1});", "--qbh: round(down, var(--qb) / 64);", "--qbl: calc(var(--qb) - 64 * var(--qbh));"]
+       f"--gk1: calc(var(--fon) * (1 - var(--pstale)) * var(--gabs) * (1 - mod(var(--gT), 2)) * clamp(0, {BLKS - 1} - var(--fb), 1) * (var(--gk) + 1));"]
 cpu += [f"--fwd{w}: " + sel("fk", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
 HOT = range(256, 768)     # the blocks runs mostly read: globals, strings, code, the bottom of the stack (read ports, below)
-cpu += [f"--rbhot: calc(clamp(0, var(--rb) - {HOT.start - 1}, 1) * clamp(0, {HOT.stop} - var(--rb), 1));",
-        f"--qbhot: calc(clamp(0, var(--qb) - {HOT.start - 1}, 1) * clamp(0, {HOT.stop} - var(--qb), 1));"]
 
 # ---------------- reads: a word through the cache. For read n of address A: block b, word u, set z, hits h (way 0) and
 # H (way 1), each one if() over the set comparing that way's tag, and the word v (set, then way, then word).
@@ -249,12 +253,12 @@ ABL = os.environ.get('ABL', '').split(',')     # timing ablations: norom (the RO
 if 'norom' in ABL: rom_table = "0"
 # ---------------- the page's CSS
 P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
-     "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "rb", "rbh", "rbl", "gs", "gv", "gk", "gT", "gabs", "gk1", "qb", "qbh", "qbl", "rbhot", "qbhot",
+     "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
      "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl"]
 P += [r[0] for r in regs if r[0] not in P]
-P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")] + [f"mval{i}" for i in range(2 * WB)]
+P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
 P += [f"n{r[0]}" for r in WREGS]
 P += [x + n for n in READS for x in LOOKUP] + [f"v{n}" for n in READS if n not in ("w", "p")]
@@ -288,23 +292,23 @@ def mux(p, blocks, leaf, default):
     return f"if({' '.join(outer)} else: {default})"
 ROMNZ = {a for a, x in enumerate(image['rom']) if x}
 def leafname(a): return f"--r{a}" if a < ROM else f"--c{a - ROM}"
-css.append(lbl.group(f'Read ports: one per bank ({WB}) for the pending block (rb) and one for the next (qb)',
-                     'a two-level if() picks the leaf, anchor-size() reads it'))
+css.append(lbl.group(f'Read ports (readers at the chain\'s end): one per bank ({WB}) for the missing block (xb) and one for the next (yb)',
+                     'a two-level if() picks the leaf, anchor-size() reads it, a view-timeline subject keeps it for the next pass'))
 for i in range(2 * WB):
-    w, q, on = i % WB, "rb" if i < WB else "qb", "fon" if i < WB else "gk1"
+    w, q = i % WB, "xb" if i < WB else "yb"
     leaf = lambda b, w=w: leafname(4 * b + w)
-    css.append(f".rp{i} {{ width: anchor-size(var(--sR{i}) width, {WOFF}px); }} .vp{i} {{ --mval{i}: calc(100cqi / 1px - {WOFF}); }}")
+    css.append(f".rp{i} {{ width: anchor-size(var(--sR{i}) width, {WOFF}px); }}")
     if 'nomux' in ABL: continue
-    css.append(f"@container style(--{q}hot: 1) {{ .rp{i} {{ --sR{i}: {mux(q, set(HOT), leaf, f'--c{w}')}; }} }}")
-    css.append(f"@container style(--{q}hot: 0) and (not style(--{on}: 0)) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(BLKS)) - set(HOT), leaf, f'--c{w}')}; }} }}")
+    css.append(f"@container style(--xon: 1) and style(--{q}hot: 1) {{ .rp{i} {{ --sR{i}: {mux(q, set(HOT), leaf, f'--c{w}')}; }} }}")
+    css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(BLKS)) - set(HOT), leaf, f'--c{w}')}; }} }}")
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
 css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0;\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
 css += [f"@container style(--fk1: {k + 1}) {{ .fl {{ --T{k}: calc(2 * var(--fb) + 2); --F{k // 2}: {1 - k % 2}; " +
-        " ".join(f"--W{k}_{j}: var(--mval{j});" for j in range(4)) + " } }" for k in range(NL)]
+        " ".join(f"--W{k}_{j}: var(--mv{j});" for j in range(4)) + " } }" for k in range(NL)]
 css += [f"@container style(--gk1: {k + 1}) {{ .fl {{ --T{k}: calc(2 * var(--fb) + 4); --F{k // 2}: {1 - k % 2}; " +
-        " ".join(f"--W{k}_{j}: var(--mval{WB + j});" for j in range(4)) + " } }" for k in range(NL)]
+        " ".join(f"--W{k}_{j}: var(--mv{WB + j});" for j in range(4)) + " } }" for k in range(NL)]
 
 css.append(lbl.section('Instructions', f'{K} levels of .f (fetch, decode) > .x (execute) > .c (commit), display: contents'))
 css.append(lbl.group('.f: fetch the word at pc unless the chain has stopped', 'ROM from a static table, RAM through the cache; a miss stalls'))
@@ -337,6 +341,10 @@ for w in range(WB):
             rel = f"min(1, var(--{A_})) * {eq(f'var(--{A_})', f'var(--wa{p_}{w}{c})')}"
             ex += [f"--nwa{p_}{w}{c}: calc({s_} * var(--{A_}) + (1 - {s_}) * (1 - {rel}) * var(--wa{p_}{w}{c}));",
                    f"--nwd{p_}{w}{c}: calc({s_} * var(--{D_}) + (1 - {s_}) * var(--wd{p_}{w}{c}));"]
+ex += ["--xon: min(1, var(--pend));"] + [
+    d for q, e in (("xb", f"clamp(0, var(--pend) - 1, {BLKS - 1})"), ("yb", f"clamp(0, var(--pend), {BLKS - 1})"))
+    for d in (f"--{q}: {e};", f"--{q}h: round(down, var(--{q}) / 64);", f"--{q}l: calc(var(--{q}) - 64 * var(--{q}h));",
+              f"--{q}hot: calc(clamp(0, var(--{q}) - {HOT.start - 1}, 1) * clamp(0, {HOT.stop} - var(--{q}), 1));")]
 css.append(".ex { " + " ".join(ex) + " }")
 
 css.append(lbl.section('RAM', f'memtree.py: {len(CH)} write channels per bank, each a decode tree over the bank\'s cells'))
@@ -351,7 +359,7 @@ for w in range(WB):
 css.append(lbl.section('Console', f'one reader per console cell ({COLS} x {ROWS}), drawn with the ascii counter style'))
 for i in range(OUT_SIZE):
     r_, c_ = divmod(i, COLS)
-    css.append(f".oc{i} {{ width: anchor-size(--c{OUT_BASE - ROM + i} width, {WOFF}px); left: calc(24px + {c_} * 11px); top: calc(24px + {r_} * 20px); }}")
+    css.append(f".oc{i} {{ width: anchor-size(--c{OUT_BASE - ROM + i} width, {WOFF}px); left: calc(8px + {c_} * 11px); top: calc(8px + {r_} * 20px); }}")
 css.append('@counter-style ascii { system: fixed 32; symbols: ' + " ".join('"\\""' if c == 34 else '"\\\\"' if c == 92 else f'"{chr(c)}"' for c in range(32, 127)) + '; fallback: blank; }')
 css.append('@counter-style blank { system: cyclic; symbols: " "; }')
 
@@ -369,12 +377,12 @@ static = f"""
   .cell {{ display: block; content-visibility: hidden; width: fit-content; height: 1px; contain-intrinsic-size: auto {WOFF}px; }}
   .rom {{ display: block; height: 1px; }}
   .rp {{ position: fixed; top: 0; left: 0; visibility: hidden; height: 1px; container-type: inline-size; }}
-  .vp {{ visibility: visible; }}
   .f, .x, .c {{ display: contents; }}
   .regs {{ height: 0; overflow: hidden; }}
   .reg {{ position: relative; overflow: hidden; width: 1px; }}
   .sub {{ position: absolute; left: 0; width: 1px; height: 1px; }}
-  .con {{ position: fixed; left: 16px; top: 16px; width: {COLS * 11 + 16}px; height: {ROWS * 20 + 16}px; background: #151515; border-radius: 6px; }}
+  .cons {{ position: fixed; left: 16px; top: 16px; width: {COLS * 11 + 16}px; height: {ROWS * 20 + 16}px; contain: strict; }}
+  .con {{ position: absolute; inset: 0; background: #151515; border-radius: 6px; }}
   .oc {{ position: fixed; height: 20px; container-type: inline-size; visibility: hidden; font: 16px/20px ui-monospace, monospace; color: #eee; }}
   .oc > b {{ --code: calc(100cqi / 1px - {WOFF}); counter-set: ch var(--code); font-weight: 400; visibility: visible; display: inline-block; width: 11px; }}
   .oc > b::after {{ content: counter(ch, ascii); }}
@@ -422,13 +430,15 @@ if os.environ.get('BENCH'):
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM))
 LIVE = STATIC_CELLS
 mem_html = "" if 'nomem' in ABL else "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
-mem_html += "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
+# the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
+con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
 rom_html = '<div class="mem">' + "".join(f'<div class="w" style="anchor-name: --r{a}"><i class="rom" style="width: {image["rom"][a] + WOFF}px"></i></div>' for a in sorted(ROMNZ)) + '</div>\n'
 console = "" if 'nocon' in ABL else "\n".join(f'<div class="oc oc{i}"><b></b></div>' for i in range(OUT_SIZE))
-subj = "".join(f'<div class="reg" style="height: {H}px"><div class="sub" style="view-timeline-name: --{n}; top: calc(({e} + {OFF}) * 1px)"></div></div>' for n, H, OFF, e in regs)
+subj = "".join(f'<div class="reg" style="height: {H}px"><div class="sub" style="view-timeline-name: --{n}; top: calc(({e} + {OFF}) * 1px)"></div></div>' for n, H, OFF, e in regs if e)
+subj += "".join(f'<div class="rp rp{i}"><div class="reg" style="height: {M20}px"><div class="sub" style="view-timeline-name: --mv{i}; top: calc(100cqi - {WOFF - M20 // 2}px)"></div></div></div>' for i in range(2 * WB))
+if 'dupsubs' in ABL: subj += subj.replace('view-timeline-name: --', 'view-timeline-name: --dup')
 chain = f'<div class="ex"><div class="regs" aria-hidden="true">{subj}</div></div>'
 for _ in range(K): chain = f'<i class="f"><i class="x"><i class="c">{chain}</i></i></i>'
-ports = "".join(f'<div class="rp rp{i}"><div class="vp vp{i}">' for i in range(2 * WB))
 blurb = (f"<p>No font: style alone runs the bytecode. Each layout pass runs up to {K} instructions as a chain of nested elements "
          f"(fetch and decode, execute, commit) out of a 2-way, 32-line cache of RAM held in custom properties. The first cache "
          f"miss stops the chain; the next pass fills the line, and prefetches the next, through anchor-size() read ports.</p>"
@@ -443,8 +453,8 @@ page = f"""<!doctype html>
 {chr(10).join(props)}
 {chr(10).join(css)}
 </style>
-{mem_html}{rom_html}<div class="con"></div>
-{console}
+{mem_html}{rom_html}<div class="cons">{con_html}<div class="con"></div>
+{console}</div>
 <div id="clk"><div id="cpu">
 <div class="head"{' hidden' if 'nohead' in ABL else ''}>
 <h1>JavaScript on a pure-CSS CPU</h1>
@@ -452,7 +462,7 @@ page = f"""<!doctype html>
 <div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b>
  halt <b class="num" style="--v: var(--halt)"></b></div>
 </div>
-{ports}<div class="fl">{chain}</div>{'</div></div>' * (2 * WB)}
+<div class="fl">{chain}</div>
 </div></div>
 </html>
 """
