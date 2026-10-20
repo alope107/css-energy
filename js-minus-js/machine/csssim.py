@@ -26,7 +26,7 @@ import cc_ref as R
 
 NSET, NWAY = 16, 2
 ROMF = PREF = True
-BLKS = (ref.ROMN + ref.LA['ram_size']) // 4
+BLKS = (ref.ROMN + ref.LA['ram_size']) // 4; RB0 = ref.ROMN // 4
 def setof(b): return (b + b // 16 + b // 256) % NSET
 STR_LO, STR_HI = LA['data_base'] + SDATA, STRP_HI     # literals and heap strings
 
@@ -55,14 +55,15 @@ class Sim:
         s = setof(b); w = self.fifo[s]
         if self.dirty[s][w]:
             vt = self.tag[s][w]
-            for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
+            if vt >= RB0:
+                for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
             self.wbacks += 1; self.wb = vt
         self.tag[s][w] = b; self.dirty[s][w] = 0; self.fifo[s] ^= 1
-        self.words[s][w] = [self.st['mem'].get(4 * b + j, 0) for j in range(4)]
+        self.words[s][w] = [self.st['mem'].get(4 * b + j, 0) if b >= RB0 else 0 for j in range(4)]     # (ROM as data: 0)
         nb = b + 1; s = setof(nb); w = self.fifo[s]
         if PREF and nb < BLKS and nb not in self.tag[s] and not self.dirty[s][w] and not self.pstale:
             self.tag[s][w] = nb; self.fifo[s] ^= 1
-            self.words[s][w] = [self.st['mem'].get(4 * nb + j, 0) for j in range(4)]
+            self.words[s][w] = [self.st['mem'].get(4 * nb + j, 0) if nb >= RB0 else 0 for j in range(4)]
         return cw
     def chunk(self, op, v):
         """one PRINT execution: (cells written, newline after, done, next pst); reads may stall"""

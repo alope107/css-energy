@@ -419,7 +419,7 @@ for i in range(2 * WB):
     css.append(f".rp{i} {{ width: anchor-size(var(--sR{i}) width, {WOFF}px); }}")
     if 'nomux' in ABL: continue
     css.append(f"@container style(--xon: 1) and style(--{q}hot: 1) {{ .rp{i} {{ --sR{i}: {mux(q, set(HOT), leaf, f'--c{w}')}; }} }}")
-    css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(BLKS)) - set(HOT), leaf, f'--c{w}')}; }} }}")
+    css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(RB0, BLKS)) - set(HOT), leaf, '--rom')}; }} }}")   # (ROM: no leaf, reads 0)
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
 css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0; --lat: 1;"
@@ -564,7 +564,9 @@ LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain'
 mem_html = "" if 'nomem' in ABL else "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
 con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
-rom_html = '<div class="mem">' + "".join(f'<div class="w" style="anchor-name: --r{a}"><i class="rom" style="width: {image["rom"][a] + WOFF}px"></i></div>' for a in sorted(ROMNZ)) + '</div>\n'
+# no ROM leaves: instructions come from the fetch table, and a data read below RAM gives 0 (a read port's leaf name --rom
+# names nothing). ~6,000 leaves cost ~8 ms a frame, which the readback scan (one column per frame) and every pass pay
+rom_html = ''
 console = "" if 'nocon' in ABL else "\n".join(f'<div class="oc oc{i}"><b></b></div>' for i in range(OUT_SIZE))
 RUNX = lambda n, e: f"({e}) * var(--run)" if UI and n not in ('k', 'par', 'tprev') else e     # Edit (run = 0) zeroes the registers
 subj = "".join(f'<div class="reg" style="height: {H}px"><div class="sub" style="view-timeline-name: --{n}; top: calc(({RUNX(n, e)} + {OFF}) * 1px)"></div></div>' for n, H, OFF, e in regs if e)

@@ -944,7 +944,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
     never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced')"""
     if out_base is None: out_base = LAYOUT['out_base']
     mem = [0] * (AMASK + 1)
-    for i, w in enumerate(rom): mem[i] = w
+    romw = [w or 0 for w in rom]       # instructions only: a data read below RAM gives 0 (the page has no ROM leaves)
     for a, v in mem_init.items(): mem[a] = v
     pc, sp, fp, optr, steps, out = 0, sp0, sp0, 0, 0, []
     s20 = lambda x: (x + (1 << 19)) % (1 << 20) - (1 << 19)       # machine words: 20-bit two's complement
@@ -959,7 +959,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         steps += 1
         if steps > max_steps: raise RuntimeError('step limit')
         if strict and sp < sp0 and pc >= LAYOUT['code_base']: raise RuntimeError(f'stack underflow at code word {pc - LAYOUT["code_base"]}')
-        w = mem[pc]; op, imm = w // 8192, w % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
+        w = romw[pc] if pc < len(romw) else mem[pc]; op, imm = w // 8192, w % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
         if op == 0: pass
         elif op == 1: mem[sp] = imm; sp += 1
         elif op == 2: mem[sp] = mem[imm]; sp += 1

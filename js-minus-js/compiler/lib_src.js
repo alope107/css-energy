@@ -444,7 +444,8 @@ function tostringb(d, v) { return tostr(v, 1); }
 // [ 1, 'a', [ 2 ] ], { k: 1, 'a b': [] }; below depth 2 [Array] / [Object]. op: the PRINT instruction (its separator; none:
 // a piece of a + chain, printed as its string)
 function pval(v, ret, op) {
-  if ((op == __OP_PRINT__) + (op == __OP_PRINTB__)) { prn(tostr(v, 0)); return ret; }     // a piece of a + chain
+  // a piece of a + chain (op 0: the PRINT is in ROM, which reads as 0: pnK's, a piece's)
+  if ((op == __OP_PRINT__) + (op == __OP_PRINTB__) + (op == 0)) { prn(tostr(v, 0)); return ret; }
   ins(v, 0);
   if ((op == __OP_PRINTSP__) + (op == __OP_PRINTBSP__)) { putc(32); }
   if ((op == __OP_PRINTLN__) + (op == __OP_PRINTBLN__)) { putc(10); }
