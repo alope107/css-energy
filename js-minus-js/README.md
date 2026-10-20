@@ -12,14 +12,15 @@ editor and press Run. The program then goes through four stages:
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-19).**
+**Status (2026-10-20).**
 
-- Every test level passes: 120 programs checked against Node's output and 46 the compiler must reject, plus
+- Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, plus
   differential tests that check thousands of generated, reformatted and mutated programs against Node (`make fuzz`).
   The CPU's checks: C1 (its model, every program) and C2 (a CPU-only page per program, 111 under 1,500 steps).
-- On the page, FizzBuzz 1–15 compiles in about 2.4 s from Run (including the 1.2 s readback sweep), runs in about
-  1.5 s, and halts about 3.9 s after Run; the font CPU took 10.5 s. On CPU-only pages the CSS CPU is 2.8–7.3× faster
-  than the font CPU (FizzBuzz 1.0 s against 5.7 s from load).
+- Strings and arrays are values: strings are built anywhere and compared by their characters, arrays grow, both have
+  their common methods, and `console.log` prints arrays and objects as Node does.
+- On the page, FizzBuzz 1–15 compiles in about 2.45 s from Run (including the 1.2 s readback sweep), runs in about
+  1.2 s, and halts about 3.6 s after Run. On CPU-only pages FizzBuzz halts ~0.95 s after load.
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start

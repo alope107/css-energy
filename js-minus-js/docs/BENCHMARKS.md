@@ -283,3 +283,50 @@ its step count was exact.)
   only) never helps and each pass fills one block (`deep_recursion`: 1,413 of 1,415 passes end on a miss). The font
   CPU, with a 16-line cache and a trap per miss, is slower still.
 
+
+## 13. Strings and arrays (2026-10-20)
+
+Heap strings and growable arrays (ARCHITECTURE §3.6): ROM 6,144 words (a jsc-compiled runtime and hand-written
+routines), new instructions PUSHS, IDXA, STOREX, DYN, `JZ` / `JNZ` / `NOT` reading a string's length, `ENTER` zeroing
+its locals. Main is `22295b9`, built in its own worktree; headless Chromium 153, mini PC, nothing else running, the
+two pages alternately.
+
+**Editor page, FizzBuzz** (`machine/ui_seq.js`, three rounds):
+
+| Page | compiledMs | haltMs |
+|---|---|---|
+| main | 2,512–2,555 | 4,022–4,075 |
+| strings and arrays | 2,437–2,467 | 3,607–3,625 |
+
+*(derived)* HALT ~10% sooner: no startup copy (`__init` is gone: globals start at 0, `data_base`'s constant is an
+overlay), no heap setup, 415 steps against 462.
+
+**CPU-only pages** (`machine/halttime.js`, `POLL=30`, two runs each; run = first step → HALT):
+
+| Program | Steps main / now | Run main | Run now |
+|---|---|---|---|
+| FizzBuzz | 462 / 415 | 678–683 ms | 610–620 ms |
+| `gcd.js` | 122 / 91 | 104–111 ms | 42–46 ms |
+| `primes.js` | 1,774 / 1,695 | 1,564 ms | 1,605–1,619 ms |
+| `str_table.js` | 165 / 118 | 354–358 ms | 285–290 ms |
+| `obj_basic.js` | 360 / 232 | 1,456 ms | 968–1,058 ms |
+| `array_sort.js` | 647 / 545 | 659–695 ms | 794–813 ms |
+| `str_concat.js` | 82 / 93 | 318–372 ms | 414–423 ms |
+
+- `array_sort` is slower: its array is a heap block (header and elements: more blocks to fill than the old static
+  array next to the globals), and `a[i]` is `LOADG a; i; IDXA` (the arr class) where the old static arrays had one IDX.
+  DYN in a class of its own took it from ~960 to ~890 ms (A/B, three runs each).
+- `str_concat`: `console.log("n = " + n)` prints its pieces through a ROM routine (`pnK`) instead of a PRINT each, so
+  that `"a" + b == c` inside `console.log` is right.
+- Load (navigation → first step) is the same as main's: the ROM has no leaf elements (a data read below RAM gives 0).
+  With leaves for its ~6,000 words, each frame cost ~8 ms more: the editor's readback (one column a frame) compiled
+  ~0.5 s later and FizzBuzz halted at ~4.3 s.
+- The ROM fetch table is split into tiers of 1,024 words (a rule each): `str_concat` with the runtime's ~4,000 words in
+  one table ran 1,174–1,212 ms, in tiers 1,024–1,052 ms (before the other changes above).
+
+**Long string and array programs** (C2 pages, three browsers at once, so not timings to compare): `str_build` 7,586
+steps 18.6 s, `str_methods` 13,633 steps 27.0 s, `arr_methods` 38,653 steps 83.2 s, `arr_nested` 15,937 steps 37.5 s.
+String building and the methods run in ROM (jsc's code, ~1.5 ms a step).
+
+**Compiler size** (`tools/vsz.py`): 338 variants, 70,478 temps (main: 355, 71,815); on the page 317 variants in 185
+rules. `popops` emitting one word per operator (not one per case) took it from 104,872 temps.
