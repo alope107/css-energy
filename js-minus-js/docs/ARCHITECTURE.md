@@ -1,7 +1,8 @@
 # Architecture
 
 `make page` builds one XHTML file that runs no script. The user types JavaScript and presses Run; CSS reads the text
-back, CSS compiles it to bytecode, and a font executes it while Chrome shapes text. Output goes to an 8 × 16 console.
+back, CSS compiles it to bytecode, and CSS executes it: a chain of instructions per layout pass. Output goes to an
+8 × 16 console. (Until 2026-10-19 the CPU was a GSUB font; §3.7.)
 
 ```
  editor (contenteditable)                                        readback/ui_rb.py
@@ -15,9 +16,10 @@ back, CSS compiles it to bytecode, and a font executes it while Chrome shapes te
    │  parser step (cc_dsl.Prog) per level, one specialised variant per (mode, token)
    │  emits code words as overlays named after their RAM cells (--c<index>)
    ▼
- font CPU: the machine state is a line of text; Blink shapes it with      machine/gen_fvm4.py, cpu4.py
-   a GSUB font that runs 32 micro-cycles per shaping; CSS services traps   machine/memtree.py (RAM)
-   (cache misses, write-backs, MUL/DIV/MOD/SHL13, PRINT, PUTC)
+ CSS CPU: registers in view timelines; each layout pass runs up to 32    machine/gen_css.py, csssim.py (model)
+   instructions as nested elements (fetch > execute > commit) out of a   machine/memtree.py (RAM)
+   2-way cache in custom properties; the first miss stops the chain and
+   read ports at its end fetch the block for the next pass
    ▼
  console: 8 × 16 RAM cells shown with a counter-style font
 ```
@@ -145,51 +147,75 @@ in-flow overlays `.ovs` named after their RAM cell.
 
 ---
 
-## 3. The font CPU (`machine/`)
+## 3. The CSS CPU (`machine/gen_css.py`)
 
-### 3.1 Design
+Measurements and the style-engine costs behind the design: `exp/csscpu/README.md`.
 
-- `uarch.py` / `uarch4.py`: the value-level model and the trap service; `Machine4` is what L4 runs.
-- `cpu4.py` compiles it into GSUB through `cpugen.py` (stages A / RA / MAP) and `otl.py`, a hand-written assembler,
-  because one cycle's lookups are referenced S times from the LookupList, which fontTools can't express. Every state
-  glyph is a GDEF mark; mark-filtering sets let each lookup see only the cells it needs.
-- `fvm_build.py` writes the woff2 and the page's metadata (`build/f4cc_16.*`).
+### 3.1 A pass
 
-### 3.2 State and cache
+- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px (the font CPU's mechanism); 273 of them: pc,
+  sp, fp, the console cursor, `--pst`, steps, halt, the pending miss, the cache (32 tags with dirty bits, 16 victim
+  bits, 128 words), the read ports' eight words, the latches, the RAM and console write channels. Two passes per frame
+  (the frame gate: `--go`, `--k`, `--par`; a third settles).
+- **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers; a dirty
+  victim's words go out through the RAM write channels. The next block is prefetched into its own set if it is absent
+  there and the victim is clean.
+- **Chain**: 32 levels of three nested `display: contents` elements, styled once per pass:
+  - `.f` fetches: ROM from a static table (its own container-query rule, since an `if()` costs its whole text wherever
+    it is evaluated), RAM through the cache; decodes the opcode and its class.
+  - `.x` executes: one `@container style(--cls: c)` rule per class (push, load, bin, jump, store, index, out), `if()`
+    on `--op` inside it for addresses, results and next registers. A container-query test costs ~2 µs per element,
+    matched or not, an `if()` branch ~0.3 µs: a rule per opcode made even idle levels cost 269 µs, classes 47 µs.
+  - `.c` commits: registers on success; on a stall, `--stop` and the missing block; output; a write as its whole
+    cache set (16 rules on the set; 128 rules on the word cost too much to test).
+- **Stalls**: an instruction runs only if every word it touches is cached (output also needs the pass's console write
+  set). The first that can't stops the chain. It keeps the operands it did read (**latches**) for its re-execution as
+  the next pass's first instruction, so it needs only its written line resident at the end: three blocks in one 2-way
+  set (code, stack top, a string) otherwise evicted each other forever. A read is latched only if the reads its
+  address came from were good (a class's `deps`, exactly).
+- **Export** (`.ex`): the registers' subjects at the chain's end; the pass's writes into the channels (a channel keeps
+  its cell until it takes another: a channel change restyles its whole tree); and eight **read ports** (readers: a
+  fixed element whose width is `anchor-size()` of the leaf a two-level `if()` names, a scroller inside whose subject
+  sits at `100cqi`) that read the missing block and the next during this pass's layout, for the next pass's fill.
+  Nothing above the chain is a size container: ports nested above it restyled the chain once per port per fill.
+- A miss on the block the same pass writes back would read its leaf before the write lands (channels take effect a
+  pass later), so that fill waits a pass (`--stale`).
 
-- State: about 1,274 glyph cells (core registers as hex digits, a control glyph, 16 cache lines of 4 words). One
-  shaping runs S = 32 micro-cycles (`font-feature-settings: "cv01" var(--go)`).
-- An instruction commits PC, SP, FP and its memory write only in its last micro-cycle, so a trap simply restarts it.
-  A trap sets the control glyph to `('T', kind)`; the rest of the shaping does nothing. Kinds: MISS, WFAIL (dirty
-  victim), EXT (MUL, DIV, MOD, SHL13, the six PRINT ops), PUTC, HALT. A PRINT trap repeats until the whole value is
-  written (RESV).
-- Cache: a ring of 16 lines with a victim pointer; data never moves between lines. A MISS writes back the victim's
-  dirty words (one per bank) and fills the whole block. ROM fetch is a font lookup and never traps.
+### 3.2 Memory and output
 
-### 3.3 The page around it (`gen_fvm4.py`)
+- Cache: 16 sets × 2 ways × 4 words, set `(b + b / 16 + b / 256) mod 16` of block `b`, FIFO victims, write-allocate.
+  `--T<line>` = 2 × (block + 1) + dirty, 0 for empty.
+- RAM: `memtree.py`'s leaves and decode trees, four banks (one block's four words in one pass). The read ports' leaf
+  names are muxes over 4,352 blocks; the 512 most-read blocks (globals, strings, code, the stack's bottom) have their
+  own mux, evaluated on the port, and only when a block is missing.
+- Console: its own four small trees and channels in a `contain: strict` box, so output doesn't restyle RAM; readers
+  as before. PRINT and PUTC write up to 4 cells per execution and repeat with `--pst` until done (uarch's print
+  service).
+- Object instructions read 0 below RAM and drop their writes there (`cc_ref.run`). NEW and ENDK write two words, one
+  per execution (`--pst` 0, then 1).
 
-- Registers are view-timeline scrollers (a subject at `value` px); they update every pass, RAM only once per frame.
-- Each pass renders the state as text (one counter per digit, through a `@counter-style` mapping to CPU glyphs),
-  HarfBuzz shapes it, and 76 readers (size containers, mostly two values each) read about 140 span widths as the
-  next state. At most 2 shapings per frame (ENGINE_NOTES 37).
-- Trap service: four banks, so a whole line is written back or filled in one service (four read ports, up to four
-  writes per issue). A read port is a two-level `if()` choosing the anchor name among the bank's 4,096 cells (at most
-  128 `style()` tests), one `anchor-size()`, and a size container that makes it a property. Off-path tree nodes
-  compute constants (ENGINE_NOTES 22, 41). The service also computes EXT ops and PUTC.
-- PRINT service: T1 is classified at run time (string pointer, boolean for the B forms, number); the read ports point
-  at the string's block (`--mblk`); characters (`--pch0…3`) go to their console cells' banks (`(optr + i) mod 4`).
-  `--pst` carries the position between services. `uarch.Machine.print_service` is the same state machine.
-- `zoomfix.py` makes one font unit one device pixel (ENGINE_NOTES 29).
-- Gating: `--go = font ok × compiler done (ccok) × run × …`; nothing runs until `--ccgo`. Edit sets `--run` to 0,
-  zeroing every held register and RAM leaf.
+### 3.3 Model and checks
 
-### 3.4 Runtime library
+- `machine/csssim.py` runs the same design pass by pass (cache, prefetch, stall rules, latches, PRINT chunks); C1
+  checks it on every suite program against Node and cc_ref's steps. `machine/cssref.py` is the ISA as a stepper.
+- `gen_css.py` refuses a page in which a registered `<integer>` value is more than one term (Chrome takes it as
+  invalid and uses 0) or a property is registered twice (memtree's, the compiler's and the scan's names are global).
+
+### 3.4 The page around it
+
+- `UI=1` adds the editor, the readback scan, the compile chain and Run / Edit (`uipage.py`, shared with the font
+  page). Gating: `--go = compiled (ccok) × run × …`; nothing runs until `--ccgo`. Edit sets `--run` to 0, zeroing
+  every register and RAM leaf; the compile chain's overlays (named after their RAM cells) hold code, strings and
+  staging, and read ports read them as RAM.
+
+### 3.5 Runtime library
 
 `compiler/lib_src.js`, in jsc's dialect, compiled by `libbuild.js` (the self-hosted `jsc.js` under Node) into
 `lib.json`. It holds `__init` (copies the staged globals, then the ROM's last word jumps to `code_base`) and `addc`;
-printing is the PRINT family (jsc's `prn(x)`). It is baked into the font, so a change means `make page`.
+printing is the PRINT family (jsc's `prn(x)`). It is the ROM, a static table in the page, so a change means
+`make page`.
 
-### 3.5 Objects and the garbage collector
+### 3.6 Objects and the garbage collector
 
 **Representation.**
 
@@ -204,23 +230,21 @@ printing is the PRINT family (jsc's `prn(x)`). It is baked into the font, so a c
   is a compile-time constant and `o[s]` finds `o.x` when `s` is `"x"`. The lexer writes each identifier's bytes at
   `sdp` and commits them only after `.` (not after `console`) or before `:`.
 
-**Instructions** (opcodes 45 … 53, microcode in `uarch.py`, mirrored in `cc_ref.run()`):
+**Instructions** (opcodes 45 … 53, in `cc_ref.run()`, `csssim.py` and `gen_css.py`'s index, store and load classes):
 
-| Op | Stack | Micro-cycles | What it does |
-|---|---|---|---|
-| `SCANI k` | [o] → [c] | 3 per probe | compare the key at the cursor with `k`: found or 0, stop (cursor stays on that word); negative, follow the link; else step 2 words. Re-executes until it stops |
-| `SCAN` | [o] → [c] | 4 per probe | the same, key in KEYCELL (the ROM routines' dynamic keys) |
-| `LDF i` | [p] → [mem[p+i]] | 3 | `o.x` is `SCANI x; LDF 1` |
-| `PUTV k` | [c, v] → [] | 4 | key at `c`: `mem[c+1] = v`; else call the ROM's append routine with `[c, v]` (return address in `mem[c+1]`) |
-| `NEW` | [] → [o] | 4 | a chunk at HP; if the heap is full, call the GC (GCSP = SP, RETCELL = this NEW), which returns to it |
-| `SETF i` | [o, v] → [o] | 3 | `mem[o+i] = v` (a literal's pairs) |
-| `ENDK i` | [o] → [o] | 3 | `mem[o+i] = mem[o+i+1] = 0`: the keys end there |
-| `OVER` | [a, b] → [a, b, a] | 2 | |
-| `JNEG l` | [a, b] → [a, b] | 2 | jump if `a` is negative (an object; an array is an address) |
+| Op | Stack | What it does |
+|---|---|---|
+| `SCANI k` | [o] → [c] | compare the key at the cursor with `k`: found or 0, stop (cursor stays on that word); negative, follow the link; else step 2 words. Re-executes until it stops |
+| `SCAN` | [o] → [c] | the same, key in KEYCELL (the ROM routines' dynamic keys) |
+| `LDF i` | [p] → [mem[p+i]] | `o.x` is `SCANI x; LDF 1` |
+| `PUTV k` | [c, v] → [] | key at `c`: `mem[c+1] = v`; else call the ROM's append routine with `[c, v]` (return address in `mem[c+1]`) |
+| `NEW` | [] → [o] | a chunk at HP; if the heap is full, call the GC (GCSP = SP, RETCELL = this NEW), which returns to it. Two executions: the word, then HP |
+| `SETF i` | [o, v] → [o] | `mem[o+i] = v` (a literal's pairs) |
+| `ENDK i` | [o] → [o] | `mem[o+i] = mem[o+i+1] = 0`: the keys end there. Two executions |
+| `OVER` | [a, b] → [a, b, a] | |
+| `JNEG l` | [a, b] → [a, b] | jump if `a` is negative (an object; an array is an address) |
 
-- Selectors: a 3-valued gate glyph `ZSEL` (from the control glyph and flags `ZT1 ZT2 ZD SD ST2`) picks address, data
-  and commit; the per-digit gate `ZJ` copies it.
-- Restart safety: every write before the last micro-cycle must leave the inputs unchanged; NEW writes HP last.
+- Restart safety: a first execution's write must leave the second's inputs unchanged (NEW writes HP last).
 - ROM calls go through the jump table: GC (1020), APPEND (1021), SETX (1022), GETX (1023). Routines keep state in the
   `rt_base` cells, not frames (they nest: APPEND allocates, NEW collects).
 - `x[k]`: a name statically typed number (an array literal) uses IDX; anything else calls GETX / SETX, which test the
@@ -233,8 +257,13 @@ MOD 8; heap words only point at chunk starts. Copying sets `k0` to −1 and `k1`
 to the first free pair, and the link if all three are used. Cost is a few shapings per live chunk, none per dead one.
 HP and GCLIM start at 0, so the first NEW sets up the heap.
 
-**Font budget**: 148 control values; 392 subtables per cycle of the 512 allowed at S = 32, thanks to
-`cpu4.merge_digits` (an expression's digits in one subtable). Costs: BENCHMARKS §10.
+### 3.7 The font CPU (removed; last at commit `181cbb7`)
+
+A GSUB CPU ran 32 micro-cycles per shaping while Chrome shaped the machine state as a line of text, and CSS serviced
+its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output): `uarch.py` / `uarch4.py` modelled it, `cpu4.py`,
+`cpugen.py`, `otl.py` and `fvm_build.py` wrote the font, `gen_fvm4.py` its page, L4 checked the model and
+`machine/hbtest.py` the font in uharfbuzz. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12); ENGINE_NOTES
+25–33 are what it relied on.
 
 ---
 
@@ -263,15 +292,16 @@ HP and GCLIM start at 0, so the first NEW sets up the heap.
 | L1 | `make l1` | `cc_ref` compile + 20-bit simulator, strict: the stack must never go below its start and be back at HALT | Node output |
 | L2 | `make l2` | the DSL in Python level by level, with the page's specialised variants (`SPEC=1`; `make l2-generic` unspecialised) | the reference: parser state, tables, every word and label |
 | L3 | `make l3`, `make fuzz-l3` | the generated CSS compiler in Chrome (`build/suite_css.xhtml`, programs written into the latch cells) | the reference, word for word; `suite_err` must be rejected (any nonzero error) |
-| L4 | `make l4` | `uarch4.Machine4` runs every compiled image | Node output |
+| C1 | `make c1` | `csssim.py`, the CSS CPU pass by pass, runs every compiled image | Node output, cc_ref's steps |
+| C2 | `make c2` | a CPU-only page per program under 1,500 steps (`tests/csscpu_pages.py`) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
 
-- `make test` = oracle, L1, quick fuzz, L2, L4. `tests/suite/` has 120 programs (each must fit the editor, or
+- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 120 programs (each must fit the editor, or
   `suite_ref.py` fails it), `tests/suite_err/` 46; `tests/programs/` has the demos t1–t4.
 - **Differential tests** (`tests/fuzz/fuzz.py`; `make test` runs a quick fixed-seed set, `make fuzz` the full one,
   `make fuzz-l3` 300 of them through L3 in Chrome). Node is the oracle; each program goes through L1, L1 on the
-  page's padded text when it fits the editor, and optionally L2 (`--l2`, on every program, rejected ones too) and L4
-  (`--l4`). Sources: `fmt`, every suite program in 11 layouts that must print the same (no semicolons, comments
+  page's padded text when it fits the editor, and optionally L2 (`--l2`, on every program, rejected ones too) and C1
+  (`--c1`). Sources: `fmt`, every suite program in 11 layouts that must print the same (no semicolons, comments
   between all tokens, tabs, CRLF, one line, one token per line, …); `gen`, random programs from `progen.py`, typed
   across the whole language and rendered twice from one tree, for us and for Node with the machine's integer
   semantics spelled out (20-bit wrap, truncating division, x / 0 = x % 0 = 0), staying inside the documented
@@ -281,20 +311,18 @@ HP and GCLIM start at 0, so the first NEW sets up the heap.
   Failures are shrunk into `build/fuzz/`; `tests/fuzz/show.py` replays one, `fuzz.py gen --k N` regenerates one.
 - L5 runs only programs under 1,500 steps (`tests/suite_ui.py`). Harnesses detect HALT by the page's `--isHALT`
   flag, not a trap-kind index (that moves when opcodes are added).
-- `machine/hbtest.py` runs the real font in uharfbuzz against the model: the only check that the font agrees (L4
-  runs the model against itself).
 
 ---
 
 ## 6. Build
 
 ```
-make page   # compiler/lib.json (if lib_src.js changed) -> build/ccimg.json -> build/f4cc_16.woff2 -> build/js_in_css.xhtml
+make page   # compiler/lib.json (if lib_src.js changed) -> build/ccimg.json -> build/js_in_css.xhtml
 make dist   # copy it to dist/
 ```
 
 - Reproducible (the Makefile pins `PYTHONHASHSEED` and `SOURCE_DATE_EPOCH`). The image (`mkimage.py tests/fizz.js`)
   supplies the ROM and the editor's initial program.
-- `gen_fvm4.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
-  readable property names; `MEMGROUP=n` sets the RAM group size. Without `UI=1` it builds a CPU-only page for a RAM
-  image holding the program (HTML: name it `.html`).
+- `gen_css.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
+  the compiler's readable property names; `K` the levels per pass (32); `MEMGROUP=n` the RAM group size. Without
+  `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`).

@@ -1,7 +1,8 @@
 # css-physics, js-minus-js and paint: techniques compared
 
 css-physics runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js
-compiles JavaScript with CSS and runs the bytecode in a GSUB "CPU" font while Chrome shapes text. paint stores state
+compiles JavaScript with CSS and runs the bytecode in CSS too: a chain of instruction levels per layout pass (until
+2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text). paint stores state
 in Chrome's compression-dictionary store. Numbers are from each project's `docs/BENCHMARKS.md`.
 
 ## What css-physics and js-minus-js share
@@ -9,16 +10,18 @@ in Chrome's compression-dictionary store. Numbers are from each project's `docs/
 | Technique | css-physics | js-minus-js |
 |---|---|---|
 | State kept in layout, read back by view timelines | 13 registers per body, `top`/`left` in a 10⁶ px scroller | CPU registers as view-timeline subjects; RAM as remembered sizes |
-| Two useful passes per frame | 2 physics steps per frame | at most 2 shapings per frame; a third issue runs on stale state |
+| Two useful passes per frame | 2 physics steps per frame | 2 CPU passes per frame (more ran correctly but slower) |
 | 6 significant digits through `var()` | 6 bodies per decimal digest word | 20-bit words kept signed, \|v\| < 2¹⁹ |
 | Few registered properties, names reused | `SHARE`: level-local props share names | pooled temp names `qp<i>` |
 | Parity copies avoid self-reference | `J`/`K` accumulators | `--p-<name>-A/B` parser state |
 | Per-frame drivers are non-inherited | clock on `#LT`, pointer zeroed by `.rz` | wall clock on `#clk` |
 | Deep nested chains as the program | one element per Gauss–Seidel round | one element per character and per token |
-| Data-dependent work selected by `@container` | gates per body, pair and plane | one parser variant per (mode, token) |
+| Data-dependent work selected by `@container` | gates per body, pair and plane | one parser variant per (mode, token); one CPU rule per instruction class, `if()` within it |
 
 They differ in shape: css-physics bakes the topology into the stylesheet (rules per pair, N² growth) and does all
-math in `calc()`; js-minus-js runs a fixed generic step selected by data and does its arithmetic in HarfBuzz.
+math in `calc()`; js-minus-js runs a fixed generic step selected by data. js-minus-js's measured style costs (a
+container-query test ~2 µs per element, matched or not; an `if()` ~70 ns per entry it contains; size containers
+restyling a dependent subtree once each) are in `js-minus-js/exp/csscpu/README.md`.
 css-physics is style-bound and works hard to make idle scenes free; js-minus-js only needs to be fast while running.
 
 ## Open ideas across projects

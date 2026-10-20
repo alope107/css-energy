@@ -1,16 +1,16 @@
-"""csscpu_sim.py [K] — level C1: the CSS CPU's design (exp/csscpu/sim.py: cache, prefetch, stalls, PRINT chunks) runs
+"""csscpu_sim.py [K] — level C1: the CSS CPU's design (machine/csssim.py: cache, prefetch, stalls, PRINT chunks) runs
 each suite program from the RAM image the CSS compiler leaves (the padded editor source, as level 4); output compared
 with Node's, steps with cc_ref's. Every program, objects included (uses_objects() picks C2's pages until the page runs
 the object instructions too)."""
 import sys, os, json, glob
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path[:0] = [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback', 'exp/csscpu')]
-import cc_ref as R, ccpage5 as C, ref, sim
+sys.path[:0] = [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback')]
+import cc_ref as R, ccpage5 as C, cssref as ref, csssim as sim
 from uarch import OPN, PRINTOPS
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 K = int(sys.argv[1]) if __name__ == '__main__' and len(sys.argv) > 1 else 32
 PLAIN = set(OPN); L = R.LAYOUT     # every instruction (objects too): uses_objects() is for C2's page list until the page has them
-PAGE_OPS = set(OPN[:OPN.index(PRINTOPS[0]) + 6]) | {'JNEG'}
+PAGE_OPS = set(OPN)
 def uses_objects(im):
     code = im['ram'][L['code_base'] - L['rom_size']:L['code_base'] - L['rom_size'] + 511]
     return any(w and w // 8192 < len(OPN) and OPN[w // 8192] not in PAGE_OPS for w in code)

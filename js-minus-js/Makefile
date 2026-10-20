@@ -21,25 +21,25 @@ L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
 FUZZ     := $(B)/fuzz.$(call id,$(B)/py,-,tests/cmp_dsl.py tests/fuzz/fuzz.py tests/fuzz/oracle.js tests/fuzz/all.sh $(PYSRC)).log
 # The browser's part needs `npm install`. Goals that launch no browser skip it (CI deploys with `make dist` and no
 # npm packages: ../deploy/README.md), and those checks' logs get a name no pass is ever written under.
-NOBROWSER := help all lib image font page dist expect l1 l2 l2-generic l4 c1 fuzz fuzz-quick test clean
+NOBROWSER := help all lib image page dist expect l1 l2 l2-generic c1 fuzz fuzz-quick test clean
 BCONF     = $(if $(filter-out $(NOBROWSER),$(MAKECMDGOALS)),$(call id,$(1),fontcpu,$(2)),no-browser)
 L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
 UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
 C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
-CSSCPU   := $(wildcard exp/csscpu/gencpu.py exp/csscpu/sim.py exp/csscpu/ref.py)
+CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
 
-.PHONY: help all lib image font page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l4 l5 l5-smoke l5-input c1 c2 fuzz fuzz-quick fuzz-l3 clean
+.PHONY: help all lib image page dist test test-browser test-ui test-ui-smoke test-all \
+        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input c1 c2 fuzz fuzz-quick fuzz-l3 clean
 
 help:
-	@echo "make page           build/js_in_css.xhtml (lib -> image -> CPU font -> page, ~25 s)"
-	@echo "make test           fast levels, no browser: Node oracle, L1 reference, quick fuzz, L2 DSL, L4 machine model (~10 s)"
-	@echo "make fuzz           differential tests against Node on thousands of programs, L1 + L2 + L4 (~1.5 min)"
+	@echo "make page           build/js_in_css.xhtml (lib -> image -> page: editor, compile chain, CSS CPU; ~40 s)"
+	@echo "make test           fast levels, no browser: Node oracle, L1 reference, quick fuzz, L2 DSL, C1 CPU model (~10 s)"
+	@echo "make fuzz           differential tests against Node on thousands of programs, L1 + L2 + C1 (~1.5 min)"
 	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~40 s)"
 	@echo "make fuzz-l3        L3 on 300 generated and mutated programs (~2 min)"
 	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~30 s)"
 	@echo "make test-ui        L5 on every quick program (~5.5 min)"
-	@echo "make c2             the CSS CPU (exp/csscpu) runs every quick program without objects to HALT (~25 s)"
+	@echo "make c2             a CPU-only page per quick program runs to HALT (~30 s)"
 	@echo "make dist           copy the built page to dist/"
 
 all: page
@@ -50,19 +50,15 @@ $(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.jso
 	$(NODE) $(CC)/libbuild.js $@
 	$(PY) $(CC)/rtlib.py $@
 
-# ---- image (ROM = lib) -> CPU font (ROM baked into GSUB) -> page (editor + readback + CSS compiler + font CPU)
+# ---- image (ROM = lib) -> page (editor + readback + CSS compiler + CSS CPU; machine/gen_css.py)
 image: $(B)/ccimg.json
 $(B)/ccimg.json: $(CC)/lib.json $(CC)/cc_ref.py $(CC)/mkimage.py tests/fizz.js
 	@mkdir -p $(B)
 	$(PY) $(CC)/mkimage.py tests/fizz.js $@
 
-font: $(B)/f4cc_16.woff2
-$(B)/f4cc_16.woff2: $(B)/ccimg.json $(wildcard machine/cpu4.py machine/cpugen.py machine/otl.py machine/uarch*.py machine/fontbase.py machine/fvm_build.py)
-	CPUMOD=cpu4 $(PY) machine/fvm_build.py $(B)/ccimg.json 16 32 $(B)/f4cc_16
-
 page: $(B)/js_in_css.xhtml
-$(B)/js_in_css.xhtml: $(B)/f4cc_16.woff2 $(wildcard $(CC)/*.py machine/*.py readback/*.py) $(SHARED)/py/csslabel.py
-	UI=1 $(PY) machine/gen_fvm4.py $(B)/ccimg.json $(B)/f4cc_16 $@
+$(B)/js_in_css.xhtml: $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
+	UI=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
 
 dist: page
 	cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
@@ -78,11 +74,9 @@ $(L2): tests/cmp_dsl.py tests/par.py $(PYSRC) $(SUITE) $(RERUN_IF)
 	SPEC=1 SPECK=$(SPECK) $(LOGGED) $@ -t 3 -p '^ALL OK' -- $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js
 l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
-l4:                                       # font CPU model (uarch4) runs every compiled image vs Node
-	$(PY) tests/suite_machine.py
-c1:                                       # the CSS CPU's design (exp/csscpu/sim.py) runs every compiled image vs Node
+c1:                                       # the CSS CPU's design (machine/csssim.py) runs every compiled image vs Node
 	$(PY) tests/csscpu_sim.py
-# C2: a CSS CPU page per program (exp/csscpu/gencpu.py) runs to HALT in Chrome; console vs Node, steps vs cc_ref
+# C2: a CPU-only page per program (machine/gen_css.py) runs to HALT in Chrome; console vs Node, steps vs cc_ref
 $(B)/c2/list.txt: tests/csscpu_pages.py tests/csscpu_sim.py $(CSSCPU) $(PYSRC) $(SUITE)
 	$(PY) tests/csscpu_pages.py $(B)/c2
 c2: $(C2)
@@ -90,7 +84,7 @@ c2: $(C2)
 $(C2): $(B)/c2/list.txt tests/csscpu_pages.js $(HARNESS) $(RERUN_IF)
 	SHARDS=$(SHARDS) $(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/csscpu_pages.js $(B)/c2
 # differential tests against Node without a browser (tests/fuzz/fuzz.py): the suite reformatted, generated programs,
-# one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and L4 too, ~1.5 min)
+# one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and C1 too, ~1.5 min)
 fuzz-quick:
 	$(PY) tests/fuzz/fuzz.py fmt && $(PY) tests/fuzz/fuzz.py gen -n 500 && $(PY) tests/fuzz/fuzz.py mut -n 1000
 fuzz: $(FUZZ)
@@ -133,7 +127,7 @@ l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what th
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)
 	SHARDS=$(SHARDS) EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
 
-test: expect l1 fuzz-quick l2 l4 c1
+test: expect l1 fuzz-quick l2 c1
 test-browser: l3
 test-ui: l5
 test-ui-smoke: l5-smoke

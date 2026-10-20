@@ -1,4 +1,4 @@
-"""fuzz.py MODE [-n N] [-s SEED] [--l2] [--l4] [-v] — differential tests of the compiler against Node, without a browser.
+"""fuzz.py MODE [-n N] [-s SEED] [--l2] [--c1] [-v] — differential tests of the compiler against Node, without a browser.
 
 Modes (each program is checked against Node, which is the oracle, by the levels below):
   gen   random programs from progen.py (the whole language, typed so that only real bugs differ);
@@ -12,7 +12,8 @@ Levels:
   L1    cc_ref compiles and its 20-bit simulator runs; output compared with Node's. Also on the page's padded text
         (24 x 64, as ccpage5.padded_source) when the program fits the editor;
   L2    (--l2) the DSL, level by level, against cc_ref (state, tables, every code word, label and data word);
-  L4    (--l4) the font CPU's model (uarch4) runs the image; output compared with Node's.
+  C1    (--c1) the CSS CPU's model (machine/csssim.py) runs the image of the page's padded text; output compared
+        with Node's.
 A failure is written to build/fuzz/ as the program and Node's version, shrunk (lines removed while it still fails).
 Exit status 1 if anything failed.
 """
@@ -90,9 +91,9 @@ def check(name, src, nres, opts, res, expect_reject=False, mutated=False):
         perr, pout, plim = ours(padded_source(src.rstrip('\n'), 24, 64))
         if (perr, pout) != (0, out) and plim != 'steps': return f'L1 on the padded page text differs: err {perr} {plim or ""}\n{pout}'
         res.c['fits the page'] += 1
-    if opts.l4 and fits(src):
-        o4 = l4(src)
-        if o4 != nres['out']: return f'L4 output differs:\n{o4}'
+    if opts.c1 and fits(src):
+        oc = c1(src)
+        if oc != nres['out']: return f'C1 output differs:\n{oc}'
     res.c['ok'] += 1
     return None
 
@@ -108,13 +109,13 @@ def load_l2():
     os.environ['SPEC'] = '1'
     import cmp_dsl; dsl_check = cmp_dsl.check
 
-def l4(src):
-    from uarch4 import Machine4
-    from uarch import ROM
+def c1(src):
+    import cssref, csssim
     c = R.Compiler(R.LAYOUT['data_base'], R.LAYOUT['code_base'], LIB); words, data = c.compile(padded_source(src.rstrip('\n'), 24, 64))
-    mem = R.image_mem(c, words, data, LIB['init'])
-    m = Machine4(dict(rom=LIB['rom'], ram=[mem.get(ROM + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0']), 16)
-    m.run(32); return ''.join(map(chr, m.out))
+    mem = R.image_mem(c, words, data, LIB['init']); rom = R.LAYOUT['rom_size']
+    s = csssim.Sim(cssref.from_image(dict(rom=LIB['rom'], romSize=rom, ram=[mem.get(rom + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0'])))
+    while not s.st['halt'] and s.passes < 200000: s.run_pass(32)
+    return ''.join(map(chr, s.st['out']))
 
 # ---------------- shrinking: drop lines (the same lines from both versions) while the failure stays
 def shrink(ol, nl, fails_with):
@@ -147,7 +148,7 @@ def mode_gen(opts, res):
     progs = []
     for k in (opts.k or range(opts.n)):
         seed = opts.seed * 100003 + k
-        o, n = progen.generate(seed, opts.size * random.Random(seed).uniform(0.3, 1.2))     # small ones fit the page (padded text, L4)
+        o, n = progen.generate(seed, opts.size * random.Random(seed).uniform(0.3, 1.2))     # small ones fit the page (padded text, C1)
         progs.append((seed, '\n'.join(o) + '\n', '\n'.join(n) + '\n'))
     nres = node([(n, progen.PRELUDE) for _, _, n in progs])
     whys = check_all(opts, res, [(f'gen{seed}', o, nr, {}) for (seed, o, _), nr in zip(progs, nres)])
@@ -256,7 +257,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(); ap.add_argument('mode', choices=['gen', 'fmt', 'mut', 'dump'])
     ap.add_argument('--dir', default=os.path.join(OUT, 'l3'))
     ap.add_argument('-n', type=int, default=200); ap.add_argument('-s', '--seed', type=int, default=1)
-    ap.add_argument('--size', type=float, default=1.0); ap.add_argument('--l2', action='store_true'); ap.add_argument('--l4', action='store_true')
+    ap.add_argument('--size', type=float, default=1.0); ap.add_argument('--l2', action='store_true'); ap.add_argument('--c1', action='store_true')
     ap.add_argument('--k', type=int, nargs='*', help='gen: only these program numbers'); ap.add_argument('--strict', action='store_true', help='mut: an output difference fails'); ap.add_argument('-v', action='store_true'); ap.add_argument('--noshrink', action='store_true')
     opts = ap.parse_args()
     if opts.l2: load_l2()

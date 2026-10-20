@@ -1,8 +1,8 @@
-"""ref.py — cc_ref.run()'s instruction semantics as a stepper on an explicit state, for the CSS CPU experiments: the
-generator's expected results, and cache / pass analyses (python3 exp/csscpu/ref.py prog.js prints them).
+"""cssref.py — cc_ref.run()'s instruction semantics as a stepper on an explicit state, for the CSS CPU experiments: the
+generator's expected results, and cache / pass analyses (python3 machine/cssref.py prog.js prints them).
 Objects ops are left out (FizzBuzz-class programs); PRINT follows cc_ref.run (the whole value in one instruction)."""
 import os, sys, json, collections
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, 'compiler'), os.path.join(ROOT, 'machine')]
 import cc_ref as R
 from uarch import OPN

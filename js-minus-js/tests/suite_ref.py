@@ -9,7 +9,7 @@ BIG = {'cmp_far'}                       # its long first line is a comment, whic
 def one(f):
     want = open(f[:-3] + '.out').read()
     lines = open(f).read().rstrip('\n').split('\n')
-    if (len(lines) > 24 or max(map(len, lines)) > 64) and os.path.basename(f)[:-3] not in BIG:       # the page would truncate it: L4 / L5 fail for the wrong reason
+    if (len(lines) > 24 or max(map(len, lines)) > 64) and os.path.basename(f)[:-3] not in BIG:       # the page would truncate it: C1 / L5 fail for the wrong reason
         return ('TOO-BIG', f'{len(lines)} lines, longest {max(map(len, lines))} (the editor is 24 x 64)')
     try:
         c, r = R.compile_and_run(open(f).read(), lib, strict=True)

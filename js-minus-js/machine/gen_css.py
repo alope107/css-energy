@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""gencpu.py image.json out.html — the pure-CSS CPU: a CPU-only page (gen_fvm4.py's role) with no font. Style alone runs
-the instructions; layout only fills the cache and moves the registers. The design is sim.py's, which is its oracle.
+"""gen_css.py image.json out.html — the pure-CSS CPU: a CPU-only page, or with UI=1 the editor page. Style alone runs
+the instructions; layout only fills the cache and moves the registers. The design is csssim.py's, which is its oracle.
 
-A pass (ISSUE passes per frame, gen_fvm4's frame gate):
-  #cpu      the registers (view timelines, as gen_fvm4's), the frame gate, the pending miss's victim lines
+A pass (ISSUE passes per frame, the font CPU's frame gate):
+  #cpu      the registers (view timelines), the frame gate, the pending miss's victim lines
   .fl       the fill: the victim line takes the block the last pass missed, whose words the read ports left in registers
             (a dirty victim's words go to the write set first); the next block is prefetched if it is absent and its
             victim is clean
@@ -11,21 +11,24 @@ A pass (ISSUE passes per frame, gen_fvm4's frame gate):
             runs only if every word it touches is cached (and, for output, the write set is free); the first that can't
             stops the chain, noting its missing block (--pend) for the next pass's fill
   .ex       the registers' view-timeline subjects at the chain's final state; the write set goes to the RAM channels;
-            eight read ports (gen_fvm4's readback readers) read the missing block's words and the next block's (one port
+            eight read ports (readers, like the font CPU's) read the missing block's words and the next block's (one port
             per bank and block) from the ROM and RAM leaves into registers for the next pass's fill
 Nothing above the chain is a size container, so a pass styles the chain once. (Ports above it, as first built, restyled
 the whole chain once per port whose size changed: 7 times in a fill pass.)
 Cache: 16 sets x 2 ways x 4 words, set (b + b / 16 + b / 256) mod 16 of block b; --T<line> = 2 * (block + 1) + dirty
 (0: empty), --F<set> the next victim way, --W<line>_<word> the words, line = 2 * set + way. RAM is memtree.py's, the
-console gen_fvm4's.
+console the font CPU's.
 
-Cost model (measured, README): a container-query test ~2 us, a declaration ~1.3 us, an if() branch ~0.3 us, per element.
+Cost model (measured: exp/csscpu/README.md): a container-query test ~2 us, a declaration ~1.3 us, an if() branch ~0.3 us, per element.
 So .x dispatches on 7 instruction classes (one container test each) and selects within a class by if(); .c commits a
 whole cache set (16 rules) rather than a word (128).
-Env: K (levels, default 32), ISSUE (passes per frame, default 2; ENGINE_NOTES 37: more run on stale state)."""
+Env: K (levels, default 32), ISSUE (passes per frame, default 2), UI=1: the editor page (XHTML; the image's RAM is
+empty: the compile chain's overlays hold the program): Run starts the scan, the compiler, then the CPU;
+Edit zeroes the registers and RAM."""
 import sys, os, json, html as _h
-HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(os.path.dirname(HERE))
-sys.path[:0] = [os.path.join(ROOT, "machine"), os.path.join(ROOT, "compiler"), os.path.join(ROOT, "..", "shared", "py"), HERE]
+HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
+sys.path[:0] = [os.path.join(ROOT, "machine"), os.path.join(ROOT, "compiler"), os.path.join(ROOT, "readback"), os.path.join(ROOT, "..", "shared", "py"), HERE]
+UI = os.environ.get("UI") == "1"
 import memtree, csslabel as lbl, cc_ref as R
 from uarch import OPN, PRINTOPS, STRTAG, STR_LO, STR_HI
 OP = {n: i for i, n in enumerate(OPN)}
@@ -67,8 +70,9 @@ WREGS += [(f"wak{w}{c}", KN + 1, 0, f"var(--nwak{w}{c})") for w in range(WB) for
          [(f"wdk{w}{c}", 256, 0, f"var(--nwdk{w}{c})") for w in range(WB) for c in CH]
 if 'noW' in os.environ.get('ABL', ''): regs = [r for r in regs if not r[0].startswith('W')]
 # the read ports' words (their subjects sit in the ports, so no expression here), and a miss on the block this pass writes
-# back (its leaf isn't written until the next pass, so the ports read it stale: the fill waits a pass; sim.py)
+# back (its leaf isn't written until the next pass, so the ports read it stale: the fill waits a pass; csssim.py)
 regs += [(f"mv{i}", M20, M20 // 2, None) for i in range(2 * WB)]
+if UI: regs.append(("ccok", 2, 0, None))     # compiled without error: a reader of the compile chain's done anchor, in .ex
 regs += [("rLm", 64, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n})") for n in LATCH if n != "p"] + \
         [(f"rLp{j}", M20, M20 // 2, f"var(--Lp{j})") for j in range(4)]
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
@@ -80,7 +84,7 @@ WNAMES = [r[0] for r in WREGS]
 cpu = ["--first: calc(1 - var(--init));",
        f"--sp: calc(var(--init) * var(--rsp) + var(--first) * {sp0});", f"--fp: calc(var(--init) * var(--rfp) + var(--first) * {sp0});",
        "--fresh: calc(min(1, max(var(--t) - var(--tprev), var(--tprev) - var(--t))));",
-       f"--go: calc(min(1, var(--fresh) + min(1, max(0, {ISSUE} - var(--k)))));",
+       f"--go: calc({'var(--ccok) * var(--run) * ' if UI else ''}min(1, var(--fresh) + min(1, max(0, {ISSUE} - var(--k)))));", "--isHALT: var(--halt);",
        f"--chan: calc({ISSUE} * var(--par) + (1 - var(--fresh)) * var(--k));",
        f"--nk: calc(var(--fresh) + (1 - var(--fresh)) * min({ISSUE}, var(--k) + 1));",   # saturates, so frames settle (ENGINE_NOTES 16)
        "--npar: calc(var(--fresh) * (1 - var(--par)) + (1 - var(--fresh)) * var(--par));",
@@ -104,31 +108,31 @@ HOT = range(256, 768)     # the blocks runs mostly read: globals, strings, code,
 # H (way 1), each one if() over the set comparing that way's tag, and the word v (set, then way, then word).
 def lookup(n, A):
     b = f"var(--b{n})"
-    hit = lambda way: sel(f"z{n}", NSET, lambda s: eq(f"round(down, var(--T{2 * s + way}) / 2)", f"{b} + 1"))
-    return [f"--b{n}: round(down, ({A}) / 4);", f"--u{n}: mod({A}, 4);", f"--z{n}: {setof(b)};", f"--h{n}: {hit(0)};", f"--H{n}: {hit(1)};"]
+    hit = lambda way: sel(f"q{n}", NSET, lambda s: eq(f"round(down, var(--T{2 * s + way}) / 2)", f"{b} + 1"))
+    return [f"--b{n}: round(down, ({A}) / 4);", f"--u{n}: mod({A}, 4);", f"--q{n}: {setof(b)};", f"--h{n}: {hit(0)};", f"--H{n}: {hit(1)};"]
 def word(n, k): return sel(f"u{n}", 4, lambda j: f"var(--W{k}_{j})")
 # A stalled instruction's operands are kept (latches: registers rL<n>, valid if bit n of rLm) for its re-execution as the
 # next pass's first instruction (--lat: 1 until the first commit), so it needs only its written line resident at the end
-# (sim.py: without them three blocks in one set evicted each other forever). The write's own lookup (w) isn't latched.
+# (csssim.py: without them three blocks in one set evicted each other forever). The write's own lookup (w) isn't latched.
 def latched(n, e): return f"if(style(--lat: 1) and style(--Lb{n}: 1): var(--rL{n}); else: {e})"
 def read(n, A):
-    return lookup(n, A) + [f"--v{n}: " + latched(n, sel(f"z{n}", NSET, lambda s: f"if(style(--H{n}: 1): {word(n, 2 * s + 1)}; else: {word(n, 2 * s)})")) + ";"]
+    return lookup(n, A) + [f"--v{n}: " + latched(n, sel(f"q{n}", NSET, lambda s: f"if(style(--H{n}: 1): {word(n, 2 * s + 1)}; else: {word(n, 2 * s)})")) + ";"]
 def miss(n):
     return f"(1 - var(--h{n}) - var(--H{n}))" + (f" * (1 - var(--lat) * var(--Lb{n}))" if n in LATCH else "")
-LOOKUP = ("b", "u", "z", "h", "H")
+LOOKUP = ("b", "u", "q", "h", "H")
 READS = ("f", "s1", "s2", "ra", "rb", "w", "p")
 
 # a write of value V through lookup n (a read of the same address, or the write's own): the set's 8 new words and 2 tags,
 # and --wz = set + 1, which picks the commit rule on .c (0: no write, as on a stall)
-def write(n, V):
+def write(n, V, en="1"):
     d = [f"--wval: {V};"]
     for i in range(8):
         way, j = divmod(i, 4)
-        old = sel(f"z{n}", NSET, lambda s: f"var(--W{2 * s + way}_{j})")
+        old = sel(f"q{n}", NSET, lambda s: f"var(--W{2 * s + way}_{j})")
         d.append(f"--n{i}: if(style(--H{n}: {way}) and style(--u{n}: {j}): var(--wval); else: {old});")
     for way in range(2):
-        d.append(f"--nT{way}: if(style(--H{n}: {way}): calc(2 * var(--b{n}) + 3); else: {sel(f'z{n}', NSET, lambda s: f'var(--T{2 * s + way})')});")
-    return d + [f"--wz: calc(var(--ok) * (var(--z{n}) + 1));"]
+        d.append(f"--nT{way}: if(style(--H{n}: {way}): calc(2 * var(--b{n}) + 3); else: {sel(f'q{n}', NSET, lambda s: f'var(--T{2 * s + way})')});")
+    return d + [f"--wz: calc(var(--ok) * {en} * (var(--q{n}) + 1));"]
 
 # ---------------- instruction classes: (ops, reads [(name, address, the ops needing it or None for all)], write (address
 # or None to reuse read `reuse`, value, reuse) or None, next registers {pc, sp, fp}). A class is one rule on .x.
@@ -143,57 +147,97 @@ BINE = {'ADD': s20("var(--vs2) + var(--vs1)"), 'SUB': s20("var(--vs2) - var(--vs
         'AND': f"calc((1 - {z1}) * (1 - {eq('var(--vs2)', 0)}))", 'OR': f"min(1, calc((1 - {z1}) + (1 - {eq('var(--vs2)', 0)})))"}
 BINOPS = ['MOD', 'EQ', 'ADD', 'LE', 'LT', 'SUB', 'GT', 'GE', 'NE', 'MUL', 'DIV', 'AND', 'OR']    # FizzBuzz's most frequent first
 fpo = f"{fp} + {simm}"
+from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC
+pst_ = v("pst")
+def below(n): return f"clamp(0, {RB0} - var(--b{n}), 1)"       # the access is below RAM (object instructions: reads 0, writes dropped)
+RA0 = f"calc((1 - {below('ra')}) * var(--vra))"                 # an object instruction's read through ra
+scan_key = by_op({'SCAN': "var(--vrb)"}, imm)
+scan_found = f"min(1, calc({eq(RA0, scan_key)} + {eq(RA0, 0)}))"
+putv_nz = f"(1 - {eq(RA0, 0)})"
+new_lt = f"clamp(0, -1 * {s20('var(--vra) - var(--vrb)')}, 1)"   # NEW: HP - GCLIM < 0, a chunk is free
+# a class: ops; reads [(name, address, ops needing it or None for all)]; the write (address or None to reuse read `reuse`,
+# value, reuse, enable); next registers {pc, sp, fp, steps, pst}; latch dependencies {read: [(read, ops or None)]}: a read
+# is kept only if the reads its address came from were good (exactly those: a spurious dependency can block progress)
 CLASSES = {
-    'push': (['PUSHI', 'CALL', 'ENTER'], [], (sp, by_op({'CALL': f"calc({pc} + 1)", 'ENTER': fp}, imm), None),
-             {'sp': by_op({'ENTER': f"calc({sp} + 1 + {imm})"}, f"calc({sp} + 1)"), 'pc': by_op({'CALL': imm}, f"calc({pc} + 1)"), 'fp': by_op({'ENTER': sp}, fp)}),
-    'load': (['LOADG', 'LOADL', 'DUP', 'INCG', 'INCL'], [("ra", by_op({'LOADL': fpo, 'INCL': fpo, 'DUP': f"{sp} - 1"}, imm), None)],
-             (by_op({'INCG': imm, 'INCL': fpo}, sp), by_op({'INCG': s20("var(--vra) + 1"), 'INCL': s20("var(--vra) + 1")}, "var(--vra)"), None),
-             {'sp': by_op({'INCG': sp, 'INCL': sp}, f"calc({sp} + 1)")}),
-    'bin': (BINOPS, [("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None)], (None, by_op({o: BINE[o] for o in BINOPS[:-1]}, BINE[BINOPS[-1]]), "s2"),
-            {'sp': f"calc({sp} - 1)"}),
-    'jump': (['JZ', 'JMP', 'JNZ', 'POP', 'JMPI', 'NOP', 'HALT', 'JNEG'], [("s1", f"{sp} - 1", ['JZ', 'JNZ', 'JMPI']), ("s2", f"{sp} - 2", ['JNEG'])], None,
-             {'sp': by_op({'JZ': f"calc({sp} - 1)", 'JNZ': f"calc({sp} - 1)", 'POP': f"calc({sp} - 1)", 'JMPI': f"calc({sp} - 1)"}, sp),
-              'pc': by_op({'JZ': f"calc({z1} * {imm} + (1 - {z1}) * ({pc} + 1))", 'JMP': imm, 'JNZ': f"calc((1 - {z1}) * {imm} + {z1} * ({pc} + 1))",
-                           'JMPI': "mod(var(--vs1), 32768)", 'HALT': pc, 'JNEG': f"calc(clamp(0, -1 * var(--vs2), 1) * {imm} + (1 - clamp(0, -1 * var(--vs2), 1)) * ({pc} + 1))"},
-                          f"calc({pc} + 1)")}),
-    'store': (['STOREG', 'STOREL', 'STOREI'], [("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", ['STOREI'])],
-              (by_op({'STOREL': fpo, 'STOREI': "mod(var(--vs2), 32768)"}, imm), "var(--vs1)", None),
-              {'sp': by_op({'STOREI': f"calc({sp} - 2)"}, f"calc({sp} - 1)")}),
-    'index': (['LOADI', 'IDX', 'IDXL', 'RET', 'NOT', 'NEG', 'SHL13'],
-              [("s1", f"{sp} - 1", None), ("ra", by_op({'LOADI': "mod(var(--vs1), 32768)", 'IDXL': fpo, 'RET': fp}, imm), ['LOADI', 'IDX', 'IDXL', 'RET']),
-               ("rb", by_op({'RET': f"{fp} - 1"}, "mod(var(--vra) + var(--vs1), 32768)"), ['IDX', 'IDXL', 'RET'])],
-              (by_op({'RET': f"{fp} - 1 - {imm}"}, f"{sp} - 1"),
-               by_op({'LOADI': "var(--vra)", 'RET': "var(--vs1)", 'NOT': z1, 'NEG': s20("-1 * var(--vs1)"), 'SHL13': s20("var(--vs1) * 8192")}, "var(--vrb)"), None),
-              {'sp': by_op({'RET': f"calc({fp} - {imm})"}, sp), 'fp': by_op({'RET': "var(--vra)"}, fp), 'pc': by_op({'RET': "mod(var(--vrb), 32768)"}, f"calc({pc} + 1)")}),
+    'push': dict(ops=['PUSHI', 'CALL', 'ENTER'], reads=[], write=(sp, by_op({'CALL': f"calc({pc} + 1)", 'ENTER': fp}, imm), None, "1"),
+                 nx={'sp': by_op({'ENTER': f"calc({sp} + 1 + {imm})"}, f"calc({sp} + 1)"), 'pc': by_op({'CALL': imm}, f"calc({pc} + 1)"), 'fp': by_op({'ENTER': sp}, fp)}),
+    'load': dict(ops=['LOADG', 'LOADL', 'DUP', 'INCG', 'INCL', 'OVER'], reads=[("ra", by_op({'LOADL': fpo, 'INCL': fpo, 'DUP': f"{sp} - 1", 'OVER': f"{sp} - 2"}, imm), None)],
+                 write=(by_op({'INCG': imm, 'INCL': fpo}, sp), by_op({'INCG': s20("var(--vra) + 1"), 'INCL': s20("var(--vra) + 1")}, "var(--vra)"), None, "1"),
+                 nx={'sp': by_op({'INCG': sp, 'INCL': sp}, f"calc({sp} + 1)")}),
+    'bin': dict(ops=BINOPS, reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None)],
+                write=(None, by_op({o: BINE[o] for o in BINOPS[:-1]}, BINE[BINOPS[-1]]), "s2", "1"), nx={'sp': f"calc({sp} - 1)"}),
+    'jump': dict(ops=['JZ', 'JMP', 'JNZ', 'POP', 'JMPI', 'NOP', 'HALT', 'JNEG'], reads=[("s1", f"{sp} - 1", ['JZ', 'JNZ', 'JMPI']), ("s2", f"{sp} - 2", ['JNEG'])], write=None,
+                 nx={'sp': by_op({'JZ': f"calc({sp} - 1)", 'JNZ': f"calc({sp} - 1)", 'POP': f"calc({sp} - 1)", 'JMPI': f"calc({sp} - 1)"}, sp),
+                     'pc': by_op({'JZ': f"calc({z1} * {imm} + (1 - {z1}) * ({pc} + 1))", 'JMP': imm, 'JNZ': f"calc((1 - {z1}) * {imm} + {z1} * ({pc} + 1))",
+                                  'JMPI': "mod(var(--vs1), 32768)", 'HALT': pc, 'JNEG': f"calc(clamp(0, -1 * var(--vs2), 1) * {imm} + (1 - clamp(0, -1 * var(--vs2), 1)) * ({pc} + 1))"},
+                                 f"calc({pc} + 1)")}),
+    # ENDK writes its two zeros in two executions (--pst 0, then 1)
+    'store': dict(ops=['STOREG', 'STOREL', 'STOREI', 'SETF', 'ENDK'], reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", ['STOREI', 'SETF'])],
+                  write=(by_op({'STOREL': fpo, 'STOREI': "mod(var(--vs2), 32768)", 'SETF': f"mod(var(--vs2) + {imm}, 32768)",
+                                'ENDK': f"mod(var(--vs1) + {imm} + {pst_}, 32768)"}, imm), by_op({'ENDK': 0}, "var(--vs1)"), None,
+                         f"(1 - ({eq('var(--op)', OP['SETF'])} + {eq('var(--op)', OP['ENDK'])}) * {below('w')})"),
+                  nx={'sp': by_op({'STOREI': f"calc({sp} - 2)", 'ENDK': sp}, f"calc({sp} - 1)"), 'pc': by_op({'ENDK': f"calc({pc} + {pst_})"}, f"calc({pc} + 1)"),
+                      'steps': by_op({'ENDK': f"calc(var(--steps) + {pst_})"}, "calc(var(--steps) + 1)"), 'pst': by_op({'ENDK': f"calc(1 - {pst_})"}, pst_)},
+                  deps={'s2': []}),
+    # indirect reads and the object instructions. SCANI / SCAN repeat until the key or a free pair; PUTV calls the ROM's append
+    # routine when the key is missing; NEW writes its two words in two executions (--pst 0, then 1) and calls the GC when full
+    'index': dict(ops=['LOADI', 'IDX', 'IDXL', 'RET', 'NOT', 'NEG', 'SHL13', 'LDF', 'SCANI', 'SCAN', 'PUTV', 'NEW'],
+                  reads=[("s1", f"{sp} - 1", ['LOADI', 'IDX', 'IDXL', 'RET', 'NOT', 'NEG', 'SHL13', 'LDF', 'SCANI', 'SCAN', 'PUTV']), ("s2", f"{sp} - 2", ['PUTV']),
+                         ("ra", by_op({'LOADI': "mod(var(--vs1), 32768)", 'IDXL': fpo, 'RET': fp, 'LDF': f"mod(var(--vs1) + {imm}, 32768)", 'SCANI': "mod(var(--vs1), 32768)",
+                                       'SCAN': "mod(var(--vs1), 32768)", 'PUTV': "mod(var(--vs2), 32768)", 'NEW': HP}, imm),
+                          f"(({' + '.join(eq('var(--op)', OP[o]) for o in ['LOADI', 'IDX', 'IDXL', 'RET', 'LDF', 'SCANI', 'SCAN', 'PUTV', 'NEW'])}) - "
+                          f"({' + '.join(eq('var(--op)', OP[o]) for o in ['LDF', 'SCANI', 'SCAN', 'PUTV'])}) * {below('ra')})"),
+                         ("rb", by_op({'RET': f"{fp} - 1", 'SCAN': KEYCELL, 'NEW': GCLIM}, "mod(var(--vra) + var(--vs1), 32768)"), ['IDX', 'IDXL', 'RET', 'SCAN', 'NEW'])],
+                  write=(by_op({'RET': f"{fp} - 1 - {imm}", 'PUTV': "mod(var(--vs2) + 1, 32768)",
+                                'NEW': f"calc({pst_} * ({new_lt} * {HP} + (1 - {new_lt}) * {RETCELL}) + (1 - {pst_}) * ({new_lt} * {sp} + (1 - {new_lt}) * {GCSP}))"}, f"{sp} - 1"),
+                         by_op({'LOADI': "var(--vra)", 'RET': "var(--vs1)", 'NOT': z1, 'NEG': s20("-1 * var(--vs1)"), 'SHL13': s20("var(--vs1) * 8192"), 'LDF': RA0,
+                                'SCANI': f"calc(clamp(0, -1 * {RA0}, 1) * {RA0} + (1 - clamp(0, -1 * {RA0}, 1)) * {s20('var(--vs1) + 2')})",
+                                'SCAN': f"calc(clamp(0, -1 * {RA0}, 1) * {RA0} + (1 - clamp(0, -1 * {RA0}, 1)) * {s20('var(--vs1) + 2')})",
+                                'PUTV': f"calc({putv_nz} * var(--vs1) + (1 - {putv_nz}) * {pc})",
+                                'NEW': f"calc({pst_} * ({new_lt} * (var(--vra) + 8) + (1 - {new_lt}) * {pc}) + (1 - {pst_}) * ({new_lt} * (var(--vra) + {HEAP0 - OBJTAG}) + (1 - {new_lt}) * {sp}))"},
+                               "var(--vrb)"), None,
+                         f"(1 - ({eq('var(--op)', OP['SCANI'])} + {eq('var(--op)', OP['SCAN'])}) * {scan_found} - {eq('var(--op)', OP['PUTV'])} * {below('w')})"),
+                  nx={'sp': by_op({'RET': f"calc({fp} - {imm})", 'PUTV': f"calc({sp} - 2 * {putv_nz})", 'NEW': f"calc({sp} + {pst_})"}, sp),
+                      'fp': by_op({'RET': "var(--vra)"}, fp),
+                      'pc': by_op({'RET': "mod(var(--vrb), 32768)", 'SCANI': f"calc({pc} + {scan_found})", 'SCAN': f"calc({pc} + {scan_found})",
+                                   'PUTV': f"calc({putv_nz} * ({pc} + 1) + (1 - {putv_nz}) * {PUTVEC})",
+                                   'NEW': f"calc((1 - {pst_}) * {pc} + {pst_} * ({new_lt} * ({pc} + 1) + (1 - {new_lt}) * {GCVEC}))"}, f"calc({pc} + 1)"),
+                      'steps': by_op({'NEW': f"calc(var(--steps) + {pst_})"}, "calc(var(--steps) + 1)"), 'pst': by_op({'NEW': f"calc(1 - {pst_})"}, pst_)},
+                  deps={'ra': [('s1', ['LOADI', 'LDF', 'SCANI', 'SCAN']), ('s2', ['PUTV'])], 'rb': [('s1', ['IDX', 'IDXL']), ('ra', ['IDX', 'IDXL'])]}),
 }
 def first_miss(acc):
     """the block of the first missing access (dependency order) among [(name, mask)], -1 for none"""
     e = "-1"
     for n, m in reversed(acc): e = f"calc({m}{miss(n)} * var(--b{n}) + (1 - {m}{miss(n)}) * {e})"
     return e
-def need(ops): return "" if ops is None else "(" + " + ".join(eq("var(--op)", OP[o]) for o in ops) + ") * "
+def need(ops):
+    if ops is None: return ""
+    if isinstance(ops, str): return ops + " * "
+    return "(" + " + ".join(eq("var(--op)", OP[o]) for o in ops) + ") * "
 def nexts(nx, done="1"):
     return [f"--npc: {nx.get('pc', f'calc({pc} + {done})')};", f"--nsp: {nx.get('sp', sp)};", f"--nfp: {nx.get('fp', fp)};",
-            f"--nsteps: calc(var(--steps) + {done});"]
+            f"--nsteps: {nx.get('steps', f'calc(var(--steps) + {done})')};"] + ([f"--npst: {nx['pst']};"] if 'pst' in nx else [])
 cls_rules = {}
-for c, (ops, rds, wr, nx) in CLASSES.items():
+for c, k in CLASSES.items():
     d, acc = [], []
-    for n, A, ops_n in rds: d += read(n, A); acc.append((n, need(ops_n)))
-    # a read is kept only if the reads its address depends on were good (index: ra on s1 for LOADI, rb on ra and s1)
-    deps = {'ra': ['s1'] if c == 'index' else [], 'rb': ['s1', 'ra']}
-    good = {n: f"(1 - {miss(n)})" + "".join(f" * (1 - {miss(m)})" for m in deps.get(n, [])) for n, _, _ in rds}
+    for n, A, ops_n in k['reads']: d += read(n, A); acc.append((n, need(ops_n)))
+    good = {}
+    for n, _, _ in k['reads']:
+        g = f"(1 - {miss(n)})"
+        for m, ops_m in k.get('deps', {}).get(n, []): g += f" * (1 - {need(ops_m)}{miss(m)})"
+        good[n] = g
     d.append("--hm: calc(1 - var(--mf)" + "".join(f" + {LATCH[n]} * {g}" for n, g in good.items()) + ");")
-    if wr:
-        A, V, reuse = wr
-        if reuse is None: d += lookup("w", A); acc.append(("w", "")); wn = "w"
+    if k['write']:
+        A, V, reuse, en = k['write']
+        if reuse is None: d += lookup("w", A); acc.append(("w", "" if en == "1" else en + " * ")); wn = "w"
         else: wn = reuse
-        d += write(wn, V)
+        d += write(wn, V, en)
     d += [f"--ok: calc(1 - min(1, calc({' + '.join(f'{m}{miss(n)}' for n, m in acc)})));" if acc else "--ok: 1;",
-          f"--mb: {first_miss(acc)};" if acc else "--mb: -1;"] + nexts(nx)
+          f"--mb: {first_miss(acc)};" if acc else "--mb: -1;"] + nexts(k['nx'])
     if c == 'jump': d += [f"--nstop: {eq('var(--op)', OP['HALT'])};", f"--nhalt: {eq('var(--op)', OP['HALT'])};"]
-    cls_rules[c] = (ops, d)
+    cls_rules[c] = (k['ops'], d)
 
-# 'out': the PRINT family and PUTC (uarch.Machine.print_service, gen_fvm4's service): up to 4 console cells per execution,
+# 'out': the PRINT family and PUTC (the font CPU's print service): up to 4 console cells per execution,
 # one per bank; a string chunk ends at its block (the block's line must be cached), at a NUL (the value is out) or a
 # newline (taken); until the value is out the instruction repeats (npc = pc) and --pst carries the position. Output needs
 # the pass's write set free. PUTC writes one cell or a newline.
@@ -209,7 +253,7 @@ pr = read("s1", f"{sp} - 1") + [
     "--pq: calc(min(1, var(--pst)) * var(--pst) + (1 - min(1, var(--pst))) * var(--pp));",
     f"--pdone: calc(var(--isStr) * {eq('var(--pq)', STR_LO)});", "--pj0: mod(var(--pq), 4);"]
 pr += lookup("p", "var(--pq)")
-pr += [f"--pw{j}: if(style(--lat: 1) and style(--Lbp: 1): var(--rLp{j}); else: " + sel("zp", NSET, lambda s, j=j: f"if(style(--Hp: 1): var(--W{2 * s + 1}_{j}); else: var(--W{2 * s}_{j}))") + ");" for j in range(4)]
+pr += [f"--pw{j}: if(style(--lat: 1) and style(--Lbp: 1): var(--rLp{j}); else: " + sel("qp", NSET, lambda s, j=j: f"if(style(--Hp: 1): var(--W{2 * s + 1}_{j}); else: var(--W{2 * s}_{j}))") + ");" for j in range(4)]
 pr.append(f"--hm: calc(1 - var(--mf) + 2 * (1 - {miss('s1')}) + 32 * (1 - {miss('p')}) * (1 - {miss('s1')}));")
 pr += [f"--mpp: calc(var(--isStr) * (1 - var(--pdone)) * {miss('p')});",
        f"--pa: max({pv}, -1 * {pv});", f"--pneg: clamp(0, -1 * {pv}, 1);",
@@ -254,7 +298,7 @@ for w in range(WB):
            f"--nwD{w}: calc(" + " + ".join(f"{eq(f'var(--pi{w})', i)} * var(--pch{i})" for i in range(4)) + ");"]
 cls_rules['out'] = (PRINTOPS + ['PUTC'], pr)
 CLS = {c: i + 1 for i, c in enumerate(cls_rules)}
-assert set(OPN[:OP[PRINTOPS[0]] + 6]) <= {o for ops, _ in cls_rules.values() for o in ops}, 'every non-object op in one class'
+assert sorted(OPN) == sorted(o for ops, _ in cls_rules.values() for o in ops), 'every instruction in one class'
 FREQ = ['PUSHI', 'LOADG', 'JZ', 'MOD', 'EQ', 'JMP', 'ADD', 'STOREG', 'LE', 'PRINTLN', 'LOADL']   # FizzBuzz's most frequent first
 opcls = {o: CLS[c] for c, (ops, _) in cls_rules.items() for o in ops}
 cls_of = "if(" + " ".join(f"style(--op: {OP[o]}): {opcls[o]};" for o in FREQ + [o for o in opcls if o not in FREQ]) + " else: 0)"
@@ -271,7 +315,7 @@ P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "in
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
-     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm"]
+     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
@@ -280,14 +324,14 @@ P += [x + n for n in READS for x in LOOKUP] + [f"v{n}" for n in READS if n not i
 P = list(dict.fromkeys(P))
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
-LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "zf", "hf", "Hf", "rh", "rl"}
+LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
 props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; initial-value: --c0; }}' for i in range(2 * WB)]   # a port's leaf name
 
-css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines (gen_fvm4.py)'),
+css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines'),
        "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
        "#cpu {\n  timeline-scope: " + ", ".join(f"--{r[0]}" for r in regs if r[0] not in WNAMES) +
        ";\n  animation-name: " + ", ".join(f"r-{r[0]}" for r in regs) + ";\n  animation-timeline: " + ", ".join(f"--{r[0]}" for r in regs) +
@@ -296,7 +340,7 @@ css.append(lbl.group('Register keyframes', 'each register\'s view timeline mappe
 css += [f"@keyframes r-{n} {{ from {{ --{n}: {H - OFF}; }} to {{ --{n}: {-1 - OFF}; }} }}" for n, H, OFF, _ in regs]
 
 # a read port's leaf name: a two-level if() on the block's 64-block group (h) and place in it (l). An if() costs ~70 ns per
-# entry it contains, taken or not (README), so a 4,352-block mux costs ~0.3 ms wherever it is evaluated: each port
+# entry it contains, taken or not (exp/csscpu/README.md), so a 4,352-block mux costs ~0.3 ms wherever it is evaluated: each port
 # evaluates it itself (not #cpu, which restyles every pass), only on passes that fill, and from a mux of the 512 blocks
 # runs mostly read (HOT) unless the block is outside them.
 def mux(p, blocks, leaf, default):
@@ -331,8 +375,8 @@ css.append(lbl.section('Instructions', f'{K} levels of .f (fetch, decode) > .x (
 css.append(lbl.group('.f: fetch the word at pc unless the chain has stopped', 'ROM from a static table, RAM through the cache; a miss stalls'))
 css.append(".f { --op: 255; --cls: 0; --ok: 2; --pout: 0; --wz: 0; }")
 css.append("@container style(--stop: 0) { .f { " + " ".join(lookup("f", pc)) +
-           f" --vf: " + latched("f", sel("zf", NSET, lambda s: f"if(style(--Hf: 1): {word('f', 2 * s + 1)}; else: {word('f', 2 * s)})")) + ";"
-           f" --mf: calc({miss('f')}); --ok: calc(2 - 2 * var(--mf)); --mb: var(--bf); --hm: calc(1 - var(--mf));"
+           f" --vf: " + latched("f", sel("qf", NSET, lambda s: f"if(style(--Hf: 1): {word('f', 2 * s + 1)}; else: {word('f', 2 * s)})")) + ";"
+           f" --mf: calc({miss('f')}); --ok: calc(2 - 2 * var(--mf)); --mb: var(--bf); --hm: calc(1 - var(--mf)); --npst: var(--pst);"
            " --op: calc(var(--mf) * 255 + (1 - var(--mf)) * round(down, var(--vf) / 8192)); --imm: mod(var(--vf), 8192);"
            f" --simm: calc(var(--imm) - 8192 * min(1, round(down, var(--imm) / 4096))); --cls: {cls_of}; }} }}")
 # (a large if() costs its whole text wherever it is evaluated, so the ROM table gets a rule of its own: README)
@@ -341,19 +385,19 @@ css.append("@container style(--stop: 0) and style(--rom: 1) { .f { --rh: round(d
 css.append(lbl.group('.x: execute', 'one rule per instruction class; if() on --op inside it'))
 css += [f"@container style(--cls: {CLS[c]}) {{ .x {{ {' '.join(d)} }} }}" for c, (_, d) in cls_rules.items()]
 css.append(lbl.group('.c: commit', 'registers on success; the stall (stop, the missing block); output; the written word\'s cache set'))
-css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --sp: var(--nsp); --fp: var(--nfp); --steps: var(--nsteps); --stop: var(--nstop); --halt: var(--nhalt);"
+css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --sp: var(--nsp); --fp: var(--nfp); --steps: var(--nsteps); --stop: var(--nstop); --halt: var(--nhalt); --pst: var(--npst);"
            f" --lat: 0; --rom: clamp(0, {ROM} - var(--npc), 1); }} }}")
 css.append("@container style(--ok: 0) { .c { --stop: 1; --pend: calc(var(--mb) + 1); --Lm: var(--hm);"
            + " ".join(f" --L{n}: var(--v{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--pw{j});" for j in range(4)) + " } }")
-css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --pst: var(--npst); --cw: var(--ncw); " +
+css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --cw: var(--ncw); " +
            " ".join(f"--cA{w}: var(--nwA{w}); --cD{w}: var(--nwD{w});" for w in range(WB)) + " } }")
 css += [f"@container style(--wz: {s + 1}) {{ .c {{ " + " ".join(f"--W{2 * s + i // 4}_{i % 4}: var(--n{i});" for i in range(8)) +
         f" --T{2 * s}: var(--nT0); --T{2 * s + 1}: var(--nT1); }} }}" for s in range(NSET)]
 
-css.append(lbl.section('Export', 'the write set into the RAM channels (gen_fvm4.py\'s rotation); the registers\' subjects'))
+css.append(lbl.section('Export', 'the write set into the RAM channels; the registers\' subjects'))
 # (it holds its cell until it takes another, rather than being cleared: a channel change restyles the tree). Rotation: a
 # channel written in a frame is not taken again until its leaf's remembered size has been recorded at that frame's end
-# (gen_fvm4.py); a cell written again releases the channel that held it.
+# (the font CPU's rotation); a cell written again releases the channel that held it.
 ex = []
 for w in range(WB):
     for i, c in enumerate(CH):
@@ -369,7 +413,14 @@ ex += ["--xon: min(1, var(--pend));"] + [
 css.append(".ex { " + " ".join(ex) + " }")
 
 css.append(lbl.section('RAM', f'memtree.py: {len(CH)} write channels per bank, each a decode tree over the bank\'s cells'))
-css.append(memtree.scope(WNAMES))
+if UI:
+    import ccpage5, ui_rb, uipage
+    UIL, UIP, UIT = (int(os.environ.get(k_, d_)) for k_, d_ in (('UIL', 24), ('UIP', 64), ('UIT', 400)))
+    ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
+    print('compile chain', ui_info)
+    css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
+    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES] + ui_tls + ['--rbrdT']) + "; }")
+else: css.append(memtree.scope(WNAMES))
 _sp, _sc = memtree.shared(); props += [lbl.group('RAM write channels')] + _sp; css += _sc
 for w in range(WB):
     _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"{w}{c}" for c in CH)}, BANKN, WOFF, prefix=str(w))
@@ -426,7 +477,7 @@ if os.environ.get('DUP'):
 # ---------------- BENCH=1: the chain alone (chainbench.js), started from the state of the first pass sim.py runs with all
 # K levels executing (STALL=1: the chain stopped at its top). The root's inline style holds the state.
 if os.environ.get('BENCH'):
-    import copy, sim, ref
+    import copy, csssim as sim, cssref as ref
     sm = sim.Sim(ref.load(os.environ['PROG']))
     while True:
         before = copy.deepcopy(sm); n, why = sm.run_pass(K)
@@ -449,13 +500,16 @@ if os.environ.get('BENCH'):
 
 # ---------------- HTML
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM))
-LIVE = STATIC_CELLS
+LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain's overlays hold code, strings and staging
 mem_html = "" if 'nomem' in ABL else "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
 con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
 rom_html = '<div class="mem">' + "".join(f'<div class="w" style="anchor-name: --r{a}"><i class="rom" style="width: {image["rom"][a] + WOFF}px"></i></div>' for a in sorted(ROMNZ)) + '</div>\n'
 console = "" if 'nocon' in ABL else "\n".join(f'<div class="oc oc{i}"><b></b></div>' for i in range(OUT_SIZE))
-subj = "".join(f'<div class="reg" style="height: {H}px"><div class="sub" style="view-timeline-name: --{n}; top: calc(({e} + {OFF}) * 1px)"></div></div>' for n, H, OFF, e in regs if e)
+RUNX = lambda n, e: f"({e}) * var(--run)" if UI and n not in ('k', 'par', 'tprev') else e     # Edit (run = 0) zeroes the registers
+subj = "".join(f'<div class="reg" style="height: {H}px"><div class="sub" style="view-timeline-name: --{n}; top: calc(({RUNX(n, e)} + {OFF}) * 1px)"></div></div>' for n, H, OFF, e in regs if e)
+if UI: subj += ('<div class="rp" style="width: anchor-size(--ccdone width, 0px)"><div class="reg" style="height: 2px">'
+                '<div class="sub" style="view-timeline-name: --ccok; top: calc(min(1, round(100cqi / 1px)) * 1px)"></div></div></div>')
 subj += "".join(f'<div class="rp rp{i}"><div class="reg" style="height: {M20}px"><div class="sub" style="view-timeline-name: --mv{i}; top: calc(100cqi - {WOFF - M20 // 2}px)"></div></div></div>' for i in range(2 * WB))
 if 'dupsubs' in ABL: subj += subj.replace('view-timeline-name: --', 'view-timeline-name: --dup')
 chain = f'<div class="ex"><div class="regs" aria-hidden="true">{subj}</div></div>'
@@ -464,27 +518,87 @@ blurb = (f"<p>No font: style alone runs the bytecode. Each layout pass runs up t
          f"(fetch and decode, execute, commit) out of a 2-way, 32-line cache of RAM held in custom properties. The first cache "
          f"miss stops the chain; the next pass fills the line, and prefetches the next, through anchor-size() read ports.</p>"
          f"<pre>{_h.escape(image.get('source', ''))}</pre>")
-page = f"""<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>JavaScript on a CSS CPU</title>
-<style>
-{lbl.header('js-minus-js/exp/csscpu/gencpu.py', 'js-minus-js/exp/csscpu/README.md')}
+if not UI:
+    page = f"""<!doctype html>
+    <html lang="en">
+    <meta charset="utf-8">
+    <title>JavaScript on a CSS CPU</title>
+    <style>
+    {lbl.header('js-minus-js/machine/gen_css.py', 'js-minus-js/docs/ARCHITECTURE.md')}
+    {static}
+    {chr(10).join(props)}
+    {chr(10).join(css)}
+    </style>
+    {mem_html}{rom_html}<div class="cons">{con_html}<div class="con"></div>
+    {console}</div>
+    <div id="clk"><div id="cpu">
+    <div class="head"{' hidden' if 'nohead' in ABL else ''}>
+    <h1>JavaScript on a pure-CSS CPU</h1>
+    {blurb}
+    <div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b>
+     halt <b class="num" style="--v: var(--halt)"></b></div>
+    </div>
+    <div class="fl">{chain}</div>
+    </div></div>
+    </html>
+    """
+else:
+    ui_props = uipage.props(WOFF) + [f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
+                                     '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }']
+    notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back (a variable axis makes HarfBuzz "
+             f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "
+             f"stylesheet, runs over those characters: a lexer on a chain of one element per character, then a parser on a chain of one element "
+             f"per token, each parser rule picked by a container query. Every bytecode word it emits is an element named after its RAM cell. Then "
+             f"the CPU, also a stylesheet, runs the program: each layout pass executes up to {K} instructions as a chain of nested elements, out of a "
+             f"cache of RAM held in custom properties. Output appears in the console on the left.</p>"
+             f"<p>The language is a small JavaScript subset: <code>var</code>, <code>function</code>, <code>if</code>/<code>else</code>, "
+             f"<code>while</code>, <code>for</code>, <code>switch</code>, <code>return</code>, integer arithmetic, strings, arrays, objects, "
+             f"<code>console.log(x)</code> and <code>putc(c)</code>. Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
+             f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine.</p>")
+    page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>JavaScript in CSS</title>
+<style><![CDATA[
+{lbl.header('js-minus-js/machine/gen_css.py (page, CPU, RAM), compiler/ccpage5.py (compiler), readback/ui_rb.py (editor scan)', 'js-minus-js/docs/ARCHITECTURE.md')}
 {static}
+{uipage.static(COLS, ROWS, UIL, UIP, WOFF)}
 {chr(10).join(props)}
+{chr(10).join(ui_props)}
 {chr(10).join(css)}
-</style>
-{mem_html}{rom_html}<div class="cons">{con_html}<div class="con"></div>
+{lbl.section('Editor scan', 'a font reads the editor back one column per frame and latches each character into a register')}
+{ui_rb.css(UIL, UIP, 8)}
+{lbl.section('Compiler', 'the lexer on a chain of one element per character, the parser on a chain of one element per token')}
+{ui_css}
+]]></style>
+</head>
+<body>
+<input type="checkbox" id="run" class="runcb" aria-label="Run"/>
+{mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
+<main id="app">
+<div class="width-reader"></div>{ui_rb.regs_html()}
+<header><h1>JavaScript, compiled and run by a stylesheet</h1>
+<p class="lede">Type a program and press Run. No JavaScript runs on this page.</p></header>
+<section class="pane">
+<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span></div>
+<div class="frame"><div id="ed" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div></div>
+<div class="rbout"></div>
+<p class="limit">Lines past {UIL} are not read.</p>
+<p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>
+</section>
+<section class="notes">{notes}</section>
+{ui_rb.probes_html(UIL, UIP, 8)}
+</main>
+<div id="clkw">
+<div class="cons">{con_html}<div class="con"></div>
 {console}</div>
 <div id="clk"><div id="cpu">
-<div class="head"{' hidden' if 'nohead' in ABL else ''}>
-<h1>JavaScript on a pure-CSS CPU</h1>
-{blurb}
-<div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b>
- halt <b class="num" style="--v: var(--halt)"></b></div>
+<div class="head">
+<div class="status"><span>steps <b class="num" style="--v: var(--steps)"></b></span><span>pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b></span></div>
 </div>
 <div class="fl">{chain}</div>
-</div></div>
+</div></div></div>
+</body>
 </html>
 """
 import re, collections
@@ -507,6 +621,7 @@ def lint(text, ints):
 _bad = lint("\n".join(css), set(re.findall(r'@property --([\w-]+) \{ syntax: "<integer>"', "\n".join(props))))
 assert not _bad, f'registered integers with more than one term: {_bad[:5]}'
 _dup = [n for n, c in collections.Counter(re.findall(r'@property (--[\w-]+)', page)).items() if c > 1]
-assert not _dup, f'properties registered twice (memtree.py has its own): {_dup}'
+assert not _dup, f'properties registered twice (memtree.py, the compile chain and the scan have their own): {_dup}'
+if UI: lbl.check(page, outp)
 open(outp, 'w').write(page)
 print(outp, len(page), 'bytes; K', K, 'ISSUE', ISSUE, '; registers', len(regs), '; properties', len(P))

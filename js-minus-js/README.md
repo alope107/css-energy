@@ -1,39 +1,43 @@
-# JavaScript, compiled by a stylesheet and run by a font
+# JavaScript, compiled and run by a stylesheet
 
 `dist/js_in_css.xhtml` is one static XHTML page, and no script runs on it. You type a JavaScript program into its
 editor and press Run. The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates bytecode.
-3. **A font runs it.** A GSUB "CPU" executes the bytecode while Chrome shapes a line of text.
+3. **CSS runs it.** Each layout pass executes up to 32 instructions as a chain of nested elements, out of a cache of
+   RAM held in custom properties. (Until 2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text; its code last
+   exists at commit `181cbb7`.)
 4. **The output appears.** It shows in an 8 × 16 console.
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-17).**
+**Status (2026-10-19).**
 
-- All five test levels pass: 120 programs checked against Node's output and 46 the compiler must reject, plus
+- Every test level passes: 120 programs checked against Node's output and 46 the compiler must reject, plus
   differential tests that check thousands of generated, reformatted and mutated programs against Node (`make fuzz`).
-- On the page, compiling takes 1.7–5.8 s from Run (median 2.2 s), including the 1.2 s readback sweep. FizzBuzz 1–15
-  then runs in about 8.3 s and halts about 10.8 s after Run (18.3 s before printing moved into the machine). Objects
-  and garbage collection left FizzBuzz's run time unchanged and compile time about 4% slower.
+  The CPU's checks: C1 (its model, every program) and C2 (a CPU-only page per program, 111 under 1,500 steps).
+- On the page, FizzBuzz 1–15 compiles in about 2.4 s from Run (including the 1.2 s readback sweep), runs in about
+  1.5 s, and halts about 3.9 s after Run; the font CPU took 10.5 s. On CPU-only pages the CSS CPU is 2.8–7.3× faster
+  than the font CPU (FizzBuzz 1.0 s against 5.7 s from load).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
 ```
 npm install                       # playwright-core + @sparticuz/chromium (Linux x64), for the harnesses only
-pip install -r requirements.txt   # fontTools, brotli (uharfbuzz optional)
-make page                         # -> build/js_in_css.xhtml (about 25 s; reproducible)
-make test                         # fast tests, no browser (about 15 s)
-make fuzz                         # differential tests against Node, no browser (about 10 min)
-make l3                           # the CSS compiler in Chrome (about 1.5 min)
-make l5-smoke                     # the real page, typed like a user (about 1 min)
+pip install -r requirements.txt   # fontTools, brotli (the readback font)
+make page                         # -> build/js_in_css.xhtml (about 40 s; reproducible)
+make test                         # fast tests, no browser (about 10 s)
+make fuzz                         # differential tests against Node, no browser (about 1.5 min)
+make l3                           # the CSS compiler in Chrome (about 40 s)
+make c2                           # the CSS CPU on CPU-only pages (about 30 s)
+make l5-smoke                     # the real page, typed like a user (about 30 s)
 ```
 
 Open `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome. Elsewhere than Linux x64, set
-`CHROME=/path/to/chrome` for the harnesses. Toolchain: Python 3.12+, fontTools 4.65+, Node 22+; the page needs CSS
-`if()` and `sibling-index()`.
+`CHROME=/path/to/chrome` for the harnesses. Toolchain: Python 3.12+, fontTools 4.65+ (the readback font), Node 22+;
+the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timelines.
 
 ## The language
 
@@ -75,7 +79,7 @@ Open `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome. Elsewhere th
 ### How values print
 
 - A string is a tagged pointer (its address minus 2^18), so `console.log` tells it from a number at run time. Each
-  argument is one PRINT instruction, serviced by CSS at up to 4 console cells per shaping.
+  argument is one PRINT instruction, which writes up to 4 console cells per execution and repeats until it is done.
 - The compiler tracks types statically (boolean, string, number, unknown; from comparisons and `!`, literals and
   arithmetic, a variable's last assignment, a function's returns) so that booleans print as `true` / `false`:
   `console.log(1 < 2)` prints `true`. Only 0 / 1 depend on the static type; strings and numbers are told apart at

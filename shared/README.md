@@ -131,7 +131,7 @@ python3 shared/py/csslabel.py --check js-minus-js/build/*.xhtml  # exit 1 if a s
 - Labels cost only bytes (a few KB per page, a few hundred per paint cell document); the CSS parser drops comments.
 
 **What gets a label**
-- Every rule sits under a section, hand-written CSS a generator inlines too (`ui3d.css`, `gen_fvm4.py`'s `static`).
+- Every rule sits under a section, hand-written CSS a generator inlines too (`ui3d.css`, `gen_css.py`'s `static`).
   Each generator calls `csslabel.check()` on what it writes and stops the build if a rule comes before the first
   section.
 - A section per subsystem a reader would look for, named as the project's `docs/ARCHITECTURE.md` names it (state

@@ -22,7 +22,7 @@ const { consoleCodes, gridText } = require(path.join(__dirname, '..', 'tools', '
       const p = await b.newPage({ viewport: { width: 1200, height: 800 } }); const t0 = Date.now();
       await p.goto(fileUrl(path.join(dir, name + '.html')), { timeout: 120000 });
       let r = { halted: false, steps: 0 };
-      while (Date.now() - t0 < 60000 && !r.halted) {
+      while (Date.now() - t0 < +(process.env.MAXMS || 60000) && !r.halted) {
         await p.waitForTimeout(50);
         r = await p.evaluate(() => { const cs = getComputedStyle(document.querySelector('#cpu')); return { halted: +cs.getPropertyValue('--halt') === 1, steps: +cs.getPropertyValue('--steps') }; });
       }

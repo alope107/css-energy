@@ -1,7 +1,8 @@
 # History: how the design got here, and what didn't work
 
 Numbers for superseded code come from raw logs and earlier chats on other machines. The code was removed on
-2026-10-15 (`git checkout 91d73bc -- js-minus-js/archive`), the logs on 2026-10-18 (`83d4fde`). "Self-compile": the self-hosted `jsc.js` in ROM compiles FizzBuzz at run time, then runs it.
+2026-10-15 (`git checkout 91d73bc -- js-minus-js/archive`), the logs on 2026-10-18 (`83d4fde`), the font CPU (timeline 2–11)
+on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in ROM compiles FizzBuzz at run time, then runs it.
 "Direct fizz": FizzBuzz compiled into ROM.
 
 ## Timeline
@@ -31,12 +32,20 @@ Numbers for superseded code come from raw logs and earlier chats on other machin
   version needed 531 subtables per cycle; gated rule groups and `merge_digits` got 392. Fixed on the way: 16 copies of
   every self-update rule (HarfBuzz −6%), comparisons overflowing for operands 2^19 apart (`tests/suite/cmp_far.js`),
   the model's 20-bit address mask. FizzBuzz within 1% on the page.
+- **12, the CSS CPU again (2026-10-19).** Chained shapings (branch `chain-shapings`) showed nested containers running
+  several recalcs in one pass; a toy of instructions in style alone came out at 0.38 ms per instruction against the font
+  CPU's ~8.6. The machine (`machine/gen_css.py`, `exp/csscpu/README.md`): a chain of instruction levels per pass, a
+  2-way cache in custom properties, read ports at the chain's end, latches against livelock. Getting it fast was
+  learning Blink's style costs: a container-query test ~2 µs per element (a rule per opcode and per cache word made
+  idle levels 269 µs), an `if()` ~70 ns per entry it contains, size containers above a subtree restyling it once per
+  container (7 times per fill). FizzBuzz on the page 10.5 → 3.9 s after Run; CPU-only pages 2.8–7.3× faster
+  (BENCHMARKS §12). The font CPU's code was removed; it last exists at commit `181cbb7`.
 
 ## Dead ends and superseded approaches
 
 | # | Tried | What happened | Replaced by |
 |---|---|---|---|
-| 1 | Pure-CSS VM as the CPU | 3–4× slower (3,609 vs 1,287 s; 1,502 vs 385 s) | font CPU |
+| 1 | Pure-CSS VM as the CPU (2026-10-09) | 3–4× slower (3,609 vs 1,287 s; 1,502 vs 385 s): one instruction per pass | font CPU; then the CSS CPU (timeline 12) |
 | 2 | One `@container` rule per RAM cell per write channel | 70 ms style + layout per pass | decode tree, ~20 ms |
 | 3 | FIFO cache + evict buffer, data moving between lines | long contexts, slow in HarfBuzz | ring with a victim pointer |
 | 4 | One-word cache lines | more traps | 4-word lines (385 → 250 s) |

@@ -993,9 +993,9 @@ def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
     return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict)
 
 def image(src, lib, ram=False):
-    """The machine image every harness takes (gen_fvm4.py, uarch4, hbtest.py): ROM = the lib; RAM all zero (the page's
+    """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero (the page's
     compile chain supplies code and data), or with ram=True the program as the CSS compiler leaves it (CPU-only pages,
-    the model, the font in uharfbuzz). steps/expected come from cc_ref's simulation."""
+    the CSS CPU's model). steps/expected come from cc_ref's simulation."""
     L = LAYOUT
     c = Compiler(L['data_base'], L['code_base'], lib)
     words, data = c.compile(src)

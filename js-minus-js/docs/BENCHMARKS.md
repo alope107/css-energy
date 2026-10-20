@@ -1,6 +1,7 @@
 # Benchmarks
 
-Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`.
+Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`. §1–§11 measured the font CPU,
+removed on 2026-10-20 (last at commit `181cbb7`); they stay as the baseline the CSS CPU (§12) is compared with.
 
 **Conventions.** Measured 2026-10-17 on the Ubuntu mini PC (Intel i5-12600H, no GPU), headless Chromium
 153.0.8010.12 launched by `tools/browser.js` (profile `fontcpu`), nothing else running unless noted; desktop Chrome
@@ -237,3 +238,48 @@ Model (`tools/traps.py`), steps / shapings / misses: obj_basic 365 / 77 / 47; ob
 - On the page (L5, loaded machine; FizzBuzz 12.6 s in the same run), Run → HALT: obj_basic 13.8 s, obj_list 15.0 s,
   obj_func 18.0 s, obj_nested 24.1 s, obj_keys 24.4 s; `obj_gc_small` (500 objects through the 384-chunk heap) 216 s,
   output and step count exact.
+
+## 12. The CSS CPU (2026-10-19)
+
+`machine/gen_css.py`; the build-up, ablations and Blink's style costs are in `exp/csscpu/README.md`. Headless
+Chromium 153, mini PC.
+
+**Editor page, FizzBuzz** (`machine/ui_seq.js`, one browser, the two pages alternately, three rounds each):
+
+| Page | compiledMs | haltMs | run |
+|---|---|---|---|
+| font CPU (`181cbb7`) | 2,678–2,771 | 10,453–10,581 | ~7.8 s |
+| CSS CPU (`make page`) | 2,431–2,492 | 3,876–3,951 | ~1.45 s |
+
+*(derived)* HALT 2.7× sooner, run ~5.4× faster.
+
+**CPU-only pages**, load → HALT (`exp/csscpu/halt.js`, `POLL=30` for both, run alternately, two runs each):
+
+| Program | Steps | CSS CPU | Font CPU | Speed-up |
+|---|---|---|---|---|
+| FizzBuzz | 462 | 985–1,033 ms | 5,714–5,753 ms | 5.7× |
+| `gcd.js` | 122 | 420–436 ms | 1,677–1,691 ms | 3.9× |
+| `primes.js` | 1,774 | 1,732–1,779 ms | 12,787–13,022 ms | 7.3× |
+| `array_sort.js` | 647 | 1,004–1,049 ms | 4,689–4,788 ms | 4.6× |
+| `str_table.js` | 165 | 656–695 ms | 2,682–2,779 ms | 4.0× |
+| `bool_print.js` | 46 | 392–400 ms | 1,097–1,127 ms | 2.8× |
+
+**Long programs**, load → HALT (one run each, one browser; CSS pages by `tests/csscpu_pages.js`, font pages by
+`exp/csscpu/halt.js`):
+
+| Program | Steps | CSS CPU | Font CPU | Speed-up |
+|---|---|---|---|---|
+| `fib.js` | 8,353 | 8.6 s | 81.7 s | 9.6× |
+| `deep_recursion.js` | 8,445 | 56.1 s | 196.5 s | 3.5× |
+| `obj_gc_small.js` | 12,432 | 40.1 s | 152.0 s | 3.8× |
+| `obj_gc.js` | 40,443 | 287.2 s | not halted at 900 s (30,042 steps) | > 3.1× |
+
+(`halt.js` compares the console with the raw output, so it reports fib's wrapped console as wrong on the font page;
+its step count was exact.)
+
+- Correctness: L5 164/164 and L5-input 14/14 on the CSS CPU page; C2 111/111 (every suite program under 1,500 steps,
+  objects included) and the nine longer ones; C1 120/120.
+- Misses dominate long runs: deep recursion and heap allocation evict dirty lines, so the prefetch (clean victims
+  only) never helps and each pass fills one block (`deep_recursion`: 1,413 of 1,415 passes end on a miss). The font
+  CPU, with a 16-line cache and a trap per miss, is slower still.
+

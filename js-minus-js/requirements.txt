@@ -1,5 +1,3 @@
-# Build: the CPU font and the readback font are generated with fontTools; woff2 needs brotli.
+# Build: the readback font is generated with fontTools; woff2 needs brotli.
 fonttools>=4.65
 brotli
-# Optional: offline HarfBuzz runs of the CPU font (machine/hbtest.py and the HarfBuzz benchmarks in docs/BENCHMARKS.md)
-uharfbuzz>=0.56
