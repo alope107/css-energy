@@ -180,7 +180,7 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
   - `.f` fetches: ROM from a static table (its own container-query rule, since an `if()` costs its whole text wherever
     it is evaluated), RAM through the cache; decodes the opcode and its class.
   - `.x` executes: one `@container style(--cls: c)` rule per class (push, load, bin, jump, test, store, index, arr,
-    out), `if()` on `--op` inside it for addresses, results and next registers. A container-query test costs ~2 µs per element,
+    dyn, out), `if()` on `--op` inside it for addresses, results and next registers. A container-query test costs ~2 µs per element,
     matched or not, an `if()` branch ~0.3 µs: a rule per opcode made even idle levels cost 269 µs, classes 47 µs.
   - `.c` commits: registers on success; on a stall, `--stop` and the missing block; output; a write as its whole
     cache set (16 rules on the set; 128 rules on the word cost too much to test).
@@ -249,7 +249,7 @@ address − `STRTAG`, like a literal's); an array `[hdr][cap][len][ptr][elements
 `hdr` = −2 − words − kind (kind 0 string, 1 array). The tags are multiples of 2^15, so the 15-bit address registers
 untag a value for free (`LOADI` of `x − 1` is the length of a string or an array).
 
-**Instructions** (`cc_ref.run()`, `csssim.py`, `gen_css.py`'s arr, test and out classes). A trap pushes the return
+**Instructions** (`cc_ref.run()`, `csssim.py`, `gen_css.py`'s push, arr, dyn, test and out classes). A trap pushes the return
 address and jumps to a ROM routine, as CALL does:
 
 | Op | Stack | What it does |

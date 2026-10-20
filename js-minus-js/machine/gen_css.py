@@ -230,24 +230,28 @@ def isref_v(x):
     return (f"calc({isstr_v(x)} + clamp(0, {x} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {x}, 1)"
             f" + clamp(0, {x} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {x}, 1))")
 ARR_PRE = [f"--xA: {by_op({'STOREX': vs3}, vs2)};", f"--xk: {by_op({'STOREX': vs2}, vs1)};",
-           f"--xarr: calc((1 - {eq('var(--op)', OP['DYN'])}) * clamp(0, var(--xA) - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - var(--xA), 1));",
+           f"--xarr: calc(clamp(0, var(--xA) - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - var(--xA), 1));",
            f"--xa: calc(var(--xarr) * mod(var(--xA), 32768) + (1 - var(--xarr)) * ({sp} - 1));",
            "--xin: calc(var(--xarr) * clamp(0, var(--xk) + 1, 1) * clamp(0, var(--vrb) - var(--xk), 1));",
            f"--xrd: calc({eq('var(--op)', OP['IDXA'])} * var(--xin));",
-           f"--xtrap: {by_op({'DYN': 'var(--dtr)', 'IDXA': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')};",
-           "--df: mod(var(--imm), 64);",
+           f"--xtrap: {by_op({'IDXA': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')};"]
+# DYN, a class of its own (the arr class's reads are wasted on it, and its result if() on them)
+DYN_PRE = ["--df: mod(var(--imm), 64);",
            # DYN's slow path: == / != with two strings, the others with a string, array or object on either side
            f"--dtr: if(style(--df: {OP['EQ']}) or style(--df: {OP['NE']}): calc({isstr_v(vs1)} * {isstr_v(vs2)}); else: min(1, calc({isref_v(vs1)} + {isref_v(vs2)})));",
            "--dres: if(" + " ".join(f"style(--df: {OP[o]}): {BINE[o]};" for o in ('ADD', 'EQ', 'NE', 'LT', 'GT', 'LE')) + f" else: {BINE['GE']});"]
-CLASSES['arr'] = dict(ops=['IDXA', 'STOREX', 'DYN'], pre=ARR_PRE,
+CLASSES['arr'] = dict(ops=['IDXA', 'STOREX'], pre=ARR_PRE,
     reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None), ("s3", f"{sp} - 3", ['STOREX']),
            ("ra", "var(--xa)", "var(--xarr)"), ("rb", "calc(var(--xa) - var(--xarr))", "var(--xarr)"),
            ("rc", "mod(var(--vra) + var(--xin) * var(--xk), 32768)", "var(--xrd)")],
     write=(f"calc(var(--xtrap) * {sp} + (1 - var(--xtrap)) * {by_op({'STOREX': 'mod(var(--vra) + var(--xk), 32768)'}, f'calc({sp} - 2)')})",
-           f"calc(var(--xtrap) * ({pc} + 1) + (1 - var(--xtrap)) * {by_op({'IDXA': 'calc(var(--xin) * var(--vrc))', 'STOREX': vs1}, 'var(--dres)')})", None, "1"),
+           f"calc(var(--xtrap) * ({pc} + 1) + (1 - var(--xtrap)) * {by_op({'IDXA': 'calc(var(--xin) * var(--vrc))'}, vs1)})", None, "1"),
     nx={'sp': f"calc(var(--xtrap) * ({sp} + 1) + (1 - var(--xtrap)) * {by_op({'STOREX': f'calc({sp} - 3)'}, f'calc({sp} - 1)')})",
-        'pc': f"calc(var(--xtrap) * {by_op({'IDXA': GETXVEC, 'STOREX': SETXVEC}, DYNVEC)} + (1 - var(--xtrap)) * ({pc} + 1))"},
+        'pc': f"calc(var(--xtrap) * {by_op({'IDXA': GETXVEC}, SETXVEC)} + (1 - var(--xtrap)) * ({pc} + 1))"},
     deps={'ra': [('s2', ['IDXA']), ('s3', ['STOREX'])], 'rb': [('s2', ['IDXA']), ('s3', ['STOREX'])], 'rc': [('s1', None), ('ra', None), ('rb', None)]})
+CLASSES['dyn'] = dict(ops=['DYN'], pre=DYN_PRE, reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None)],
+    write=(f"calc(var(--dtr) * {sp} + (1 - var(--dtr)) * ({sp} - 2))", f"calc(var(--dtr) * ({pc} + 1) + (1 - var(--dtr)) * var(--dres))", None, "1"),
+    nx={'sp': f"calc(var(--dtr) * ({sp} + 1) + (1 - var(--dtr)) * ({sp} - 1))", 'pc': f"calc(var(--dtr) * {DYNVEC} + (1 - var(--dtr)) * ({pc} + 1))"})
 def first_miss(acc):
     """the block of the first missing access (dependency order) among [(name, mask)], -1 for none"""
     e = "-1"
