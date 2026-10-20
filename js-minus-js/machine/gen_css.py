@@ -154,7 +154,7 @@ RA0 = f"calc((1 - {below('ra')}) * var(--vra))"                 # an object inst
 scan_key = by_op({'SCAN': "var(--vrb)"}, imm)
 scan_found = f"min(1, calc({eq(RA0, scan_key)} + {eq(RA0, 0)}))"
 putv_nz = f"(1 - {eq(RA0, 0)})"
-new_lt = f"clamp(0, -1 * {s20('var(--vra) - var(--vrb)')}, 1)"   # NEW: HP - GCLIM < 0, a chunk is free
+new_lt = f"clamp(0, -1 * {s20('var(--vra) - var(--vrb) - 3065')}, 1)"   # NEW: HP - (GCLIM + heap_size - 7) < 0, a chunk is free (GCLIM: the space's offset)
 # a class: ops; reads [(name, address, ops needing it or None for all)]; the write (address or None to reuse read `reuse`,
 # value, reuse, enable); next registers {pc, sp, fp, steps, pst}; latch dependencies {read: [(read, ops or None)]}: a read
 # is kept only if the reads its address came from were good (exactly those: a spurious dependency can block progress)
@@ -346,11 +346,17 @@ cls_of = "if(" + " ".join(f"style(--op: {OP[o]}): {opcls[o]};" for o in FREQ + [
 
 # the ROM's words (instruction fetch only), two-level on the pc
 ROMW = [w or 0 for w in image['rom']] + [0] * (ROM - len(image['rom']))
-rom_table = "if(" + " ".join(f"style(--rh: {h}): if(" + " ".join(f"style(--rl: {l}): {ROMW[32 * h + l]};" for l in range(32) if ROMW[32 * h + l]) + " else: 0);"
-                            for h in range(ROM // 32) if any(ROMW[32 * h:32 * h + 32])) + " else: 0)"
+def rom_table(lo, hi):
+    return "if(" + " ".join(f"style(--rh: {h}): if(" + " ".join(f"style(--rl: {l}): {ROMW[32 * h + l]};" for l in range(32) if ROMW[32 * h + l]) + " else: 0);"
+                            for h in range(lo // 32, hi // 32) if any(ROMW[32 * h:32 * h + 32])) + " else: 0)"
+# An if() costs ~70 ns per entry it holds wherever it is evaluated, so the ROM's words are split into tiers of ROMTIER, each a
+# rule of its own matched by --rom = 1 + the tier (0: not in ROM): a ROM instruction evaluates one tier's table
+ROMTIER = int(os.environ.get('ROMTIER', 1024)) or ROM
+TIERS = [t for t in range(ROM // ROMTIER) if any(ROMW[t * ROMTIER:(t + 1) * ROMTIER])]
+def rom_of(x): return f"calc(clamp(0, {ROM} - {x}, 1) * (1 + round(down, {x} / {ROMTIER})))"
 
 ABL = os.environ.get('ABL', '').split(',')     # timing ablations: norom (the ROM table empty), ...
-if 'norom' in ABL: rom_table = "0"
+if 'norom' in ABL: rom_table = lambda lo, hi: "0"
 # ---------------- the page's CSS
 P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
@@ -405,7 +411,7 @@ for i in range(2 * WB):
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
 css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0; --lat: 1;"
-           f" --rom: clamp(0, {ROM} - var(--pc), 1); --Lm: calc((1 - var(--go)) * var(--rLm));"
+           f" --rom: {rom_of('var(--pc)')}; --Lm: calc((1 - var(--go)) * var(--rLm));"
            + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
 css += [f"@container style(--fk1: {k + 1}) {{ .fl {{ --T{k}: calc(2 * var(--fb) + 2); --F{k // 2}: {1 - k % 2}; " +
@@ -422,13 +428,13 @@ css.append("@container style(--stop: 0) { .f { " + " ".join(lookup("f", pc)) +
            " --op: calc(var(--mf) * 255 + (1 - var(--mf)) * round(down, var(--vf) / 8192)); --imm: mod(var(--vf), 8192);"
            f" --simm: calc(var(--imm) - 8192 * min(1, round(down, var(--imm) / 4096))); --cls: {cls_of}; }} }}")
 # (a large if() costs its whole text wherever it is evaluated, so the ROM table gets a rule of its own: README)
-css.append("@container style(--stop: 0) and style(--rom: 1) { .f { --rh: round(down, var(--pc) / 32); --rl: mod(var(--pc), 32);"
-           f" --vf: {rom_table}; --mf: 0; }} }}")
+css += [f"@container style(--stop: 0) and style(--rom: {t + 1}) {{ .f {{ --rh: round(down, var(--pc) / 32); --rl: mod(var(--pc), 32);"
+        f" --vf: {rom_table(t * ROMTIER, (t + 1) * ROMTIER)}; --mf: 0; }} }}" for t in TIERS]
 css.append(lbl.group('.x: execute', 'one rule per instruction class; if() on --op inside it'))
 css += [f"@container style(--cls: {CLS[c]}) {{ .x {{ {' '.join(d)} }} }}" for c, (_, d) in cls_rules.items()]
 css.append(lbl.group('.c: commit', 'registers on success; the stall (stop, the missing block); output; the written word\'s cache set'))
 css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --sp: var(--nsp); --fp: var(--nfp); --steps: var(--nsteps); --stop: var(--nstop); --halt: var(--nhalt); --pst: var(--npst);"
-           f" --lat: 0; --rom: clamp(0, {ROM} - var(--npc), 1); }} }}")
+           f" --lat: 0; --rom: {rom_of('var(--npc)')}; }} }}")
 css.append("@container style(--ok: 0) { .c { --stop: 1; --pend: calc(var(--mb) + 1); --Lm: var(--hm);"
            + " ".join(f" --L{n}: var(--v{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--pw{j});" for j in range(4)) + " } }")
 css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --cw: var(--ncw); " +
@@ -541,7 +547,7 @@ if os.environ.get('BENCH'):
     open(outp, 'w').write(page); print(outp, len(page), 'bytes; bench pass', sm.passes, 'K', K, 'stall', stall); sys.exit()
 
 # ---------------- HTML
-STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM))
+STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM)) | {R.LAYOUT['data_base'] - ROM}
 LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain's overlays hold code, strings and staging
 mem_html = "" if 'nomem' in ABL else "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out

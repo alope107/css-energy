@@ -34,7 +34,7 @@ def table_names():
             + [x for k in range(NI) for x in (f'ih1_{k}', f'ih2_{k}', f'iv_{k}')])
 
 def initial_lex(data_base):
-    st = {n: 0 for n in LEX_STATE}; st['sdp'] = data_base + R.SDATA + 1        # (cc_ref: past the DONE marker)
+    st = {n: 0 for n in LEX_STATE}; st['sdp'] = data_base + R.SDATA + 1 + len(R.SEED)        # (cc_ref: past the DONE marker and SEED)
     return st
 
 def initial_parse(data_base):
@@ -1082,7 +1082,10 @@ class Prog(Base):
 
     def arr_end(self, n):
         """cc_ref.arr_end: the n elements are on the stack"""
-        self.emit(R.PUSHI, n); self.emit(R.CALL, self.ent['mkarr'], b=0); self.set('mode', R.S_OPER); self.done()
+        n = lift(n); short = self.m(le(n, 8), 'ashort')
+        with self.when(not_(short)): self.emit(R.PUSHI, n)
+        self.emit(R.CALL, ite(short, add(*[mul(eq(n, k), self.ent[f'mkarr{k}']) for k in range(9)]), self.ent['mkarr']), b=0)
+        self.set('mode', R.S_OPER); self.done()
 
     def meth_end(self, tv, last):
         """cc_ref.meth_end: the routine for (method, argument count), or error 77"""

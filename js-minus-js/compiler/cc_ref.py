@@ -50,6 +50,10 @@ OD, CD, NS, NF, NL, EMAX, NI = 8, 8, 32, 16, 64, 12, 32      # NI: interned stri
 SDATA = 256                             # globals: data_base + 1 .. + SDATA - 1 (data_base itself holds STRTAG, for the lib)
 STR0 = LAYOUT['data_base'] + SDATA      # the string area: STR0 (the lib's empty DONE marker) .. SEND
 SEND = STR0 + LAYOUT['str_size']
+# the string area's first strings, there before any program's: "true" and "false" ([len][bytes][0] each), for a boolean made a
+# string (the ROM's b2s, tostr) without allocating. TRUEV / FALSEV: their values
+SEED = [w for t in ('true', 'false') for w in [len(t)] + [ord(ch) for ch in t] + [0]]
+TRUEV, FALSEV = STR0 + 2 - 262144, STR0 + 8 - 262144                 # (- STRTAG)
 assert SEND == LAYOUT['code_base']
 CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 holds the staged-data count)
 STRTAG = 262144                         # a string value is its address - STRTAG (machine words are 20-bit signed)
@@ -186,7 +190,7 @@ class Compiler:
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0
         self.dp = data_base + 1             # globals and array literals (parser); data_base holds STRTAG
-        self.sdp = data_base + SDATA + 1    # string literals and property names (lexer); data_base + SDATA itself is the lib's
+        self.sdp = data_base + SDATA + 1 + len(SEED)    # string literals and property names (lexer; after SEED); data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at (a property name there printed as '')
         # parser
         self.mode = S_STMT; self.pn = (0, 0)
@@ -761,7 +765,9 @@ class Compiler:
 
     def arr_end(self, n):
         """an array literal's ']': its n elements are on the stack"""
-        self.emit(PUSHI, n); self.emit(CALL, self.ent['mkarr'], b=0); self.mode = S_OPER
+        if n <= 8: self.emit(CALL, self.ent[f'mkarr{n}'], b=0)        # (fixed-count routines for short literals)
+        else: self.emit(PUSHI, n); self.emit(CALL, self.ent['mkarr'], b=0)
+        self.mode = S_OPER
 
     def meth_end(self, tv, last):
         """a method call's ')': M_METH's value tv = the method + 64 * the commas; last: an argument just ended"""
@@ -1016,7 +1022,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             if rd(c) != 0: wr(c + 1, mem[sp - 1]); sp -= 2
             else: wr(c + 1, pc - 1); pc = PUTVEC         # the append routine, [c, v]
         elif op == NEW:
-            t2 = mem[HP]; t1 = mem[GCLIM]
+            t2 = mem[HP]; t1 = mem[GCLIM] + LAYOUT['heap_size'] - 7          # GCLIM: the space's offset (0 or heap_size)
             if s20(t2 - t1) < 0: mem[sp] = t2 + HEAP0 - OBJTAG; mem[HP] = t2 + 8
             else: mem[GCSP] = sp; mem[RETCELL] = pc - 1; pc = GCVEC
             sp += 1
@@ -1050,7 +1056,9 @@ def image_mem(c, words, data, init=None):
         if a >= sbase: mem[a] = v
         else: mem[init + a - c.db] = v
     mem[init - 1] = c.dp - c.db
-    mem[init] = STRTAG                  # the lib's untag constant, staged for data_base
+    assert all(a >= sbase for a in data), 'nothing is staged: globals start at 0'
+    mem[c.db] = STRTAG                  # the untag constant at data_base (read only: an overlay on the page)
+    for i, w in enumerate(SEED): mem[sbase + 1 + i] = w
     mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
 

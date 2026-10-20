@@ -151,7 +151,7 @@ class Sim:
                 wr0(rd(sp - 1) + imm + st['pst'], 0)
                 if st['pst'] == 0: pc -= 1; partial = True
             elif op == 'NEW':
-                t2 = rd(HP); t1 = rd(GCLIM); lt = s20(t2 - t1) < 0
+                t2 = rd(HP); t1 = rd(GCLIM) + LA['heap_size'] - 7; lt = s20(t2 - t1) < 0       # GCLIM: the space's offset
                 if st['pst'] == 0:
                     if lt: wr(sp, t2 + HEAP0 - OBJTAG)
                     else: wr(GCSP, sp)

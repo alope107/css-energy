@@ -12,7 +12,7 @@
 
 // a + chain inside console.log keeps its pieces on the stack: the ROM's pnK prints them (PRINT without a separator: an array
 // or object as its string, pval); catnK joins them when an operator other than + follows. b2s: a boolean piece
-function b2s(v) { return tostr(v, 1); }
+
 function catn2(a, b) { return cat(a, b, 0); }
 function catn3(a, b, c) { return cat(cat(a, b, 0), c, 0); }
 function catn4(a, b, c, d) { return cat(catn3(a, b, c), d, 0); }
@@ -32,18 +32,17 @@ function getfp() { return __fp(); }
 // n words (a multiple of 8) -> a raw address; collects when the space is full (the stack up to this frame is the roots)
 function halloc(n) {
   var hp = peek(__HP__);
-  if (hp + n - 8 >= peek(__GCLIM__)) { gc(getfp(), n); hp = peek(__HP__); }
+  if (hp + n - 8 >= peek(__GCLIM__) + __H__ - 7) { gc(getfp(), n); hp = peek(__HP__); }
   poke(__HP__, hp + n);
   return hp + __HEAP0__;
 }
 // Cheney's copying collector between the two semi-spaces. HP / GCLIM are offsets from HEAP0: the next free word and the
-// space's end - 7. The roots: the globals, the routines' value cells, the stack from SP0 to gcsp. Then need more words must
-// fit, or the program stops (out of memory). The first call only sets the heap up.
+// current space's start (0: space A, as RAM starts). The roots: the globals, the routines' value cells, the stack from SP0
+// to gcsp. Then need more words must fit, or the program stops (out of memory).
 function gc(gcsp, need) {
-  var lim = peek(__GCLIM__); var from = __HEAP0__; var to = __HEAP0__ + __H__; var p = 0; var e = 0;
-  if (lim == 0) { poke(__GCLIM__, __H__ - 7); poke(__K_PUTV__, __W_PUTV__); }
-  else {
-    if (lim != __H__ - 7) { from = __HEAP0__ + __H__; to = __HEAP0__; }
+  var from = __HEAP0__; var to = __HEAP0__ + __H__; var p = 0; var e = 0;
+  if (1) {
+    if (peek(__GCLIM__)) { from = __HEAP0__ + __H__; to = __HEAP0__; }
     poke(__G_FLO__, from); poke(__G_FREE__, to);
     p = __DB__ + 1; e = __DB__ + peek(__INIT__ - 1);
     while (p < e) { poke(p, fwd(peek(p))); p++; }
@@ -52,9 +51,9 @@ function gc(gcsp, need) {
     while (p < gcsp) { poke(p, fwd(peek(p))); p++; }
     p = to;
     while (p < peek(__G_FREE__)) { p = p + scan(p); }
-    poke(__HP__, peek(__G_FREE__) - __HEAP0__); poke(__GCLIM__, to - __HEAP0__ + __H__ - 7);
+    poke(__HP__, peek(__G_FREE__) - __HEAP0__); poke(__GCLIM__, to - __HEAP0__);
   }
-  if (peek(__HP__) + need - 8 >= peek(__GCLIM__)) { oom(); }
+  if (peek(__HP__) + need - 8 >= peek(__GCLIM__) + __H__ - 7) { oom(); }
   return 0;
 }
 function oom() {
@@ -155,9 +154,9 @@ function tostr(v, b) {
     poke(p + 7, 32); poke(p + 8, 79); poke(p + 9, 98); poke(p + 10, 106); poke(p + 11, 101); poke(p + 12, 99); poke(p + 13, 116); poke(p + 14, 93);
     return r;
   }
-  if (b) {
-    if (v == 1) { r = newstr(4); p = r + __STRTAG__; poke(p, 116); poke(p + 1, 114); poke(p + 2, 117); poke(p + 3, 101); return r; }
-    if (v == 0) { r = newstr(5); p = r + __STRTAG__; poke(p, 102); poke(p + 1, 97); poke(p + 2, 108); poke(p + 3, 115); poke(p + 4, 101); return r; }
+  if (b) {                                      // (the string area's first strings, cc_ref SEED)
+    if (v == 1) { return __TRUEV__; }
+    if (v == 0) { return __FALSEV__; }
   }
   r = newstr(nlen(v)); nput(v, r + __STRTAG__);
   return r;

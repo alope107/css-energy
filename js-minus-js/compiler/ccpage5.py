@@ -337,17 +337,18 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: var(--p-cp-{y}); --dpf: var(--p-dp-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
                f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
-               # the lib's string untag constant, staged for the first data cell
-               f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - data_base}; width: {R.STRTAG + WOFF}px; }}'
+               # the string untag constant at data_base (the program never writes it)
+               f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c0; width: {R.STRTAG + WOFF}px; }}'
+               + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{data_cells + 1 + i}; width: {w + WOFF}px; }}' for i, w in enumerate(R.SEED))
                # the string area's end, for the runtime's key lookups
-               f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
-               ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
+               + f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
+               + ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
                ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
     for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b><b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(R.SEED))) + '<b class="dn"></b><b class="di"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

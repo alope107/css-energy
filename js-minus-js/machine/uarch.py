@@ -35,7 +35,7 @@ OUT_BASE = LAYOUT['rom_size'] + LAYOUT['ram_size'] - OUT_COLS * OUT_ROWS   # con
 # a key calls the ROM's append routine.
 OBJTAG, KBIAS = LAYOUT['objtag'], STRTAG
 RT = LAYOUT['rt_base']; CELL = {n: RT + i for i, n in enumerate(LAYOUT['rt_cells'])}; HP, GCLIM, GCSP, KEYCELL, RETCELL = (CELL[n] for n in ('HP', 'GCLIM', 'GCSP', 'KEYCELL', 'RETCELL'))
-# HP / GCLIM: the next free chunk and the space's end - 7 (offsets from HEAP0); GCSP: SP at a GC call; KEYCELL: the key KEYV made
+# HP / GCLIM: the next free chunk and the current space's start (offsets from HEAP0; 0 is space A, so a zeroed RAM is a heap); GCSP: SP at a GC call; KEYCELL: the key KEYV made
 # for SCAN; RETCELL: the return address of a call into the ROM routines
 HEAP0 = LAYOUT['heap_lo']
 VEC = LAYOUT['vec_base']; VECS = {n: VEC + i for i, n in enumerate(LAYOUT['vectors'])}   # the ROM's jump table (compiler/rtlib.py)

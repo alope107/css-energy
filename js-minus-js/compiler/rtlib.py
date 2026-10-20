@@ -7,7 +7,7 @@ lib_src.js holds the collector, allocation, strings, arrays and the dynamic path
 work on the machine directly:
 
   GC      (vec gc)      NEW found the heap full: call the collector (lib_src.js gc) with the stack up to GCSP as roots, then
-                        execute the NEW again. The first call only sets up the heap.
+                        execute the NEW again.
   APPEND  (vec append)  PUTV found no key: claim the free pair at the cursor, or (the chunk is full) link a new chunk there.
   SETX    (vec setx)    STOREX's slow path: x[k] = v for an object (here), anything else (lib_src.js setx: an array grows).
   GETX    (vec getx)    IDXA's slow path: x[k] of an object (here), anything else (lib_src.js getx: a string's character).
@@ -22,6 +22,7 @@ import sys, os, json, subprocess, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..', 'machine')]
 import uarch as U
+sys.path[:0] = [HERE]; import cc_ref as R
 from uarch import OP, HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, KBIAS, STRTAG, CELL
 
 L = U.LAYOUT
@@ -30,7 +31,7 @@ DB, INIT, SP0, VEC = L['data_base'], L['init'], L['sp0'], L['vec_base']
 assert H % 8 == 0 and HEAP0 % 8 == 0 and HEAP0 + 2 * H <= L['rom_size'] + L['ram_size'] - L['cols'] * L['rows']
 TAG0 = HEAP0 - OBJTAG                                 # the object value of the heap's first word
 assert TAG0 % 8 == 0 and TAG0 < 0
-S_RET, S_V, S_K, S_DRET, S_XRET, S_A, S_N, S_T, K_PUTV = (CELL[n] for n in 'S_RET S_V S_K S_DRET S_XRET S_A S_N S_T K_PUTV'.split())
+S_RET, S_V, S_K, S_DRET, S_XRET, S_A, S_N, S_T = (CELL[n] for n in 'S_RET S_V S_K S_DRET S_XRET S_A S_N S_T'.split())
 assert max(CELL.values()) < SP0
 OBJMIN = 393216                                       # x < -OBJMIN: an object (objects lie below it, strings above)
 assert -OBJMIN > TAG0 + 2 * H and -OBJMIN < U.STR_LO - STRTAG
@@ -38,7 +39,7 @@ assert -OBJMIN > TAG0 + 2 * H and -OBJMIN < U.STR_LO - STRTAG
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=256, STR_LO=U.STR_LO, HEAP0=HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=STRTAG, OBJTAG=OBJTAG, ARRTAG=U.ARRTAG,
-             INIT=INIT, SP0=SP0, DATA_BASE=DB, CODE_BASE=L['code_base'], STREND=L['strend'])
+             INIT=INIT, SP0=SP0, DATA_BASE=DB, CODE_BASE=L['code_base'], STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV)
     k.update(CELL)
     k.update({f'OP_{n}': i for n, i in OP.items()}); k.update({f'W_{n}': i * 8192 for n, i in OP.items()})
     return k
@@ -69,7 +70,7 @@ def routines(a):
 
     # ---------------- APPEND, from PUTV: [c, v]; the word after c holds the PUTV's address (its immediate is the key)
     a.lab('append'); a('OVER'); a('LDF', 1); a('DUP'); a('PUSHI', 1); a('ADD'); a('STOREG', S_RET)
-    a('LOADI'); a('LOADG', K_PUTV); a('SUB'); a('STOREG', S_K)
+    a('LOADI'); a.k(OP['PUTV'] * 8192); a('SUB'); a('STOREG', S_K)
     # common: [c, v], S_K the key, S_RET where to return. c is a free pair, or the link word of a full chunk (offset 6)
     # (chunks are 8-aligned from TAG0, a multiple of 8, and c is negative: offset 6 has c % 8 == -2 under truncating MOD)
     a.lab('add'); a('OVER'); a('PUSHI', 8); a('MOD'); a('PUSHI', 2); a('ADD'); a('JZ', 'add_link')
@@ -106,11 +107,34 @@ def routines(a):
     # ---------------- PRINT of an array or object: [v, ret] -> pval(v, ret, the PRINT's opcode), which prints it and returns ret
     a.lab('print'); a('DUP'); a('PUSHI', 1); a('SUB'); a('LOADI'); a.k(8192); a('DIV'); a('CALL', 'js.pval'); a('JMPI')
 
+    # ---------------- b2s: [b, ret] -> ["true" / "false"] (the string area's first strings: cc_ref SEED)
+    a.lab('b2s'); a('STOREG', S_T); a('JZ', 'b2s_f'); a('PUSHS', R.TRUEV + STRTAG); a('LOADG', S_T); a('JMPI')
+    a.lab('b2s_f'); a('PUSHS', R.FALSEV + STRTAG); a('LOADG', S_T); a('JMPI')
+
     # ---------------- pnK: [p1 .. pk, sep, ret] -> [0]: print the pieces of a + chain (PRINT, no separator), then sep
     for k in range(2, 9):
         a.lab(f'pn{k}'); a('ENTER', 0)
         for i in range(k): a('LOADL', (-2 - k + i) % 8192); a('PRINT')
         a('LOADL', (-2) % 8192); a('PUTC'); a('PUSHI', 0); a('RET', k + 1)
+
+    # ---------------- mkarrN (N <= 8): [e1 .. eN, ret] -> [an array of them]. Locals: 1 the array, 2 its elements' address. The
+    # block is taken from HP here if it fits (lib_src.js halloc otherwise, through newarr, which may collect: the elements are
+    # parameters, so roots)
+    for N in range(9):
+        cap = max(N, 4); nw = cap + 4 + (8 - (cap + 4) % 8) % 8
+        a.lab(f'mkarr{N}'); a('ENTER', 2)
+        a('LOADG', HP); a('PUSHI', nw); a('ADD'); a('LOADG', GCLIM); a.k(H + 1); a('ADD'); a('LT'); a('JZ', f'mk{N}_slow')
+        a('LOADG', HP); a.k(HEAP0); a('ADD'); a('LOADG', HP); a('PUSHI', nw); a('ADD'); a('STOREG', HP)      # [b]
+        a('DUP'); a.k(-3 - nw); a('STOREI'); a('DUP'); a('PUSHI', 1); a('ADD'); a('PUSHI', cap); a('STOREI')
+        a('DUP'); a('PUSHI', 2); a('ADD'); a('PUSHI', N); a('STOREI'); a('DUP'); a('PUSHI', 3); a('ADD'); a('OVER'); a('PUSHI', 4); a('ADD'); a('STOREI')
+        a('PUSHI', 3); a('ADD'); a.k(U.ARRTAG); a('ADD'); a('JMP', f'mk{N}_fill')
+        a.lab(f'mk{N}_slow'); a('PUSHI', cap); a('PUSHI', N); a('CALL', 'js.newarr')
+        a.lab(f'mk{N}_fill'); a('DUP'); a('STOREL', 1); a('LOADI'); a('STOREL', 2)
+        for i in range(N):
+            a('LOADL', 2)
+            if i: a('PUSHI', i); a('ADD')
+            a('LOADL', (-1 - N + i) % 8192); a('STOREI')
+        a('LOADL', 1); a('RET', N)
 
     # ---------------- mkarr: [e1 .. en, n, ret] -> [array]; the elements stay on the stack (roots) while newarr allocates
     a.lab('mkarr'); a('STOREG', S_XRET); a('DUP'); a('DUP'); a('CALL', 'js.newarr'); a('STOREG', S_A); a('STOREG', S_N)
@@ -133,7 +157,7 @@ def build(out):
     rom += [OP['JMP'] * 8192 + a.labels[n] for n in L['vectors']]
     assert len(rom) <= L['rom_size']
     entries = {n: lib['fns'][n] for n in lib['fns']}
-    entries.update({n: a.labels[n] for n in ['mkarr'] + [f'pn{k}' for k in range(2, 9)]})
+    entries.update({n: a.labels[n] for n in ['mkarr', 'b2s'] + [f'pn{k}' for k in range(2, 9)] + [f'mkarr{k}' for k in range(9)]})
     lib = dict(lib, rom=rom, rt=dict(words=len(code), at=a.base, labels=a.labels), getx=U.GETXVEC, setx=U.SETXVEC, entries=entries)
     json.dump(lib, open(out, 'w'))
     print('runtime: lib', a.base, 'words + ROM routines', len(code), '; ROM', len(rom), 'words with the jump table')
