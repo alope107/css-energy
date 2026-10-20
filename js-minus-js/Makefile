@@ -66,7 +66,7 @@ dist: page
 # ---- tests (see docs/ARCHITECTURE.md#5-tests)
 expect:                                   # Node is the oracle: writes tests/suite/*.out
 	$(NODE) tests/suite_expect.js tests/suite
-l1:                                       # reference compiler + 20-bit simulator vs Node
+l1: lib                                   # reference compiler + 20-bit simulator vs Node
 	$(PY) tests/suite_ref.py
 l2: $(L2)                                 # DSL (page's specialised variants) vs reference, level by level
 	$(call report,$<,3)
@@ -74,7 +74,7 @@ $(L2): tests/cmp_dsl.py tests/par.py $(PYSRC) $(SUITE) $(RERUN_IF)
 	SPEC=1 SPECK=$(SPECK) $(LOGGED) $@ -t 3 -p '^ALL OK' -- $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js
 l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
-c1:                                       # the CSS CPU's design (machine/csssim.py) runs every compiled image vs Node
+c1: lib                                   # the CSS CPU's design (machine/csssim.py) runs every compiled image vs Node
 	$(PY) tests/csscpu_sim.py
 # C2: a CPU-only page per program (machine/gen_css.py) runs to HALT in Chrome; console vs Node, steps vs cc_ref
 $(B)/c2/list.txt: tests/csscpu_pages.py tests/csscpu_sim.py $(CSSCPU) $(PYSRC) $(SUITE)
@@ -85,7 +85,7 @@ $(C2): $(B)/c2/list.txt tests/csscpu_pages.js $(HARNESS) $(RERUN_IF)
 	SHARDS=$(SHARDS) $(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/csscpu_pages.js $(B)/c2
 # differential tests against Node without a browser (tests/fuzz/fuzz.py): the suite reformatted, generated programs,
 # one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and C1 too, ~1.5 min)
-fuzz-quick:
+fuzz-quick: lib
 	$(PY) tests/fuzz/fuzz.py fmt && $(PY) tests/fuzz/fuzz.py gen -n 500 && $(PY) tests/fuzz/fuzz.py mut -n 1000
 fuzz: $(FUZZ)
 	$(call report,$<,6)

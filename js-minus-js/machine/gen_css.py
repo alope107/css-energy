@@ -102,7 +102,7 @@ cpu = ["--first: calc(1 - var(--init));",
        f"--gk1: calc(var(--fon) * (1 - var(--pstale)) * var(--gabs) * (1 - mod(var(--gT), 2)) * clamp(0, {BLKS - 1} - var(--fb), 1) * (var(--gk) + 1));"]
 cpu += [f"--fwd{w}: " + sel("fk", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
 cpu += [f"--Lb{n}: mod(round(down, var(--rLm) / {b}), 2);" for n, b in LATCH.items()]
-HOT = range(256, 768)     # the blocks runs mostly read: globals, strings, code, the bottom of the stack (read ports, below)
+HOT = range(R.LAYOUT["data_base"] // 4, (R.LAYOUT["data_base"] + 2048) // 4)     # the blocks runs mostly read: globals, strings, code, the bottom of the stack (read ports, below)
 
 # ---------------- reads: a word through the cache. For read n of address A: block b, word u, set z, hits h (way 0) and
 # H (way 1), each one if() over the set comparing that way's tag, and the word v (set, then way, then word).
