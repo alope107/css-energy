@@ -188,7 +188,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append(lbl.group('String bytes: in-flow words'))
     N.add('l-o_sa-h', False)
     css.append(f'.ovs {{ display: none; height: 0; }} @container style(--l-o_sv: 1) {{ .ovs {{ display: block; --l-o_sa-h: round(down, (var(--l-o_sa) - {data_cells}) / 32);'
-               f' anchor-name: {mux_shift("l-o_sa", data_cells, data_cells)}; width: calc((var(--l-o_sw) + {WOFF}) * 1px); }} }}')
+               f' anchor-name: {mux_shift("l-o_sa", R.LAYOUT['str_size'], data_cells)}; width: calc((var(--l-o_sw) + {WOFF}) * 1px); }} }}')
     init = {f's-{n}-A': v for n, v in D.initial_lex(data_base).items() if n != 'pp'}
     init['s-nt-A'] = 0
     ch_html = []
@@ -323,7 +323,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         css.append(f'@container style(--q-o_v{s}: 1) {{ .ov.k{s} {{ {body} }} }}')
     N.add('q-o_da-h', False)
     css.append(f'@container style(--q-o_dv: 1) {{ .ovd {{ display: block; --q-o_da-h: round(down, var(--q-o_da) / 32);'
-               f' anchor-name: {mux_shift("q-o_da", 2 * data_cells, 0, lambda v: ishift if v < data_cells else 0)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
+               f' anchor-name: {mux_shift("q-o_da", data_cells + R.LAYOUT['str_size'], 0, lambda v: ishift if v < data_cells else 0)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
     css.append('.lp { display: none; height: 0; }')
     for k in range(NLP):
         css.append(f'@container style(--q-o_lv{k}: 1) {{ .lp{k} {{ display: block; anchor-name: {mux_lab(f"q-o_lj{k}", R.NL)};'

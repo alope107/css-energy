@@ -85,7 +85,7 @@ class Machine:
         elif op.startswith('PRINT'):
             sp -= 1; v = rd(sp); p = v + STRTAG
             sep = 10 if op.endswith('LN') else 32 if op.endswith('SP') else 0
-            if LA['data_base'] + SDATA <= p < LA['data_base'] + 2 * SDATA:
+            if R.isstr(v):
                 text = []
                 while p != LA['data_base'] + SDATA and rd(p) != 0: text.append(rd(p)); p += 1
             elif op in ('PRINTB', 'PRINTBSP', 'PRINTBLN') and v in (0, 1): text = [ord(ch) for ch in ('true' if v else 'false')]

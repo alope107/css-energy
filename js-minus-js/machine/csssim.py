@@ -21,13 +21,14 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cssref as ref
 from cssref import OPN, AMASK, s20, BIN, BINF, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
-from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC
+from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC, GETXVEC, SETXVEC, DYNVEC, PRINTVEC, ARRTAG, HEAP_HI, STRP_HI
+import cc_ref as R
 
 NSET, NWAY = 16, 2
 ROMF = PREF = True
 BLKS = (ref.ROMN + ref.LA['ram_size']) // 4
 def setof(b): return (b + b // 16 + b // 256) % NSET
-STR_LO, STR_HI = LA['data_base'] + SDATA, LA['data_base'] + 2 * SDATA
+STR_LO, STR_HI = LA['data_base'] + SDATA, STRP_HI     # literals and heap strings
 
 class Stall(Exception):
     def __init__(self, miss=None): self.miss = miss
@@ -118,6 +119,19 @@ class Sim:
         elif op == 'HALT': pc -= 1; st['halt'] = True
         elif op == 'JMPI': sp -= 1; pc = rd(sp)
         elif op == 'JNEG': pc = imm if rd(sp - 2) < 0 else pc
+        elif op == 'DYN':                         # a string operand: the ROM's dyn (a trap pushes the return address)
+            b = rd(sp - 1); a = rd(sp - 2)
+            if R.isstr(a) or R.isstr(b): wr(sp, pc); sp += 1; pc = DYNVEC
+            else: sp -= 1; wr(sp - 1, {'ADD': s20(a + b), 'EQ': int(a == b), 'NE': int(a != b), 'LT': int(a < b), 'GT': int(a > b), 'LE': int(a <= b)}.get(OPN[imm % 64], int(a >= b)))
+        elif op in ('IDXA', 'STOREX'):            # an array inside its length here; anything else: the ROM's GETX / SETX
+            v1 = rd(sp - 1); v2 = rd(sp - 2)
+            x, k = (v2, v1) if op == 'IDXA' else (rd(sp - 3), v2)
+            inb = False
+            if R.isarr(x):
+                a = (x - ARRTAG) & AMASK; p = rd(a); inb = 0 <= k < rd(a - 1)
+            if op == 'IDXA' and R.isarr(x): wr(sp - 2, rd((p + k) & AMASK) if inb else 0); sp -= 1
+            elif op == 'STOREX' and inb: wr((p + k) & AMASK, v1); sp -= 3
+            else: wr(sp, pc); sp += 1; pc = GETXVEC if op == 'IDXA' else SETXVEC
         elif op in ('SCANI', 'SCAN', 'LDF', 'PUTV', 'NEW', 'SETF', 'ENDK', 'OVER'):
             rd0 = lambda a: 0 if a & AMASK < ref.ROMN else rd(a)
             def wr0(a, v):
@@ -150,9 +164,11 @@ class Sim:
         elif op == 'INCL': wr(fp + simm, rd(fp + simm) + 1)
         elif op == 'IDX': wr(sp - 1, rd(rd(imm) + rd(sp - 1)))
         elif op == 'IDXL': wr(sp - 1, rd(rd(fp + simm) + rd(sp - 1)))
+        elif op.startswith('PRINT') and (R.isarr(rd(sp - 1)) or R.isobj(rd(sp - 1))):    # the ROM prints it (a trap)
+            wr(sp, pc); sp += 1; pc = PRINTVEC
         elif op.startswith('PRINT'):
-            if cw: raise Stall()
             v = rd(sp - 1)
+            if cw: raise Stall()
             cells, nl, done, pst = self.chunk(op, v)
             out = (cells, nl)
             if done: sp -= 1; st['pst'] = 0

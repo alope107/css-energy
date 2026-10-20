@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path[:0] = [os.path.join(ROOT, "machine"), os.path.join(ROOT, "compiler"), os.path.join(ROOT, "readback"), os.path.join(ROOT, "..", "shared", "py"), HERE]
 UI = os.environ.get("UI") == "1"
 import memtree, csslabel as lbl, cc_ref as R
-from uarch import OPN, PRINTOPS, STRTAG, STR_LO, STR_HI
+from uarch import OPN, PRINTOPS, STRTAG, STR_LO, STRP_HI
 OP = {n: i for i, n in enumerate(OPN)}
 
 image = json.load(open(sys.argv[1])); outp = sys.argv[2]
@@ -54,7 +54,7 @@ def by_op(cases, default):
     return "if(" + " ".join(f"style(--op: {OP[o]}): {e};" for o, e in cases.items()) + f" else: {default})"
 def setof(b): return f"mod({b} + round(down, {b} / 16) + round(down, {b} / 256), 16)"
 
-LATCH = {"f": 1, "s1": 2, "s2": 4, "ra": 8, "rb": 16, "p": 32}    # the latchable reads and their bits (reads, below)
+LATCH = {"f": 1, "s1": 2, "s2": 4, "ra": 8, "rb": 16, "p": 32, "s3": 64, "rc": 128}    # the latchable reads and their bits (reads, below)
 # ---------------- registers: (name, H, OFF), value range [-OFF, H - OFF); the subject's expression at the chain's end
 regs = [("pc", A15, 0, "var(--pc)"), ("rsp", A15, 0, "var(--sp)"), ("rfp", A15, 0, "var(--fp)"), ("optr", 256, 0, "var(--optr)"),
         ("pst", A15, 0, "var(--pst)"), ("steps", 1 << 21, 0, "var(--steps)"), ("halt", 2, 0, "var(--halt)"), ("pend", 8192, 0, "var(--pend)"),
@@ -73,7 +73,7 @@ if 'noW' in os.environ.get('ABL', ''): regs = [r for r in regs if not r[0].start
 # back (its leaf isn't written until the next pass, so the ports read it stale: the fill waits a pass; csssim.py)
 regs += [(f"mv{i}", M20, M20 // 2, None) for i in range(2 * WB)]
 if UI: regs.append(("ccok", 2, 0, None))     # compiled without error: a reader of the compile chain's done anchor, in .ex
-regs += [("rLm", 64, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n})") for n in LATCH if n != "p"] + \
+regs += [("rLm", 256, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n})") for n in LATCH if n != "p"] + \
         [(f"rLp{j}", M20, M20 // 2, f"var(--Lp{j})") for j in range(4)]
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
@@ -120,7 +120,7 @@ def read(n, A):
 def miss(n):
     return f"(1 - var(--h{n}) - var(--H{n}))" + (f" * (1 - var(--lat) * var(--Lb{n}))" if n in LATCH else "")
 LOOKUP = ("b", "u", "q", "h", "H")
-READS = ("f", "s1", "s2", "ra", "rb", "w", "p")
+READS = ("f", "s1", "s2", "ra", "rb", "w", "p", "s3", "rc")
 
 # a write of value V through lookup n (a read of the same address, or the write's own): the set's 8 new words and 2 tags,
 # and --wz = set + 1, which picks the commit rule on .c (0: no write, as on a stall)
@@ -147,7 +147,7 @@ BINE = {'ADD': s20("var(--vs2) + var(--vs1)"), 'SUB': s20("var(--vs2) - var(--vs
         'AND': f"calc((1 - {z1}) * (1 - {eq('var(--vs2)', 0)}))", 'OR': f"min(1, calc((1 - {z1}) + (1 - {eq('var(--vs2)', 0)})))"}
 BINOPS = ['MOD', 'EQ', 'ADD', 'LE', 'LT', 'SUB', 'GT', 'GE', 'NE', 'MUL', 'DIV', 'AND', 'OR']    # FizzBuzz's most frequent first
 fpo = f"{fp} + {simm}"
-from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC
+from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC, GETXVEC, SETXVEC, DYNVEC, PRINTVEC, ARRTAG, HEAP_HI
 pst_ = v("pst")
 def below(n): return f"clamp(0, {RB0} - var(--b{n}), 1)"       # the access is below RAM (object instructions: reads 0, writes dropped)
 RA0 = f"calc((1 - {below('ra')}) * var(--vra))"                 # an object instruction's read through ra
@@ -205,6 +205,28 @@ CLASSES = {
                       'steps': by_op({'NEW': f"calc(var(--steps) + {pst_})"}, "calc(var(--steps) + 1)"), 'pst': by_op({'NEW': f"calc(1 - {pst_})"}, pst_)},
                   deps={'ra': [('s1', ['LOADI', 'LDF', 'SCANI', 'SCAN']), ('s2', ['PUTV'])], 'rb': [('s1', ['IDX', 'IDXL']), ('ra', ['IDX', 'IDXL'])]}),
 }
+# arrays and the dynamic operators (uarch.py): IDXA / STOREX index an array inside its length (IDXA reads 0 past it) and DYN
+# computes a number result; anything else traps (the return address written at sp, pc to the ROM routine). xA / xk: the
+# array and the index; ra = its ptr word, rb = its length word, rc = the element (only read when they matter)
+vs1, vs2, vs3 = "var(--vs1)", "var(--vs2)", "var(--vs3)"
+def isstr_v(x): return f"calc(clamp(0, {x} - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - {x}, 1))"
+ARR_PRE = [f"--xA: {by_op({'STOREX': vs3}, vs2)};", f"--xk: {by_op({'STOREX': vs2}, vs1)};",
+           f"--xarr: calc((1 - {eq('var(--op)', OP['DYN'])}) * clamp(0, var(--xA) - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - var(--xA), 1));",
+           f"--xa: calc(var(--xarr) * mod(var(--xA), 32768) + (1 - var(--xarr)) * ({sp} - 1));",
+           "--xin: calc(var(--xarr) * clamp(0, var(--xk) + 1, 1) * clamp(0, var(--vrb) - var(--xk), 1));",
+           f"--xrd: calc({eq('var(--op)', OP['IDXA'])} * var(--xin));",
+           f"--xtrap: {by_op({'DYN': f'min(1, calc({isstr_v(vs1)} + {isstr_v(vs2)}))', 'IDXA': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')};",
+           "--df: mod(var(--imm), 64);",
+           "--dres: if(" + " ".join(f"style(--df: {OP[o]}): {BINE[o]};" for o in ('ADD', 'EQ', 'NE', 'LT', 'GT', 'LE')) + f" else: {BINE['GE']});"]
+CLASSES['arr'] = dict(ops=['IDXA', 'STOREX', 'DYN'], pre=ARR_PRE,
+    reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None), ("s3", f"{sp} - 3", ['STOREX']),
+           ("ra", "var(--xa)", "var(--xarr)"), ("rb", "calc(var(--xa) - var(--xarr))", "var(--xarr)"),
+           ("rc", "mod(var(--vra) + var(--xin) * var(--xk), 32768)", "var(--xrd)")],
+    write=(f"calc(var(--xtrap) * {sp} + (1 - var(--xtrap)) * {by_op({'STOREX': 'mod(var(--vra) + var(--xk), 32768)'}, f'calc({sp} - 2)')})",
+           f"calc(var(--xtrap) * ({pc} + 1) + (1 - var(--xtrap)) * {by_op({'IDXA': 'calc(var(--xin) * var(--vrc))', 'STOREX': vs1}, 'var(--dres)')})", None, "1"),
+    nx={'sp': f"calc(var(--xtrap) * ({sp} + 1) + (1 - var(--xtrap)) * {by_op({'STOREX': f'calc({sp} - 3)'}, f'calc({sp} - 1)')})",
+        'pc': f"calc(var(--xtrap) * {by_op({'IDXA': GETXVEC, 'STOREX': SETXVEC}, DYNVEC)} + (1 - var(--xtrap)) * ({pc} + 1))"},
+    deps={'ra': [('s2', ['IDXA']), ('s3', ['STOREX'])], 'rb': [('s2', ['IDXA']), ('s3', ['STOREX'])], 'rc': [('s1', None), ('ra', None), ('rb', None)]})
 def first_miss(acc):
     """the block of the first missing access (dependency order) among [(name, mask)], -1 for none"""
     e = "-1"
@@ -219,7 +241,7 @@ def nexts(nx, done="1"):
             f"--nsteps: {nx.get('steps', f'calc(var(--steps) + {done})')};"] + ([f"--npst: {nx['pst']};"] if 'pst' in nx else [])
 cls_rules = {}
 for c, k in CLASSES.items():
-    d, acc = [], []
+    d, acc = list(k.get('pre', [])), []
     for n, A, ops_n in k['reads']: d += read(n, A); acc.append((n, need(ops_n)))
     good = {}
     for n, _, _ in k['reads']:
@@ -247,7 +269,7 @@ pr = read("s1", f"{sp} - 1") + [
     "--prLN: " + by_op({o: 1 for o in PRINTOPS if o.endswith('LN')}, 0) + ";", "--prSP: " + by_op({o: 1 for o in PRINTOPS if o.endswith('SP')}, 0) + ";",
     "--prB: " + by_op({o: 1 for o in PRINTOPS if o.startswith('PRINTB')}, 0) + ";",
     f"--pp: calc({pv} + {STRTAG});",
-    f"--isStr: calc((1 - {isputc}) * clamp(0, var(--pp) - {STR_LO - 1}, 1) * clamp(0, {STR_HI} - var(--pp), 1));",
+    f"--isStr: calc((1 - {isputc}) * clamp(0, var(--pp) - {STR_LO - 1}, 1) * clamp(0, {STRP_HI} - var(--pp), 1));",
     f"--isBool: calc((1 - var(--isStr)) * var(--prB) * ({eq(pv, 0)} + {eq(pv, 1)}));",
     "--isNum: calc((1 - var(--isStr)) * (1 - var(--isBool)));",
     "--pq: calc(min(1, var(--pst)) * var(--pst) + (1 - min(1, var(--pst))) * var(--pp));",
@@ -281,16 +303,22 @@ pr += ["--pe: calc((1 - var(--pdone)) * (var(--pr0) + var(--pr1) + var(--pr2) + 
        f"--pn: if(style(--op: {OP['PUTC']}): calc(1 - {eq(pv, 10)}); else: calc(var(--isStr) * (var(--pe) + var(--ptNul) * var(--prSP)) + (1 - var(--isStr)) * clamp(0, var(--ptot) - var(--pbase), 4)));",
        f"--pfin: if(style(--op: {OP['PUTC']}): 1; else: calc(var(--isStr) * var(--ptNul) + (1 - var(--isStr)) * clamp(0, var(--pbase) + 5 - var(--ptot), 1)));",
        f"--pnl: if(style(--op: {OP['PUTC']}): {eq(pv, 10)}; else: calc(var(--isStr) * (var(--ptNL) + var(--ptNul) * var(--prLN)) + (1 - var(--isStr)) * var(--pfin) * var(--prLN)));",
-       "--npst: calc(var(--isStr) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)) + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pph) + 1));"]
+       "--npst: calc((1 - var(--isRef)) * (var(--isStr) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)) + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pph) + 1)));"]
 for i in range(4):
     pr.append(f"--pch{i}: " + (f"if(style(--op: {OP['PUTC']}): {pv}; else: " if i == 0 else "") +
               f"calc(var(--isStr) * (var(--pr{i}) * var(--pb{i}) + {eq('var(--pe)', i)} * var(--ptNul) * var(--prSP) * 32)"
               f" + (1 - var(--isStr)) * clamp(0, var(--pn) - {i}, 1) * var(--pnb{i}))" + (")" if i == 0 else "") + ";")
-pr += ["--ok: calc((1 - min(1, calc(var(--ms1) + var(--mpp)))) * (1 - var(--cw)));".replace("var(--ms1)", miss("s1")),
-       f"--mb: calc({miss('s1')} * var(--bs1) + (1 - {miss('s1')}) * (var(--mpp) * var(--bp) + (1 - var(--mpp)) * -1));"]
-pr += nexts({'pc': f"calc({pc} + var(--pfin))", 'sp': f"calc({sp} - var(--pfin))"}, "var(--pfin)")
+# an array or object (isRef) traps instead: the return address written at sp, pc to the ROM's print routine (no output here)
+pr += [f"--isRef: calc((1 - {isputc}) * (clamp(0, {pv} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {pv}, 1)"
+       f" + clamp(0, {pv} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {pv}, 1)));"]
+pr += lookup("w", sp) + write("w", f"calc({pc} + 1)", "var(--isRef)")
+pr += [f"--ok: calc(var(--isRef) * (1 - min(1, calc({miss('s1')} + {miss('w')}))) + (1 - var(--isRef)) * (1 - min(1, calc({miss('s1')} + var(--mpp)))) * (1 - var(--cw)));",
+       f"--mb: calc({miss('s1')} * var(--bs1) + (1 - {miss('s1')}) * (var(--isRef) * ({miss('w')} * var(--bw) + (1 - {miss('w')}) * -1)"
+       f" + (1 - var(--isRef)) * (var(--mpp) * var(--bp) + (1 - var(--mpp)) * -1)));"]
+pr += nexts({'pc': f"calc(var(--isRef) * {PRINTVEC} + (1 - var(--isRef)) * ({pc} + var(--pfin)))", 'sp': f"calc(var(--isRef) * ({sp} + 1) + (1 - var(--isRef)) * ({sp} - var(--pfin)))"},
+            "max(var(--isRef), var(--pfin))")
 # cell i of the chunk goes to optr + i, bank (optr + i) mod 4 (OUT_BASE is a multiple of 4)
-pr += ["--pout: var(--ok);", "--ncw: min(1, var(--pn));",
+pr += ["--pout: calc(var(--ok) * (1 - var(--isRef)));", "--ncw: min(1, var(--pn));",
        f"--noptr: mod(var(--pnl) * (round(down, (var(--optr) + var(--pn)) / {COLS}) + 1) * {COLS} + (1 - var(--pnl)) * (var(--optr) + var(--pn)), {OUT_SIZE});"]
 for w in range(WB):
     pr += [f"--pi{w}: mod({w} - var(--optr), 4);", f"--dp{w}: clamp(0, var(--pn) - var(--pi{w}), 1);",
@@ -304,7 +332,7 @@ opcls = {o: CLS[c] for c, (ops, _) in cls_rules.items() for o in ops}
 cls_of = "if(" + " ".join(f"style(--op: {OP[o]}): {opcls[o]};" for o in FREQ + [o for o in opcls if o not in FREQ]) + " else: 0)"
 
 # the ROM's words (instruction fetch only), two-level on the pc
-ROMW = image['rom']
+ROMW = [w or 0 for w in image['rom']] + [0] * (ROM - len(image['rom']))
 rom_table = "if(" + " ".join(f"style(--rh: {h}): if(" + " ".join(f"style(--rl: {l}): {ROMW[32 * h + l]};" for l in range(32) if ROMW[32 * h + l]) + " else: 0);"
                             for h in range(ROM // 32) if any(ROMW[32 * h:32 * h + 32])) + " else: 0)"
 
@@ -314,7 +342,7 @@ if 'norom' in ABL: rom_table = "0"
 P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
-     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
+     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef",
      "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
@@ -325,6 +353,7 @@ P = list(dict.fromkeys(P))
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
+LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}

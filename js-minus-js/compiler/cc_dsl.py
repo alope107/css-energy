@@ -4,7 +4,7 @@ Mirrors cc_ref.Compiler exactly (same state, same limits, same code), but as pre
 it can become one nested element's CSS. Prog is the parser step (one token), LexProg the lexer step (one
 character). Outputs: code-word candidates, label definitions, the data word, table write ports.
 
-Table encodings: sk_j = (type + 4 * const) * 65536 + kind * 16384 + addr + 8192 (a parameter i is addr 4096 + i, resolved
+Table encodings: sk_j = (type + 4 * const) * 65536 + kind * 16384 + addr + 8192 (a parameter i is addr PARAM0 + i, resolved
 against npar when read); fl_k = label + 64 * type + 256 * (argument count + 1, or 0 while unknown) (type: 0 number/unknown,
 1 boolean, 2 string); iv_k = an interned string's
 address + 4096 if it has no tag word (cc_ref.intern). Symbols 0..nsym-1 are
@@ -215,9 +215,9 @@ class Prog(Base):
         sk = self.sym_sel(j, 'sk_', 'sk')
         b = self.m(mod(fdiv(sk, 65536), 4), 'skb'); r = self.m(mod(sk, 65536), 'skr'); cst = self.m(fdiv(sk, 262144), 'skc')
         k, a = self.m(fdiv(r, 16384), 'skk'), self.m(sub(mod(r, 16384), 8192), 'ska')
-        # parameter i is stored as kind 2, addr 4096 + i; its frame slot is -1 - npar + i (npar of the current function)
-        ispar = self.m(and_(eq(k, 2), ge(a, 4096)), 'spar')
-        return k, self.m(ite(ispar, sub(add(a, -1 - 4096), self.v('npar')), a), 'ska2'), b, cst
+        # parameter i is stored as kind 2, addr PARAM0 + i; its frame slot is -1 - npar + i (npar of the current function)
+        ispar = self.m(and_(eq(k, 2), ge(a, R.PARAM0)), 'spar')
+        return k, self.m(ite(ispar, sub(add(a, -1 - R.PARAM0), self.v('npar')), a), 'ska2'), b, cst
     def set_symbool(self, j, b):
         """symbol j's type := b (write port: the whole entry)"""
         sk = self.sym_sel(j, 'sk_', 'sk')
@@ -264,10 +264,10 @@ class Prog(Base):
             self.intw.append((self.x.g, n, lift(h1), lift(h2), lift(vnew))); self.set('nint', n + 1)
         return self.m(ite(new, vnew, oldv), 'ival'), self.m(not_(full), 'iok')
     def key_name(self, tv, th1, th2):
-        """cc_ref.key_name: a property name -> (key, ok); tv = address (+ 4096: no room) + 8192 * length"""
-        ta = self.m(mod(tv, 8192), 'kta'); big = self.m(ge(ta, 4096), 'kbig')
+        """cc_ref.key_name: a property name -> (key, ok); tv: strtok()"""
+        ta = self.m(mod(tv, 2048), 'kta'); big = self.m(ge(ta, 1024), 'kbig')
         with self.when(big): self.fail(26)
-        with self.when(not_(big)): e, ok = self.intern(th1, th2, ta, fdiv(tv, 8192))
+        with self.when(not_(big)): e, ok = self.intern(th1, th2, add(ta, self.db), fdiv(tv, 2048))
         return self.m(e, 'kname'), self.m(and_(not_(big), ok), 'kok')
     def stmt_level(self):
         return self.m(and_(eq(self.v('osp'), 0), eq(self.top()[0], R.C_EXPR)), 'stl')
@@ -294,7 +294,7 @@ class Prog(Base):
             return pred(c)
         lx, p2, tkc = self.m(self.v('lx'), 'lx'), self.m(self.v('p2'), 'p2'), self.m(self.v('tkc'), 'tkc')
         ltk = self.m(self.v('lt'), 'ltk')
-        SEND = self.db + 2 * R.SDATA                   # the end of the string area (cc_ref.sbyte)
+        SEND = R.SEND                                  # the end of the string area (cc_ref.sbyte)
         # the NUL after an identifier's bytes (cc_ref.char)
         inul = self.m(self.v('inul'), 'inul')
         with self.when(and_(ne(inul, 0), lt(inul, SEND))): self.datum(inul, 0)
@@ -304,6 +304,9 @@ class Prog(Base):
         def tok(kind, v=0, a=0, b=0):
             self.set('tk', kind); self.set('tv', v); self.set('th1', a); self.set('th2', b)
         def adv(): self.set('sdp', self.v('sdp') + 1)
+        def strtok(noroom, a, ln):
+            """a string's or name's token value: its address - data_base (or 1024: it didn't fit) + 2048 * its length"""
+            return add(ite(noroom, 1024, sub(a, self.db)), mul(ln, 2048))
         alc, dgc = self.m(cpred(isal, ALPHA), 'al'), self.m(cpred(isdg, DIGIT), 'dg')
         alcn, dgcn = self.m(isal(cn), 'aln'), self.m(isdg(cn), 'dgn')
         two = self.m(add(*[mul(and_(ceq(a), eq(cn, b)), code) for (a, b), code in R.TWO.items()]), 'two')
@@ -313,10 +316,10 @@ class Prog(Base):
         L = lambda n: self.m(and_(not_(eof), eq(lx, n)), f'lx{n}_')
         with self.when(L(1)):
             cq = self.m(eq(c, self.v('q')), 'cq')
-            with self.when(cq):                             # tv: its address, + 4096 if it did not fit, + 8192 * its length; th1 / th2: its hash
+            with self.when(cq):                             # tv: strtok(); th1 / th2: its hash
                 sdq = self.m(self.v('sdp'), 'sdq'); ss = self.m(self.v('sstart'), 'ss')
                 self.datum(sdq, 0); self.set('sdp', sdq + 1); self.set('lx', 0)
-                tok(3, add(ss, mul(gt(sdq + 1, SEND), 4096), mul(sub(sdq, ss), 8192)), self.v('h1'), self.v('h2'))
+                tok(3, strtok(gt(sdq + 1, SEND), ss, sub(sdq, ss)), self.v('h1'), self.v('h2'))
             with self.when(and_(not_(cq), ceq(92))): self.set('lx', 3)
             with self.when(and_(not_(cq), not_(ceq(92)))):
                 self.datum(self.v('sdp'), c); adv(); shash(c)
@@ -364,8 +367,8 @@ class Prog(Base):
                     kp = self.m(self.v('kpos'), 'kpos')        # maybe a property name: its bytes (cc_ref.char)
                     with self.when(and_(ne(kp, 0), lt(add(sdp, ln + 1), SEND))): self.datum(add(sdp, ln + 1), c)     # (sdp: the length word)
                     self.set('acc', ln + 1)
-                    with self.when(not_(or_(alcn, dgcn))):     # tv: its address (+ 4096: no room) + 8192 * its length
-                        tok(2, add(sdp, 1, mul(ge(add(sdp, ln + 2), SEND), 4096), mul(ln + 1, 8192)), nh1, nh2); self.set('tkc', 0)
+                    with self.when(not_(or_(alcn, dgcn))):     # tv: strtok()
+                        tok(2, strtok(ge(add(sdp, ln + 2), SEND), sdp + 1, ln + 1), nh1, nh2); self.set('tkc', 0)
                         with self.when(ne(kp, 0)): self.set('inul', add(sdp, ln + 2))
                         with self.when(eq(kp, 2)): self.set('sdp', add(sdp, ln + 3))
                         self.set('icm', mul(eq(kp, 1), ln + 3))
@@ -598,7 +601,7 @@ class Prog(Base):
             with self.when(P(41)): self.end_params()
             with self.when(and_(not_(P(41)), not_(isID))): self.fail(36)
             with self.when(and_(not_(P(41)), isID)):
-                self.declare(th1, th2, 2, add(self.v('npar'), 4096)); self.set('npar', self.v('npar') + 1); self.set('mode', R.S_FPSEP); self.done()
+                self.declare(th1, th2, 2, add(self.v('npar'), R.PARAM0)); self.set('npar', self.v('npar') + 1); self.set('mode', R.S_FPSEP); self.done()
         with block(R.S_FPSEP):
             with self.when(P(44)): self.set('mode', R.S_FPARAM); self.done()
             with self.when(P(41)): self.end_params()
@@ -667,9 +670,9 @@ class Prog(Base):
                 with self.when(and_(nk, isID)): ksI, okI = self.key_name(tv, th1, th2)
             else: ksI, okI = K(0), K(0)
             if self.spec_tk in (None, 3):
-                tsa = self.m(mod(tv, 8192), 'otsa'); bigS = self.m(and_(nk, isSTR, ge(tsa, 4096)), 'obig')
+                tsa = self.m(mod(tv, 2048), 'otsa'); bigS = self.m(and_(nk, isSTR, ge(tsa, 1024)), 'obig')
                 with self.when(bigS): self.fail(26)
-                with self.when(and_(nk, isSTR, not_(bigS))): eS, okS = self.intern(th1, th2, tsa, fdiv(tv, 8192))
+                with self.when(and_(nk, isSTR, not_(bigS))): eS, okS = self.intern(th1, th2, add(tsa, self.db), fdiv(tv, 2048))
                 ksS = self.m(eS, 'oks'); okS = self.m(and_(not_(bigS), okS), 'okS')
             else: ksS, okS = K(0), K(0)
             skok = self.m(or_(and_(isID, okI), and_(isSTR, okS)), 'skok'); ksv = self.m(add(mul(isID, ksI), mul(isSTR, ksS)), 'ksv')
@@ -698,10 +701,10 @@ class Prog(Base):
                     self.emit(R.PUSHI, fdiv(tv, 8192)); self.emit(R.SHL13); self.emit(R.PUSHI, mod(tv, 8192)); self.emit(R.ADD)
                 self.set('mode', R.S_OPER); self.done()
             with self.when(isSTR):                          # interned (cc_ref)
-                tsa = self.m(mod(tv, 8192), 'tsa')
-                with self.when(ge(tsa, 4096)): self.fail(26)
-                with self.when(lt(tsa, 4096)):
-                    e, ok = self.intern(th1, th2, tsa, fdiv(tv, 8192))
+                tsa = self.m(mod(tv, 2048), 'tsa')
+                with self.when(ge(tsa, 1024)): self.fail(26)
+                with self.when(lt(tsa, 1024)):
+                    e, ok = self.intern(th1, th2, add(tsa, self.db), fdiv(tv, 2048))
                     with self.when(ok): self.emit(R.PUSHS, e, b=2); self.set('mode', R.S_OPER); self.done()
             tf = self.m(or_(KWc('true'), KWc('false'), KWc('null')), 'tf')
             with self.when(and_(tf, not_(KWc('null')))): self.emit(R.PUSHI, KWc('true'), b=1); self.set('mode', R.S_OPER); self.done()
