@@ -18,7 +18,7 @@ def ref_state(c):
     st = dict(lx=c.lx, q=c.q, lt=c.lt, tkc=c.tkc, acc=c.acc, h1=c.h1, h2=c.h2, p2=c.p2, sstart=c.sstart, dp=c.dp, mode=c.mode, pn1=c.pn[0], pn2=c.pn[1],
               sdp=c.sdp, pnl=c.pnl, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
               osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, lb=c.lb, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
-              pendLa=c.pendLa, err=c.err, arrstart=c.arrstart)
+              pendLa=c.pendLa, err=c.err)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
     for k in range(R.CD):
         e = c.cs[k]; st[f'csA{k}'] = e[0] * 4096 + e[1] * 64 + e[2] if k < c.csp else None; st[f'csB{k}'] = e[5] * 4096 + e[3] * 64 + e[4] if k < c.csp else None

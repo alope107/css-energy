@@ -121,7 +121,7 @@ class Sim:
         elif op == 'JNEG': pc = imm if rd(sp - 2) < 0 else pc
         elif op == 'DYN':                         # a string operand: the ROM's dyn (a trap pushes the return address)
             b = rd(sp - 1); a = rd(sp - 2)
-            if R.isstr(a) or R.isstr(b): wr(sp, pc); sp += 1; pc = DYNVEC
+            if R.dyntrap(imm, a, b): wr(sp, pc); sp += 1; pc = DYNVEC
             else: sp -= 1; wr(sp - 1, {'ADD': s20(a + b), 'EQ': int(a == b), 'NE': int(a != b), 'LT': int(a < b), 'GT': int(a > b), 'LE': int(a <= b)}.get(OPN[imm % 64], int(a >= b)))
         elif op in ('IDXA', 'STOREX'):            # an array inside its length here; anything else: the ROM's GETX / SETX
             v1 = rd(sp - 1); v2 = rd(sp - 2)

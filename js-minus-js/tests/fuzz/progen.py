@@ -8,18 +8,24 @@ optional semicolons, comments):
 So Node's output is what the program must print on our machine.
 
 The generator stays inside the documented language (README "The language" and "Limits"), so any difference is a bug:
-- values are typed: number, string, array (of numbers, with a known length), object (known keys); a variable keeps its
-  type, and booleans never reach a variable, a parameter, a return value or an arithmetic operand (they are printed only
-  as a comparison / ! / && / || of those, directly in console.log);
-- indexes stay in bounds, missing properties are never read, objects are never printed, number keys never meet the
-  string spelling of the same number;
+- values are typed: number, string, array of numbers or of strings (with a known minimum length: push only raises it),
+  object (known keys); a variable keeps its type, and booleans never reach a variable, a parameter, a return value or an
+  arithmetic operand (they are printed only as a comparison / ! / && / || / a method like includes of those, directly
+  in console.log);
+- strings are built with + anywhere (never two numbers: Node's + on numbers is spelled W(...)); string methods get
+  arguments they can't fail on (charCodeAt on s + "z" at 0, indexes in range);
+- indexes stay in bounds, missing properties are never read, objects are never printed (arrays are: the oracle skips
+  what Node prints on several lines), number keys never meet the string spelling of the same number;
 - loops terminate: counters are reserved names that only their loop changes, continue is used only where the counter
   still advances, calls form a DAG except self-recursion on a decreasing depth parameter;
 - every typed function ends with a return; a function's value is used only if it has a type.
 Limits the compiler enforces with an error (labels, code size, nesting, strings) are not avoided: fuzz.py skips such
 programs and counts them.
 """
-import random
+import random, os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'compiler'))
+import cc_ref as _R
+TAGGED = [(_R.STRV_LO, _R.STRV_HI), (_R.HEAP0 - _R.OBJTAG, _R.HEAP_HI - _R.OBJTAG), (_R.HEAP0 + _R.ARRTAG, _R.HEAP_HI + _R.ARRTAG)]
 
 PRELUDE = ('function W(x){x=((x%1048576)+1048576)%1048576;return x>=524288?x-1048576:x}'
            'function D(a,b){return b===0?0:W(Math.trunc(a/b))}function M(a,b){return b===0?0:a%b}')
@@ -68,6 +74,11 @@ def rend(e, t):
     if k == 'inc':                                    # x++ ++x x-- --x on a number variable (not wrapped in Node: small values)
         return (e[2] + e[1]) if e[3] else (e[1] + e[2]), 8
     if k == 'arr': return '[' + ', '.join(rend(x, t)[0] for x in e[1]) + ']', 9
+    if k == 'scat':                                   # a + b with a string on one side: the same text for Node (no W)
+        sa, pa = rend(e[1], t); sb, pb = rend(e[2], t)
+        return f'{paren(sa, pa < 6)} + {paren(sb, pb <= 6)}', 6
+    if k == 'meth':                                   # x.name(args)
+        s_, p_ = rend(e[1], t); return f'{paren(s_, p_ < 9)}.{e[2]}(' + ', '.join(rend(a, t)[0] for a in e[3]) + ')', 9
     if k == 'obj': return '{' + ', '.join(f'{kk}: {rend(v, t)[0]}' for kk, v in e[1]) + '}', 9
     raise ValueError(k)
 
@@ -109,12 +120,13 @@ class Gen:
     # ---- expressions
     def num(self, d=0):
         r = self.r
-        opts = ['lit', 'lit', 'var', 'var', 'bin', 'bin', 'bin', 'neg', 'tern', 'call', 'idx', 'len', 'prop', 'inc', 'par', 'logic']
+        opts = ['lit', 'lit', 'var', 'var', 'bin', 'bin', 'bin', 'neg', 'tern', 'call', 'idx', 'len', 'prop', 'inc', 'par', 'logic', 'smeth', 'ameth']
         if d >= 3: opts = ['lit', 'var', 'var', 'idx', 'len', 'prop']
         k = r.choice(opts)
         if k == 'lit':
             x = r.random()
-            return lit(r.randint(0, 9) if x < .5 else r.randint(10, 999) if x < .8 else r.randint(1000, 9000) if x < .95 else r.randint(8192, 300000))
+            v = r.randint(0, 9) if x < .5 else r.randint(10, 999) if x < .8 else r.randint(1000, 9000) if x < .95 else r.randint(8192, 300000)
+            return lit(v if not any(lo <= v < hi for lo, hi in TAGGED) else 8192)       # (numbers there are arrays to our machine)
         if k == 'var':
             vs = self.vars(lambda v: v.ty == 'num')
             return ('raw', r.choice(vs).name) if vs else lit(r.randint(0, 20))
@@ -142,6 +154,20 @@ class Gen:
             vs = self.vars(lambda v: v.ty == 'num' and not v.const and not v.counter)
             if not vs: return lit(5)
             return ('inc', r.choice(vs).name, r.choice(['++', '--']), r.random() < 0.5)
+        if k == 'smeth':                              # a number from a string
+            x = r.random(); s_ = self.strx(d + 1)
+            if x < 0.3: return ('dot', s_, 'length')
+            if x < 0.55: return ('meth', s_, 'indexOf', [self.strx(d + 1)])
+            if x < 0.8: return ('meth', ('par', ('scat', s_, ('raw', '"z"'))), 'charCodeAt', [lit(0)])
+            return ('call', 'parseInt', [('call', 'String', [self.num(d + 1)])])
+        if k == 'ameth':                              # a number from an array
+            a = self.arrexpr(need=0); x = r.random()
+            if not a: return lit(6)
+            if x < 0.4: return ('meth', a[0], 'indexOf', [self.num(d + 1)])
+            if x < 0.7: return ('meth', ('arr', [self.num(d + 1), self.num(d + 1)]), 'pop', [])
+            vs = self.vars(lambda v: v.ty == 'arr' and not v.counter)
+            if vs and not self.inlog: return ('meth', ('raw', r.choice(vs).name), 'push', [self.num(d + 1)])
+            return ('dot', a[0], 'length')
     def index(self, ln, d):
         """an index expression in 0 .. ln - 1 (ln known) or, for an array of unknown length, 0"""
         r = self.r
@@ -159,8 +185,19 @@ class Gen:
             for kk, (ty, ln) in v.keys.items():
                 if ty == 'arr' and ln >= need: c.append((self.keyread(v.name, kk), ln))
         if r.random() < 0.1:
-            n = r.randint(max(need, 1), 4); return (('arr', [lit(r.randint(-9, 99)) if r.random() < .8 else ('neg', lit(r.randint(1, 9))) for _ in range(n)]), n)
+            n = r.randint(max(need, 1), 4); return (('arr', [self.elem() for _ in range(n)]), n)
         return r.choice(c) if c else None
+    def elem(self):
+        """an element of an array literal: a number literal, or (sometimes) any number expression"""
+        r = self.r
+        if r.random() < 0.3 and not self.inlog: return self.num(2)
+        return lit(r.randint(-9, 99)) if r.random() < .8 else ('neg', lit(r.randint(1, 9)))
+    def sarr(self):
+        """an array of strings -> (expr, minimum length)"""
+        r = self.r
+        vs = self.vars(lambda v: v.ty == 'sarr')
+        if vs and r.random() < 0.6: v = r.choice(vs); return ('raw', v.name), v.ln
+        n = r.randint(1, 3); return ('arr', [('raw', r.choice(self.strs)) for _ in range(n)]), n
     def keyread(self, oname, kk):
         if kk.startswith('#'): return ('idx', ('raw', oname), lit(int(kk[1:])))
         if kk.startswith('"') or kk.startswith("'"): return ('idx', ('raw', oname), ('raw', kk))
@@ -184,6 +221,23 @@ class Gen:
         if k < 0.6:
             p = self.propread('str')
             if p: return p
+        if k < 0.75 and d < 3:                        # + with a string on one side
+            x = r.random()
+            if x < 0.4: return ('scat', self.strx(d + 1), self.strx(d + 1))
+            if x < 0.7: return ('scat', self.strx(d + 1), self.num(d + 1))
+            return ('scat', self.num(d + 1), self.strx(d + 1))
+        if k < 0.85 and d < 3:                        # string methods
+            x = r.random(); s_ = self.strx(d + 1)
+            if x < 0.2: return ('meth', s_, 'toUpperCase', [])
+            if x < 0.4: return ('meth', s_, 'slice', [lit(r.randint(0, 3))] + ([lit(r.randint(-2, 5))] if r.random() < .5 else []))
+            if x < 0.55: return ('meth', s_, 'charAt', [lit(r.randint(0, 4))])
+            if x < 0.7: return ('call', 'String', [self.num(d + 1)])
+            if x < 0.85:
+                a, ln = self.sarr(); return ('meth', a, 'join', [('raw', r.choice(self.strs))] if r.random() < .7 else [])
+            a = self.arrexpr(need=0)
+            if a: return ('meth', a[0], 'join', [('raw', r.choice(self.strs))])
+        if k < 0.9:
+            a, ln = self.sarr(); return ('idx', a, lit(r.randint(0, ln - 1)))
         return ('raw', r.choice(self.strs))
     def cond(self, d=0):
         r = self.r; k = r.random()
@@ -191,7 +245,14 @@ class Gen:
         if k < 0.08 and bv: return ('raw', r.choice(bv).name)
         if k < 0.1: return ('raw', r.choice(['true', 'false']))
         if d >= 3 or k < 0.45: return ('bin', r.choice(['<', '>', '<=', '>=', '==', '!=', '===', '!==']), self.num(d + 1), self.num(d + 1))
-        if k < 0.55: return ('bin', r.choice(['===', '!==', '==', '!=']), self.strx(d + 1), self.strx(d + 1))
+        if k < 0.5: return ('bin', r.choice(['===', '!==', '==', '!=']), self.strx(d + 1), self.strx(d + 1))
+        if k < 0.55:
+            x = r.random()
+            if x < 0.4: return ('bin', r.choice(['<', '>', '<=', '>=']), self.strx(d + 1), self.strx(d + 1))
+            if x < 0.6: return ('meth', self.strx(d + 1), r.choice(['includes', 'startsWith']), [self.strx(d + 1)])
+            a = self.arrexpr(need=0)
+            if a: return ('meth', a[0], 'includes', [self.num(d + 1)])
+            return ('meth', self.sarr()[0], 'includes', [self.strx(d + 1)])
         if k < 0.65: return ('not', self.cond(d + 1))
         if k < 0.85: return ('bin', r.choice(['&&', '||']), self.cond(d + 1), self.cond(d + 1))
         return ('par', self.cond(d + 1))
@@ -255,7 +316,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -272,12 +333,15 @@ class Gen:
         kw = r.choice(['var', 'let', 'const', 'let'])
         if kw == 'var' and len(self.scopes) != (2 if self.cur is not None else 1): kw = 'let'     # var only at function / program level
         self.hide = n                                 # the initialiser must not read an outer n (it would be in its TDZ)
-        ty = r.choice(['num', 'num', 'num', 'str', 'arr', 'obj', 'bool'])
+        ty = r.choice(['num', 'num', 'num', 'str', 'arr', 'obj', 'bool', 'sarr'])
         if ty == 'num': e = self.num()
         elif ty == 'bool': e = self.cond()
         elif ty == 'str': e = self.strx()
         elif ty == 'arr':
-            ln = r.randint(0, 5); e = ('arr', [lit(r.randint(0, 50)) if r.random() < .8 else ('neg', lit(r.randint(1, 50))) for _ in range(ln)])
+            ln = r.randint(0, 5); e = ('arr', [self.elem() for _ in range(ln)])
+        elif ty == 'sarr':
+            e, ln = self.sarr()
+            if e[0] == 'raw': e = ('meth', e, 'slice', [])        # (a copy: the variable's length is its own)
         else:
             keys, items = {}, []
             for kk in r.sample(KEYS, r.randint(0, 3)) + (r.sample(SKEYS, 1) if r.random() < .3 else []) + ([f'#{r.randint(0, 99)}'] if r.random() < .2 else []):
@@ -294,7 +358,7 @@ class Gen:
         # a second declarator sometimes (var a = 1, b = 2)
         self.hide = None
         decls = [(n, e)]
-        v = Var(n, ty, const=(kw == 'const'), ln=(len(e[1]) if ty == 'arr' else 0), keys=(keys if ty == 'obj' else None))
+        v = Var(n, ty, const=(kw == 'const'), ln=(len(e[1]) if ty == 'arr' else ln if ty == 'sarr' else 0), keys=(keys if ty == 'obj' else None))
         self.scopes[-1][n] = v
         if ty == 'num' and r.random() < 0.15:          # var a = 1, b = 2
             n2 = self.fresh()
@@ -325,6 +389,14 @@ class Gen:
         if k < 0.2: return self.simple(f'{v.name}[{R(i)}]' + r.choice(['++', '--']))
         op = r.choice(['=', '=', '+=', '-=', '*='])
         return [('ASET', v.name, i, op, self.num())]
+    def s_push(self):
+        """an array grows: push, or a store at its length (its known minimum length stays valid)"""
+        r = self.r
+        cs = self.vars(lambda v: v.ty in ('arr', 'sarr') and not v.counter)
+        if not cs: return None
+        v = r.choice(cs); e = self.num() if v.ty == 'arr' else self.strx()
+        if r.random() < 0.7: return [('EXPR', ('meth', ('raw', v.name), 'push', [e]), self.semi())]
+        return [('ASET', v.name, ('dot', ('raw', v.name), 'length'), '=', e)]
     def s_pset(self):
         r = self.r
         cs = self.vars(lambda v: v.ty == 'obj')
@@ -350,7 +422,10 @@ class Gen:
             k = r.random()
             if k < 0.4: args.append(('num', self.num()))
             elif k < 0.6: args.append(('str', self.strx()))
-            elif k < 0.75: args.append(('cond', self.cond()))
+            elif k < 0.7: args.append(('cond', self.cond()))
+            elif k < 0.75:                              # an array itself
+                a = self.arrexpr(need=0) if r.random() < 0.6 else self.sarr()
+                args.append(('arr', a[0] if a else ('arr', [])))
             else:                                       # "..." + n + ...: pieces joined by + (a string first, or after numbers)
                 pieces = []
                 if r.random() < 0.3: pieces += [('num', self.num(2)), ('num', self.num(2))]

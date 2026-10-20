@@ -15,10 +15,9 @@ level of an argument concatenates when an operand is a string ("n = " + n, s + "
 statements end with ';', or a newline / '}' where JavaScript would insert one. Objects: literals {a: 1, "b": 2, 3: x},
 o.x and x[k] reads, o.x / x[k] assignment statements (=, op=, ++, --), null; strings are interned (see OBJTAG below).
 
-Strings cannot be built: + on a string anywhere but the top level of a console.log argument is a compile error
-(when the compiler knows the operand is a string). Inside console.log, + whose operands are known strings prints
-the pieces in turn; + whose operand types are unknown calls the lib's addc, which adds numbers, or prints both
-pieces and returns a marker that print skips.
+Strings are built at run time (+ on a string: DYN, whose slow path is the ROM's). At the top level of a console.log argument
+a + chain with a string in it is not built: its pieces stay on the stack and the ROM's pnK prints them (or, if a comparison,
+&& / || or ?: follows, catnK joins them into one string first).
 
 Values: integers; a string is a tagged pointer (address - STRTAG), so console.log can tell it from a number at
 run time; booleans are 0/1. Values are also typed statically: the compiler tracks the type of the last value it
@@ -73,6 +72,10 @@ STRV_LO, STRV_HI = LAYOUT['data_base'] + SDATA - STRTAG, HEAP_HI - STRTAG     # 
 def isstr(v): return STRV_LO <= v < STRV_HI
 def isarr(v): return HEAP0 <= v - ARRTAG < HEAP_HI
 def isobj(v): return HEAP0 <= v + OBJTAG < HEAP_HI
+def isref(v): return isstr(v) or isarr(v) or isobj(v)
+def dyntrap(imm, a, b):
+    """DYN takes the ROM's slow path: == / != with two strings, the others with a string, array or object on either side"""
+    return (isstr(a) and isstr(b)) if imm % 64 in (EQ, NE) else (isref(a) or isref(b))
 H1M, H2M = 65521, 65519
 
 def h1h2(s):
@@ -123,8 +126,10 @@ def prec(code):
     return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, AND: 3, OR: 2, M_TELSE: 1,
             NOT: 8, NEG: 8}.get(code, 0)
 
-# + at the top level of a console.log argument (value: the left operand's static type); precedence of +
+# + at the top level of a console.log argument (value: the left operand's static type); precedence of +. M_PRINT's value: 2 after a
+# ',' (until the next argument starts) + 4 * the pieces of a + chain already on the stack (PIECES at most: then they are joined)
 M_CADD = 50
+PIECES = 8
 # c ? a : b is  c JZ L1  a JMP L2  L1: b  L2:. '?' pushes the marker M_TERN (value L1 + 64 * reuse); ':' replaces it with
 # the operator M_TELSE (value L2 + 64 * the then-branch's static type), lowest precedence, whose pop defines L2. In a
 # chain a ? x : b ? y : z the inner ternary reuses the outer L2 (reuse: M_TELSE was on top at '?'), so at most one
@@ -170,7 +175,7 @@ def tmerge(a, b):
 class Compiler:
     def __init__(self, data_base, code_base, lib):
         """lib: the runtime library's entry addresses (lib.json)"""
-        self.db, self.cb, self.addc_fn = data_base, code_base, lib['addc']
+        self.db, self.cb = data_base, code_base
         self.ent = lib['entries']                    # the ROM routines compiled code calls (mkarr, the methods)
         # lexer. An identifier that may be a property name (after '.', '{' or ','; kpos 2 / 1 / 1) writes its bytes to the
         # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
@@ -239,6 +244,12 @@ class Compiler:
         if self.nsym + self.nlet >= NS: self.fail(24); return
         if blk: self.nlet += 1; self.sym[NS - self.nlet] = [h[0], h[1], kind, addr, 0, cst]
         else: self.sym[self.nsym] = [h[0], h[1], kind, addr, 0, cst]; self.nsym += 1
+    def redecl(self, h):
+        """the scope a declaration goes into (decl_blk) holds a name h already: the block's own let / const (from its control
+        entry's mark), or the function's or program's names (its parameters included)"""
+        if self.decl_blk(): js = range(NS - self.nlet, NS - self.top_cs()[5])
+        else: js = range(self.fsym if self.curf else 0, self.nsym)
+        return any((self.sym[j][0], self.sym[j][1]) == h for j in js)
     def decl_blk(self):
         """the declaration in progress is block-scoped: let / const (pn[0] 1 / 2) below the function or program level"""
         return int(self.pn[0] > 0 and self.csp > self.curf)
@@ -259,9 +270,12 @@ class Compiler:
                 self.deflab(val % 64, self.here()); self.lb = tmerge(val // 64, self.lb)
             elif code in DYNOPS:                               # val: the left operand's static type
                 self.emit_dyn(code, val, self.lb)
-            elif code == M_CADD:                               # numbers: add; else the lib's addc
-                if val == 3 and self.lb == 3: self.emit(ADD)
-                else: self.emit(CALL, self.addc_fn, b=0)
+            elif code == M_CADD:                               # numbers: add; a string (not after a boolean): two pieces; else DYN
+                if val in (1, 3) and self.lb in (1, 3): self.emit(ADD)
+                elif 2 in (val, self.lb) and val != 1:
+                    if self.lb == 1: self.emit(CALL, self.ent['b2s'], b=2)
+                    self.opv[self.osp - 1] += 4
+                else: self.emit_dyn(ADD, val, self.lb)
             else: self.emit(code)
     def emit_dyn(self, code, lt, rt):
         """a + b or a comparison, the operands of static types lt and rt: the plain instruction when they are known to be numbers
@@ -295,12 +309,18 @@ class Compiler:
         for k in range(self.csp - 1, -1, -1):
             if self.cs[k][0] in (C_LOOPB, C_LOOPB1, C_DOB, C_DOB1) or (brk and self.cs[k][0] == C_SWITCH): return self.cs[k]
         return None
-    def print_call(self, sep, cat=False):
-        """print (and pop) the value on the stack, then the separator sep (0 none, 32 space, 10 newline): one PRINT word.
-        The machine tells strings from numbers at run time (and arrays and objects: the ROM prints them); only booleans need
-        the static type (the B forms). A piece of a + of unknown type is first made a string if it is an array or object."""
-        if self.lb == 0 and cat: self.emit(CALL, self.ent['tostrp'])
-        self.emit(PRINT_OP[sep] + int(self.lb == 1), b=0)
+    def print_call(self, sep):
+        """a console.log argument ended (sep: 32 a space follows, 10 a newline): one PRINT word, which pops the value and prints it
+        and the separator. The machine tells strings from numbers at run time (and arrays and objects: the ROM prints them);
+        only booleans need the static type (the B forms). A + chain's pieces on the stack (c before this one): the ROM's pnK"""
+        c = self.opv[self.osp - 1] // 4
+        if not c: return self.emit(PRINT_OP[sep] + int(self.lb == 1), b=0)
+        if self.lb == 1: self.emit(CALL, self.ent['b2s'], b=2)
+        self.emit(PUSHI, sep); self.emit(CALL, self.ent[f'pn{c + 1}']); self.emit(POP, b=0)
+    def join_pieces(self):
+        """a + chain's pieces (M_PRINT on top) before an operator that is not +: joined into one string (the left operand)"""
+        t, tv = self.top_op()
+        if t == M_PRINT and tv >= 4: self.emit(CALL, self.ent[f'catn{tv // 4 + 1}'], b=2); self.opv[self.osp - 1] = tv % 4
 
     # ---------------- lexer: one character -> at most one token
     def sbyte(self, a, v):
@@ -508,6 +528,7 @@ class Compiler:
         if m == S_VAR:
             if kind != 'ID': return self.fail(9)
             cst, blk = int(self.pn[0] == 2), self.decl_blk()
+            if self.pn[0] and self.redecl(v): return self.fail(78)    # let / const of a name this scope declares already
             if self.curf: self.nloc += 1; self.declare(v, 2, self.nloc, cst, blk)
             else:
                 if self.dp >= self.db + SDATA: return self.fail(25)            # globals would reach the strings
@@ -660,15 +681,18 @@ class Compiler:
             if kind == 'P' and v in BIN:
                 op = BIN[v]; self.popops(prec(op))
                 t, tv = self.top_op()
-                if op == ADD and t == M_PRINT and (tv == 1 or self.lb == 2):    # "..." + x in console.log: print the pieces
-                    self.print_call(0, tv == 1); self.opv[self.osp - 1] = 1; self.mode = S_OPND; return
+                if op == ADD and t == M_PRINT and (tv >= 4 or self.lb == 2):    # "..." + x in console.log: a piece, kept on the stack
+                    if self.lb == 1: self.emit(CALL, self.ent['b2s'], b=2)
+                    if tv // 4 == PIECES - 1: self.emit(CALL, self.ent[f'catn{PIECES}'], b=2); tv %= 4     # (too many: joined)
+                    self.opv[self.osp - 1] = tv + 4; self.mode = S_OPND; return
                 if op == ADD: self.push_op(M_CADD if t == M_PRINT else ADD, self.lb); self.mode = S_OPND; return
+                if prec(op) <= prec(ADD): self.join_pieces()       # (* / % bind tighter: they end no piece)
                 if op in (AND, OR):                            # short-circuit: a DUP JZ/JNZ L POP b L:
                     lb = self.lb; l = self.newlab(); self.emit(DUP); self.emit(JZ if op == AND else JNZ, 0, l); self.emit(POP)
                     self.push_op(op, l + 64 * lb); self.mode = S_OPND; return
                 self.push_op(op, self.lb); self.mode = S_OPND; return    # (the left operand's static type: popops)
             if isP(63):                                        # c ? ...
-                self.popops(2); t, tv = self.top_op()
+                self.popops(2); self.join_pieces(); t, tv = self.top_op()
                 l = self.newlab(); self.emit(JZ, 0, l); self.push_op(M_TERN, l + 64 * int(t == M_TELSE)); self.mode = S_OPND; return
             if isP(58):                                        # c ? a : ...
                 self.popops(1); t, tv = self.top_op()
@@ -695,7 +719,7 @@ class Compiler:
                 if isP(93) and t == M_ARR: self.osp -= 1; return self.arr_end(tv + 1)
                 if isP(44) and t == M_ARR: self.opv[self.osp - 1] += 1; self.mode = S_OPND; return
                 if isP(44):
-                    if t == M_PRINT: self.print_call(32, tv == 1); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return     # (2: after a ',')
+                    if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return     # (2: after a ',')
                     if t in (M_CALL, M_METH): self.opv[self.osp - 1] += 64      # count the arguments
                     if t in (M_CALL, M_METH, M_PUTC): self.mode = S_OPND; return
                     if self.osp == 0 and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
@@ -705,7 +729,7 @@ class Compiler:
                 if t == M_CALL: self.osp -= 1; return self.call_end(tv, 1)
                 if t == M_METH: self.osp -= 1; return self.meth_end(tv, 1)
                 if t == M_PUTC: self.osp -= 1; self.emit(PUTC); self.emit(PUSHI, 0); return
-                if t == M_PRINT: self.osp -= 1; self.print_call(10, tv == 1); return self.print_end()
+                if t == M_PRINT: self.print_call(10); self.osp -= 1; return self.print_end()
                 if self.osp: return self.fail(46)
                 return self.end_expr_stmt(kind, v)             # ')' closing a statement-level paren
             asiok = (not any(self.ops[k] >= 100 for k in range(self.osp)) and self.top_cs()[0] in (C_ASSIGN, C_EXPR, C_RETURN, C_PSET)
@@ -974,7 +998,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             else: mem[sp] = pc; sp += 1; pc = GETXVEC if op == IDXA else SETXVEC
         elif op == DYN:
             b = mem[sp - 1]; a = mem[sp - 2]
-            if isstr(a) or isstr(b): mem[sp] = pc; sp += 1; pc = DYNVEC
+            if dyntrap(imm, a, b): mem[sp] = pc; sp += 1; pc = DYNVEC
             else: sp -= 1; mem[sp - 1] = {ADD: s20(a + b), EQ: int(a == b), NE: int(a != b), LT: int(a < b), GT: int(a > b), LE: int(a <= b)}.get(imm % 64, int(a >= b))
         # objects (machine/uarch.py's microcode, instruction by instruction). Data reads below RAM give 0, writes there are lost.
         elif op in (SCANI, SCAN):                          # probe one key; execute again unless it stopped

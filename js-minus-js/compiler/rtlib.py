@@ -14,6 +14,7 @@ work on the machine directly:
   DYN     (vec dyn)     DYN's slow path (a string operand): lib_src.js dynop with the instruction's immediate.
   PRINT   (vec print)   PRINT of an array or object: lib_src.js pval prints it (Node's one-line form) and the separator.
   mkarr                 called by compiled code: [e1 .. en, n] -> [an array of those n elements]
+  pnK                   called by compiled code: [p1 .. pk, sep] -> [0], printing a + chain's pieces and sep (console.log)
 
 Routines keep their state in fixed cells (layout.json rt_cells), not in frames: GC and the append path may run inside one
 another. The cells S_V and S_K may hold values while something allocates: they are roots."""
@@ -103,6 +104,12 @@ def routines(a):
     # ---------------- PRINT of an array or object: [v, ret] -> pval(v, ret, the PRINT's opcode), which prints it and returns ret
     a.lab('print'); a('DUP'); a('PUSHI', 1); a('SUB'); a('LOADI'); a.k(8192); a('DIV'); a('CALL', 'js.pval'); a('JMPI')
 
+    # ---------------- pnK: [p1 .. pk, sep, ret] -> [0]: print the pieces of a + chain (PRINT, no separator), then sep
+    for k in range(2, 9):
+        a.lab(f'pn{k}'); a('ENTER', 0)
+        for i in range(k): a('LOADL', (-2 - k + i) % 8192); a('PRINT')
+        a('LOADL', (-2) % 8192); a('PUTC'); a('PUSHI', 0); a('RET', k + 1)
+
     # ---------------- mkarr: [e1 .. en, n, ret] -> [array]; the elements stay on the stack (roots) while newarr allocates
     a.lab('mkarr'); a('STOREG', S_XRET); a('DUP'); a('DUP'); a('CALL', 'js.newarr'); a('STOREG', S_A); a('STOREG', S_N)
     a.lab('mk_loop'); a('LOADG', S_N); a('JZ', 'mk_done')
@@ -124,7 +131,7 @@ def build(out):
     rom += [OP['JMP'] * 8192 + a.labels[n] for n in L['vectors']]
     assert len(rom) <= L['rom_size']
     entries = {n: lib['fns'][n] for n in lib['fns']}
-    entries.update({n: a.labels[n] for n in ('mkarr',)})
+    entries.update({n: a.labels[n] for n in ['mkarr'] + [f'pn{k}' for k in range(2, 9)]})
     lib = dict(lib, rom=rom, rt=dict(words=len(code), at=a.base, labels=a.labels), getx=U.GETXVEC, setx=U.SETXVEC, entries=entries)
     json.dump(lib, open(out, 'w'))
     print('runtime: lib', a.base, 'words + ROM routines', len(code), '; ROM', len(rom), 'words with the jump table')

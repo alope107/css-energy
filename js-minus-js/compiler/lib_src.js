@@ -10,15 +10,16 @@
 // then a data block of its own); hdr = -2 - words - kind (kind 0 string, 1 array); a block the collector moved has -1 and
 // its copy's address in its first two words.
 
-// addc(a, b): a + b inside a console.log argument when the types are not known to be numbers: if either is a
-// string, print both (prn: the machine's PRINT, no separator; an array or object as its string) and return DONE (the
-// empty marker at STR_LO), which PRINT prints as nothing; else the sum.
-function addc(a, b) {
-  if (isstr(a) + isstr(b)) { prn(tostrp(a)); prn(tostrp(b)); return __STR_LO__ - __STRTAG__; }
-  return a + b;
-}
-// a piece of a + inside console.log of unknown type: an array or object as its string, anything else as it is
-function tostrp(v) { if (isarr(v) + isobj(v)) { return tostr(v, 0); } return v; }
+// a + chain inside console.log keeps its pieces on the stack: the ROM's pnK prints them (PRINT without a separator: an array
+// or object as its string, pval); catnK joins them when an operator other than + follows. b2s: a boolean piece
+function b2s(v) { return tostr(v, 1); }
+function catn2(a, b) { return cat(a, b, 0); }
+function catn3(a, b, c) { return cat(cat(a, b, 0), c, 0); }
+function catn4(a, b, c, d) { return cat(catn3(a, b, c), d, 0); }
+function catn5(a, b, c, d, e) { return cat(catn4(a, b, c, d), e, 0); }
+function catn6(a, b, c, d, e, f) { return cat(catn5(a, b, c, d, e), f, 0); }
+function catn7(a, b, c, d, e, f, g) { return cat(catn6(a, b, c, d, e, f), g, 0); }
+function catn8(a, b, c, d, e, f, g, h) { return cat(catn7(a, b, c, d, e, f, g), h, 0); }
 
 // ---------------- kinds
 function isstr(v) { var a = v + __STRTAG__; if (a >= __STR_LO__) { if (a < __HEAP_HI__) { return 1; } } return 0; }
@@ -185,11 +186,20 @@ function scmp(a, b) {
   }
   return r;
 }
-// DYN's slow path (a string on either side): op = the binary opcode + 64 * (a boolean on the left) + 128 * (on the right)
+// DYN's slow path (== / != on two strings; the others with a string, array or object operand): op = the binary opcode
+// + 64 * (a boolean on the left) + 128 * (on the right). Comparisons: arrays and objects as their strings; two strings by
+// their characters, a string and a number as numbers (parseInt: 0 where JavaScript has NaN)
 function dynop(a, b, op) {
   var f = op % 64; var c = 0;
   if (f == __OP_ADD__) { return cat(a, b, op / 64); }
-  if (isstr(a) * isstr(b)) { c = scmp(a, b); } else { c = (a > b) - (a < b); }
+  if (isarr(a) + isobj(a)) { a = tostr(a, 0); }
+  if (isarr(b) + isobj(b)) { b = tostr(b, 0); }
+  if (isstr(a) * isstr(b)) { c = scmp(a, b); }
+  else {
+    if (isstr(a)) { a = parseint(0, a); }
+    if (isstr(b)) { b = parseint(0, b); }
+    c = (a > b) - (a < b);
+  }
   if (f == __OP_EQ__) { return c == 0; }
   if (f == __OP_NE__) { return c != 0; }
   if (f == __OP_LT__) { return c < 0; }
@@ -430,8 +440,10 @@ function parseint(d, s) {
 function tostringb(d, v) { return tostr(v, 1); }
 
 // ---------------- console.log of an array or object (PRINT traps into the ROM's pval): Node's one-line form
-// [ 1, 'a', [ 2 ] ], { k: 1, 'a b': [] }; below depth 2 [Array] / [Object]. op: the PRINT instruction (its separator)
+// [ 1, 'a', [ 2 ] ], { k: 1, 'a b': [] }; below depth 2 [Array] / [Object]. op: the PRINT instruction (its separator; none:
+// a piece of a + chain, printed as its string)
 function pval(v, ret, op) {
+  if ((op == __OP_PRINT__) + (op == __OP_PRINTB__)) { prn(tostr(v, 0)); return ret; }     // a piece of a + chain
   ins(v, 0);
   if ((op == __OP_PRINTSP__) + (op == __OP_PRINTBSP__)) { putc(32); }
   if ((op == __OP_PRINTLN__) + (op == __OP_PRINTBLN__)) { putc(10); }

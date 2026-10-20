@@ -210,13 +210,19 @@ CLASSES = {
 # array and the index; ra = its ptr word, rb = its length word, rc = the element (only read when they matter)
 vs1, vs2, vs3 = "var(--vs1)", "var(--vs2)", "var(--vs3)"
 def isstr_v(x): return f"calc(clamp(0, {x} - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - {x}, 1))"
+def isref_v(x):
+    """a string, array or object value (1 / 0)"""
+    return (f"calc({isstr_v(x)} + clamp(0, {x} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {x}, 1)"
+            f" + clamp(0, {x} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {x}, 1))")
 ARR_PRE = [f"--xA: {by_op({'STOREX': vs3}, vs2)};", f"--xk: {by_op({'STOREX': vs2}, vs1)};",
            f"--xarr: calc((1 - {eq('var(--op)', OP['DYN'])}) * clamp(0, var(--xA) - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - var(--xA), 1));",
            f"--xa: calc(var(--xarr) * mod(var(--xA), 32768) + (1 - var(--xarr)) * ({sp} - 1));",
            "--xin: calc(var(--xarr) * clamp(0, var(--xk) + 1, 1) * clamp(0, var(--vrb) - var(--xk), 1));",
            f"--xrd: calc({eq('var(--op)', OP['IDXA'])} * var(--xin));",
-           f"--xtrap: {by_op({'DYN': f'min(1, calc({isstr_v(vs1)} + {isstr_v(vs2)}))', 'IDXA': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')};",
+           f"--xtrap: {by_op({'DYN': 'var(--dtr)', 'IDXA': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')};",
            "--df: mod(var(--imm), 64);",
+           # DYN's slow path: == / != with two strings, the others with a string, array or object on either side
+           f"--dtr: if(style(--df: {OP['EQ']}) or style(--df: {OP['NE']}): calc({isstr_v(vs1)} * {isstr_v(vs2)}); else: min(1, calc({isref_v(vs1)} + {isref_v(vs2)})));",
            "--dres: if(" + " ".join(f"style(--df: {OP[o]}): {BINE[o]};" for o in ('ADD', 'EQ', 'NE', 'LT', 'GT', 'LE')) + f" else: {BINE['GE']});"]
 CLASSES['arr'] = dict(ops=['IDXA', 'STOREX', 'DYN'], pre=ARR_PRE,
     reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None), ("s3", f"{sp} - 3", ['STOREX']),
@@ -342,7 +348,7 @@ if 'norom' in ABL: rom_table = "0"
 P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
-     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef",
+     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr",
      "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
@@ -353,7 +359,7 @@ P = list(dict.fromkeys(P))
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
-LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef"}
+LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
