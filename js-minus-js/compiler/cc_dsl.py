@@ -186,32 +186,41 @@ class Prog(Base):
                 with self.when(eq(code, R.OR)): self.set('scO', 1); self.set('scOl', mod(val, 64))
                 with self.when(or_(eq(code, R.AND), eq(code, R.OR))): self.set('lb', self.tmerge(fdiv(val, 64), self.v('lb')))   # cc_ref
                 lb = self.m(self.v('lb'), 'plb')
-                with self.when(anyeq(code, R.DYNOPS)): self.emit_dyn(code, val, lb)
-                with self.when(eq(code, R.M_CADD)):                  # cc_ref: numbers ADD; a string (not after a boolean) two pieces; else DYN
-                    nm = lambda t: or_(eq(t, 1), eq(t, 3))
-                    num = self.m(and_(nm(val), nm(lb)), 'cnum')
-                    pcs = self.m(and_(not_(num), or_(eq(val, 2), eq(lb, 2)), ne(val, 1)), 'cpcs')
-                    with self.when(num): self.emit(R.ADD)
-                    with self.when(and_(pcs, eq(lb, 1))): self.emit(R.CALL, self.ent['b2s'], b=2)
-                    with self.when(pcs): _, pv = self.top_op(); self.set_top_op(R.M_PRINT, add(pv, 4))
-                    with self.when(and_(not_(num), not_(pcs))): self.emit_dyn(R.ADD, val, lb)
-                with self.when(not_(anyeq(code, (R.AND, R.OR, R.M_CADD, R.M_TELSE) + R.DYNOPS))): self.emit(code)
+                # one word for an operator (cc_ref: emit_dyn for + and the comparisons, else the opcode); M_CADD after the loop
+                isd = self.m(anyeq(code, R.DYNOPS), 'pisd')
+                dop, dimm, db = self.dyn_word(code, val, lb)
+                with self.when(not_(anyeq(code, (R.AND, R.OR, R.M_CADD, R.M_TELSE)))):
+                    self.emit(ite(isd, dop, code), mul(isd, dimm), b=ite(isd, db, ite(eq(code, R.NOT), 1, 3)))
         with self.when(self.v('scA')): self.deflab(self.v('scAl'), self.here())
         with self.when(self.v('scO')): self.deflab(self.v('scOl'), self.here())
-        # an M_TELSE is the bottom of its segment, so if one was popped it was the last: the entry at the new osp
+        # an M_TELSE or M_CADD is the bottom of its segment, so if one was popped it was the last: the entry at the new osp
         osp = self.m(self.v('osp'), 'ospo')
         w = self.m(add(*[mul(eq(osp, k), self.v(f'op{k}')) for k in range(OD)]), 'lastw')
-        with self.when(and_(lt(osp, osp_in), eq(fdiv(w, 8192), R.M_TELSE))):
+        popped = self.m(lt(osp, osp_in), 'ppd')
+        with self.when(and_(popped, eq(fdiv(w, 8192), R.M_TELSE))):
             val = self.m(mod(w, 8192), 'tev')
             self.deflab(mod(val, 64), self.here()); self.set('lb', self.tmerge(fdiv(val, 64), self.v('lb')))
-    def emit_dyn(self, code, lt, rt):
-        """cc_ref.emit_dyn: the plain instruction for known numbers, else DYN (boolean operands flagged in its immediate)"""
+        with self.when(and_(popped, eq(fdiv(w, 8192), R.M_CADD))):        # cc_ref: numbers ADD; a string (not after a boolean) two pieces; else DYN
+            val = self.m(mod(w, 8192), 'cav'); lb = self.m(self.v('lb'), 'calb')
+            nm = lambda t: or_(eq(t, 1), eq(t, 3))
+            num = self.m(and_(nm(val), nm(lb)), 'cnum')
+            pcs = self.m(and_(not_(num), or_(eq(val, 2), eq(lb, 2)), ne(val, 1)), 'cpcs')
+            dop, dimm, db = self.dyn_word(R.ADD, val, lb)
+            with self.when(not_(pcs)): self.emit(dop, dimm, b=db)
+            with self.when(and_(pcs, eq(lb, 1))): self.emit(R.CALL, self.ent['b2s'], b=2)
+            with self.when(pcs): _, pv = self.top_op(); self.set_top_op(R.M_PRINT, add(pv, 4))
+    def dyn_word(self, code, lt, rt):
+        """cc_ref.emit_dyn's word: (opcode, immediate, static type): the plain instruction for known numbers, else DYN"""
         code, lt, rt = lift(code), lift(lt), lift(rt)
         num = lambda t: or_(eq(t, 1), eq(t, 3))
         isadd = self.m(eq(code, R.ADD), 'dadd')
         plain = self.m(ite(isadd, and_(num(lt), num(rt)), or_(num(lt), num(rt))), 'dpl')
         imm = add(code, mul(eq(lt, 1), 64), mul(eq(rt, 1), 128))
-        self.emit(ite(plain, code, R.DYN), mul(not_(plain), imm), b=ite(isadd, ite(plain, 3, mul(or_(eq(lt, 2), eq(rt, 2)), 2)), 1))
+        return (self.m(ite(plain, code, R.DYN), 'dop'), self.m(mul(not_(plain), imm), 'dimm'),
+                self.m(ite(isadd, ite(plain, 3, mul(or_(eq(lt, 2), eq(rt, 2)), 2)), 1), 'dtb'))
+    def emit_dyn(self, code, lt, rt):
+        """cc_ref.emit_dyn: the plain instruction for known numbers, else DYN (boolean operands flagged in its immediate)"""
+        op, imm, b = self.dyn_word(code, lt, rt); self.emit(op, imm, b=b)
     def tmerge(self, a, b): return self.m(ite(or_(eq(a, 1), eq(b, 1)), 1, mul(eq(a, b), b)), 'tmg')     # cc_ref.tmerge
     def lookup(self, h1, h2):
         """index of the symbol with this name, or -1: the latest block-scoped one (scores NS+1..2NS), else the latest
