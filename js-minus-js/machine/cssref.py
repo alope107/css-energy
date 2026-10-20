@@ -56,6 +56,7 @@ class Machine:
         st['steps'] += 1
         if op == 'NOP': pass
         elif op == 'PUSHI': wr(sp, imm); sp += 1
+        elif op == 'PUSHS': wr(sp, imm - STRTAG); sp += 1
         elif op == 'LOADG': wr(sp, rd(imm)); sp += 1
         elif op == 'STOREG': sp -= 1; wr(imm, rd(sp))
         elif op == 'LOADL': wr(sp, rd(fp + simm)); sp += 1

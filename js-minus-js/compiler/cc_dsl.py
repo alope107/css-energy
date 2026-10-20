@@ -251,8 +251,10 @@ class Prog(Base):
         new = self.m(eq(found, 0), 'fnew')
         return (self.m(ite(new, n, sub(found, 1)), 'fni'), self.m(ite(new, self.v('nlab') - 1, mod(oldl, 64)), 'fnl'),
                 self.m(ite(new, 0, mod(fdiv(oldl, 64), 4)), 'fnb'))
-    def intern(self, h1, h2, vnew):
-        """cc_ref.intern: -> (table value, ok) of the interned string h1 / h2, entering vnew if it is new (fail 68 when full)"""
+    def intern(self, h1, h2, vnew, ln):
+        """cc_ref.intern: -> (address, ok) of the interned string h1 / h2, entering vnew if it is new (fail 68 when full); writes
+        this copy's length word"""
+        self.datum(sub(vnew, 1), ln)
         n = self.m(self.v('nint'), 'nin')
         found = self.m(mx(*[mul(and_(eq(I(f'ih1_{k}'), h1), eq(I(f'ih2_{k}'), h2), lt(k, n)), k + 1) for k in range(NI)]), 'ifd')
         oldv = self.m(add(*[mul(eq(found, k + 1), I(f'iv_{k}')) for k in range(NI)]), 'iov')
@@ -262,11 +264,11 @@ class Prog(Base):
             self.intw.append((self.x.g, n, lift(h1), lift(h2), lift(vnew))); self.set('nint', n + 1)
         return self.m(ite(new, vnew, oldv), 'ival'), self.m(not_(full), 'iok')
     def key_name(self, tv, th1, th2):
-        """cc_ref.key_name: a property name -> (key, ok)"""
-        big = self.m(ge(tv, 4096), 'kbig')
+        """cc_ref.key_name: a property name -> (key, ok); tv = address (+ 4096: no room) + 8192 * length"""
+        ta = self.m(mod(tv, 8192), 'kta'); big = self.m(ge(ta, 4096), 'kbig')
         with self.when(big): self.fail(26)
-        with self.when(not_(big)): e, ok = self.intern(th1, th2, add(tv, 4096))
-        return self.m(mod(e, 4096), 'kname'), self.m(and_(not_(big), ok), 'kok')
+        with self.when(not_(big)): e, ok = self.intern(th1, th2, ta, fdiv(tv, 8192))
+        return self.m(e, 'kname'), self.m(and_(not_(big), ok), 'kok')
     def stmt_level(self):
         return self.m(and_(eq(self.v('osp'), 0), eq(self.top()[0], R.C_EXPR)), 'stl')
     def load(self, k, a, b=0):
@@ -293,9 +295,9 @@ class Prog(Base):
         lx, p2, tkc = self.m(self.v('lx'), 'lx'), self.m(self.v('p2'), 'p2'), self.m(self.v('tkc'), 'tkc')
         ltk = self.m(self.v('lt'), 'ltk')
         SEND = self.db + 2 * R.SDATA                   # the end of the string area (cc_ref.sbyte)
-        # the NUL after an identifier's bytes (cc_ref.char), unless this level opens a string
+        # the NUL after an identifier's bytes (cc_ref.char)
         inul = self.m(self.v('inul'), 'inul')
-        with self.when(and_(ne(inul, 0), lt(inul, SEND), not_(and_(eq(lx, 0), eq(p2, 0), or_(ceq(34), ceq(39)))))): self.datum(inul, 0)
+        with self.when(and_(ne(inul, 0), lt(inul, SEND))): self.datum(inul, 0)
         self.set('inul', 0)
         def shash(x):
             self.set('h1', mod(add(mul(self.v('h1'), 31), x), H1M)); self.set('h2', mod(add(mul(self.v('h2'), 37), x), H2M))
@@ -311,9 +313,10 @@ class Prog(Base):
         L = lambda n: self.m(and_(not_(eof), eq(lx, n)), f'lx{n}_')
         with self.when(L(1)):
             cq = self.m(eq(c, self.v('q')), 'cq')
-            with self.when(cq):                             # tv: its address, + 4096 if it did not fit; th1 / th2: its hash
-                self.datum(self.v('sdp'), 0); adv(); self.set('lx', 0)
-                tok(3, add(self.v('sstart'), mul(gt(self.v('sdp'), SEND), 4096)), self.v('h1'), self.v('h2'))
+            with self.when(cq):                             # tv: its address, + 4096 if it did not fit, + 8192 * its length; th1 / th2: its hash
+                sdq = self.m(self.v('sdp'), 'sdq'); ss = self.m(self.v('sstart'), 'ss')
+                self.datum(sdq, 0); self.set('sdp', sdq + 1); self.set('lx', 0)
+                tok(3, add(ss, mul(gt(sdq + 1, SEND), 4096), mul(sub(sdq, ss), 8192)), self.v('h1'), self.v('h2'))
             with self.when(and_(not_(cq), ceq(92))): self.set('lx', 3)
             with self.when(and_(not_(cq), not_(ceq(92)))):
                 self.datum(self.v('sdp'), c); adv(); shash(c)
@@ -350,7 +353,7 @@ class Prog(Base):
                 with self.when(cB): self.set('lx', 6)
                 with self.when(cH):
                     sdp = self.m(self.v('sdp'), 'sdp0')
-                    self.set('lx', 1); self.set('q', c); self.datum(sdp, sdp + 1 - R.STRTAG); self.set('sdp', sdp + 1); self.set('sstart', sdp + 1)
+                    self.set('lx', 1); self.set('q', c); self.set('sdp', sdp + 1); self.set('sstart', sdp + 1)     # (sdp: the length word)
                     self.set('h1', 0); self.set('h2', 0)
                 with self.when(cI):                         # an identifier: hashed, its bytes at sdp (acc: its length so far)
                     keep = self.m(eq(tkc, 1), 'kp')
@@ -359,13 +362,13 @@ class Prog(Base):
                     self.set('h1', nh1); self.set('h2', nh2); self.set('tkc', 1)
                     sdp = self.m(self.v('sdp'), 'sdp1'); ln = self.m(mul(keep, self.v('acc')), 'iln')
                     kp = self.m(self.v('kpos'), 'kpos')        # maybe a property name: its bytes (cc_ref.char)
-                    with self.when(and_(ne(kp, 0), lt(add(sdp, ln), SEND))): self.datum(add(sdp, ln), c)
+                    with self.when(and_(ne(kp, 0), lt(add(sdp, ln + 1), SEND))): self.datum(add(sdp, ln + 1), c)     # (sdp: the length word)
                     self.set('acc', ln + 1)
-                    with self.when(not_(or_(alcn, dgcn))):
-                        tok(2, add(sdp, mul(ge(add(sdp, ln + 1), SEND), 4096)), nh1, nh2); self.set('tkc', 0)
-                        with self.when(ne(kp, 0)): self.set('inul', add(sdp, ln + 1))
-                        with self.when(eq(kp, 2)): self.set('sdp', add(sdp, ln + 2))
-                        self.set('icm', mul(eq(kp, 1), ln + 2))
+                    with self.when(not_(or_(alcn, dgcn))):     # tv: its address (+ 4096: no room) + 8192 * its length
+                        tok(2, add(sdp, 1, mul(ge(add(sdp, ln + 2), SEND), 4096), mul(ln + 1, 8192)), nh1, nh2); self.set('tkc', 0)
+                        with self.when(ne(kp, 0)): self.set('inul', add(sdp, ln + 2))
+                        with self.when(eq(kp, 2)): self.set('sdp', add(sdp, ln + 3))
+                        self.set('icm', mul(eq(kp, 1), ln + 3))
                 with self.when(cJ):
                     nacc = self.m(add(mul(mul(eq(tkc, 2), self.v('acc')), 10), sub(c, 48)), 'nacc')
                     self.set('acc', nacc); self.set('tkc', 2)
@@ -664,10 +667,10 @@ class Prog(Base):
                 with self.when(and_(nk, isID)): ksI, okI = self.key_name(tv, th1, th2)
             else: ksI, okI = K(0), K(0)
             if self.spec_tk in (None, 3):
-                bigS = self.m(and_(nk, isSTR, ge(tv, 4096)), 'obig')
+                tsa = self.m(mod(tv, 8192), 'otsa'); bigS = self.m(and_(nk, isSTR, ge(tsa, 4096)), 'obig')
                 with self.when(bigS): self.fail(26)
-                with self.when(and_(nk, isSTR, not_(bigS))): eS, okS = self.intern(th1, th2, tv)
-                ksS = self.m(mod(eS, 4096), 'oks'); okS = self.m(and_(not_(bigS), okS), 'okS')
+                with self.when(and_(nk, isSTR, not_(bigS))): eS, okS = self.intern(th1, th2, tsa, fdiv(tv, 8192))
+                ksS = self.m(eS, 'oks'); okS = self.m(and_(not_(bigS), okS), 'okS')
             else: ksS, okS = K(0), K(0)
             skok = self.m(or_(and_(isID, okI), and_(isSTR, okS)), 'skok'); ksv = self.m(add(mul(isID, ksI), mul(isSTR, ksS)), 'ksv')
             setf = self.m(and_(nk, skok, lt(ov, 3)), 'osetf')
@@ -695,14 +698,11 @@ class Prog(Base):
                     self.emit(R.PUSHI, fdiv(tv, 8192)); self.emit(R.SHL13); self.emit(R.PUSHI, mod(tv, 8192)); self.emit(R.ADD)
                 self.set('mode', R.S_OPER); self.done()
             with self.when(isSTR):                          # interned (cc_ref)
-                with self.when(ge(tv, 4096)): self.fail(26)
-                with self.when(lt(tv, 4096)):
-                    e, ok = self.intern(th1, th2, tv)
-                    with self.when(ok):
-                        notag = self.m(ge(e, 4096), 'notag')
-                        with self.when(notag): self.emit(R.PUSHI, mod(e, 4096)); self.emit(R.LOADG, self.db % 8192); self.emit(R.SUB, b=2)
-                        with self.when(not_(notag)): self.emit(R.LOADG, mod(sub(e, 1), 8192), b=2)
-                        self.set('mode', R.S_OPER); self.done()
+                tsa = self.m(mod(tv, 8192), 'tsa')
+                with self.when(ge(tsa, 4096)): self.fail(26)
+                with self.when(lt(tsa, 4096)):
+                    e, ok = self.intern(th1, th2, tsa, fdiv(tv, 8192))
+                    with self.when(ok): self.emit(R.PUSHS, e, b=2); self.set('mode', R.S_OPER); self.done()
             tf = self.m(or_(KWc('true'), KWc('false'), KWc('null')), 'tf')
             with self.when(and_(tf, not_(KWc('null')))): self.emit(R.PUSHI, KWc('true'), b=1); self.set('mode', R.S_OPER); self.done()
             with self.when(KWc('null')): self.emit(R.PUSHI, 0, b=0); self.set('mode', R.S_OPER); self.done()

@@ -35,10 +35,11 @@ DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v'))
 PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
 
 def mux_shift(prop, n, base, shift=0):
-    """--c<v + shift> for v in [base, base+n): prop holds v, prop-h holds (v - base) // 32"""
+    """--c<v + shift> for v in [base, base+n): prop holds v, prop-h holds (v - base) // 32; shift may be a function of v"""
     hi = []
+    sh = shift if callable(shift) else (lambda v: shift)
     for h in range((n + 31) // 32):
-        lo = ' '.join(f'style(--{prop}: {base + h * 32 + l}): --c{base + h * 32 + l + shift};' for l in range(32) if h * 32 + l < n)
+        lo = ' '.join(f'style(--{prop}: {base + h * 32 + l}): --c{base + h * 32 + l + sh(base + h * 32 + l)};' for l in range(32) if h * 32 + l < n)
         hi.append(f'style(--{prop}-h: {h}): if({lo} else: none);')
     return f'if({" ".join(hi)} else: none)'
 
@@ -322,7 +323,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         css.append(f'@container style(--q-o_v{s}: 1) {{ .ov.k{s} {{ {body} }} }}')
     N.add('q-o_da-h', False)
     css.append(f'@container style(--q-o_dv: 1) {{ .ovd {{ display: block; --q-o_da-h: round(down, var(--q-o_da) / 32);'
-               f' anchor-name: {mux_shift("q-o_da", data_cells, 0, ishift)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
+               f' anchor-name: {mux_shift("q-o_da", 2 * data_cells, 0, lambda v: ishift if v < data_cells else 0)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
     css.append('.lp { display: none; height: 0; }')
     for k in range(NLP):
         css.append(f'@container style(--q-o_lv{k}: 1) {{ .lp{k} {{ display: block; anchor-name: {mux_lab(f"q-o_lj{k}", R.NL)};'

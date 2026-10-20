@@ -39,7 +39,7 @@ AMASK = 32767                           # addresses are 15-bit (the font's addre
 # opcodes (jsc.js)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
     JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL, \
-    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG = range(54)
+    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, PUSHS = range(55)
 # PRINT family (serviced by CSS on the page, machine/uarch.py in the model): pop a value and print it. A tagged string pointer
 # prints its bytes, anything else prints in decimal; the B forms print 0 / 1 as false / true (the static type says
 # boolean). SP / LN add a space / newline. PRINT_OP[sep] + (type == boolean) is the opcode.
@@ -143,7 +143,7 @@ class Compiler:
         # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
-        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.pnl = 0
+        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.pnl = 0
         self.dp = data_base + 1             # globals and array literals (parser); data_base holds STRTAG
         self.sdp = data_base + SDATA + 1    # string literals and property names (lexer); data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at (a property name there printed as '')
@@ -156,7 +156,7 @@ class Compiler:
         self.sym = [[0, 0, 0, 0, 0, 0] for _ in range(NS)]; self.nsym = 0; self.nlet = 0
         self.fn = [[0, 0, 0, 0, 0] for _ in range(NF)]; self.nfn = 0           # h1 h2 label type argc (+1; 0: no call or definition yet)
         self.lab = [-1] * NL; self.nlab = 0
-        self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings: h1 h2 address + 4096 if no tag word
+        self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings and names: h1 h2 address
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
         self.pendLa = 0; self.err = 0; self.arrstart = 0; self.lb = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
@@ -231,19 +231,22 @@ class Compiler:
                 if val == 3 and self.lb == 3: self.emit(ADD)
                 else: self.emit(CALL, self.addc_fn, b=0)
             else: self.emit(code)
-    def intern(self, h, addr, tag):
-        """the interned string of hash h: its table value (address + 4096 if it has no tag word), entering it (at addr) if new;
-        -1 when the table is full"""
+    def intern(self, h, addr, ln):
+        """the interned string of hash h: its address, entering it (at addr) if new; -1 when the table is full. Every string
+        and name in the string area is [length][bytes][0], its address that of the first byte: this copy's length word is
+        written here (the lexer can't: it writes one word per character)"""
+        self.datum(addr - 1, ln)
         for k in range(self.nint):
             if (self.itab[k][0], self.itab[k][1]) == h: return self.itab[k][2]
         if self.nint >= NI: self.fail(68); return -1
-        self.itab[self.nint] = [h[0], h[1], addr + 4096 * (1 - tag)]; self.nint += 1
-        return addr + 4096 * (1 - tag)
+        self.itab[self.nint] = [h[0], h[1], addr]; self.nint += 1
+        return addr
+    def datum(self, a, v):
+        if a < self.db + 2 * SDATA: self.data[a] = v
     def key_name(self, h):
         """a property name (identifier token): its key, the interned address (-1: failed)"""
         if self.tid >= 4096: self.fail(26); return -1
-        e = self.intern(h, self.tid, 0)
-        return -1 if e < 0 else e % 4096
+        return self.intern(h, self.tid, self.tlen)
     def stmt_level(self):
         """an assignment to o.x / x[k]: only as a statement of its own"""
         return self.osp == 0 and self.top_cs()[0] == C_EXPR
@@ -268,13 +271,13 @@ class Compiler:
         tok = None; gap = 0                               # gap: a blank or the end of a comment (no token here)
         isal = lambda x: 65 <= x <= 90 or 97 <= x <= 122 or x in (95, 36)
         isdg = lambda x: 48 <= x <= 57
-        if self.inul and not (self.lx == 0 and self.p2 == 0 and c in (34, 39)): self.sbyte(self.inul, 0)   # NUL after an identifier
+        if self.inul: self.sbyte(self.inul, 0)            # NUL after an identifier
         self.inul = 0
         if c == 0 and self.lx != 0: self.lx = 0; self.p2 = 0; tok = ('EOF', 0)    # unterminated string / comment
         elif self.lx == 1:                                # in a string
             if c == self.q:
                 self.data[self.sdp] = 0; self.sdp += 1; self.lx = 0
-                tok = ('STR', (self.sstart + 4096 * int(self.sdp > self.db + 2 * SDATA), self.h1, self.h2))
+                tok = ('STR', (self.sstart + 4096 * int(self.sdp > self.db + 2 * SDATA), self.h1, self.h2, self.sdp - 1 - self.sstart))
             elif c == 92: self.lx = 3
             else: self.data[self.sdp] = c; self.sdp += 1; self.shash(c)
         elif self.lx == 3:                                # after a backslash
@@ -296,20 +299,20 @@ class Compiler:
             if c == 10: tok = self.newline()
         elif c == 47 and cn == 47: self.lx = 2
         elif c == 47 and cn == 42: self.lx = 6
-        elif c in (34, 39):                               # a string: its tag word, then its bytes (hashed for interning)
-            self.lx = 1; self.q = c; self.data[self.sdp] = self.sdp + 1 - STRTAG; self.sdp += 1; self.sstart = self.sdp
+        elif c in (34, 39):                               # a string: its length word (the parser writes it), then its bytes (hashed)
+            self.lx = 1; self.q = c; self.sdp += 1; self.sstart = self.sdp
             self.h1 = self.h2 = 0
         elif isal(c) or (isdg(c) and self.tkc == 1):      # an identifier: hashed; its bytes at sdp (acc: its length so far)
             if self.tkc != 1: self.h1 = self.h2 = 0; self.acc = 0
             self.shash(c); self.tkc = 1
-            if self.kpos: self.sbyte(self.sdp + self.acc, c)
+            if self.kpos: self.sbyte(self.sdp + 1 + self.acc, c)      # (sdp itself: the length word)
             self.acc += 1
             if not (isal(cn) or isdg(cn)):
-                tok = ('ID', (self.h1, self.h2)); self.tkc = 0
-                self.tid = self.sdp + 4096 * int(self.sdp + self.acc >= self.db + 2 * SDATA)    # its address (+ 4096: no room)
-                if self.kpos: self.inul = self.sdp + self.acc
-                if self.kpos == 2: self.sdp += self.acc + 1
-                self.icm = self.acc + 1 if self.kpos == 1 else 0
+                tok = ('ID', (self.h1, self.h2)); self.tkc = 0; self.tlen = self.acc
+                self.tid = self.sdp + 1 + 4096 * int(self.sdp + 1 + self.acc >= self.db + 2 * SDATA)    # its address (+ 4096: no room)
+                if self.kpos: self.inul = self.sdp + 1 + self.acc
+                if self.kpos == 2: self.sdp += self.acc + 2
+                self.icm = self.acc + 2 if self.kpos == 1 else 0
         elif isdg(c):
             self.acc = (self.acc * 10 if self.tkc == 2 else 0) + c - 48; self.tkc = 2
             if not isdg(cn): tok = ('NUM', self.acc); self.tkc = 0
@@ -559,7 +562,7 @@ class Compiler:
             if kind == 'ID': ks = self.key_name(v)
             elif kind == 'STR':
                 if v[0] >= 4096: return self.fail(26)
-                e = self.intern((v[1], v[2]), v[0], 1); ks = -1 if e < 0 else e % 4096
+                ks = self.intern((v[1], v[2]), v[0], v[3])
             elif kind == 'NUM': ks = -2
             else: return self.fail(71)
             if ks == -1: return
@@ -585,12 +588,9 @@ class Compiler:
                 self.mode = S_OPER; return
             if kind == 'STR':
                 if v[0] >= 4096: return self.fail(26)                         # string data would reach the code
-                e = self.intern((v[1], v[2]), v[0], 1)
+                e = self.intern((v[1], v[2]), v[0], v[3])
                 if e < 0: return
-                if e >= 4096:                                  # first seen as a property name: no tag word to load
-                    self.emit(PUSHI, e % 4096); self.emit(LOADG, self.db % 8192); self.emit(SUB, b=2)
-                else: self.emit(LOADG, (e - 1) % 8192, b=2)
-                self.mode = S_OPER; return
+                self.emit(PUSHS, e, b=2); self.mode = S_OPER; return
             if isK('true') or isK('false'): self.emit(PUSHI, int(isK('true')), b=1); self.mode = S_OPER; return
             if isK('null'): self.emit(PUSHI, 0, b=0); self.mode = S_OPER; return
             if isP(123):                                       # an object literal
@@ -938,6 +938,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 36: mem[fp + simm] = s20(mem[fp + simm] + 1)
         elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) & AMASK]
         elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) & AMASK]
+        elif op == PUSHS: mem[sp] = imm - STRTAG; sp += 1
         # objects (machine/uarch.py's microcode, instruction by instruction). Data reads below RAM give 0, writes there are lost.
         elif op in (SCANI, SCAN):                          # probe one key; execute again unless it stopped
             key = imm if op == SCANI else mem[KEYCELL]

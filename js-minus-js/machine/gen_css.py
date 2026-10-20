@@ -159,7 +159,7 @@ new_lt = f"clamp(0, -1 * {s20('var(--vra) - var(--vrb)')}, 1)"   # NEW: HP - GCL
 # value, reuse, enable); next registers {pc, sp, fp, steps, pst}; latch dependencies {read: [(read, ops or None)]}: a read
 # is kept only if the reads its address came from were good (exactly those: a spurious dependency can block progress)
 CLASSES = {
-    'push': dict(ops=['PUSHI', 'CALL', 'ENTER'], reads=[], write=(sp, by_op({'CALL': f"calc({pc} + 1)", 'ENTER': fp}, imm), None, "1"),
+    'push': dict(ops=['PUSHI', 'CALL', 'ENTER', 'PUSHS'], reads=[], write=(sp, by_op({'CALL': f"calc({pc} + 1)", 'ENTER': fp, 'PUSHS': f"calc({imm} - {STRTAG})"}, imm), None, "1"),
                  nx={'sp': by_op({'ENTER': f"calc({sp} + 1 + {imm})"}, f"calc({sp} + 1)"), 'pc': by_op({'CALL': imm}, f"calc({pc} + 1)"), 'fp': by_op({'ENTER': sp}, fp)}),
     'load': dict(ops=['LOADG', 'LOADL', 'DUP', 'INCG', 'INCL', 'OVER'], reads=[("ra", by_op({'LOADL': fpo, 'INCL': fpo, 'DUP': f"{sp} - 1", 'OVER': f"{sp} - 2"}, imm), None)],
                  write=(by_op({'INCG': imm, 'INCL': fpo}, sp), by_op({'INCG': s20("var(--vra) + 1"), 'INCL': s20("var(--vra) + 1")}, "var(--vra)"), None, "1"),
