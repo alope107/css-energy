@@ -433,6 +433,7 @@ class Compiler:
             if isP(91) and self.lookup(h) < 0: return self.fail(7)        # NAME[e] = e: an expression statement (x[k] below)
             # anything else: an expression statement starting with NAME
             self.push_cs(C_EXPR); m = self.mode = S_NAMEE
+            if self.err: return                               # (the DSL's later blocks need live: they stop here too)
         if m == S_NAMEE:
             h = self.pn
             if h == KW['console']:

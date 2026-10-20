@@ -36,7 +36,7 @@ const fs = require('fs'), path = require('path');
         if (info % 2 === 1) { ok = d.querySelector('.dn').getBoundingClientRect().width; break; }
       }
       const ms = performance.now() - t; const code = {}, data = {};
-      for (const el of document.querySelectorAll('.ov, .ovd, .ovs, .ovn, .ovk')) {
+      for (const el of document.querySelectorAll('.ov, .ovd, .ovs, .ovn, .ovk, .ovt, .fin > [class^="sd"]')) {
         if (!el.getClientRects().length) continue; const an = getComputedStyle(el).anchorName;
         if (an && an !== 'none') (el.classList.contains('ov') ? code : data)[+an.slice(3) + base] = Math.round(el.getBoundingClientRect().width) - 1048576;
       }
