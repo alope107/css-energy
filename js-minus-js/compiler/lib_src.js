@@ -523,14 +523,16 @@ function inskey(s) {
   return qstr(s);
 }
 
-// ---------------- string keys built at run time: o[k] for a heap string k uses the program's literal or name with those
-// characters if there is one (the string area holds [len][bytes][0] each, up to the end the compiler left at STREND), else
-// one of the object's keys with them, else k itself (GETX / SETX call this before they look the key up)
+// ---------------- string keys built at run time: o[k] for a string k that isn't the program's own (a heap string, or one of
+// the string area's first ones, SEED) uses the program's literal or name with those characters if there is one (from
+// STRP0 the string area holds [len][bytes][0] each, up to the end the compiler left at STREND), else one of the object's
+// keys with them, else k itself (GETX / SETX call this before they look the key up)
 function isheap(k) { var a = k + __STRTAG__; if (a >= __HEAP0__) { if (a < __HEAP_HI__) { return 1; } } return 0; }
+function notown(k) { var a = k + __STRTAG__; if (isstr(k)) { if (a < __STRP0__) { return 1; } return a >= __HEAP0__; } return 0; }
 function seq(p, q, n) { var i = 0; while (i < n) { if (p[i] != q[i]) { return 0; } i++; } return 1; }
 function okey(o, k) {
-  var p = __STR_LO__ + 1; var e = peek(__STREND__); var n = 0; var c = 0; var key = 0; var go = 1;
-  if (isheap(k) == 0) { return k; }
+  var p = __STRP0__; var e = peek(__STREND__); var n = 0; var c = 0; var key = 0; var go = 1;
+  if (notown(k) == 0) { return k; }
   n = peek(k - 1);
   while (p < e) { if (peek(p) == n) { if (seq(p + 1, k + __STRTAG__, n)) { return p + 1 - __STRTAG__; } } p = p + peek(p) + 2; }
   c = o + __OBJTAG__;
@@ -539,7 +541,7 @@ function okey(o, k) {
     if (key == 0) { go = 0; }
     else if (key < 0) { c = key + __OBJTAG__; }
     else {
-      if (isheap(key - __STRTAG__)) { if (peek(key - 1) == n) { if (seq(key, k + __STRTAG__, n)) { return key - __STRTAG__; } } }
+      if (notown(key - __STRTAG__)) { if (peek(key - 1) == n) { if (seq(key, k + __STRTAG__, n)) { return key - __STRTAG__; } } }
       c = c + 2;
     }
   }

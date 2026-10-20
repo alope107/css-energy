@@ -55,6 +55,7 @@ SEND = STR0 + LAYOUT['str_size']
 SEED = [w for t in ('true', 'false') for w in [len(t)] + [ord(ch) for ch in t] + [0]]
 SEED += [0] * (-len(SEED) % 4)          # (a multiple of 4: the program's strings keep their alignment to the cache's blocks)
 TRUEV, FALSEV = STR0 + 2 - 262144, STR0 + 8 - 262144                 # (- STRTAG)
+STRP0 = STR0 + 1 + len(SEED)            # the program's own strings start here
 assert SEND == LAYOUT['code_base']
 CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 holds the staged-data count)
 STRTAG = 262144                         # a string value is its address - STRTAG (machine words are 20-bit signed)
