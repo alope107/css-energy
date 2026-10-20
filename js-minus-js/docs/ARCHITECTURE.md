@@ -36,19 +36,21 @@ The map is `compiler/layout.json`, read by `cc_ref.LAYOUT`, `libbuild.js`, `uarc
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 1023 | ROM: runtime library (`lib_src.js`, 103 words, ends with a jump to `code_base`), object runtime (`rtlib.py`, 383 words), jump table at 1020 … 1023 (`vec_base`) | baked into the font |
-| 1024 | `data_base`: `STRTAG` = 262144, the untag constant | `__init`, from staging |
-| 1025 … 1279 | globals and array literals (255 words) | `__init`; the program |
-| 1280 … 1535 | strings `[tag][bytes…][0]`, property names `[bytes…][0]` | compiler overlays |
-| 1536 … 2046 | code (`code_base`, 511 words) | compiler overlays |
-| 2047 | count of staged words | compiler `.fin` |
-| 2048 … 2303 | staged globals and arrays (`init`), `STRTAG` at 2048 | compiler overlays |
-| 2304 … 2322 | `rt_base`: HP, GCLIM, GCSP, KEYCELL, RETCELL, routine scratch | object instructions, ROM routines |
-| 2560 … 11135 | stack (`sp0`) | program |
-| 11136 … 17279 | heap (`heap_lo`): two semi-spaces of 3,072 words | object instructions, GC |
-| 17280 … 17407 | console: the last `cols × rows` words | PRINT / PUTC service |
+| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by jsc, ~4,000 words; its first words jump to `code_base`), hand-written routines (`rtlib.py`, ~940 words), the jump table at 6128 … (`vec_base`) | the page's static ROM table |
+| 6144 | `data_base`: `STRTAG` = 262144, the untag constant (and the object key bias) | compiler `.fin` (an overlay) |
+| 6145 … 6399 | globals (255 words) | the program |
+| 6400 | `STR0`: the empty marker; then `"true"` and `"false"` (`SEED`) | compiler `.fin` |
+| 6414 … 7167 | strings and property names, `[length][bytes…][0]` each (768 words with `SEED`) | compiler overlays (the length: the parser) |
+| 7168 … 7678 | code (`code_base`, 511 words) | compiler overlays |
+| 7679 | count of global words (the collector's roots) | compiler `.fin` |
+| 7935 | `strend`: the string area's end | compiler `.fin` |
+| 7936 … | `rt_base`: HP, GCLIM, GCSP, KEYCELL, RETCELL, the routines' cells (`layout.json` `rt_cells`) | instructions, ROM routines |
+| 8192 … 16255 | stack (`sp0`) | program |
+| 16256 … 22399 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ROM routines, GC |
+| 22400 … 22527 | console: the last `cols × rows` words | PRINT / PUTC service |
 
-RAM is 16,384 words from 1024; the compile chain names cell `k` = address − 1024 `--c<k>`.
+RAM is 16,384 words from 6144; the compile chain names cell `k` = address − 6144 `--c<k>`. Everything the program
+reads but never writes (code, strings, `data_base`'s constant) is an overlay, so nothing is copied at start.
 
 **RAM on the page** (`machine/memtree.py`): one leaf per word, a `content-visibility: hidden` element whose
 remembered width is word + 2^20, with `anchor-name: --c<k>`. Four bank trees (address mod 4) of radix-4 decode nodes
@@ -76,10 +78,10 @@ It exists twice, and the two must agree exactly (L2).
   temp is one custom-property declaration. `Prog` parses one token per call, `LexProg` lexes one character.
 
 **Fixed limits** (`cc_ref.py`): operator and control stacks `OD` = `CD` = 8; symbols `NS` = 32; functions `NF` = 16;
-labels `NL` = 64 (6-bit fields); `EMAX` = 12 code words per step; `NI` = 16 interned strings and names; `SDATA` = 256
-words of globals and of strings; the page: 24 × 64 characters, 400 tokens (`TMAX`).
+labels `NL` = 64 (6-bit fields); `EMAX` = 12 code words per step; `NI` = 32 interned strings and names; `SDATA` = 256
+words of globals, `str_size` = 768 of strings; the page: 24 × 64 characters, 400 tokens (`TMAX`).
 
-**Parser structure.** 31 modes (`S_STMT`, `S_OPND`, …). Control-stack kinds: bodies (`C_IFB`, `C_LOOPB`, `C_SWITCH`,
+**Parser structure.** 27 modes (`S_STMT`, `S_OPND`, …). Control-stack kinds: bodies (`C_IFB`, `C_LOOPB`, `C_SWITCH`,
 …), pending headers and statements (`C_IFC`, `C_SWITCHC`, `C_FORINIT`, `C_ASSIGN`, `C_CASE`, …), braceless bodies (`kind + BRACELESS`, closed
 by `complete_stmt`). Entries pack as `kind × 4096 + a × 64 + b` and `e × 4096 + c × 64 + d` (`e` = block-scope mark).
 
@@ -107,8 +109,22 @@ by `complete_stmt`). Entries pack as `kind × 4096 + a × 64 + b` and `e × 4096
   body start with `case`, `default` or `}`.
 - `++` / `--` in expressions (variables): `x++` is `LOAD INC`, `++x` `INC LOAD` (`--` with `PUSHI 1 SUB` and a `DUP`);
   `pm` = 3 after one, so no `.` or `[` may follow.
-- `.length`: an array literal's first data word is its count and its pointer is the next word, so `x.length` is
-  `PUSHI 1 SUB LOADI` on any array.
+- Strings in the string area: the lexer writes a literal's or a name's bytes (a word reserved before them) and the NUL;
+  the parser writes the length word when it interns the string (the lexer has one data port per character). A string
+  token's value is its address − `data_base` (1024: no room) + 2048 × its length (+ 2^18 for an identifier followed
+  directly by `(`: a method call needs no interning). A literal is `PUSHS address`.
+- `.length`: a string's and an array's length are both the word before the value's address, so `x.length` is
+  `PUSHI 1 SUB LOADI`.
+- Array literals: the elements on the stack, then `CALL mkarrN` (N ≤ 8, fixed-count routines) or `PUSHI n CALL mkarr`.
+  `x[k]` reads `IDXA`, `x[k] = v` is `[x, k, v] STOREX`, `x[k] op= e` is `OVER OVER IDXA e op STOREX`.
+- `+` and the comparisons: the plain instruction when the static types say numbers (for a comparison: either
+  operand), else `DYN op` (bit 6 / 7 of its immediate: the left / right operand is a boolean, for `"x" + true`).
+- Methods: `x.name(` for a name in `METHODS` (`cc_ref.py`) pushes `M_METH`; the `)` emits `CALL` of the ROM routine
+  for that name and argument count (`ALLM`), the receiver and the arguments on the stack. `parseInt(` `Number(`
+  `String(` push 0 as the receiver. A method's name not followed by `(` is a property (it was interned then).
+- `console.log`'s `+` chains: a piece with a string on either side stays on the stack (`M_PRINT`'s value counts them);
+  the argument's end prints them with `CALL pnK` (K ≤ 8 pieces; more are joined first), and a lower-precedence
+  operator joins them with `CALL catnK` first. A boolean piece becomes `"true"` / `"false"` (`b2s`).
 - `console.log` leaves no value (its PRINT words pop every argument): it ends its statement itself, without the
   expression statement's `POP` (`print_end`), and can't be used as a value.
 - Argument counts: `fl_k` = label + 64 × type + 256 × (argument count + 1, 0 until the first call or the definition).
@@ -142,8 +158,8 @@ in-flow overlays `.ovs` named after their RAM cell.
   width `word + 2^20` (plus `anchor-size(--l<j> width)` for a label). They override the RAM leaves (ENGINE_NOTES
   21), which works only because code, strings and staging are never written at run time.
 - Labels: in-flow anchors `.lp<k>` (21 ports per level) named `--l<j>`, width = the label's value.
-- The last live level shows `.fin`: the count word, the staged `STRTAG`, `--ccdone` and `--ccinfo` (width
-  `done + 2·err + 1024·words`, for the status line). `#tcr > .big` (`--cctoo`) shows past 400 tokens.
+- The last live level shows `.fin`: the globals' count word, `STRTAG` at `data_base`, the `SEED` strings, the string
+  area's end at `strend`, `--ccdone` and `--ccinfo` (width `done + 2·err + 1024·words`, for the status line). `#tcr > .big` (`--cctoo`) shows past 400 tokens.
 
 ---
 
@@ -163,8 +179,8 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 - **Chain**: 32 levels of three nested `display: contents` elements, styled once per pass:
   - `.f` fetches: ROM from a static table (its own container-query rule, since an `if()` costs its whole text wherever
     it is evaluated), RAM through the cache; decodes the opcode and its class.
-  - `.x` executes: one `@container style(--cls: c)` rule per class (push, load, bin, jump, store, index, out), `if()`
-    on `--op` inside it for addresses, results and next registers. A container-query test costs ~2 µs per element,
+  - `.x` executes: one `@container style(--cls: c)` rule per class (push, load, bin, jump, test, store, index, arr,
+    out), `if()` on `--op` inside it for addresses, results and next registers. A container-query test costs ~2 µs per element,
     matched or not, an `if()` branch ~0.3 µs: a rule per opcode made even idle levels cost 269 µs, classes 47 µs.
   - `.c` commits: registers on success; on a stall, `--stop` and the missing block; output; a write as its whole
     cache set (16 rules on the set; 128 rules on the word cost too much to test).
@@ -210,14 +226,44 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 
 ### 3.5 Runtime library
 
-`compiler/lib_src.js`, in jsc's dialect, compiled by `libbuild.js` (the self-hosted `jsc.js` under Node) into
-`lib.json`. It holds `__init` (copies the staged globals, then the ROM's last word jumps to `code_base`) and `addc`;
-printing is the PRINT family (jsc's `prn(x)`). It is the ROM, a static table in the page, so a change means
-`make page`.
+`compiler/rtlib.py` builds the ROM: it writes `lib_src.js`'s constants (upper-case names between double underscores:
+the layout, the cells, opcodes) for `libbuild.js`, which compiles `lib_src.js` with the self-hosted `jsc.js` under Node,
+then appends hand-written routines and the jump table. `lib.json` holds the ROM and `entries` (every routine's
+address, for the compiler). It is a static table in the page (in tiers of 1,024 words, each a rule of its own: an
+`if()` costs per entry it holds), so a change means `make page`.
 
-### 3.6 Objects and the garbage collector
+- jsc's dialect: functions, locals, `while` / `for` / `if`, `peek` / `poke`, `putc`, `prn` (PRINT), `__fp()` (the
+  caller's frame pointer, for the collector's roots), `__op(word, args…)` (one raw instruction). No globals or string
+  literals: jsc would put them in the data area, which is the program's. A routine's frame holds tagged values, which
+  the collector updates; a raw address must not be kept across an allocation.
+- `lib_src.js`: the collector and `halloc`, strings (`newstr`, `tostr`, `cat`, `scmp`, `dynop`), arrays (`newarr`,
+  `grow`, `aset`, `push`, `pop`), the methods, printing arrays and objects (`pval`), run-time string keys (`okey`).
+- `rtlib.py`: the GC stub (called by NEW), APPEND, GETX / SETX (the object paths; the rest goes to `lib_src.js`), the
+  DYN and PRINT trap stubs, `pnK`, `b2s`, `mkarrN`.
 
-**Representation.**
+### 3.6 Strings, arrays and objects, and the garbage collector
+
+**Heap blocks.** 8-aligned, a multiple of 8 words. A string is `[hdr][len][bytes…][0]` (its value: the first byte's
+address − `STRTAG`, like a literal's); an array `[hdr][cap][len][ptr][elements…]` (its value: the ptr word's address +
+`ARRTAG` = 2^18; ptr points at the elements, inline until the array outgrows `cap`, then at a data block of its own);
+`hdr` = −2 − words − kind (kind 0 string, 1 array). The tags are multiples of 2^15, so the 15-bit address registers
+untag a value for free (`LOADI` of `x − 1` is the length of a string or an array).
+
+**Instructions** (`cc_ref.run()`, `csssim.py`, `gen_css.py`'s arr, test and out classes). A trap pushes the return
+address and jumps to a ROM routine, as CALL does:
+
+| Op | Stack | What it does |
+|---|---|---|
+| `PUSHS a` | [] → [s] | push the string value of address `a` (a literal) |
+| `IDXA` | [x, k] → [x[k]] | an array: its element (0 past the length); anything else traps to GETX |
+| `STOREX` | [x, k, v] → [] | an array, `k` inside its length: the store; anything else traps to SETX (an array grows) |
+| `DYN op` | [a, b] → [a op b] | ADD, EQ, NE, LT, GT, LE, GE on numbers; traps to `dyn` for `==` / `!=` of two strings, and for the others with a string, array or object |
+| `JZ` / `JNZ` / `NOT` | | 0 and the empty string are false (a string's length word is read) |
+| PRINT family | | an array or object traps to `print` (Node's one-line form; without a separator, a `+` piece: its string) |
+
+
+
+**Objects.**
 
 - An object is an 8-word chunk `[k0 v0 k1 v1 k2 v2 L pad]`; its value is the address minus `OBJTAG` = 491,520, a
   multiple of 32,768, so the 15-bit address registers untag it for free (`LDF`, `SETF`, `STOREI` and the probes take
@@ -230,7 +276,7 @@ printing is the PRINT family (jsc's `prn(x)`). It is the ROM, a static table in 
   is a compile-time constant and `o[s]` finds `o.x` when `s` is `"x"`. The lexer writes each identifier's bytes at
   `sdp` and commits them only after `.` (not after `console`) or before `:`.
 
-**Instructions** (opcodes 45 … 53, in `cc_ref.run()`, `csssim.py` and `gen_css.py`'s index, store and load classes):
+**Object instructions** (opcodes 45 … 53, in `cc_ref.run()`, `csssim.py` and `gen_css.py`'s index, store and load classes):
 
 | Op | Stack | What it does |
 |---|---|---|
@@ -245,17 +291,20 @@ printing is the PRINT family (jsc's `prn(x)`). It is the ROM, a static table in 
 | `JNEG l` | [a, b] → [a, b] | jump if `a` is negative (an object; an array is an address) |
 
 - Restart safety: a first execution's write must leave the second's inputs unchanged (NEW writes HP last).
-- ROM calls go through the jump table: GC (1020), APPEND (1021), SETX (1022), GETX (1023). Routines keep state in the
-  `rt_base` cells, not frames (they nest: APPEND allocates, NEW collects).
-- `x[k]`: a name statically typed number (an array literal) uses IDX; anything else calls GETX / SETX, which test the
-  sign with JNEG. `o[k] op= e` is `[o, k] OVER OVER GETX e op SETX`.
+- ROM calls go through the jump table (`layout.json` `vectors`: gc, append, setx, getx, dyn, print). The assembly
+  routines keep state in the `rt_base` cells, not frames (they nest: APPEND allocates, NEW collects).
+- `o[k]` is IDXA / STOREX trapping to GETX / SETX; a key that is a heap string is first replaced by the program's
+  string with its characters (a walk of the string area up to `strend`), or by one of the object's keys with them
+  (`okey`), so it finds the same property as a literal key.
 
-**The collector** (`rtlib.py`, hand-written): Cheney copying between the semi-spaces. Roots are the globals and arrays
-(up to the staged count at `init − 1`), the routines' scratch cells, and the stack from `sp0` to GCSP. A root may
-point *into* a chunk (a SCANI cursor waits on the stack while `e` in `o.x = e` allocates), so its offset is found with
-MOD 8; heap words only point at chunk starts. Copying sets `k0` to −1 and `k1` to the copy; the scan follows values up
-to the first free pair, and the link if all three are used. Cost is a few shapings per live chunk, none per dead one.
-HP and GCLIM start at 0, so the first NEW sets up the heap.
+**The collector** (`lib_src.js` `gc`): Cheney copying between the semi-spaces. The roots: the globals (up to the count
+at `init − 1`), the routines' value cells (S_V, S_K), and the stack from `sp0` to GCSP (NEW's SP, or `halloc`'s frame,
+`getfp()`). A value is forwarded by its tag range: an object (a root may point *into* its chunk: a SCANI cursor), a
+string, an array (copied with its elements inline, whatever its data block was); anything else that only looks like one
+(a number in a tag range, a stale frame word) is left alone (alignment and the header are checked). The scan follows an
+object's keys (a heap string key moves too) and values up to its first free pair, and its link if all three are used,
+and an array's elements up to its length. HP and GCLIM are offsets from `heap_lo`; GCLIM is the current space's
+offset, so zeroed RAM is space A and needs no setup. Cost is per live block, nothing per dead one.
 
 ### 3.7 The font CPU (removed; last at commit `181cbb7`)
 

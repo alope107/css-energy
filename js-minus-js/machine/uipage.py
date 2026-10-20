@@ -58,7 +58,8 @@ def static(COLS, ROWS, UIL, UIP, WOFF):
       style(--cse: 57): "error: return outside a function"; style(--cse: 60): "error: undefined function";
       style(--cse: 73): "error: case outside a switch"; style(--cse: 75): "error: two defaults in a switch";
       style(--cse: 76): "error: wrong number of arguments";
-      style(--cse: 25): "error: too many globals / array elements"; style(--cse: 26): "error: too much string data"; style(--cse: 63): "error: strings can only be joined in console.log";
+      style(--cse: 25): "error: too many globals"; style(--cse: 26): "error: too much string data"; style(--cse: 68): "error: too many distinct strings";
+      style(--cse: 77): "error: wrong number of arguments to a method"; style(--cse: 78): "error: redeclared in this scope";
       else: "syntax error (" counter(cse) ")"); }}
 """
 

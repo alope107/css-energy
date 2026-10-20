@@ -113,7 +113,11 @@ class Sim:
             sp -= 1; v = rd(sp); z = v == 0 or (R.isstr(v) and rd((v - 1) & AMASK) == 0)
             pc = imm if z == (op == 'JZ') else pc
         elif op == 'CALL': wr(sp, pc); sp += 1; pc = imm
-        elif op == 'ENTER': wr(sp, fp); fp = sp; sp = sp + 1 + imm
+        elif op == 'ENTER':                       # the frame, then one execution per local zeroing it (--pst: which)
+            p_ = st['pst']
+            if p_ == 0: wr(sp, fp); fp = sp; sp = sp + 1 + imm
+            else: wr(fp + p_, 0)
+            if p_ < imm: pc -= 1; partial = True
         elif op == 'RET': v = rd(sp - 1); ofp = rd(fp); ret = rd(fp - 1); nsp = fp - 1 - imm; wr(nsp, v); sp = nsp + 1; fp = ofp; pc = ret
         elif op == 'POP': sp -= 1
         elif op == 'DUP': wr(sp, rd(sp - 1)); sp += 1
@@ -187,6 +191,7 @@ class Sim:
             if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
             if cells: cw = 1
         if op in ('ENDK', 'NEW'): st['pst'] = 1 if partial else 0
+        if op == 'ENTER': st['pst'] = st['pst'] + 1 if partial else 0
         st['pc'], st['sp'], st['fp'] = pc, sp, fp; st['steps'] += 0 if (out and not done) or partial else 1
         return cw
     def run_pass(self, K):

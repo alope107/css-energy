@@ -159,8 +159,16 @@ new_lt = f"clamp(0, -1 * {s20('var(--vra) - var(--vrb) - 3065')}, 1)"   # NEW: H
 # value, reuse, enable); next registers {pc, sp, fp, steps, pst}; latch dependencies {read: [(read, ops or None)]}: a read
 # is kept only if the reads its address came from were good (exactly those: a spurious dependency can block progress)
 CLASSES = {
-    'push': dict(ops=['PUSHI', 'CALL', 'ENTER', 'PUSHS'], reads=[], write=(sp, by_op({'CALL': f"calc({pc} + 1)", 'ENTER': fp, 'PUSHS': f"calc({imm} - {STRTAG})"}, imm), None, "1"),
-                 nx={'sp': by_op({'ENTER': f"calc({sp} + 1 + {imm})"}, f"calc({sp} + 1)"), 'pc': by_op({'CALL': imm}, f"calc({pc} + 1)"), 'fp': by_op({'ENTER': sp}, fp)}),
+    # ENTER: the frame (--pst 0), then one execution per local zeroing it (--pst 1 .. imm): locals are the collector's roots
+    'push': dict(ops=['PUSHI', 'CALL', 'ENTER', 'PUSHS'], reads=[],
+                 pre=["--epk: min(1, var(--pst));", f"--emore: clamp(0, {imm} - var(--pst), 1);"],
+                 write=(by_op({'ENTER': f"calc((1 - var(--epk)) * {sp} + var(--epk) * ({fp} + var(--pst)))"}, sp),
+                        by_op({'CALL': f"calc({pc} + 1)", 'ENTER': f"calc((1 - var(--epk)) * {fp})", 'PUSHS': f"calc({imm} - {STRTAG})"}, imm), None, "1"),
+                 nx={'sp': by_op({'ENTER': f"calc((1 - var(--epk)) * ({sp} + 1 + {imm}) + var(--epk) * {sp})"}, f"calc({sp} + 1)"),
+                     'pc': by_op({'CALL': imm, 'ENTER': f"calc({pc} + 1 - var(--emore))"}, f"calc({pc} + 1)"),
+                     'fp': by_op({'ENTER': f"calc((1 - var(--epk)) * {sp} + var(--epk) * {fp})"}, fp),
+                     'steps': by_op({'ENTER': "calc(var(--steps) + 1 - var(--emore))"}, "calc(var(--steps) + 1)"),
+                     'pst': by_op({'ENTER': "calc(var(--emore) * (var(--pst) + 1))"}, pst_)}),
     'load': dict(ops=['LOADG', 'LOADL', 'DUP', 'INCG', 'INCL', 'OVER'], reads=[("ra", by_op({'LOADL': fpo, 'INCL': fpo, 'DUP': f"{sp} - 1", 'OVER': f"{sp} - 2"}, imm), None)],
                  write=(by_op({'INCG': imm, 'INCL': fpo}, sp), by_op({'INCG': s20("var(--vra) + 1"), 'INCL': s20("var(--vra) + 1")}, "var(--vra)"), None, "1"),
                  nx={'sp': by_op({'INCG': sp, 'INCL': sp}, f"calc({sp} + 1)")}),
@@ -361,7 +369,7 @@ if 'norom' in ABL: rom_table = lambda lo, hi: "0"
 P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
-     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr",
+     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr", "epk", "emore",
      "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
@@ -372,7 +380,7 @@ P = list(dict.fromkeys(P))
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
-LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr"}
+LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr", "epk", "emore"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}

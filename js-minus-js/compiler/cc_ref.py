@@ -53,6 +53,7 @@ SEND = STR0 + LAYOUT['str_size']
 # the string area's first strings, there before any program's: "true" and "false" ([len][bytes][0] each), for a boolean made a
 # string (the ROM's b2s, tostr) without allocating. TRUEV / FALSEV: their values
 SEED = [w for t in ('true', 'false') for w in [len(t)] + [ord(ch) for ch in t] + [0]]
+SEED += [0] * (-len(SEED) % 4)          # (a multiple of 4: the program's strings keep their alignment to the cache's blocks)
 TRUEV, FALSEV = STR0 + 2 - 262144, STR0 + 8 - 262144                 # (- STRTAG)
 assert SEND == LAYOUT['code_base']
 CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 holds the staged-data count)
@@ -979,7 +980,9 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             sp -= 1
             if truthy(mem, mem[sp]): pc = imm
         elif op == 26: mem[sp] = pc; sp += 1; pc = imm
-        elif op == 27: mem[sp] = fp; fp = sp; sp = sp + 1 + imm
+        elif op == 27:                                     # ENTER: the frame, its locals zeroed (they are the collector's roots)
+            mem[sp] = fp; fp = sp; sp = sp + 1 + imm
+            for i in range(1, imm + 1): mem[fp + i] = 0
         elif op == 28:
             v = mem[sp - 1]; oldfp = mem[fp]; ret = mem[fp - 1]; nsp = fp - 1 - imm; mem[nsp] = v; sp = nsp + 1; fp = oldfp; pc = ret
         elif op == 29: sp -= 1

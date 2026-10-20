@@ -53,7 +53,8 @@ SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 
 ```
 compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same step as CSS)  ccpage5.py (compile chain)
-           lib_src.js -> lib.json (runtime library)  rtlib.py (object runtime + GC in ROM)  layout.json (the memory map)
+           lib_src.js (runtime in jsc's dialect) + rtlib.py (builds the ROM: jsc, hand-written routines) -> lib.json
+           layout.json (the memory map, the runtime cells, the jump table)
            mkimage.py (machine images: the page's, or `--ram` with the program in RAM)
 machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compiler)  csssim.py (its pass-by-pass model)
            cssref.py (the ISA as a stepper)  memtree.py (RAM)  uipage.py (editor page parts)  uarch.py (ISA constants)
@@ -72,7 +73,7 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
    codes; new state in `parse_state_names()` / `LEX_STATE` and `ref_state()` in `tests/cmp_dsl.py`) until `make l2`
    reports `ALL OK`. Teach the program generator (`tests/fuzz/progen.py`) the feature, within what the language
    guarantees, and run `python3 tests/fuzz/fuzz.py gen -n 2000`, `fmt` and `mut -n 2000`.
-3. Note `tools/vsz.py` before and after (now 355 variants). Every temp,
+3. Note `tools/vsz.py` before and after (now 338 variants, 70,478 temps). Every temp,
    every rule (applied or not) and every label port costs on each of 400 token levels.
 4. `make fuzz` and `make l3` (`make fuzz-l3` too if the lexer or the page changed), then `make page && make l5-smoke`,
    then `make dist`.
@@ -88,9 +89,16 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 - A value of a registered `<integer>` must be one term (`calc((a) * b)`, not `(a) * b`): Chrome takes the latter as
   invalid and uses 0, silently. `gen_css.py` refuses to write such a page.
 
-### Runtime-library change (`compiler/lib_src.js`)
+### Runtime-library change (`compiler/lib_src.js`, `compiler/rtlib.py`)
 
-- The lib is the ROM, a static table in the page's fetch rule; `make page` rebuilds lib → image → page.
+- The lib is the ROM, a static table in the page's fetch rules (tiers of 1,024 words); `make page` rebuilds
+  lib → image → page. `rtlib.py` runs jsc (`libbuild.js`) and appends the hand-written routines.
+- jsc's dialect has no short-circuit `&&` / `||`, no `break`, blocks after every `if` / `while`, `//` comments only. No
+  globals or string literals (they would land in the program's data area): fixed cells are `layout.json` `rt_cells`.
+  Frames are roots: a tagged value in a local survives a collection (it is updated); a raw address must not be held
+  across anything that allocates. Keywords are recognised by a 13-bit hash, so a new identifier can collide with one.
+- Values are told apart by range (`cc_ref.isstr` / `isarr` / `isobj`): the tags are multiples of 2^15, so `peek(x - 1)`
+  is the length of a string or an array.
 - Compare `python3 machine/csssim.py tests/suite/fizzbuzz.js` (and the `tests/programs/t*.js`) before and after:
   passes track wall time, steps don't. Data sits in RAM behind a 32-line cache of 4-word lines (2-way); instructions
   in ROM never miss.
@@ -129,7 +137,8 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
   Never put an overlay on a cell the program writes.
 - `cc_ref.py` and `cc_dsl.py` change together. In the DSL a local named `le` or `lt` shadows the comparison helpers
   in `token()`. A new fallthrough between modes must go in `token()`'s `FALL` map, or the block silently vanishes
-  from specialised variants.
+  from specialised variants. A DSL `emit()` is a code record that each of the 12 output slots multiplexes: in a loop
+  (`popops` runs 8 times) emit one word per iteration, not one per case.
 - Error 99 on the page means no parser variant accepts that token. L3 accepts any nonzero error for `suite_err`.
 - `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines, so `suite_ref.py` fails one
   that doesn't.
