@@ -47,7 +47,7 @@ function gc(gcsp, need) {
     poke(__G_FLO__, from); poke(__G_FREE__, to);
     p = __DB__ + 1; e = __DB__ + peek(__INIT__ - 1);
     while (p < e) { poke(p, fwd(peek(p))); p++; }
-    poke(__S_V__, fwd(peek(__S_V__))); poke(__S_K__, fwd(peek(__S_K__)));
+    poke(__S_V__, fwd(peek(__S_V__))); poke(__S_K__, fwdkey(peek(__S_K__)));
     p = __SP0__;
     while (p < gcsp) { poke(p, fwd(peek(p))); p++; }
     p = to;
@@ -70,7 +70,7 @@ function scan(s) {
     while (go) {
       if (peek(s + i) == 0) { go = 0; }
       else {
-        poke(s + i + 1, fwd(peek(s + i + 1))); i = i + 2;
+        poke(s + i, fwdkey(peek(s + i))); poke(s + i + 1, fwd(peek(s + i + 1))); i = i + 2;
         if (i == 6) { poke(s + 6, fwd(peek(s + 6))); go = 0; }
       }
     }
@@ -92,6 +92,8 @@ function fwd(w) {
   if (a >= flo + 3) { if (a < flo + __H__) { return fwdblk(w, a - 3, 1, flo); } }
   return w;
 }
+// an object's key (a value + KBIAS): a heap string's (its address) moves with it
+function fwdkey(k) { if (isheap(k - __STRTAG__)) { return fwd(k - __STRTAG__) + __STRTAG__; } return k; }
 function fwdobj(w, a, b) {
   var k = peek(b); var n = 0; var i = 0;
   if (k == 0 - 1) { return peek(b + 1) + a - b - __OBJTAG__; }
@@ -520,4 +522,27 @@ function inskey(s) {
   while (i < n) { if (isid(p[i], i == 0) == 0) { ok = 0; } i++; }
   if (ok) { return puts(s); }
   return qstr(s);
+}
+
+// ---------------- string keys built at run time: o[k] for a heap string k uses the program's literal or name with those
+// characters if there is one (the string area holds [len][bytes][0] each, up to the end the compiler left at STREND), else
+// one of the object's keys with them, else k itself (GETX / SETX call this before they look the key up)
+function isheap(k) { var a = k + __STRTAG__; if (a >= __HEAP0__) { if (a < __HEAP_HI__) { return 1; } } return 0; }
+function seq(p, q, n) { var i = 0; while (i < n) { if (p[i] != q[i]) { return 0; } i++; } return 1; }
+function okey(o, k) {
+  var p = __STR_LO__ + 1; var e = peek(__STREND__); var n = 0; var c = 0; var key = 0; var go = 1;
+  if (isheap(k) == 0) { return k; }
+  n = peek(k - 1);
+  while (p < e) { if (peek(p) == n) { if (seq(p + 1, k + __STRTAG__, n)) { return p + 1 - __STRTAG__; } } p = p + peek(p) + 2; }
+  c = o + __OBJTAG__;
+  while (go) {
+    key = peek(c);
+    if (key == 0) { go = 0; }
+    else if (key < 0) { c = key + __OBJTAG__; }
+    else {
+      if (isheap(key - __STRTAG__)) { if (peek(key - 1) == n) { if (seq(key, k + __STRTAG__, n)) { return key - __STRTAG__; } } }
+      c = c + 2;
+    }
+  }
+  return k;
 }

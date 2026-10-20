@@ -658,6 +658,7 @@ class Prog(Base):
                 self.emit(R.PUSHI, 1); self.emit(R.SUB); self.emit(R.LOADI, b=3); self.set('mode', R.S_OPER); self.done()
             mi = self.m(add(*[mul(and_(eq(th1, KW[m[0]][0]), eq(th2, KW[m[0]][1])), i + 1) for i, m in enumerate(R.METHODS)]), 'mi')
             direct = self.m(and_(isID, not_(isl), ne(mi, 0), ge(tv, 262144)), 'mdir')     # x.name( for a method's name
+            with self.when(and_(or_(isl, direct), lt(mod(tv, 2048), 1024))): self.datum(add(mod(tv, 1024), self.db - 1), mod(fdiv(tv, 2048), 128))    # (cc_ref: the length word)
             with self.when(direct): self.set('pn1', 0); self.set('pn2', 0); self.set('pm', add(mi, 3)); self.set('mode', R.S_OPER); self.done()
             with self.when(and_(isID, not_(isl), not_(direct))):
                 ks, ok = self.key_name(tv, th1, th2)

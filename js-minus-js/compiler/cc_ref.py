@@ -587,6 +587,7 @@ class Compiler:
         # ---- objects
         if m == S_DOT:                                         # o . name
             if kind != 'ID': return self.fail(69)
+            if v == KW['length'] or (v in METHOD_INDEX and self.tparen): self.datum(self.tid - 1, self.tlen)   # (its committed bytes' length word)
             if v == KW['length']:                              # a string's or an array's length: the word before its value's address
                 self.emit(PUSHI, 1); self.emit(SUB); self.emit(LOADI, b=3); self.mode = S_OPER; return
             if v in METHOD_INDEX and self.tparen:              # x.name( for a method's name: the call (S_OPER)
@@ -1050,6 +1051,7 @@ def image_mem(c, words, data, init=None):
         else: mem[init + a - c.db] = v
     mem[init - 1] = c.dp - c.db
     mem[init] = STRTAG                  # the lib's untag constant, staged for data_base
+    mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
 
 def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):

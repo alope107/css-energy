@@ -217,7 +217,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append('#cc { ' + ' '.join(f'--{n}: {v};' for n, v in init.items()) + ' }')
     # ================= token chain
     css.append(lbl.group('Token chain: group sources', 'one source per group of 32 tokens animates their fields from the token registers'))
-    css.append(f'#tcr {{ contain: strict; position: relative; height: 0; --ntf: var(--s-nt-{fo}); }}')
+    css.append(f'#tcr {{ contain: strict; position: relative; height: 0; --ntf: var(--s-nt-{fo}); --sdf: var(--s-sdp-{fo}); }}')
     N.add('ntf', True)
     # one source element per group of G tokens (names alternate by group parity, so the previous group's last
     # token stays visible to the first level of the next group). It also passes on what the next level's
@@ -339,13 +339,15 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
                # the lib's string untag constant, staged for the first data cell
                f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - data_base}; width: {R.STRTAG + WOFF}px; }}'
+               # the string area's end, for the runtime's key lookups
+               f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
                ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
                ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
-    for n in ('e', 'done', 'n', 'dpf'): N.add(n, True)
+    for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b><b class="dn"></b><b class="di"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

@@ -38,7 +38,7 @@ assert -OBJMIN > TAG0 + 2 * H and -OBJMIN < U.STR_LO - STRTAG
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=256, STR_LO=U.STR_LO, HEAP0=HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=STRTAG, OBJTAG=OBJTAG, ARRTAG=U.ARRTAG,
-             INIT=INIT, SP0=SP0, DATA_BASE=DB, CODE_BASE=L['code_base'])
+             INIT=INIT, SP0=SP0, DATA_BASE=DB, CODE_BASE=L['code_base'], STREND=L['strend'])
     k.update(CELL)
     k.update({f'OP_{n}': i for n, i in OP.items()}); k.update({f'W_{n}': i * 8192 for n, i in OP.items()})
     return k
@@ -87,7 +87,9 @@ def routines(a):
     # ---------------- SETX: [x, k, v, ret]
     a.lab('setx'); a('STOREG', S_RET); a('STOREG', S_V); isobj(); a('JNZ', 'sx_obj')
     a('LOADG', S_V); a('CALL', 'js.setx'); a('POP'); a('PUSHI', 0); a('STOREG', S_V); a('LOADG', S_RET); a('JMPI')
-    a.lab('sx_obj'); a('LOADG', DB); a('ADD'); a('DUP'); a('STOREG', KEYCELL); a('STOREG', S_K)              # key + KBIAS
+    def canon():                                      # [x, k] -> [x, k']: a heap string key as the program's or the object's (okey)
+        a('OVER'); a('OVER'); a('CALL', 'js.okey'); a('STOREG', S_T); a('POP'); a('LOADG', S_T)
+    a.lab('sx_obj'); canon(); a('LOADG', DB); a('ADD'); a('DUP'); a('STOREG', KEYCELL); a('STOREG', S_K)              # key + KBIAS
     a('SCAN'); a('DUP'); a('LDF', 0); a('LOADG', S_K); a('EQ'); a('JZ', 'sx_add')
     a('LOADG', S_V); a('SETF', 1); a('POP'); a('PUSHI', 0); a('STOREG', S_V); a('LOADG', S_RET); a('JMPI')
     a.lab('sx_add'); a('LOADG', S_V); a('PUSHI', 0); a('STOREG', S_V); a('JMP', 'add')
@@ -95,7 +97,7 @@ def routines(a):
     # ---------------- GETX: [x, k, ret]
     a.lab('getx'); a('STOREG', S_RET); isobj(); a('JNZ', 'gx_obj')
     a('CALL', 'js.getx'); a('LOADG', S_RET); a('JMPI')
-    a.lab('gx_obj'); a('LOADG', DB); a('ADD'); a('STOREG', KEYCELL); a('SCAN'); a('LDF', 1); a('LOADG', S_RET); a('JMPI')
+    a.lab('gx_obj'); canon(); a('LOADG', DB); a('ADD'); a('STOREG', KEYCELL); a('SCAN'); a('LDF', 1); a('LOADG', S_RET); a('JMPI')
 
     # ---------------- DYN: [a, b, ret] -> dynop(a, b, the DYN's immediate)
     a.lab('dyn'); a('STOREG', S_DRET); a('LOADG', S_DRET); a('PUSHI', 1); a('SUB'); a('LOADI'); a.k(8192); a('MOD')
