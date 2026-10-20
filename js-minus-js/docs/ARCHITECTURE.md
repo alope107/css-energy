@@ -2,7 +2,7 @@
 
 `make page` builds one XHTML file that runs no script. The user types JavaScript and presses Run; CSS reads the text
 back, CSS compiles it to bytecode, and CSS executes it: a chain of instructions per layout pass. Output goes to an
-8 × 16 console. (Until 2026-10-19 the CPU was a GSUB font; §3.6.)
+8 × 16 console. (Until 2026-10-19 the CPU was a GSUB font; §3.7.)
 
 ```
  editor (contenteditable)                                        readback/ui_rb.py
@@ -153,7 +153,7 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 
 ### 3.1 A pass
 
-- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px (gen_fvm4's mechanism); 273 of them: pc,
+- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px (the font CPU's mechanism); 273 of them: pc,
   sp, fp, the console cursor, `--pst`, steps, halt, the pending miss, the cache (32 tags with dirty bits, 16 victim
   bits, 128 words), the read ports' eight words, the latches, the RAM and console write channels. Two passes per frame
   (the frame gate: `--go`, `--k`, `--par`; a third settles).
@@ -257,12 +257,13 @@ MOD 8; heap words only point at chunk starts. Copying sets `k0` to −1 and `k1`
 to the first free pair, and the link if all three are used. Cost is a few shapings per live chunk, none per dead one.
 HP and GCLIM start at 0, so the first NEW sets up the heap.
 
-### 3.7 The font CPU (deprecated; `make page-font`)
+### 3.7 The font CPU (removed; last at commit `181cbb7`)
 
-`uarch.py` / `uarch4.py` model a GSUB CPU (`cpu4.py`, `cpugen.py`, `otl.py`, `fvm_build.py` write the font) that ran
-32 micro-cycles per shaping while Chrome shaped the machine state as a line of text; `gen_fvm4.py` builds its page,
-where CSS serviced its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output). L4 still checks its model and
-`machine/hbtest.py` the font against it. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12).
+A GSUB CPU ran 32 micro-cycles per shaping while Chrome shaped the machine state as a line of text, and CSS serviced
+its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output): `uarch.py` / `uarch4.py` modelled it, `cpu4.py`,
+`cpugen.py`, `otl.py` and `fvm_build.py` wrote the font, `gen_fvm4.py` its page, L4 checked the model and
+`machine/hbtest.py` the font in uharfbuzz. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12); ENGINE_NOTES
+25–33 are what it relied on.
 
 ---
 
@@ -291,17 +292,16 @@ where CSS serviced its traps (misses, write-backs, MUL / DIV / MOD / SHL13, outp
 | L1 | `make l1` | `cc_ref` compile + 20-bit simulator, strict: the stack must never go below its start and be back at HALT | Node output |
 | L2 | `make l2` | the DSL in Python level by level, with the page's specialised variants (`SPEC=1`; `make l2-generic` unspecialised) | the reference: parser state, tables, every word and label |
 | L3 | `make l3`, `make fuzz-l3` | the generated CSS compiler in Chrome (`build/suite_css.xhtml`, programs written into the latch cells) | the reference, word for word; `suite_err` must be rejected (any nonzero error) |
-| L4 | `make l4` | the deprecated font CPU's model, `uarch4.Machine4`, runs every compiled image | Node output |
 | C1 | `make c1` | `csssim.py`, the CSS CPU pass by pass, runs every compiled image | Node output, cc_ref's steps |
 | C2 | `make c2` | a CPU-only page per program under 1,500 steps (`tests/csscpu_pages.py`) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
 
-- `make test` = oracle, L1, quick fuzz, L2, L4, C1. `tests/suite/` has 120 programs (each must fit the editor, or
+- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 120 programs (each must fit the editor, or
   `suite_ref.py` fails it), `tests/suite_err/` 46; `tests/programs/` has the demos t1–t4.
 - **Differential tests** (`tests/fuzz/fuzz.py`; `make test` runs a quick fixed-seed set, `make fuzz` the full one,
   `make fuzz-l3` 300 of them through L3 in Chrome). Node is the oracle; each program goes through L1, L1 on the
-  page's padded text when it fits the editor, and optionally L2 (`--l2`, on every program, rejected ones too) and L4
-  (`--l4`). Sources: `fmt`, every suite program in 11 layouts that must print the same (no semicolons, comments
+  page's padded text when it fits the editor, and optionally L2 (`--l2`, on every program, rejected ones too) and C1
+  (`--c1`). Sources: `fmt`, every suite program in 11 layouts that must print the same (no semicolons, comments
   between all tokens, tabs, CRLF, one line, one token per line, …); `gen`, random programs from `progen.py`, typed
   across the whole language and rendered twice from one tree, for us and for Node with the machine's integer
   semantics spelled out (20-bit wrap, truncating division, x / 0 = x % 0 = 0), staying inside the documented
@@ -311,7 +311,6 @@ where CSS serviced its traps (misses, write-backs, MUL / DIV / MOD / SHL13, outp
   Failures are shrunk into `build/fuzz/`; `tests/fuzz/show.py` replays one, `fuzz.py gen --k N` regenerates one.
 - L5 runs only programs under 1,500 steps (`tests/suite_ui.py`). Harnesses detect HALT by the page's `--isHALT`
   flag, not a trap-kind index (that moves when opcodes are added).
-- `machine/hbtest.py` runs the deprecated font in uharfbuzz against its model.
 
 ---
 
@@ -326,5 +325,4 @@ make dist   # copy it to dist/
   supplies the ROM and the editor's initial program.
 - `gen_css.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
   the compiler's readable property names; `K` the levels per pass (32); `MEMGROUP=n` the RAM group size. Without
-  `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`). `make page-font`
-  builds the deprecated font CPU's page (`gen_fvm4.py`) as `build/js_in_font.xhtml`.
+  `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`).

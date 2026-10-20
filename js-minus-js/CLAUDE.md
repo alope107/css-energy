@@ -2,7 +2,8 @@
 
 JavaScript compiled and run by CSS. `dist/js_in_css.xhtml` is a static page: CSS reads back the text typed into its
 editor (through a readback font), CSS compiles it to bytecode, and a CPU made of style rules executes it, a chain of
-instructions per layout pass. (The CPU used to be a GSUB font, run while Chrome shaped text; it is deprecated.)
+instructions per layout pass. (Until 2026-10-19 the CPU was a GSUB font run while Chrome shaped text; its code last
+exists at commit `181cbb7`.)
 `README.md` has the language, limits and error codes; `docs/` has ARCHITECTURE (how it works), ENGINE_NOTES (the
 Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead ends, open leads).
 
@@ -22,14 +23,13 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 ```
 npm install && pip install -r requirements.txt     # once
 make page            # build/js_in_css.xhtml: lib -> image -> page (~40 s, reproducible)
-make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, L4, C1
-make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, L4 (~1.5 min; tests/fuzz/fuzz.py)
+make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, C1
+make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~1.5 min; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~30 s)
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
-make page-font       # the deprecated font CPU's page: build/js_in_font.xhtml
 make dist            # copy the built page to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
@@ -58,10 +58,9 @@ compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same 
 machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compiler)  csssim.py (its pass-by-pass model)
            cssref.py (the ISA as a stepper)  memtree.py (RAM)  uipage.py (editor page parts)  uarch.py (ISA constants)
            ui_seq.js halttime.js trace.js (browser harnesses)
-           deprecated font CPU: uarch4.py cpu4.py cpugen.py otl.py fvm_build.py gen_fvm4.py hbtest.py
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
-tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size)
+tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 ```
 
 ## How to make changes
@@ -88,7 +87,6 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
   `deps`, exactly: latches (a stalled instruction's operands kept for its re-execution) are what guarantee progress.
 - A value of a registered `<integer>` must be one term (`calc((a) * b)`, not `(a) * b`): Chrome takes the latter as
   invalid and uses 0, silently. `gen_css.py` refuses to write such a page.
-- The deprecated font CPU's microcode is `uarch.py`'s `UCODE` (`cpu4.py` compiles it; L4 checks the model).
 
 ### Runtime-library change (`compiler/lib_src.js`)
 
@@ -142,3 +140,5 @@ tools/     browser.js page.js (harness helpers)  traps.py  vsz.py (compiler size
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py build/js_in_css.xhtml` prints the
   page's outline.
 - Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed: `git checkout 91d73bc -- js-minus-js/archive`.
+  The font CPU (`gen_fvm4.py`, `cpu4.py`, `cpugen.py`, `otl.py`, `fvm_build.py`, `uarch4.py`, `hbtest.py`, `traps.py`, L4)
+  last exists at `181cbb7`.

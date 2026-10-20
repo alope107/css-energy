@@ -1,6 +1,7 @@
 # Benchmarks
 
-Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`.
+Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`. §1–§11 measured the font CPU,
+removed on 2026-10-20 (last at commit `181cbb7`); they stay as the baseline the CSS CPU (§12) is compared with.
 
 **Conventions.** Measured 2026-10-17 on the Ubuntu mini PC (Intel i5-12600H, no GPU), headless Chromium
 153.0.8010.12 launched by `tools/browser.js` (profile `fontcpu`), nothing else running unless noted; desktop Chrome
@@ -247,7 +248,7 @@ Chromium 153, mini PC.
 
 | Page | compiledMs | haltMs | run |
 |---|---|---|---|
-| font CPU (`make page-font`) | 2,678–2,771 | 10,453–10,581 | ~7.8 s |
+| font CPU (`181cbb7`) | 2,678–2,771 | 10,453–10,581 | ~7.8 s |
 | CSS CPU (`make page`) | 2,431–2,492 | 3,876–3,951 | ~1.45 s |
 
 *(derived)* HALT 2.7× sooner, run ~5.4× faster.

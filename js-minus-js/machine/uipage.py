@@ -1,4 +1,4 @@
-"""uipage.py — the editor page's parts that don't depend on the CPU (the font CPU's gen_fvm4.py and the CSS CPU's
+"""uipage.py — the editor page's parts that don't depend on the CPU (taken out of the font CPU's page generator for
 machine/gen_css.py): layout, the Run / Edit button, the compile status line, Edit clearing RAM, the ccgo gate."""
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))

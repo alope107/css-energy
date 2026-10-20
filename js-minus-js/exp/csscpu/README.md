@@ -1,7 +1,7 @@
 # A CPU in style alone
 
 Since 2026-10-19 this is the page's CPU (`machine/gen_css.py`, `machine/csssim.py`, `docs/ARCHITECTURE.md` §3); the font
-CPU is deprecated. This directory keeps how it was found and measured: the toy, the timing tools, Blink's style costs.
+CPU was removed (last at commit `181cbb7`). This directory keeps how it was found and measured: the toy, the timing tools, Blink's style costs.
 
 Can CSS style recalc beat the font CPU (HarfBuzz) at running js-minus-js bytecode? Two stages: a toy that times
 instructions with nothing missing (`mkcpu.py`), then a CPU-only page that runs real programs to HALT
@@ -9,8 +9,8 @@ instructions with nothing missing (`mkcpu.py`), then a CPU-only page that runs r
 
 ## The machine (`machine/gen_css.py`, oracle `machine/csssim.py`)
 
-`python3 machine/gen_css.py image.json out.html` takes a `compiler/mkimage.py --ram` image, as `machine/gen_fvm4.py`
-does, and builds a page with no font and no script. FizzBuzz, gcd, primes, array_sort, str_table, bool_print, putc
+`python3 machine/gen_css.py image.json out.html` takes a `compiler/mkimage.py --ram` image, as the font CPU's
+`gen_fvm4.py` did, and builds a page with no font and no script. FizzBuzz, gcd, primes, array_sort, str_table, bool_print, putc
 and break_nested run to HALT with cc_ref's exact step counts and the expected console.
 
 ```
@@ -20,9 +20,9 @@ POLL=30 node exp/csscpu/halt.js build/csscpu/fizz.html build/csscpu/fizz.json   
 python3 machine/csssim.py tests/suite/fizzbuzz.js 32                               # passes, checked against cc_ref
 ```
 
-A layout pass (two per frame, gen_fvm4's frame gate):
+A layout pass (two per frame, the font CPU's frame gate):
 
-- **`#cpu`** holds the registers as view timelines (gen_fvm4's): pc, sp, fp, the output cursor, the cache
+- **`#cpu`** holds the registers as view timelines (as the font CPU did): pc, sp, fp, the output cursor, the cache
   (16 sets × 2 ways × 4 words: 128 words, 32 tags with dirty bits, 16 victim bits), the pending miss and the read
   ports' eight words. 262 registers.
 - **`.fl`** fills the block the last pass missed into its set's victim way (a dirty victim goes out through the RAM
@@ -33,7 +33,7 @@ A layout pass (two per frame, gen_fvm4's frame gate):
   cache set (16 rules). An instruction runs only if every word it touches is cached (and, for output, the pass's
   console write set is free); the first one that can't stops the chain and records its missing block.
 - **`.ex`**, at the chain's end, holds the registers' subjects, routes the pass's writes into the RAM and console
-  channels, and holds eight read ports (gen_fvm4's readback readers). They read the missing block and the next one
+  channels, and holds eight read ports (readers, as the font CPU's page had). They read the missing block and the next one
   from the ROM and RAM leaves (`memtree.py`) during the same pass's layout and keep the words in registers for the next
   pass's fill.
 
@@ -54,7 +54,7 @@ service). It predicts the passes (FizzBuzz 36 at K = 32; the page latches every 
 the first miss, so the page can take fewer).
 
 Checks (`make test` runs C1; `make c2`):
-- **C1** (`tests/csscpu_sim.py`): csssim.py runs every suite program's image (the padded editor source, as L4)
+- **C1** (`tests/csscpu_sim.py`): csssim.py runs every suite program's image (the padded editor source, as the page compiles it)
   against Node's output and cc_ref's step count.
 - **C2** (`tests/csscpu_pages.py` builds, `tests/csscpu_pages.js` runs): a page per program under 1,500 steps (111),
   each run to HALT in Chrome, console against Node's, steps against cc_ref's.
@@ -64,7 +64,7 @@ Checks (`make test` runs C1; `make c2`):
 ## Results (2026-10-19, headless Chromium 153, mini PC)
 
 Load → HALT, `halt.js` with `POLL=30` for both pages, run alternately, two runs each. The font CPU pages are
-`gen_fvm4.py` without `UI=1` on the same images (its step count is one lower: it counts differently).
+`gen_fvm4.py` (commit `181cbb7`) without `UI=1` on the same images (its step count is one lower: it counts differently).
 
 | Program | Steps | CSS CPU | Font CPU | Speed-up |
 |---|---|---|---|---|

@@ -6,8 +6,8 @@ editor and press Run. The program then goes through four stages:
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates bytecode.
 3. **CSS runs it.** Each layout pass executes up to 32 instructions as a chain of nested elements, out of a cache of
-   RAM held in custom properties. (Until 2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text; that page is
-   still built by `make page-font`, deprecated.)
+   RAM held in custom properties. (Until 2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text; its code last
+   exists at commit `181cbb7`.)
 4. **The output appears.** It shows in an 8 × 16 console.
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
@@ -26,7 +26,7 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 ```
 npm install                       # playwright-core + @sparticuz/chromium (Linux x64), for the harnesses only
-pip install -r requirements.txt   # fontTools, brotli (uharfbuzz optional)
+pip install -r requirements.txt   # fontTools, brotli (the readback font)
 make page                         # -> build/js_in_css.xhtml (about 40 s; reproducible)
 make test                         # fast tests, no browser (about 10 s)
 make fuzz                         # differential tests against Node, no browser (about 1.5 min)

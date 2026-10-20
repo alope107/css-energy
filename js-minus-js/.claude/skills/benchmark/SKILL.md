@@ -17,7 +17,6 @@ and the noise floor are in `docs/BENCHMARKS.md`.
 | Is B faster than A, beyond the noise? | `EXP1=build/ui_exp/fizzbuzz.grid node ../shared/js/ab.js -p haltMs 'node machine/ui_seq.js {}' a.xhtml b.xhtml` (CPU-only: `-p haltMs 'IMG=img.json node machine/halttime.js {} 60'`) | Interleaved rounds, fresh browser per run; ratio to A per round (median, IQR). Run A against A first. |
 | Where does a frame go? | `RUN=1 RUNWAIT=3500 node machine/trace.js build/js_in_css.xhtml 4`, then `python3 machine/passprof.py trace.json` | **The window must sit inside the run** (ENGINE_NOTES 39); without `RUN=1` you trace the idle editor. CPU-only pages: `WAIT=700`. Ignore mouse-move hit tests. |
 | Which elements restyle or relayout per pass? | add `disabled-by-default-devtools.timeline.invalidationTracking` to `trace.js`'s categories | `StyleResolver::ResolveStyle` instants and `LayoutInvalidationTracking` events carry node names and reasons (ENGINE_NOTES 34). |
-| HarfBuzz alone (deprecated font CPU) | `CPUMOD=cpu4 python3 machine/hbtest.py img.json 16 32` (`img.json` from `compiler/mkimage.py --ram prog.js img.json`) | Needs uharfbuzz; checks the font against the model, reports ms per shaping. Not `build/ccimg.json`: it holds no program. |
 | Readback sweep | `python3 readback/rb_only2.py rb.xhtml && node readback/rbsweep.js rb.xhtml tests/fizz.js 3` | Counts unread or wrong cells per sweep. `readback/rbtest.js page prog.js` prints what the latches read. |
 | Compiler CSS size | `python3 tools/vsz.py` | Variants and temps per mode, the largest variants, label ports. |
 

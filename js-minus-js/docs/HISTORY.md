@@ -1,7 +1,8 @@
 # History: how the design got here, and what didn't work
 
 Numbers for superseded code come from raw logs and earlier chats on other machines. The code was removed on
-2026-10-15 (`git checkout 91d73bc -- js-minus-js/archive`), the logs on 2026-10-18 (`83d4fde`). "Self-compile": the self-hosted `jsc.js` in ROM compiles FizzBuzz at run time, then runs it.
+2026-10-15 (`git checkout 91d73bc -- js-minus-js/archive`), the logs on 2026-10-18 (`83d4fde`), the font CPU (timeline 2–11)
+on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in ROM compiles FizzBuzz at run time, then runs it.
 "Direct fizz": FizzBuzz compiled into ROM.
 
 ## Timeline
@@ -38,7 +39,7 @@ Numbers for superseded code come from raw logs and earlier chats on other machin
   learning Blink's style costs: a container-query test ~2 µs per element (a rule per opcode and per cache word made
   idle levels 269 µs), an `if()` ~70 ns per entry it contains, size containers above a subtree restyling it once per
   container (7 times per fill). FizzBuzz on the page 10.5 → 3.9 s after Run; CPU-only pages 2.8–7.3× faster
-  (BENCHMARKS §12). The font CPU is deprecated (`make page-font`).
+  (BENCHMARKS §12). The font CPU's code was removed; it last exists at commit `181cbb7`.
 
 ## Dead ends and superseded approaches
 

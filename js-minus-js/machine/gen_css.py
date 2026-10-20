@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""gen_css.py image.json out.html — the pure-CSS CPU: a CPU-only page (gen_fvm4.py's role) with no font. Style alone runs
+"""gen_css.py image.json out.html — the pure-CSS CPU: a CPU-only page, or with UI=1 the editor page. Style alone runs
 the instructions; layout only fills the cache and moves the registers. The design is csssim.py's, which is its oracle.
 
-A pass (ISSUE passes per frame, gen_fvm4's frame gate):
-  #cpu      the registers (view timelines, as gen_fvm4's), the frame gate, the pending miss's victim lines
+A pass (ISSUE passes per frame, the font CPU's frame gate):
+  #cpu      the registers (view timelines), the frame gate, the pending miss's victim lines
   .fl       the fill: the victim line takes the block the last pass missed, whose words the read ports left in registers
             (a dirty victim's words go to the write set first); the next block is prefetched if it is absent and its
             victim is clean
@@ -11,19 +11,19 @@ A pass (ISSUE passes per frame, gen_fvm4's frame gate):
             runs only if every word it touches is cached (and, for output, the write set is free); the first that can't
             stops the chain, noting its missing block (--pend) for the next pass's fill
   .ex       the registers' view-timeline subjects at the chain's final state; the write set goes to the RAM channels;
-            eight read ports (gen_fvm4's readback readers) read the missing block's words and the next block's (one port
+            eight read ports (readers, like the font CPU's) read the missing block's words and the next block's (one port
             per bank and block) from the ROM and RAM leaves into registers for the next pass's fill
 Nothing above the chain is a size container, so a pass styles the chain once. (Ports above it, as first built, restyled
 the whole chain once per port whose size changed: 7 times in a fill pass.)
 Cache: 16 sets x 2 ways x 4 words, set (b + b / 16 + b / 256) mod 16 of block b; --T<line> = 2 * (block + 1) + dirty
 (0: empty), --F<set> the next victim way, --W<line>_<word> the words, line = 2 * set + way. RAM is memtree.py's, the
-console gen_fvm4's.
+console the font CPU's.
 
 Cost model (measured: exp/csscpu/README.md): a container-query test ~2 us, a declaration ~1.3 us, an if() branch ~0.3 us, per element.
 So .x dispatches on 7 instruction classes (one container test each) and selects within a class by if(); .c commits a
 whole cache set (16 rules) rather than a word (128).
 Env: K (levels, default 32), ISSUE (passes per frame, default 2), UI=1: the editor page (XHTML; the image's RAM is
-empty: the compile chain's overlays hold the program), as gen_fvm4.py's: Run starts the scan, the compiler, then the CPU;
+empty: the compile chain's overlays hold the program): Run starts the scan, the compiler, then the CPU;
 Edit zeroes the registers and RAM."""
 import sys, os, json, html as _h
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -237,7 +237,7 @@ for c, k in CLASSES.items():
     if c == 'jump': d += [f"--nstop: {eq('var(--op)', OP['HALT'])};", f"--nhalt: {eq('var(--op)', OP['HALT'])};"]
     cls_rules[c] = (k['ops'], d)
 
-# 'out': the PRINT family and PUTC (uarch.Machine.print_service, gen_fvm4's service): up to 4 console cells per execution,
+# 'out': the PRINT family and PUTC (the font CPU's print service): up to 4 console cells per execution,
 # one per bank; a string chunk ends at its block (the block's line must be cached), at a NUL (the value is out) or a
 # newline (taken); until the value is out the instruction repeats (npc = pc) and --pst carries the position. Output needs
 # the pass's write set free. PUTC writes one cell or a newline.
@@ -331,7 +331,7 @@ LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
 props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; initial-value: --c0; }}' for i in range(2 * WB)]   # a port's leaf name
 
-css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines (gen_fvm4.py)'),
+css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines'),
        "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
        "#cpu {\n  timeline-scope: " + ", ".join(f"--{r[0]}" for r in regs if r[0] not in WNAMES) +
        ";\n  animation-name: " + ", ".join(f"r-{r[0]}" for r in regs) + ";\n  animation-timeline: " + ", ".join(f"--{r[0]}" for r in regs) +
@@ -394,10 +394,10 @@ css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --cw: var(-
 css += [f"@container style(--wz: {s + 1}) {{ .c {{ " + " ".join(f"--W{2 * s + i // 4}_{i % 4}: var(--n{i});" for i in range(8)) +
         f" --T{2 * s}: var(--nT0); --T{2 * s + 1}: var(--nT1); }} }}" for s in range(NSET)]
 
-css.append(lbl.section('Export', 'the write set into the RAM channels (gen_fvm4.py\'s rotation); the registers\' subjects'))
+css.append(lbl.section('Export', 'the write set into the RAM channels; the registers\' subjects'))
 # (it holds its cell until it takes another, rather than being cleared: a channel change restyles the tree). Rotation: a
 # channel written in a frame is not taken again until its leaf's remembered size has been recorded at that frame's end
-# (gen_fvm4.py); a cell written again releases the channel that held it.
+# (the font CPU's rotation); a cell written again releases the channel that held it.
 ex = []
 for w in range(WB):
     for i, c in enumerate(CH):
