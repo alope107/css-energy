@@ -106,11 +106,12 @@ class Sim:
         elif op == 'LOADI': wr(sp - 1, rd(rd(sp - 1)))
         elif op == 'STOREI': b = rd(sp - 1); a = rd(sp - 2); sp -= 2; wr(a, b)
         elif op in BIN: b = rd(sp - 1); a = rd(sp - 2); sp -= 1; wr(sp - 1, BINF[BIN.index(op)](a, b))
-        elif op == 'NOT': wr(sp - 1, int(rd(sp - 1) == 0))
+        elif op == 'NOT': v = rd(sp - 1); wr(sp - 1, int(v == 0 or (R.isstr(v) and rd((v - 1) & AMASK) == 0)))
         elif op == 'NEG': wr(sp - 1, -rd(sp - 1))
         elif op == 'JMP': pc = imm
-        elif op == 'JZ': sp -= 1; pc = imm if rd(sp) == 0 else pc
-        elif op == 'JNZ': sp -= 1; pc = imm if rd(sp) != 0 else pc
+        elif op in ('JZ', 'JNZ'):                  # 0 and the empty string are false
+            sp -= 1; v = rd(sp); z = v == 0 or (R.isstr(v) and rd((v - 1) & AMASK) == 0)
+            pc = imm if z == (op == 'JZ') else pc
         elif op == 'CALL': wr(sp, pc); sp += 1; pc = imm
         elif op == 'ENTER': wr(sp, fp); fp = sp; sp = sp + 1 + imm
         elif op == 'RET': v = rd(sp - 1); ofp = rd(fp); ret = rd(fp - 1); nsp = fp - 1 - imm; wr(nsp, v); sp = nsp + 1; fp = ofp; pc = ret

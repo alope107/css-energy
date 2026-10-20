@@ -73,6 +73,9 @@ def isstr(v): return STRV_LO <= v < STRV_HI
 def isarr(v): return HEAP0 <= v - ARRTAG < HEAP_HI
 def isobj(v): return HEAP0 <= v + OBJTAG < HEAP_HI
 def isref(v): return isstr(v) or isarr(v) or isobj(v)
+def truthy(mem, v):
+    """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address)"""
+    return v != 0 and not (isstr(v) and mem[(v - 1) & AMASK] == 0)
 def dyntrap(imm, a, b):
     """DYN takes the ROM's slow path: == / != with two strings, the others with a string, array or object on either side"""
     return (isstr(a) and isstr(b)) if imm % 64 in (EQ, NE) else (isref(a) or isref(b))
@@ -959,15 +962,15 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             sp -= 1; b = mem[sp]; a = mem[sp - 1]
             mem[sp - 1] = [s20(a + b), s20(a - b), s20(a * b), tdiv(a, b), tmod(a, b), int(a < b), int(a > b), int(a <= b), int(a >= b), int(a == b), int(a != b),
                            int(a != 0 and b != 0), int(a != 0 or b != 0)][op - 8]
-        elif op == 21: mem[sp - 1] = int(mem[sp - 1] == 0)
+        elif op == 21: mem[sp - 1] = int(not truthy(mem, mem[sp - 1]))
         elif op == 22: mem[sp - 1] = s20(-mem[sp - 1])
         elif op == 23: pc = imm
         elif op == 24:
             sp -= 1
-            if mem[sp] == 0: pc = imm
+            if not truthy(mem, mem[sp]): pc = imm
         elif op == 25:
             sp -= 1
-            if mem[sp] != 0: pc = imm
+            if truthy(mem, mem[sp]): pc = imm
         elif op == 26: mem[sp] = pc; sp += 1; pc = imm
         elif op == 27: mem[sp] = fp; fp = sp; sp = sp + 1 + imm
         elif op == 28:

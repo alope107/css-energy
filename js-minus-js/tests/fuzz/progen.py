@@ -238,6 +238,7 @@ class Gen:
             if a: return ('meth', a[0], 'join', [('raw', r.choice(self.strs))])
         if k < 0.9:
             a, ln = self.sarr(); return ('idx', a, lit(r.randint(0, ln - 1)))
+        if k < 0.93 and d < 3: return ('bin', r.choice(['||', '&&']), self.strx(d + 1), self.strx(d + 1))
         return ('raw', r.choice(self.strs))
     def cond(self, d=0):
         r = self.r; k = r.random()
@@ -253,7 +254,8 @@ class Gen:
             a = self.arrexpr(need=0)
             if a: return ('meth', a[0], 'includes', [self.num(d + 1)])
             return ('meth', self.sarr()[0], 'includes', [self.strx(d + 1)])
-        if k < 0.65: return ('not', self.cond(d + 1))
+        if k < 0.6: return ('not', self.cond(d + 1))
+        if k < 0.65: return ('not', self.strx(d + 1)) if r.random() < .6 else ('not', ('not', self.strx(d + 1)))     # a string's truth ("" is false)
         if k < 0.85: return ('bin', r.choice(['&&', '||']), self.cond(d + 1), self.cond(d + 1))
         return ('par', self.cond(d + 1))
     def call(self, ret, d):
@@ -451,7 +453,7 @@ class Gen:
         if not self.contok: return None
         return [('IFJ', self.cond(), 'continue')]
     def s_if(self):
-        c = self.cond() if self.r.random() < 0.85 else self.num()
+        x = self.r.random(); c = self.cond() if x < 0.8 else self.num() if x < 0.9 else self.strx()      # (a string: its truth)
         th = self.body(); els = []
         k = self.r.random()
         if k < 0.25: els = [('else', self.body())]

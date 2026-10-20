@@ -166,11 +166,17 @@ CLASSES = {
                  nx={'sp': by_op({'INCG': sp, 'INCL': sp}, f"calc({sp} + 1)")}),
     'bin': dict(ops=BINOPS, reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None)],
                 write=(None, by_op({o: BINE[o] for o in BINOPS[:-1]}, BINE[BINOPS[-1]]), "s2", "1"), nx={'sp': f"calc({sp} - 1)"}),
-    'jump': dict(ops=['JZ', 'JMP', 'JNZ', 'POP', 'JMPI', 'NOP', 'HALT', 'JNEG'], reads=[("s1", f"{sp} - 1", ['JZ', 'JNZ', 'JMPI']), ("s2", f"{sp} - 2", ['JNEG'])], write=None,
-                 nx={'sp': by_op({'JZ': f"calc({sp} - 1)", 'JNZ': f"calc({sp} - 1)", 'POP': f"calc({sp} - 1)", 'JMPI': f"calc({sp} - 1)"}, sp),
-                     'pc': by_op({'JZ': f"calc({z1} * {imm} + (1 - {z1}) * ({pc} + 1))", 'JMP': imm, 'JNZ': f"calc((1 - {z1}) * {imm} + {z1} * ({pc} + 1))",
-                                  'JMPI': "mod(var(--vs1), 32768)", 'HALT': pc, 'JNEG': f"calc(clamp(0, -1 * var(--vs2), 1) * {imm} + (1 - clamp(0, -1 * var(--vs2), 1)) * ({pc} + 1))"},
+    'jump': dict(ops=['JMP', 'POP', 'JMPI', 'NOP', 'HALT', 'JNEG'], reads=[("s1", f"{sp} - 1", ['JMPI']), ("s2", f"{sp} - 2", ['JNEG'])], write=None,
+                 nx={'sp': by_op({'POP': f"calc({sp} - 1)", 'JMPI': f"calc({sp} - 1)"}, sp),
+                     'pc': by_op({'JMP': imm, 'JMPI': "mod(var(--vs1), 32768)", 'HALT': pc,
+                                  'JNEG': f"calc(clamp(0, -1 * var(--vs2), 1) * {imm} + (1 - clamp(0, -1 * var(--vs2), 1)) * ({pc} + 1))"},
                                  f"calc({pc} + 1)")}),
+    # JZ / JNZ: 0 and the empty string are false (a string's length: the word before its address, ra, read only for a string)
+    'test': dict(ops=['JZ', 'JNZ'], pre=["--tstr: " + f"calc(clamp(0, var(--vs1) - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - var(--vs1), 1));",
+                                         f"--tz: calc(var(--tstr) * {eq('var(--vra)', 0)} + (1 - var(--tstr)) * {z1});"],
+                 reads=[("s1", f"{sp} - 1", None), ("ra", f"calc(var(--tstr) * mod(var(--vs1) - 1, 32768) + (1 - var(--tstr)) * ({sp} - 1))", "var(--tstr)")], write=None,
+                 nx={'sp': f"calc({sp} - 1)", 'pc': by_op({'JZ': f"calc(var(--tz) * {imm} + (1 - var(--tz)) * ({pc} + 1))"}, f"calc((1 - var(--tz)) * {imm} + var(--tz) * ({pc} + 1))")},
+                 deps={'ra': [('s1', None)]}),
     # ENDK writes its two zeros in two executions (--pst 0, then 1)
     'store': dict(ops=['STOREG', 'STOREL', 'STOREI', 'SETF', 'ENDK'], reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", ['STOREI', 'SETF'])],
                   write=(by_op({'STOREL': fpo, 'STOREI': "mod(var(--vs2), 32768)", 'SETF': f"mod(var(--vs2) + {imm}, 32768)",
@@ -183,14 +189,14 @@ CLASSES = {
     # routine when the key is missing; NEW writes its two words in two executions (--pst 0, then 1) and calls the GC when full
     'index': dict(ops=['LOADI', 'IDX', 'IDXL', 'RET', 'NOT', 'NEG', 'SHL13', 'LDF', 'SCANI', 'SCAN', 'PUTV', 'NEW'],
                   reads=[("s1", f"{sp} - 1", ['LOADI', 'IDX', 'IDXL', 'RET', 'NOT', 'NEG', 'SHL13', 'LDF', 'SCANI', 'SCAN', 'PUTV']), ("s2", f"{sp} - 2", ['PUTV']),
-                         ("ra", by_op({'LOADI': "mod(var(--vs1), 32768)", 'IDXL': fpo, 'RET': fp, 'LDF': f"mod(var(--vs1) + {imm}, 32768)", 'SCANI': "mod(var(--vs1), 32768)",
+                         ("ra", by_op({'LOADI': "mod(var(--vs1), 32768)", 'IDXL': fpo, 'RET': fp, 'NOT': f"calc(var(--nstr) * mod(var(--vs1) - 1, 32768) + (1 - var(--nstr)) * ({sp} - 1))", 'LDF': f"mod(var(--vs1) + {imm}, 32768)", 'SCANI': "mod(var(--vs1), 32768)",
                                        'SCAN': "mod(var(--vs1), 32768)", 'PUTV': "mod(var(--vs2), 32768)", 'NEW': HP}, imm),
                           f"(({' + '.join(eq('var(--op)', OP[o]) for o in ['LOADI', 'IDX', 'IDXL', 'RET', 'LDF', 'SCANI', 'SCAN', 'PUTV', 'NEW'])}) - "
-                          f"({' + '.join(eq('var(--op)', OP[o]) for o in ['LDF', 'SCANI', 'SCAN', 'PUTV'])}) * {below('ra')})"),
+                          f"({' + '.join(eq('var(--op)', OP[o]) for o in ['LDF', 'SCANI', 'SCAN', 'PUTV'])}) * {below('ra')} + {eq('var(--op)', OP['NOT'])} * var(--nstr))"),
                          ("rb", by_op({'RET': f"{fp} - 1", 'SCAN': KEYCELL, 'NEW': GCLIM}, "mod(var(--vra) + var(--vs1), 32768)"), ['IDX', 'IDXL', 'RET', 'SCAN', 'NEW'])],
                   write=(by_op({'RET': f"{fp} - 1 - {imm}", 'PUTV': "mod(var(--vs2) + 1, 32768)",
                                 'NEW': f"calc({pst_} * ({new_lt} * {HP} + (1 - {new_lt}) * {RETCELL}) + (1 - {pst_}) * ({new_lt} * {sp} + (1 - {new_lt}) * {GCSP}))"}, f"{sp} - 1"),
-                         by_op({'LOADI': "var(--vra)", 'RET': "var(--vs1)", 'NOT': z1, 'NEG': s20("-1 * var(--vs1)"), 'SHL13': s20("var(--vs1) * 8192"), 'LDF': RA0,
+                         by_op({'LOADI': "var(--vra)", 'RET': "var(--vs1)", 'NOT': f"calc(var(--nstr) * {eq('var(--vra)', 0)} + (1 - var(--nstr)) * {z1})", 'NEG': s20("-1 * var(--vs1)"), 'SHL13': s20("var(--vs1) * 8192"), 'LDF': RA0,
                                 'SCANI': f"calc(clamp(0, -1 * {RA0}, 1) * {RA0} + (1 - clamp(0, -1 * {RA0}, 1)) * {s20('var(--vs1) + 2')})",
                                 'SCAN': f"calc(clamp(0, -1 * {RA0}, 1) * {RA0} + (1 - clamp(0, -1 * {RA0}, 1)) * {s20('var(--vs1) + 2')})",
                                 'PUTV': f"calc({putv_nz} * var(--vs1) + (1 - {putv_nz}) * {pc})",
@@ -203,7 +209,8 @@ CLASSES = {
                                    'PUTV': f"calc({putv_nz} * ({pc} + 1) + (1 - {putv_nz}) * {PUTVEC})",
                                    'NEW': f"calc((1 - {pst_}) * {pc} + {pst_} * ({new_lt} * ({pc} + 1) + (1 - {new_lt}) * {GCVEC}))"}, f"calc({pc} + 1)"),
                       'steps': by_op({'NEW': f"calc(var(--steps) + {pst_})"}, "calc(var(--steps) + 1)"), 'pst': by_op({'NEW': f"calc(1 - {pst_})"}, pst_)},
-                  deps={'ra': [('s1', ['LOADI', 'LDF', 'SCANI', 'SCAN']), ('s2', ['PUTV'])], 'rb': [('s1', ['IDX', 'IDXL']), ('ra', ['IDX', 'IDXL'])]}),
+                  pre=["--nstr: " + f"calc({eq('var(--op)', OP['NOT'])} * clamp(0, var(--vs1) - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - var(--vs1), 1));"],
+                  deps={'ra': [('s1', ['LOADI', 'LDF', 'SCANI', 'SCAN', 'NOT']), ('s2', ['PUTV'])], 'rb': [('s1', ['IDX', 'IDXL']), ('ra', ['IDX', 'IDXL'])]}),
 }
 # arrays and the dynamic operators (uarch.py): IDXA / STOREX index an array inside its length (IDXA reads 0 past it) and DYN
 # computes a number result; anything else traps (the return address written at sp, pc to the ROM routine). xA / xk: the
@@ -348,7 +355,7 @@ if 'norom' in ABL: rom_table = "0"
 P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
-     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr",
+     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr",
      "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
@@ -359,7 +366,7 @@ P = list(dict.fromkeys(P))
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
-LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr"}
+LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
