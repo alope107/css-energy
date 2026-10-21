@@ -5,7 +5,7 @@ layout read back through view timelines, solver levels as nested elements and `@
 port followed (Oct 9–10; the pre-optimization generator is at `83d4fde:css-physics/archive/rigid3d-v3/gen3d_v3.py`, which
 `GEN=<path> python3 src/build3d.py` still builds). One optimization session (Oct 10) produced today's architecture:
 planes-first rounds, `K/J/JP` accumulators, the soft box patch, owner-named gating, the #LS/#LT split, two registers
-per element, `.ts` scope nests, digests, `SHARE`. Oct 13 tried spatial partitioning; Oct 17 added Firefox;
+per element, `.ts` scope nests, digests, `SHARE`. Oct 13 tried spatial partitioning; Oct 17 added Firefox, Oct 21 Safari;
 Oct 18 replaced tap-to-pick-up touch with touch-and-drag (ARCHITECTURE.md "Touch"). Bugs that
 shipped are CLAUDE.md gotchas, guarded by `tools/smoke.sh`.
 
@@ -81,6 +81,12 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 - **Moving the #LM clock into padding** to keep its box still: stopped the re-match.
 - **Shrinking boxes 2–4%** so resting faces don't intersect: Firefox still draws whole bodies in document order.
 - **A second step per frame:** not found; Firefox samples view timelines once per tick.
+
+### Safari (Oct 21)
+
+- **Registering `SC` and `GYP` as `<integer>`** so their registers read back exact: WebKit doesn't round an animated
+  `<integer>` (45.999975 stays, [327925](https://bugs.webkit.org/show_bug.cgi?id=327925)). Margins of 0.5 instead.
+- **A second step per frame:** WebKit samples view timelines once per frame too (0.97–0.99 steps per frame).
 
 ### Touch (Oct 18)
 
