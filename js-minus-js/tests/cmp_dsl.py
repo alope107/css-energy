@@ -17,8 +17,10 @@ def prog_for(mode, tk, tv):
 def ref_state(c):
     st = dict(lx=c.lx, q=c.q, lt=c.lt, tkc=c.tkc, acc=c.acc, h1=c.h1, h2=c.h2, p2=c.p2, sstart=c.sstart, dp=c.dp, mode=c.mode, pn1=c.pn[0], pn2=c.pn[1],
               sdp=c.sdp, pnl=c.pnl, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
-              osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, lb=c.lb, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
-              pendLa=c.pendLa, err=c.err)
+              osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
+              pendLa=c.pendLa, err=c.err, nd=c.nd)
+    for k in range(R.ODN): st[f'od{k}'] = c.od[k] if k < c.nd else None
+    st['pk'] = c.pk if c.nd and c.desc(c.nd - 1) >= R.KBIG and c.desc(c.nd - 1) != R.TMP else None     # (a big constant or comparison on top)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
     for k in range(R.CD):
         e = c.cs[k]; st[f'csA{k}'] = e[0] * 4096 + e[1] * 64 + e[2] if k < c.csp else None; st[f'csB{k}'] = e[5] * 4096 + e[3] * 64 + e[4] if k < c.csp else None
@@ -26,7 +28,7 @@ def ref_state(c):
         e = c.sym[j]
         live = j < c.nsym or j >= R.NS - c.nlet                    # function / program level, or block-scoped
         for nm, v in ((f'sh1_{j}', e[0]), (f'sh2_{j}', e[1]), (f'sk_{j}', (e[4] + 4 * e[5]) * 65536 + e[2] * 16384 + e[3] + 8192)):
-            st[nm] = v if live and not (nm.startswith('sk') and e[3] < 0) else None
+            st[nm] = v if live else None
     for k in range(R.NF):
         e = c.fn[k]
         for nm, v in ((f'fh1_{k}', e[0]), (f'fh2_{k}', e[1]), (f'fl_{k}', e[2] + 64 * e[3] + 256 * e[4])): st[nm] = v if k < c.nfn else None
@@ -68,8 +70,9 @@ def check(text):
                 ps, e = pg.x.run_python(env); e = collections.defaultdict(int, e); work += len(pg.x.temps); steps += 1
                 for s in range(R.EMAX):
                     if e[('T', f'o_v{s}')]:
-                        w, l, a = e[('T', f'o_w{s}')], e[('T', f'o_l{s}')], e[('T', f'o_a{s}')] + DB - CB
-                        code[a] = (w // 8192, l if l >= 0 else w % 8192, int(l >= 0))
+                        a = e[('T', f'o_a{s}')] + DB; l, m = e[('T', f'o_l{s}')], e[('T', f'o_m{s}')]
+                        code[a] = (e[('T', f'o_w{s}')], l if l >= 0 else None, 1)
+                        code[a + 1] = (e[('T', f'o_x{s}')], e[('T', f'o_f{s}')] if m else None, m)
                 if e[('T', 'o_dv')]: data[e[('T', 'o_da')] + DB] = e[('T', 'o_dw')]
                 for k in range(pg.nlports):
                     if e[('T', f'o_lv{k}')]: lab[e[('T', f'o_lj{k}')]] = e[('T', f'o_lx{k}')]
@@ -83,7 +86,8 @@ def check(text):
     rs = ref_state(ref); st = dict(ps); st.update(tab); st.update(ls)
     diff = [k for k, v in rs.items() if v is not None and st.get(k) != v]
     rlab = {j: v for j, v in enumerate(ref.lab) if v != -1}
-    rcode = {a: (op, (lab_ if lab_ is not None else imm), int(lab_ is not None)) for a, (op, imm, lab_) in ref.code.items()}
+    rcode = {a: (w, l, m if l is not None else 0) for a, (w, l, m) in ref.words_ir().items()}
+    code = {a: (w, l, m if l is not None else 0) for a, (w, l, m) in code.items()}
     lab = {j: v for j, v in lab.items() if j < R.NL}   # (labels past NL exist only after error 20)
     ok = not diff and code == rcode and data == ref.data and lab == rlab
     return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}')

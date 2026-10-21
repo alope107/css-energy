@@ -283,9 +283,10 @@ class Compiler:
 
     # ---------------- operands
     def var(self, j):
-        """symbol j's operand: a global, or a frame slot (parameter k at fp + 1 + k, local k after the parameters)"""
+        """symbol j's operand: a global, or a frame slot (parameter k at fp + 1 + k, its table address PARAM0 + k; local k after
+        the parameters)"""
         k, a = self.sym[j][2], self.sym[j][3]
-        return L(a) if k == 2 else a - self.db
+        return (L(a - PARAM0 + 1) if a >= PARAM0 else L(a)) if k == 2 else a - self.db
     def tmp(self, i): return (L(1 + self.npar * self.curf + i), self.curf)      # T(i): past the locals (+ the frame label)
     def desc(self, i): return self.od[i] % 4096
     def otype(self, i): return self.od[i] // 4096
@@ -307,12 +308,8 @@ class Compiler:
         return self.tmp(i) if d == TMP else (d, 0)
     def put(self, dst, i):
         """the value of descriptor i into operand dst (field, temp?)"""
-        d = self.desc(i)
-        if d == KBIG: self.emit('LOADK', dst, w1=self.pk)
-        elif d >= CND:                                  # (a branch takes a pending comparison; this is for completeness)
-            cop = CNDOPS[(d - CND) // 4]; b = (self.pk // 1024 + 512, (d - CND) // 2 % 2); c = (self.pk % 1024, (d - CND) % 2)
-            self.emit(NAME[cop], dst, b, c)
-        elif self.src(i) != dst: self.emit('MOV', dst, self.src(i))
+        if self.desc(i) == KBIG: self.emit('LOADK', dst, w1=self.pk)
+        elif self.src(i) != dst: self.emit('MOV', dst, self.src(i))      # (a pending comparison only ever meets a branch)
     def to_temp(self, i):
         self.put(self.tmp(i), i); self.set_od(i, TMP, self.otype(i))
     def snapshot(self, hit, n=None):
@@ -342,8 +339,12 @@ class Compiler:
 
     def popops(self, minprec, mode=None):
         """pop and emit operators with precedence >= minprec. mode 'br': a comparison or ! popped last stays pending for the
-        branch that takes the value; ('dest', o): an operator popped last writes operand o directly (an assignment's target)"""
-        while self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
+        branch that takes the value; ('dest', o): an operator popped last writes operand o directly (an assignment's target).
+        A big constant on top goes to its temp before the first pop (unless that pop splits a console.log + chain), so each pop
+        emits at most one instruction"""
+        if (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec and self.nd and self.desc(self.nd - 1) == KBIG
+                and not (self.ops[self.osp - 1] == M_CADD and 2 in (self.opv[self.osp - 1], self.otype(self.nd - 1)))): self.src(self.nd - 1)
+        while not self.err and self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
             self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
             last = not (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec)
             dest = mode[1] if last and isinstance(mode, tuple) else None
@@ -640,7 +641,7 @@ class Compiler:
         if m == S_FNAME:
             if kind != 'ID': return self.fail(34)
             k = self.fnfind(v); self.cfn = k; self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
-            self.curf = 1; self.nloc = 0; self.npar = 0; self.fsym = self.nsym; self.fcs = self.csp - 1
+            self.curf = 1; self.nloc = 0; self.npar = 0; self.fsym = self.nsym
             le = self.newlab(); self.cs[self.csp - 1][2] = le
             self.mode = S_FPAREN; return
         if m == S_FPAREN:
@@ -698,6 +699,7 @@ class Compiler:
                 if isP(46) or isP(91): return self.fail(48)
             if kind == 'P' and v in BIN:
                 op = BIN[v]; self.popops(prec(op))
+                if self.err: return
                 t, tv = self.top_op()
                 if op == ADD and t == M_PRINT and (tv >= 4 or self.otype(self.nd - 1) == 2):   # "..." + x in console.log: a piece
                     self.opv[self.osp - 1] = tv + 4; self.mode = S_OPND; return
@@ -709,12 +711,16 @@ class Compiler:
                     self.push_op(op, l + 64 * lt); self.mode = S_OPND; return
                 self.push_op(op, self.otype(self.nd - 1)); self.mode = S_OPND; return
             if isP(63):                                        # c ? a : b
-                self.popops(2, 'br'); t, tv = self.top_op()
+                self.popops(2, 'br')
+                if self.err: return
+                t, tv = self.top_op()
                 if t == M_PRINT and tv >= 4: return self.fail(NOTSUB)
                 self.snapshot(lambda q: True, self.nd - 1)
                 l = self.newlab(); self.branch(l, False); self.push_op(M_TERN, l + 64 * int(t == M_TELSE)); self.mode = S_OPND; return
             if isP(58):
-                self.popops(1); t, tv = self.top_op()
+                self.popops(1)
+                if self.err: return
+                t, tv = self.top_op()
                 if t != M_TERN: return self.fail(67)
                 self.osp -= 1; i = self.nd - 1; lbt = self.otype(i); self.to_temp(i); self.nd -= 1
                 if tv >= 64:
@@ -724,10 +730,11 @@ class Compiler:
                     l2 = self.newlab(); self.emit('JMP', label=l2); self.push_op(M_TELSE, l2 + 64 * lbt)
                 self.deflab(tv % 64, self.here()); self.mode = S_OPND; return
             if isP(46) or isP(91): return self.fail(NOTSUB)
-            if isP(41) or isP(44) or isP(93):
-                self.popops(1, self.end_mode(v) if kind == 'P' else None)
+            if isP(93): return self.fail(45)
+            if isP(41) or isP(44):
+                self.popops(1, self.end_mode(v))
+                if self.err: return
                 t, tv = self.top_op()
-                if isP(93): return self.fail(45)
                 if isP(44):
                     if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return
                     if t == M_CALL: self.to_temp(self.nd - 1); self.opv[self.osp - 1] += 64
@@ -745,9 +752,10 @@ class Compiler:
                      and not (self.csp >= 2 and self.cs[self.csp - 2][0] in (C_FORINIT, C_FORSTEP)))
             if isP(T_NL) and not asiok: return
             if isP(125) and asiok:
-                return self.asi_close(lambda: (self.popops(1, self.dest_ctx()), self.end_expr_stmt('P', T_NL)))
+                return self.asi_close(lambda: (self.popops(1, self.dest_ctx()), self.err or self.end_expr_stmt('P', T_NL)))
             if isP(59) or isP(T_NL):
                 self.popops(1, self.end_mode(59))
+                if self.err: return
                 if self.osp: return self.fail(47)
                 return self.end_expr_stmt(kind, v)
             return self.fail(48)
@@ -831,8 +839,6 @@ class Compiler:
         self.deflab(t[1], self.here()); self.csp += 1; self.mode = S_DOWHILE
 
     def end_params(self):
-        for i in range(self.npar):                           # parameter k sits at fp + 1 + k
-            self.sym[self.fsym + i][3] = 1 + i
         f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
         if f[4] and f[4] != self.npar + 1: return self.fail(76)
         f[4] = self.npar + 1; self.mode = S_LBRACE

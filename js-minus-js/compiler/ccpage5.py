@@ -19,8 +19,9 @@ Token chain (#tcr, nested inside the deepest character level; levels past the to
   - level t+1 runs the parser on token t, picking the variant for (mode, token code) with
     @container style(--vh: m) and style(--tcq: tc) on its parent; variants share one pool of temp names.
   - symbol/function tables: delayed writes; labels: in-flow anchors; code words: fixed overlays inside #tcr
-    (contain: strict), anchor-name --c<RAM index>.
-  - the last level shows .fin: the staged-data count word, and two in-flow anchors the CPU page reads:
+    (contain: strict), anchor-name --c<RAM index>, two per instruction slot: word0 adds its label (a jump target, or the
+    function's frame label for a temp in A), word1 the frame label times its multiplier (1024 for a temp in B, 1 in C).
+  - the last level shows .fin: the globals' count word, and two in-flow anchors the CPU page reads:
     --ccdone (width 1 when compiled without error) and --ccinfo (width = done + 2*err + 1024*words).
 """
 import sys, json, re, os
@@ -321,6 +322,10 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                 f' anchor-name: {mux_shift(a, code_cells, cb0)}; --ln: {mux_lab(f"q-o_l{s}", R.NL)};'
                 f' width: calc((var(--q-o_w{s}) + {WOFF}) * 1px + anchor-size(var(--ln) width, 0px));')
         css.append(f'@container style(--q-o_v{s}: 1) {{ .ov.k{s} {{ {body} }} }}')
+        body = (f'display: block; --{a}-h: round(down, (var(--{a}) - {cb0}) / 32);'
+                f' anchor-name: {mux_shift(a, code_cells, cb0, 1)}; --ln: {mux_lab(f"q-o_f{s}", R.NL)};'
+                f' width: calc((var(--q-o_x{s}) + {WOFF}) * 1px + var(--q-o_m{s}) * anchor-size(var(--ln) width, 0px));')
+        css.append(f'@container style(--q-o_v{s}: 1) {{ .ov.j{s} {{ {body} }} }}')
     N.add('q-o_da-h', False)
     css.append(f'@container style(--q-o_dv: 1) {{ .ovd {{ display: block; --q-o_da-h: round(down, var(--q-o_da) / 32);'
                f' anchor-name: {mux_shift("q-o_da", data_cells + R.LAYOUT['str_size'], 0, lambda v: ishift if v < data_cells else 0)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
@@ -332,9 +337,9 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append(lbl.group('Result: error code, word count, done flag'))
     css.append('.fin { display: if(style(--tlast: 1): block; else: none); }')
     for y in 'AB':
-        err = (f'if(style(--s-perr-{y}: 0): max(var(--s-bad-{y}) * 99, clamp(0, var(--p-cp-{y}) - {code_cells}, 1) * 62);'
+        err = (f'if(style(--s-perr-{y}: 0): max(var(--s-bad-{y}) * 99, clamp(0, 2 * var(--p-cp-{y}) - {code_cells}, 1) * 62);'
                f' else: var(--s-perr-{y}))')
-        css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: var(--p-cp-{y}); --dpf: var(--p-dp-{y}); }}')
+        css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
                f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
                # the string untag constant at data_base (the program never writes it)
@@ -347,7 +352,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
     for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
     # html
-    oslots = (''.join(f'<b class="ov k{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
+    oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
               + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(R.SEED))) + '<b class="dn"></b><b class="di"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
