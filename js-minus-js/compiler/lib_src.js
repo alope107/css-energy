@@ -1,58 +1,59 @@
-// runtime library (jsc dialect: jsc.js; libbuild.js fills in the upper-case constants between double underscores (compiler/rtlib.py consts)).
-// No globals and no string literals here: jsc would put them in the data area, which is the program's. Locals live in
-// stack frames, which the collector scans (a frame's tagged values are roots and are updated when their block moves);
-// a raw address must not be held across anything that allocates.
+// The register machine's runtime library, compiled into ROM by compiler/cc_ref.py (rom mode: rtlib.py fills in the upper-case
+// constants between double underscores). The dialect: functions, locals, while / for / if, peek(a) / poke(a, v) and p[i] on raw
+// memory, putc, prn(v) (PRINT), halt(), __fp() (this frame's fp). No globals and no string literals (they would land in the
+// program's data area). Locals live in frames, which the collector scans; a raw address must not be held across anything that
+// allocates.
 //
 // Values: numbers; a string is its first byte's address - STRTAG, a literal in the string area or a heap string; an
 // array its ptr word's address + ARRTAG; an object its chunk's address - OBJTAG; booleans 0 / 1.
-// Heap blocks are 8-aligned, a multiple of 8 words: object chunks [k0 v0 k1 v1 k2 v2 L pad] (k0 >= 0), strings
-// [hdr len bytes... 0], arrays [hdr cap len ptr elements...] (ptr: the elements, inline until the array grows past cap,
-// then a data block of its own); hdr = -2 - words - kind (kind 0 string, 1 array); a block the collector moved has -1 and
-// its copy's address in its first two words.
-
-// a + chain inside console.log keeps its pieces on the stack: the ROM's pnK prints them (PRINT without a separator: an array
-// or object as its string, pval); catnK joins them when an operator other than + follows. b2s: a boolean piece
-
-function catn2(a, b) { return cat(a, b, 0); }
-function catn3(a, b, c) { return cat(cat(a, b, 0), c, 0); }
-function catn4(a, b, c, d) { return cat(catn3(a, b, c), d, 0); }
-function catn5(a, b, c, d, e) { return cat(catn4(a, b, c, d), e, 0); }
-function catn6(a, b, c, d, e, f) { return cat(catn5(a, b, c, d, e), f, 0); }
-function catn7(a, b, c, d, e, f, g) { return cat(catn6(a, b, c, d, e, f), g, 0); }
-function catn8(a, b, c, d, e, f, g, h) { return cat(catn7(a, b, c, d, e, f, g), h, 0); }
+// Heap blocks are 8-aligned, a multiple of 8 words: object chunks [k0 v0 k1 v1 k2 v2 L pad] (a key is a value + KBIAS, so
+// k0 >= 0; 0 ends the keys; L links an overflow chunk), strings [hdr len bytes... 0], arrays [hdr cap len ptr elements...]
+// (ptr: the elements, inline until the array grows past cap, then a data block of its own); hdr = -2 - words - kind (kind 0
+// string, 1 array); a block the collector moved has -1 and its copy's address in its first two words.
+//
+// The machine calls the routines below its trapping instructions name (cc_ref.TRAPS) like functions: dadd ... dne for the
+// dynamic operators on a string, array or object; getx / setx for x[k] other than an array inside its length; setp when a
+// chunk is full; gcnew when NEW finds the heap full; pval to print an array or object. The compiler calls the methods, mkarrN
+// (array literals) and parseint / tostring / fromcc directly.
 
 // ---------------- kinds
 function isstr(v) { var a = v + __STRTAG__; if (a >= __STR_LO__) { if (a < __HEAP_HI__) { return 1; } } return 0; }
 function isarr(v) { var a = v - __ARRTAG__; if (a >= __HEAP0__) { if (a < __HEAP_HI__) { return 1; } } return 0; }
 function isobj(v) { var a = v + __OBJTAG__; if (a >= __HEAP0__) { if (a < __HEAP_HI__) { return 1; } } return 0; }
+function isref(v) { return isstr(v) + isarr(v) + isobj(v); }
 function rnd8(n) { return n + (8 - n % 8) % 8; }
 
 // ---------------- allocation and the collector
-function getfp() { return __fp(); }
-// n words (a multiple of 8) -> a raw address; collects when the space is full (the stack up to this frame is the roots)
+// n words (a multiple of 8) -> a raw address; collects when the space is full
 function halloc(n) {
   var hp = peek(__HP__);
-  if (hp + n - 8 >= peek(__GCLIM__) + __H__ - 7) { gc(getfp(), n); hp = peek(__HP__); }
+  if (hp + n - 8 >= peek(__GCLIM__) + __H__ - 7) { gc(n); hp = peek(__HP__); }
   poke(__HP__, hp + n);
   return hp + __HEAP0__;
 }
+// NEW found the heap full: collect; NEW executes again when this returns
+function gcnew() { gc(8); return 0; }
 // Cheney's copying collector between the two semi-spaces. HP / GCLIM are offsets from HEAP0: the next free word and the
-// current space's start (0: space A, as RAM starts). The roots: the globals, the routines' value cells, the stack from SP0
-// to gcsp. Then need more words must fit, or the program stops (out of memory).
-function gc(gcsp, need) {
+// current space's start (0: space A, as RAM starts). The roots: the globals, and the stack from SP0 up to this routine's
+// frame, conservatively: a word is a reference only if its block starts exactly at a block of from-space (a bitmap at MAP, built
+// by walking from-space first), so a stale word in a frame keeps a dead block alive at worst. The frames' return words (found
+// by walking the frames: off = the return word / 8192) are skipped. Then need more words must fit, or the program stops.
+function gc(need) {
   var from = __HEAP0__; var to = __HEAP0__ + __H__; var p = 0; var e = 0;
-  if (1) {
-    if (peek(__GCLIM__)) { from = __HEAP0__ + __H__; to = __HEAP0__; }
-    poke(__G_FLO__, from); poke(__G_FREE__, to);
-    p = __DB__ + 1; e = __DB__ + peek(__INIT__ - 1);
-    while (p < e) { poke(p, fwd(peek(p))); p++; }
-    poke(__S_V__, fwd(peek(__S_V__))); poke(__S_K__, fwdkey(peek(__S_K__)));
-    p = __SP0__;
-    while (p < gcsp) { poke(p, fwd(peek(p))); p++; }
-    p = to;
-    while (p < peek(__G_FREE__)) { p = p + scan(p); }
-    poke(__HP__, peek(__G_FREE__) - __HEAP0__); poke(__GCLIM__, to - __HEAP0__);
+  if (peek(__GCLIM__)) { from = __HEAP0__ + __H__; to = __HEAP0__; }
+  poke(__G_FLO__, from); poke(__G_FREE__, to);
+  mapbuild(from, from + peek(__HP__) - peek(__GCLIM__));
+  p = __DB__ + 1; e = __DB__ + peek(__INIT__ - 1);
+  while (p < e) { poke(p, fwd(peek(p))); p++; }
+  e = __fp(); e = e - peek(e) / 8192; p = __fp() - 1;
+  while (p > __SP0__) {
+    if (p == e) { e = e - peek(e) / 8192; }
+    else { poke(p, fwd(peek(p))); }
+    p = p - 1;
   }
+  p = to;
+  while (p < peek(__G_FREE__)) { p = p + scan(p); }
+  poke(__HP__, peek(__G_FREE__) - __HEAP0__); poke(__GCLIM__, to - __HEAP0__);
   if (peek(__HP__) + need - 8 >= peek(__GCLIM__) + __H__ - 7) { oom(); }
   return 0;
 }
@@ -61,7 +62,22 @@ function oom() {
   putc(109); putc(101); putc(109); putc(111); putc(114); putc(121); putc(10); halt();
   return 0;
 }
-// a copied block's references: an object's values up to its first free pair (and its link if all three are used), an
+// the block starts of from-space [b, e), one bit per 8 words, 16 to a word at MAP
+function pow2(n) { var r = 1; while (n > 0) { r = r * 2; n = n - 1; } return r; }
+function mapbuild(b, e) {
+  var i = 0; var h = 0; var x = 0;
+  while (i < __MAPN__) { poke(__MAP__ + i, 0); i++; }
+  i = b;
+  while (i < e) {
+    x = (i - b) / 8; poke(__MAP__ + x / 16, peek(__MAP__ + x / 16) + pow2(x % 16));
+    h = peek(i);
+    if (h >= 0) { i = i + 8; }
+    else { x = 0 - 2 - h; i = i + x - x % 8; }
+  }
+  return 0;
+}
+function mapget(b, flo) { var x = (b - flo) / 8; return (peek(__MAP__ + x / 16) / pow2(x % 16)) % 2; }
+// a copied block's references: an object's keys and values up to its first free pair (and its link if all three are used), an
 // array's elements up to its length. -> the block's size
 function scan(s) {
   var h = peek(s); var i = 0; var go = 1; var x = 0; var n = 0;
@@ -79,12 +95,11 @@ function scan(s) {
   if (x % 8 == 1) { n = peek(s + 2); i = 0; while (i < n) { poke(s + 4 + i, fwd(peek(s + 4 + i))); i++; } }
   return x - x % 8;
 }
-// a value -> the same value after the collection: a from-space object, string or array is copied (once). A root may point
-// into an object's chunk (a SCANI cursor); anything else that only looks like a pointer (a number in a tag range, a stale
-// word in a frame) is left as it is
+// a value -> the same value after the collection: a from-space object, string or array starting at a block is copied (once);
+// anything else is left as it is
 function fwd(w) {
   var flo = peek(__G_FLO__); var a = w + __OBJTAG__;
-  if (a >= flo) { if (a < flo + __H__) { return fwdobj(w, a, a - (a - flo) % 8); } }
+  if (a >= flo) { if (a < flo + __H__) { return fwdobj(w, a, flo); } }
   a = w + __STRTAG__;
   if (a >= flo + 2) { if (a < flo + __H__) { return fwdblk(w, a - 2, 0, flo); } }
   a = w - __ARRTAG__;
@@ -93,22 +108,27 @@ function fwd(w) {
 }
 // an object's key (a value + KBIAS): a heap string's (its address) moves with it
 function fwdkey(k) { if (isheap(k - __STRTAG__)) { return fwd(k - __STRTAG__) + __STRTAG__; } return k; }
-function fwdobj(w, a, b) {
-  var k = peek(b); var n = 0; var i = 0;
-  if (k == 0 - 1) { return peek(b + 1) + a - b - __OBJTAG__; }
-  if (k < 0) { return w; }
+function fwdobj(w, b, flo) {
+  var n = 0; var i = 0;
+  if ((b - flo) % 8) { return w; }
+  if (mapget(b, flo) == 0) { return w; }
+  if (peek(b) == 0 - 1) { return peek(b + 1) - __OBJTAG__; }
+  if (peek(b) < 0) { return w; }
   n = peek(__G_FREE__); poke(__G_FREE__, n + 8);
   while (i < 8) { poke(n + i, peek(b + i)); i++; }
   poke(b, 0 - 1); poke(b + 1, n);
-  return n + a - b - __OBJTAG__;
+  return n - __OBJTAG__;
 }
 // a string (kind 0, the value 2 words in) or an array (kind 1, 3 words in) at block b. An array is copied with its
 // elements inline whether or not they were (its data block, if any, is garbage now)
 function fwdblk(w, b, kind, flo) {
-  var h = peek(b); var x = 0 - 2 - h; var n = 0; var i = 0; var cap = 0; var len = 0; var p = 0; var nw = 0;
+  var h = 0; var x = 0; var n = 0; var i = 0; var cap = 0; var len = 0; var p = 0; var nw = 0;
   if ((b - flo) % 8) { return w; }
+  if (mapget(b, flo) == 0) { return w; }
+  h = peek(b);
   if (h == 0 - 1) { return peek(b + 1) + w - b; }
   if (h > 0 - 10) { return w; }
+  x = 0 - 2 - h;
   if (x % 8 != kind) { return w; }
   n = peek(__G_FREE__);
   if (kind == 0) { nw = x - kind; while (i < nw) { poke(n + i, peek(b + i)); i++; } }
@@ -161,7 +181,7 @@ function tostr(v, b) {
   r = newstr(nlen(v)); nput(v, r + __STRTAG__);
   return r;
 }
-// a + b with a string on either side; fl: 1 a's static type is boolean, 2 b's
+// a + b with a string, array or object on either side; fl: 1 a's static type is boolean, 2 b's
 function cat(a, b, fl) {
   var la = 0; var lb = 0; var r = 0; var p = 0; var q = 0; var i = 0;
   if (isstr(a) == 0) { a = tostr(a, fl % 2); }
@@ -187,27 +207,27 @@ function scmp(a, b) {
   }
   return r;
 }
-// DYN's slow path (== / != on two strings; the others with a string, array or object operand): op = the binary opcode
-// + 64 * (a boolean on the left) + 128 * (on the right). Comparisons: arrays and objects as their strings; two strings by
-// their characters, a string and a number as numbers (parseInt: 0 where JavaScript has NaN)
-function dynop(a, b, op) {
-  var f = op % 64; var c = 0;
-  if (f == __OP_ADD__) { return cat(a, b, op / 64); }
+// the dynamic operators' slow paths (DADD ... DNE trap here: a string, array or object on either side; for DEQ / DNE two
+// strings). DADDL / DADDR: the left / right operand's static type is boolean (true / false when joined to a string).
+// Comparisons: arrays and objects as their strings; two strings by their characters, a string and a number as numbers
+// (parseInt: 0 where JavaScript has NaN)
+function dadd(a, b) { return cat(a, b, 0); }
+function daddl(a, b) { if (isref(a) + isref(b)) { return cat(a, b, 1); } return a + b; }
+function daddr(a, b) { if (isref(a) + isref(b)) { return cat(a, b, 2); } return a + b; }
+function dcmp(a, b) {
   if (isarr(a) + isobj(a)) { a = tostr(a, 0); }
   if (isarr(b) + isobj(b)) { b = tostr(b, 0); }
-  if (isstr(a) * isstr(b)) { c = scmp(a, b); }
-  else {
-    if (isstr(a)) { a = parseint(0, a); }
-    if (isstr(b)) { b = parseint(0, b); }
-    c = (a > b) - (a < b);
-  }
-  if (f == __OP_EQ__) { return c == 0; }
-  if (f == __OP_NE__) { return c != 0; }
-  if (f == __OP_LT__) { return c < 0; }
-  if (f == __OP_GT__) { return c > 0; }
-  if (f == __OP_LE__) { return c <= 0; }
-  return c >= 0;
+  if (isstr(a) * isstr(b)) { return scmp(a, b); }
+  if (isstr(a)) { a = parseint(0, a); }
+  if (isstr(b)) { b = parseint(0, b); }
+  return (a > b) - (a < b);
 }
+function dlt(a, b) { return dcmp(a, b) < 0; }
+function dgt(a, b) { return dcmp(a, b) > 0; }
+function dle(a, b) { return dcmp(a, b) <= 0; }
+function dge(a, b) { return dcmp(a, b) >= 0; }
+function deq(a, b) { if (isstr(a) * isstr(b)) { return scmp(a, b) == 0; } return a == b; }
+function dne(a, b) { return deq(a, b) == 0; }
 // s[k]: a one-character string, or 0 past the end (JavaScript: undefined)
 function charat(s, k) {
   var c = 0; var r = 0;
@@ -275,17 +295,63 @@ function join(x, sep) {
   return r;
 }
 
-// ---------------- dynamic x[k] (the ROM's GETX / SETX call these for anything but an object)
+// ---------------- dynamic x[k] (GETX / SETX trap here for anything but an array inside its length) and properties
+// a key: a value + KBIAS (a string key becomes its address); a string built at run time is first replaced by the program's
+// string with those characters, or one of the object's keys with them (okey)
 function getx(x, k) {
   if (isstr(x)) { return charat(x, k); }
-  if (isarr(x)) { return 0; }
-  return peek(x + k);
+  if (isobj(x)) { return pget(x, okey(x, k) + __STRTAG__); }
+  return 0;
 }
 function setx(x, k, v) {
   if (isarr(x)) { aset(x, k, v); return 0; }
-  if (isstr(x) == 0) { poke(x + k, v); }
+  if (isobj(x)) { pset(x, okey(x, k) + __STRTAG__, v); }
   return 0;
 }
+// o's value for key (0 if it has none)
+function pget(o, key) {
+  var c = o + __OBJTAG__; var k = 0;
+  while (1) {
+    k = peek(c);
+    if (k == key) { return peek(c + 1); }
+    if (k == 0) { return 0; }
+    if (k < 0) { c = k + __OBJTAG__; } else { c = c + 2; }
+  }
+  return 0;
+}
+// o.key = v: the key's pair, else the first free pair (the keys end after it), else a new chunk linked from the last
+function pset(o, key, v) {
+  var c = o + __OBJTAG__; var k = 0; var n = 0;
+  while (1) {
+    k = peek(c);
+    if (k == key) { poke(c + 1, v); return 0; }
+    if (k < 0) { c = k + __OBJTAG__; }
+    else if (k == 0) {
+      if ((c - __HEAP0__) % 8 < 6) { poke(c, key); poke(c + 1, v); poke(c + 2, 0); return 0; }     // (the third pair: L := 0)
+      n = halloc(8); c = o + __OBJTAG__;
+      poke(n, key); poke(n + 1, v); poke(n + 2, 0);
+      while (peek(c + 6) < 0) { c = peek(c + 6) + __OBJTAG__; }
+      poke(c + 6, n - __OBJTAG__);
+      return 0;
+    }
+    else { c = c + 2; }
+  }
+  return 0;
+}
+// SETP found its chunk full (the key isn't there): a new chunk
+function setp(o, key, v) { pset(o, key, v); return 0; }
+// array literals: [e1 .. en] (n <= 8)
+function mkarr0() { return newarr(0, 0); }
+function mkarr1(a) { var r = newarr(1, 1); var p = peek(r); p[0] = a; return r; }
+function mkarr2(a, b) { var r = newarr(2, 2); var p = peek(r); p[0] = a; p[1] = b; return r; }
+function mkarr3(a, b, c) { var r = newarr(3, 3); var p = peek(r); p[0] = a; p[1] = b; p[2] = c; return r; }
+function mkarr4(a, b, c, d) { var r = newarr(4, 4); var p = peek(r); p[0] = a; p[1] = b; p[2] = c; p[3] = d; return r; }
+function mkarr5(a, b, c, d, e) { var r = newarr(5, 5); var p = peek(r); p[0] = a; p[1] = b; p[2] = c; p[3] = d; p[4] = e; return r; }
+function mkarr6(a, b, c, d, e, f) { var r = newarr(6, 6); var p = peek(r); p[0] = a; p[1] = b; p[2] = c; p[3] = d; p[4] = e; p[5] = f; return r; }
+function mkarr7(a, b, c, d, e, f, g) { var r = newarr(7, 7); var p = peek(r); p[0] = a; p[1] = b; p[2] = c; p[3] = d; p[4] = e; p[5] = f; p[6] = g; return r; }
+function mkarr8(a, b, c, d, e, f, g, h) { var r = newarr(8, 8); var p = peek(r); p[0] = a; p[1] = b; p[2] = c; p[3] = d; p[4] = e; p[5] = f; p[6] = g; p[7] = h; return r; }
+// a long array literal past its eighth element: x.push(e) that leaves x
+function apush(x, v) { push(x, v); return x; }
 
 // ---------------- methods: (receiver, arguments) -> the result. A string's and an array's length both sit in the word
 // before the value's address (the tags are multiples of 32768, and peek masks addresses to 15 bits): peek(x - 1)
@@ -440,16 +506,26 @@ function parseint(d, s) {
 }
 function tostringb(d, v) { return tostr(v, 1); }
 
-// ---------------- console.log of an array or object (PRINT traps into the ROM's pval): Node's one-line form
-// [ 1, 'a', [ 2 ] ], { k: 1, 'a b': [] }; below depth 2 [Array] / [Object]. op: the PRINT instruction (its separator; none:
-// a piece of a + chain, printed as its string)
-function pval(v, ret, op) {
-  // a piece of a + chain (op 0: the PRINT is in ROM, which reads as 0: pnK's, a piece's)
-  if ((op == __OP_PRINT__) + (op == __OP_PRINTB__) + (op == 0)) { prn(tostr(v, 0)); return ret; }
-  ins(v, 0);
-  if ((op == __OP_PRINTSP__) + (op == __OP_PRINTBSP__)) { putc(32); }
-  if ((op == __OP_PRINTLN__) + (op == __OP_PRINTBLN__)) { putc(10); }
-  return ret;
+// ---------------- console.log of an array or object (PRINT traps into pval): Node's one-line form [ 1, 'a', [ 2 ] ],
+// { k: 1, 'a b': [] }; below depth 2 [Array] / [Object]. fl: PRINT's flags, its separator * 2 + boolean; no separator: a
+// piece of a + chain, printed as its string
+// PRINT of an array or an object (cc_ref.TRAPS): pstub's TENTER made this frame at the PRINT's fp + TRAPOFF; its flags (A) and
+// value (operand B) are decoded from the PRINT instruction, at the return address - 2
+function ptrap() {
+  var f = __fp(); var r = peek(f) % 8192; var cf = f - __TRAPOFF__; var w1 = peek(r - 1); var c = (w1 % 1024 + 1024) % 1024;
+  var b = (w1 - c) / 1024 + 512; var v = b - 896;
+  if (b < 256) { v = peek(__DB__ + b); }
+  else if (b < 768) { v = peek(cf + b - 256); }
+  pval(v, peek(r - 2) % 8192);
+  return 0;
+}
+// PRINT's trap for an array or an object (fl: 2 * the separator + 8 if it is a piece of a + chain, which prints as a string)
+function pval(v, fl) {
+  var sp = (fl / 2) % 4;
+  if (fl / 8 + (sp == 0)) { prn(tostr(v, 0)); } else { ins(v, 0); }
+  if (sp == 1) { putc(32); }
+  if (sp == 2) { putc(10); }
+  return 0;
 }
 function puts(s) { var p = s + __STRTAG__; var n = peek(s - 1); var i = 0; while (i < n) { putc(p[i]); i++; } return 0; }
 // a string as Node quotes it: 'x', or "x" if it holds a ' and no ", with \\ \n \t and the quote escaped

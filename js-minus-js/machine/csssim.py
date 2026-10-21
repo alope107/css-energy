@@ -17,14 +17,23 @@ and a string) evicted each other forever. Instructions in ROM are fetched from a
 
 An instruction (compiler/cc_ref.py) is two words at an even address, both in one block, so one fetch. Its accesses: its
 source operands B and C when they are cells, its destination A; RET reads the return word at fp and writes the value there;
-CALL writes the return word at fp + off; JZ / JNZ / NOT read a string's length word."""
+CALL writes the return word at fp + off; JZ / JNZ / NOT read a string's length word.
+
+An instruction writes at most one word per execution (two in one block for SETP's new pair), so the multi-word ones repeat
+(pc stays, pst counts or carries a position; only the last execution is a step): a trap writes its frame's arguments, last
+first (a destination trap's C may be the cell after its frame's), then the return word, and once started (pst > 0) it finishes
+whatever its operands then hold; GETP / SETP probe one pair per execution (pst: the pair's address); SETP's new pair writes the
+terminator after it (pst: the pair's address + 1), then the pair; NEW writes the chunk's first key, the value, then HP. PRINT of
+an array or an object jumps to pstub with its own address in pst (the out class writes no memory); TENTER writes the return
+word from pst. The reads, in order (a miss stops at the first): x, y, z (and its pair word), e, then the written word."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cssref as ref
 from cssref import AMASK, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
 import cc_ref as R
 from cc_ref import OPN, s20
-from uarch import STRP_HI
+from uarch import STRP_HI, HEAP0, HP, GCLIM, OBJTAG, ARRTAG
+TRAPOFF, HS = R.TRAPOFF, LA['heap_size']
 
 NSET, NWAY = 16, 2
 ROMF = PREF = True
@@ -74,7 +83,7 @@ class Sim:
         return cw
     def chunk(self, flags, v):
         """one PRINT execution (flags: separator * 2 + boolean): (cells written, newline after, done, next pst); reads may stall"""
-        st = self.st; sep = (0, 32, 10)[flags // 2]
+        st = self.st; sep = (0, 32, 10)[flags // 2 % 4]
         isb = flags % 2; p = v + STRTAG
         if STR_LO <= p < STR_HI:
             q = st['pst'] or p
@@ -109,25 +118,78 @@ class Sim:
         def addr(o): return (DB + o if o < 256 else fp + o - 256) & AMASK
         def val(o): return o - 896 if o >= 768 else rd(addr(o))
         def truthy(v): return v != 0 and not (R.isstr(v) and rd((v - 1) & AMASK) == 0)
+        ps = st['pst']; npst = 0
+        def trap(F, args, retw, name, s):
+            """one execution of a trap: argument s from the last, or (s = len(args)) the return word, fp = F, pc = the routine"""
+            nonlocal fp, npst, done
+            n = len(args)
+            if s < n: wr(F + n - s, args[n - 1 - s]); npst = s + 1; done = False; return pc - 2
+            wr(F, retw); fp = F; return st['ent'][name]
         pc += 2; out = None; done = True
         if op in ALU: x, y = val(b), val(c); wr(addr(a), ALU[op](x, y))
         elif op == 'MOV': wr(addr(a), val(b))
         elif op == 'NEG': wr(addr(a), -val(b))
         elif op == 'NOT': wr(addr(a), int(not truthy(val(b))))
         elif op == 'LOADK': wr(addr(a), w1)
+        elif op == 'GETFP': wr(addr(a), fp)
+        elif op == 'LDI': x, y = val(b), val(c); wr(addr(a), rd(x + y))
+        elif op == 'STI': x, y = val(b), val(c); z = val(a); wr(z + x, y)
+        elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + ps + 2); fp += TRAPOFF; pc = a
+        elif op in ('DADD', 'DADDL', 'DADDR', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE'):
+            x, y = val(b), val(c)
+            slow = R.isstr(x) and R.isstr(y) if op in ('DEQ', 'DNE') else R.isref(x) or R.isref(y)
+            if ps or slow: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.TRAPS[op], ps)
+            else: wr(addr(a), ALU['ADD' if op[1] == 'A' else op[1:]](x, y))
+        elif op in ('GETX', 'SETX'):                     # x: the array (B / A), y: the index (C / B), z: its len and ptr, e: the
+            g = op == 'GETX'                             # element (GETX, inside the length) or C (SETX)
+            x = val(b) if g else val(a); y = val(c) if g else val(b)
+            arr = not ps and R.isarr(x); q = (x - ARRTAG) & AMASK
+            ln, ptr = (rd(q - 1), rd(q)) if arr else (0, 0)
+            inb = arr and 0 <= y < ln
+            if g:
+                e = rd(ptr + y) if inb else 0
+                if arr: wr(addr(a), e)
+                else: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, 'getx', ps)
+            else:
+                e = val(c)
+                if inb: wr(ptr + y, e)
+                else: pc = trap(fp + TRAPOFF, [x, y, e], TRAPOFF * 8192 + pc, 'setx', ps)
+        elif op == 'GETP':                               # one pair per execution (pst: the pair's address, 0 the first)
+            o = val(b); key = DB + c
+            if not R.isobj(o): wr(addr(a), 0)
+            else:
+                q = ps or (o + OBJTAG) & AMASK; k, v = rd(q), rd(q + 1)
+                if k == key or k == 0: wr(addr(a), v if k else 0)
+                else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
+        elif op == 'SETP':                               # pst: a pair's address (probing), + 1 (its terminator written), < HEAP0 a trap
+            o, v = val(a), val(b); key = DB + c
+            if 0 < ps < HEAP0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc, 'setp', ps)
+            elif R.isobj(o):
+                q = (ps - ps % 2) or (o + OBJTAG) & AMASK; k = rd(q); rd(q + 1)
+                if ps % 2: wr(q, key); wr(q + 1, v)
+                elif k == key: wr(q + 1, v)
+                elif k == 0 and (q - HEAP0) % 8 < 6: wr(q + 2, 0); npst = q + 1; done = False; pc -= 2
+                elif k == 0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc, 'setp', 0)
+                else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
+        elif op == 'NEW':                                # the chunk's first key, the value, then HP; full: the collector (NEW again)
+            hp, gl = rd(HP), rd(GCLIM)
+            if not ps and s20(hp - (gl + HS - 7)) >= 0: pc = trap(addr(a), [], (a - 256) * 8192 + pc - 2, 'gcnew', 0)
+            else:
+                wr((HEAP0 + hp, addr(a), HP)[ps], (0, hp + HEAP0 - OBJTAG, hp + 8)[ps])
+                if ps < 2: npst = ps + 1; done = False; pc -= 2
         elif op == 'JMP': pc = a
         elif op in ('JZ', 'JNZ'): pc = a if truthy(val(b)) == (op == 'JNZ') else pc
         elif op == 'HALT': pc -= 2; st['halt'] = True
         elif op[0] == 'J': x, y = val(b), val(c); pc = a if ALU[op[1:]](x, y) else pc
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc); fp += w1; pc = a
         elif op == 'RET': r = rd(fp); v = val(b); wr(fp, v); fp -= r // 8192; pc = r % 8192
+        elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b))): npst = pc - 2; pc = st['ent']['pstub']
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1
             if cw: raise Stall()
-            cells, nl, done, pst = self.chunk(a, v)
+            cells, nl, done, npst = self.chunk(a, v)
             out = (cells, nl)
-            if done: st['pst'] = 0
-            else: pc -= 2; st['pst'] = pst
+            if not done: pc -= 2
         elif op == 'PUTC':
             if cw: raise Stall()
             ch = val(b); out = ([], True) if ch == 10 else ([ch], False)
@@ -140,7 +202,7 @@ class Sim:
                 st['mem'][OUT_BASE + st['optr']] = ch; st['out'].append(ch); st['optr'] = (st['optr'] + 1) % (COLS * ROWS)
             if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
             if cells: cw = 1
-        st['pc'], st['fp'] = pc, fp; st['steps'] += 1 if done else 0
+        st['pc'], st['fp'], st['pst'] = pc, fp, npst; st['steps'] += 1 if done else 0
         return cw
     def run_pass(self, K):
         """one pass: (instructions executed, why it ended)"""

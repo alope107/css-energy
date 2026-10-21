@@ -598,8 +598,8 @@ class Prog(Base):
                     with self.when(not_(P(61))): self.push_od(o, b)        # x op= e: x is the left operand, read first
                     self.push_cs(R.C_ASSIGN, j, compound); self.set('mode', R.S_OPND); self.done()
             with self.when(or_(P(7), P(8))): self.incdec(pn1, pn2, tv)
-            with self.when(P(91)): self.fail(NOTSUB)
-            with self.when(not_(or_(asg, P(7), P(8), P(91)))):
+            with self.when(and_(P(91), lt(j, 0))): self.fail(7)      # NAME[e] = e: an expression statement (x[k])
+            with self.when(not_(or_(asg, P(7), P(8), and_(P(91), lt(j, 0))))):
                 self.push_cs(R.C_EXPR); self.set('mode', R.S_NAMEE)
         # ---- S_NAMEE
         with block(R.S_NAMEE):

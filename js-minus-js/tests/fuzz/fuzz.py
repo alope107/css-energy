@@ -41,7 +41,7 @@ def ours(src, max_steps=2_000_000):
     words, data = c.compile(src)
     if c.err: return c.err, None, None
     mem = R.image_mem(c, words, data, LIB.get('init', 5120))
-    try: steps, out = R.run(LIB['rom'], mem, R.LAYOUT['sp0'], max_steps=max_steps, strict=True)
+    try: steps, out = R.run(LIB['rom'], mem, R.LAYOUT['sp0'], max_steps=max_steps, strict=True, ent=LIB.get('entries'))
     except RuntimeError as e:
         if 'step limit' in str(e): return 0, None, 'steps'
         return 0, None, f'crash: {e}'

@@ -7,8 +7,9 @@ import cc_ref as R
 LA = R.LAYOUT; ROMN = LA["rom_size"]; SDATA = R.SDATA; STRTAG = R.STRTAG; AMASK = R.AMASK
 COLS, ROWS = LA['cols'], LA['rows']; OUT_BASE = ROMN + LA['ram_size'] - COLS * ROWS
 
-def state(mem):
-    return {'pc': LA['code_base'], 'fp': LA['sp0'], 'optr': 0, 'pst': 0, 'mem': mem, 'out': [], 'halt': False, 'steps': 0}
+def state(mem, ent):
+    """ent: the runtime library's entries (the traps' routines)"""
+    return {'pc': LA['code_base'], 'fp': LA['sp0'], 'optr': 0, 'pst': 0, 'mem': mem, 'out': [], 'halt': False, 'steps': 0, 'ent': ent}
 
 def load(path, lib=None):
     """the machine at its first step (pc = code_base, fp = sp0) for the program in path"""
@@ -20,10 +21,10 @@ def load_src(src, lib):
     assert not c.err, c.err
     mem = {i: w for i, w in enumerate(lib['rom'])}
     mem.update(R.image_mem(c, words, data, lib.get('init')))
-    return state(mem)
+    return state(mem, lib['entries'])
 
 def from_image(im):
     """the same, from a mkimage-style image (rom + ram lists)"""
     mem = {i: w for i, w in enumerate(im['rom']) if w}
     mem.update({im['romSize'] + i: w for i, w in enumerate(im['ram']) if w})
-    return state(mem)
+    return state(mem, im['entries'])

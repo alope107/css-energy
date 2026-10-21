@@ -29,12 +29,12 @@ instructions read; .c commits a whole cache set (16 rules) rather than a word (1
 Env: K (levels, default 32), ISSUE (passes per frame, default 2), UI=1: the editor page (XHTML; the image's RAM is
 empty: the compile chain's overlays hold the program): Run starts the scan, the compiler, then the CPU;
 Edit zeroes the registers and RAM. BENCH=1 PROG=prog.js (STALL=1): the chain alone, for exp/csscpu/chainbench.js."""
-import sys, os, json, html as _h
+import sys, os, json, re, html as _h
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path[:0] = [os.path.join(ROOT, "machine"), os.path.join(ROOT, "compiler"), os.path.join(ROOT, "readback"), os.path.join(ROOT, "..", "shared", "py"), HERE]
 UI = os.environ.get("UI") == "1"
 import memtree, csslabel as lbl, cc_ref as R
-from uarch import STRTAG, STR_LO, STRP_HI
+from uarch import STRTAG, STR_LO, STRP_HI, HEAP0, HEAP_HI, OBJTAG, ARRTAG, HP
 OP = R.OP; RC = R
 
 image = json.load(open(sys.argv[1])); outp = sys.argv[2]
@@ -60,8 +60,9 @@ def setof(b): return f"mod({b} + round(down, {b} / 16) + round(down, {b} / 256),
 def opin(lo, hi): return f"clamp(0, var(--op) - {OP[lo] - 1}, 1) * clamp(0, {OP[hi] + 1} - var(--op), 1)"     # lo <= op <= hi
 
 # the latchable reads and their bits: the fetch (f, and g, its second word, under the same bit), the operands B (x) and C (y),
-# a third word (z: RET's return word, a string's length), a string chunk (p)
-LATCH = {"f": 1, "g": 1, "x": 2, "y": 4, "z": 8, "p": 16}
+# a third word (z: RET's return word, a string's length; h: the word after it, under the same bit), a string chunk (p), a fourth
+# word (e: an array's element, SETX's C)
+LATCH = {"f": 1, "g": 1, "x": 2, "y": 4, "z": 8, "h": 8, "p": 16, "e": 32}
 # ---------------- registers: (name, H, OFF), value range [-OFF, H - OFF); the subject's expression at the chain's end
 regs = [("rpc", A15, 0, "var(--pc)"), ("rfp", A15, 0, "var(--fp)"), ("optr", 256, 0, "var(--optr)"),
         ("pst", A15, 0, "var(--pst)"), ("steps", 1 << 21, 0, "var(--steps)"), ("halt", 2, 0, "var(--halt)"), ("pend", 8192, 0, "var(--pend)"),
@@ -123,16 +124,21 @@ def read(n, A):
 def miss(n):
     return f"(1 - var(--h{n}) - var(--H{n}))" + (f" * (1 - var(--lat) * var(--Lb{n}))" if n in LATCH else "")
 LOOKUP = ("b", "u", "q", "h", "H")
-READS = ("f", "x", "y", "z", "w", "p")
+READS = ("f", "x", "y", "z", "e", "w", "p")
+def read_pair(n, A, m):
+    """read n of an even address A and the word after it (latch m)"""
+    return read(n, A) + [f"--v{m}: " + latched(m, sel(f"q{n}", NSET, lambda s: f"if(style(--H{n}: 1): {word2(n, 2 * s + 1)}; else: {word2(n, 2 * s)})")) + ";"]
 
 # a write of value V through lookup n (a read of the same address, or the write's own): the set's 8 new words and 2 tags,
-# and --wz = set + 1, which picks the commit rule on .c (0: no write, as on a stall)
-def write(n, V, en="1"):
-    d = [f"--wval: {V};"]
+# and --wz = set + 1, which picks the commit rule on .c (0: no write, as on a stall). V2: also the next word (an even address;
+# --w2 = 1 when it is written)
+def write(n, V, en="1", V2=None):
+    d = [f"--wval: {V};"] + ([f"--wval2: {V2};"] if V2 else [])
     for i in range(8):
         way, j = divmod(i, 4)
         old = sel(f"q{n}", NSET, lambda s: f"var(--W{2 * s + way}_{j})")
-        d.append(f"--n{i}: if(style(--H{n}: {way}) and style(--u{n}: {j}): var(--wval); else: {old});")
+        two = f"style(--w2: 1) and style(--H{n}: {way}) and style(--u{n}: {j - 1}): var(--wval2); " if V2 and j % 2 else ""
+        d.append(f"--n{i}: if(style(--H{n}: {way}) and style(--u{n}: {j}): var(--wval); {two}else: {old});")
     for way in range(2):
         d.append(f"--nT{way}: if(style(--H{n}: {way}): calc(2 * var(--b{n}) + 3); else: {sel(f'q{n}', NSET, lambda s: f'var(--T{2 * s + way})')});")
     return d + [f"--wz: calc(var(--ok) * {en} * (var(--q{n}) + 1));"]
@@ -158,6 +164,76 @@ BINE = {'ADD': s20(f"{xB} + {yC}"), 'SUB': s20(f"{xB} - {yC}"), 'MUL': s20(f"{xB
         'EQ': eq(xB, yC), 'NE': f"calc(1 - {eq(xB, yC)})"}
 BINOPS = ['MOD', 'ADD', 'SUB', 'MUL', 'LT', 'EQ', 'LE', 'GT', 'GE', 'NE', 'DIV']    # the suite's most frequent first
 def isstr_v(x): return f"calc(clamp(0, {x} - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - {x}, 1))"
+def isarr_v(x): return f"calc(clamp(0, {x} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {x}, 1))"
+def isobj_v(x): return f"calc(clamp(0, {x} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {x}, 1))"
+def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)})"
+ENT = image.get('entries') or json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))['entries']
+TRAPOFF, HS = R.TRAPOFF, R.LAYOUT['heap_size']
+def kv(o, n):
+    """operand o's value: a constant, or read n's word"""
+    return f"calc(var(--k{o}) * (var(--{o}) - 896) + (1 - var(--k{o})) * var(--v{n}))"
+OPNDA = ["--kA: clamp(0, var(--A) - 767, 1);", f"--aA: {oaddr('var(--A)')};"]
+# A trap writes its frame one word per execution (csssim.py): with n arguments, step s (pst, but SETP's first is in its probe)
+# writes argument n - 1 - s at F + n - s, and step n the return word at F, fp = F, pc = the routine (tr: a trap's execution,
+# tlast: its last). ARGS(s): the argument step s writes
+def trap(tr, s, n, F, args, retw):
+    return [f"--tr: {tr};", f"--ts: {s};", f"--tlast: calc(var(--tr) * {eq('var(--ts)', n)});", f"--tF: {F};",
+            f"--taddr: mod(var(--tF) + {n} - var(--ts), 32768);", f"--tval: if(style(--tlast: 1): {retw}; else: {args});"]
+# the dynamic operators: numbers here, a string, array or object in the library (== / != of two strings; the others with one)
+DYNOPS = ['DADD', 'DADDL', 'DADDR', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE']
+DYNE = {o: BINE['ADD' if o[1] == 'A' else o[1:]] for o in DYNOPS}
+bothstr = f"calc({isstr_v(xB)} * {isstr_v(yC)})"
+DYN_PRE = (OPND + [f"--aA: {oaddr('var(--A)')};", f"--dslow: {by_op({'DEQ': bothstr, 'DNE': bothstr}, f'min(1, calc({isref_v(xB)} + {isref_v(yC)}))')};"] +
+           trap("min(1, calc(var(--pst) + var(--dslow)))", "var(--pst)", 2, "var(--aA)", f"if(style(--pst: 0): {yC}; else: {xB})",
+                f"calc((var(--A) - 256) * 8192 + {pc} + 2)"))
+DYN_NX = {'pc': f"if(style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
+          'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast))",
+          'pst': "if(style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"}
+# GETX / SETX: X the array (B / A), Y the index (C / B); z its length and h its ptr (the words before and at its value's address,
+# read only for an array); e the element (GETX, inside the length) or C (SETX)
+ARR_PRE = OPND + OPNDA + [
+    f"--X: {by_op({'GETX': kv('B', 'x')}, kv('A', 'x'))};", f"--Y: {by_op({'GETX': kv('C', 'y')}, kv('B', 'y'))};",
+    f"--xarr: calc((1 - min(1, var(--pst))) * {isarr_v('var(--X)')});",
+    "--xin: calc(var(--xarr) * clamp(0, var(--Y) + 1, 1) * clamp(0, var(--vz) - var(--Y), 1));",
+    f"--E: {by_op({'GETX': 'calc(var(--xin) * var(--ve))'}, kv('C', 'e'))};"] + \
+    trap(by_op({'GETX': "calc(1 - var(--xarr))"}, "calc(1 - var(--xin))"), "var(--pst)", by_op({'GETX': 2}, 3),
+         by_op({'GETX': "var(--aA)"}, f"mod({fp} + {TRAPOFF}, 32768)"),
+         by_op({'GETX': "if(style(--pst: 0): var(--Y); else: var(--X))"}, "if(style(--pst: 0): var(--E); style(--pst: 1): var(--Y); else: var(--X))"),
+         f"calc({by_op({'GETX': 'calc((var(--A) - 256) * 8192)'}, TRAPOFF * 8192)} + {pc} + 2)")
+ARR_NX = {'pc': f"if(style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({'GETX': ENT['getx']}, ENT['setx'])}; else: {pc})",
+          'fp': DYN_NX['fp'], 'steps': DYN_NX['steps'], 'pst': DYN_NX['pst']}
+# GETP / SETP / NEW. A probe reads the pair at q (z: the key, h: the value): pst the pair's address, 0 the object's first. The
+# case oc: GETP 1 done (the value or 0), 2 the next pair; SETP 3 a trap's execution (pst 1 ... 3, or the first: a full chunk),
+# 4 the new pair (pst: its address + 1; the terminator is written), 5 not an object, 6 the key's value, 7 the new pair's
+# terminator, 8 the next pair; NEW 9 the heap is full (the collector, NEW again), 10 one of its three words (pst 0, 1, 2)
+oq = "var(--oq)"
+OBJ_PRE = OPND + OPNDA + [
+    f"--O: {by_op({'GETP': kv('B', 'x')}, kv('A', 'x'))};", f"--ob: {isobj_v('var(--O)')};", f"--okey: calc({DB} + var(--C));",
+    f"--sst: calc({eq('var(--op)', OP['SETP'])} * min(1, var(--pst)) * clamp(0, {HEAP0} - var(--pst), 1));",
+    f"--oq: {by_op({'NEW': HP}, f'calc(min(1, var(--pst)) * (var(--pst) - mod(var(--pst), 2)) + (1 - min(1, var(--pst))) * mod(var(--O) + {OBJTAG}, 32768))')};",
+    f"--ohit: {eq('var(--vz)', 'var(--okey)')};", f"--oend: {eq('var(--vz)', 0)};",
+    f"--onext: calc(clamp(0, -1 * var(--vz), 1) * mod(var(--vz) + {OBJTAG}, 32768) + (1 - clamp(0, -1 * var(--vz), 1)) * ({oq} + 2));",
+    "--oc: " + by_op({'GETP': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))",
+                      'NEW': f"calc(10 - {eq('var(--pst)', 0)} * clamp(0, var(--vz) - var(--vh) - {HS - 8}, 1))"},
+                     "if(style(--sst: 1): 3; style(--sodd: 1): 4; style(--ob: 0): 5; style(--ohit: 1): 6;"
+                     " style(--oend: 1): calc(3 + 4 * var(--oroom)); else: 8)") + ";",
+    f"--sodd: calc({eq('var(--op)', OP['SETP'])} * (1 - var(--sst)) * mod(var(--pst), 2));",
+    f"--oroom: clamp(0, 6 - mod({oq} - {HEAP0}, 8), 1);", f"--V: {kv('B', 'y')};"] + \
+    trap(f"{eq('var(--oc)', 3)}", "calc(var(--sst) * var(--pst))", 3, f"mod({fp} + {TRAPOFF}, 32768)",
+         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))", f"calc({TRAPOFF * 8192} + {pc} + 2)") + [
+    f"--oaddr: if(style(--oc: 1): var(--aA); style(--oc: 3): var(--taddr); style(--oc: 4): {oq}; style(--oc: 6): calc({oq} + 1);"
+    f" style(--oc: 7): calc({oq} + 2); style(--oc: 9): var(--aA); style(--pst: 0): calc({HEAP0} + var(--vz)); style(--pst: 1): var(--aA); else: {HP});",
+    f"--oval: if(style(--oc: 1): calc(var(--ob) * var(--ohit) * var(--vh)); style(--oc: 3): var(--tval); style(--oc: 4): var(--okey);"
+    f" style(--oc: 6): var(--V); style(--oc: 7): 0; style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc}); style(--pst: 0): 0;"
+    f" style(--pst: 1): calc(var(--vz) + {HEAP0 - OBJTAG}); else: calc(var(--vz) + 8));",
+    "--oen: if(style(--oc: 2) or style(--oc: 5) or style(--oc: 8): 0; else: 1);", f"--w2: {eq('var(--oc)', 4)};",
+    f"--odone: calc({eq('var(--oc)', 1)} + {eq('var(--oc)', 4)} + {eq('var(--oc)', 5)} + {eq('var(--oc)', 6)} + {eq('var(--oc)', 10)} * {eq('var(--pst)', 2)});",
+    f"--ojump: calc(var(--tlast) + {eq('var(--oc)', 9)});"]
+OBJ_NX = {'pc': f"if(style(--odone: 1): calc({pc} + 2); style(--ojump: 1): if(style(--oc: 9): {ENT['gcnew']}; else: {ENT['setp']}); else: {pc})",
+          'fp': f"if(style(--ojump: 1): if(style(--oc: 9): var(--aA); else: var(--tF)); else: {fp})",
+          'steps': "calc(var(--steps) + var(--odone) + var(--ojump))",
+          'pst': "if(style(--oc: 2) or style(--oc: 8): var(--onext); style(--oc: 7): calc(var(--oq) + 1); style(--oc: 3): if(style(--tlast: 1): 0;"
+                 " else: calc(var(--ts) + 1)); style(--oc: 10): if(style(--pst: 2): 0; else: calc(var(--pst) + 1)); else: 0)"}
 # JZ / JNZ / NOT: 0 and the empty string are false (a string's length, the word before its address: read z, only for a string)
 FALSY = ["--tz: calc(var(--tstr) * " + eq("var(--vz)", 0) + f" + (1 - var(--tstr)) * {eq(xB, 0)});"]
 # A class's rule evaluates all its declarations whether an instruction needs them or not, and a read costs a cache lookup,
@@ -166,9 +242,9 @@ CLASSES = {
     'alu': dict(ops=BINOPS, pre=OPND + [f"--aA: {oaddr('var(--A)')};"],
                 reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)")],
                 write=("var(--aA)", by_op({o: BINE[o] for o in BINOPS[:-1]}, BINE[BINOPS[-1]]), None, "1"), nx={'pc': f"calc({pc} + 2)"}),
-    'mov': dict(ops=['MOV', 'LOADK', 'NEG'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};"],
-                reads=[("x", "var(--aB)", f"(1 - var(--kB)) * (1 - {eq('var(--op)', OP['LOADK'])})")],
-                write=("var(--aA)", by_op({'MOV': xB, 'LOADK': "var(--vg)"}, s20(f"-1 * {xB}")), None, "1"), nx={'pc': f"calc({pc} + 2)"}),
+    'mov': dict(ops=['MOV', 'NEG', 'LOADK', 'GETFP'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};"],
+                reads=[("x", "var(--aB)", f"(1 - var(--kB)) * (1 - {eq('var(--op)', OP['LOADK'])} - {eq('var(--op)', OP['GETFP'])})")],
+                write=("var(--aA)", by_op({'MOV': xB, 'LOADK': "var(--vg)", 'GETFP': fp}, s20(f"-1 * {xB}")), None, "1"), nx={'pc': f"calc({pc} + 2)"}),
     'jump': dict(ops=['JMP', 'JNE', 'JLT', 'JGE', 'JLE', 'JGT', 'JEQ', 'HALT'], pre=OPND +
                  ["--jc: " + by_op({'JMP': 1, **{f'J{o}': BINE[o] for o in ('LT', 'GT', 'LE', 'GE', 'EQ')}}, BINE['NE']) + ";"],
                  reads=[("x", "var(--aB)", f"(1 - var(--kB)) * {opin('JLT', 'JNE')}"), ("y", "var(--aC)", f"(1 - var(--kC)) * {opin('JLT', 'JNE')}")],
@@ -179,16 +255,43 @@ CLASSES = {
                  reads=[("x", "var(--aB)", "1 - var(--kB)"), ("z", f"mod({xB} - 1, 32768)", "var(--tstr)")], write=None,
                  nx={'pc': f"calc(var(--jc) * var(--A) + (1 - var(--jc)) * ({pc} + 2))"}, deps={'z': [('x', None)]}),
     # CALL A, off: the return word (off * 8192 + the return address) at fp + off, fp += off. RET B: B over the return word
-    # (the caller's slot for the value), fp -= off. NOT A, B (reads a string's length, z, as JZ does)
-    'call': dict(ops=['CALL', 'RET', 'NOT'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};",
+    # (the caller's slot for the value), fp -= off. NOT A, B (reads a string's length, z, as JZ does). TENTER A: CALL A with
+    # off TRAPOFF and the return address pst + 2 (PRINT's trap, through pstub)
+    'call': dict(ops=['CALL', 'RET', 'NOT', 'TENTER'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};",
                  f"--tstr: calc({eq('var(--op)', OP['NOT'])} * {isstr_v(xB)});"] + FALSY,
-                 reads=[("x", "var(--aB)", f"(1 - {eq('var(--op)', OP['CALL'])}) * (1 - var(--kB))"),
+                 reads=[("x", "var(--aB)", f"(1 - {eq('var(--op)', OP['CALL'])} - {eq('var(--op)', OP['TENTER'])}) * (1 - var(--kB))"),
                         ("z", by_op({'NOT': f"mod({xB} - 1, 32768)"}, fp), f"calc({eq('var(--op)', OP['RET'])} + var(--tstr))")],
-                 write=(by_op({'CALL': f"mod({fp} + var(--vg), 32768)", 'NOT': "var(--aA)"}, fp),
-                        by_op({'CALL': f"calc(var(--vg) * 8192 + {pc} + 2)", 'NOT': "var(--tz)"}, xB), None, "1"),
-                 nx={'pc': by_op({'CALL': "var(--A)", 'RET': "mod(var(--vz), 8192)"}, f"calc({pc} + 2)"),
-                     'fp': by_op({'CALL': f"calc({fp} + var(--vg))", 'RET': f"calc({fp} - round(down, var(--vz) / 8192))"}, fp)},
+                 write=(by_op({'CALL': f"mod({fp} + var(--vg), 32768)", 'NOT': "var(--aA)", 'TENTER': f"mod({fp} + {TRAPOFF}, 32768)"}, fp),
+                        by_op({'CALL': f"calc(var(--vg) * 8192 + {pc} + 2)", 'NOT': "var(--tz)", 'TENTER': f"calc({TRAPOFF * 8192} + var(--pst) + 2)"}, xB), None, "1"),
+                 nx={'pc': by_op({'CALL': "var(--A)", 'RET': "mod(var(--vz), 8192)", 'TENTER': "var(--A)"}, f"calc({pc} + 2)"),
+                     'fp': by_op({'CALL': f"calc({fp} + var(--vg))", 'RET': f"calc({fp} - round(down, var(--vz) / 8192))", 'TENTER': f"calc({fp} + {TRAPOFF})"}, fp),
+                     'pst': "0"},
                  deps={'z': [('x', ['NOT'])]}),
+    # LDI A, B, C: A = mem[B + C] (z); STI A, B, C: mem[A + B] = C (z: A's value). The runtime library's raw memory
+    'mem': dict(ops=['LDI', 'STI'], pre=OPND + OPNDA + [f"--zA: {kv('A', 'z')};"],
+                reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"),
+                       ("z", by_op({'LDI': f"mod({xB} + {yC}, 32768)"}, "var(--aA)"), by_op({'LDI': 1}, "calc(1 - var(--kA))"))],
+                write=(by_op({'LDI': "var(--aA)"}, f"mod(var(--zA) + {xB}, 32768)"), by_op({'LDI': "var(--vz)"}, yC), None, "1"),
+                nx={'pc': f"calc({pc} + 2)"}, deps={'z': [('x', ['LDI']), ('y', ['LDI'])]}),
+    'dyn': dict(ops=DYNOPS, pre=DYN_PRE, reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)")],
+                write=("if(style(--tr: 1): var(--taddr); else: var(--aA))", f"if(style(--tr: 1): var(--tval); else: {by_op({o: DYNE[o] for o in DYNOPS[:-1]}, DYNE[DYNOPS[-1]])})", None, "1"),
+                nx=DYN_NX),
+    'arr': dict(ops=['GETX', 'SETX'], pre=ARR_PRE,
+                reads=[("x", by_op({'GETX': "var(--aB)"}, "var(--aA)"), by_op({'GETX': "calc(1 - var(--kB))"}, "calc(1 - var(--kA))")),
+                       ("y", by_op({'GETX': "var(--aC)"}, "var(--aB)"), by_op({'GETX': "calc(1 - var(--kC))"}, "calc(1 - var(--kB))")),
+                       ("z", f"mod(var(--X) - {ARRTAG + 1}, 32768)", "var(--xarr)"),
+                       ("e", by_op({'GETX': "mod(var(--vh) + var(--Y), 32768)"}, "var(--aC)"), by_op({'GETX': "var(--xin)"}, "calc(1 - var(--kC))"))],
+                pair={'z': 'h'},
+                write=("if(style(--tr: 1): var(--taddr); else: " + by_op({'GETX': "var(--aA)"}, "mod(var(--vh) + var(--Y), 32768)") + ")",
+                       "if(style(--tr: 1): var(--tval); else: var(--E))", None, "1"),
+                nx=ARR_NX, deps={'z': [('x', None)], 'e': [('z', ['GETX']), ('y', ['GETX'])]}),
+    'obj': dict(ops=['GETP', 'SETP', 'NEW'], pre=OBJ_PRE,
+                reads=[("x", by_op({'GETP': "var(--aB)"}, "var(--aA)"), by_op({'GETP': "calc(1 - var(--kB))", 'NEW': 0}, "calc(1 - var(--kA))")),
+                       ("y", "var(--aB)", by_op({'SETP': "calc(1 - var(--kB))"}, 0)),
+                       ("z", "var(--oq)", by_op({'GETP': "var(--ob)", 'SETP': "calc(var(--ob) * (1 - var(--sst)))"}, 1))],
+                pair={'z': 'h'},
+                write=("var(--oaddr)", "var(--oval)", None, "var(--oen)", "var(--V)"),
+                nx=OBJ_NX, deps={'z': [('x', ['GETP', 'SETP'])]}),
 }
 def first_miss(acc):
     """the block of the first missing access (dependency order) among [(name, mask)], -1 for none"""
@@ -205,7 +308,8 @@ def nexts(nx, done="1"):
 cls_rules = {}
 for c, k in CLASSES.items():
     d, acc = list(k.get('pre', [])), []
-    for n, A, ops_n in k['reads']: d += read(n, A); acc.append((n, need(ops_n)))
+    for n, A, ops_n in k['reads']:
+        d += read_pair(n, A, k['pair'][n]) if n in k.get('pair', {}) else read(n, A); acc.append((n, need(ops_n)))
     good = {}
     for n, _, _ in k['reads']:
         g = f"(1 - {miss(n)})"
@@ -213,10 +317,10 @@ for c, k in CLASSES.items():
         good[n] = g
     d.append("--hm: calc(1 - var(--mf)" + "".join(f" + {LATCH[n]} * {g}" for n, g in good.items()) + ");")
     if k['write']:
-        A, V, reuse, en = k['write']
-        if reuse is None: d += lookup("w", A); acc.append(("w", "" if en == "1" else en + " * ")); wn = "w"
+        A, V, reuse, en = k['write'][:4]
+        if reuse is None: d += lookup("w", A); acc.append(("w", "" if en == "1" else f"({en}) * ")); wn = "w"
         else: wn = reuse
-        d += write(wn, V, en)
+        d += write(wn, V, en, *k['write'][4:])
     d += [f"--ok: calc(1 - min(1, calc({' + '.join(f'{m}{miss(n)}' for n, m in acc)})));" if acc else "--ok: 1;",
           f"--mb: {first_miss(acc)};" if acc else "--mb: -1;"] + nexts(k['nx'])
     if c == 'jump': d += [f"--nstop: {eq('var(--op)', OP['HALT'])};", f"--nhalt: {eq('var(--op)', OP['HALT'])};"]
@@ -225,13 +329,15 @@ for c, k in CLASSES.items():
 # 'out': PRINT B, PRINTK (the value in word1) and PUTC B, as gen_css.py's print service: up to 4 console cells per execution,
 # one per bank; a string chunk ends at its block (the block's line must be cached), at a NUL (the value is out) or a newline
 # (taken); until the value is out the instruction repeats (npc = pc) and --pst carries the position. Output needs the pass's
-# write set free. A = separator * 2 + boolean (rc_ref SEP)
+# write set free. A = separator * 2 + boolean (rc_ref SEP) + 8 for a + chain's piece. PRINT of an array or an object (ptrap)
+# prints nothing here: it jumps to pstub with its own address in pst (TENTER, then the library's ptrap)
 pv = "var(--pv)"
 isputc = eq("var(--op)", OP['PUTC'])
 pr = OPND + read("x", "var(--aB)") + [
     f"--mx: calc((1 - var(--kB)) * (1 - {eq('var(--op)', OP['PRINTK'])}) * {miss('x')});",
     f"--pv: {by_op({'PRINTK': 'var(--vg)'}, xB)};",
-    f"--prLN: {eq('round(down, var(--A) / 2)', 2)};", f"--prSP: {eq('round(down, var(--A) / 2)', 1)};", "--prB: mod(var(--A), 2);",
+    f"--prLN: {eq('round(down, mod(var(--A), 8) / 2)', 2)};", f"--prSP: {eq('round(down, mod(var(--A), 8) / 2)', 1)};", "--prB: mod(var(--A), 2);",
+    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)}));",
     f"--pp: calc({pv} + {STRTAG});",
     f"--isStr: calc((1 - {isputc}) * clamp(0, var(--pp) - {STR_LO - 1}, 1) * clamp(0, {STRP_HI} - var(--pp), 1));",
     f"--isBool: calc((1 - var(--isStr)) * var(--prB) * ({eq(pv, 0)} + {eq(pv, 1)}));",
@@ -267,16 +373,17 @@ pr += ["--pe: calc((1 - var(--pdone)) * (var(--pr0) + var(--pr1) + var(--pr2) + 
        f"--pn: if(style(--op: {OP['PUTC']}): calc(1 - {eq(pv, 10)}); else: calc(var(--isStr) * (var(--pe) + var(--ptNul) * var(--prSP)) + (1 - var(--isStr)) * clamp(0, var(--ptot) - var(--pbase), 4)));",
        f"--pfin: if(style(--op: {OP['PUTC']}): 1; else: calc(var(--isStr) * var(--ptNul) + (1 - var(--isStr)) * clamp(0, var(--pbase) + 5 - var(--ptot), 1)));",
        f"--pnl: if(style(--op: {OP['PUTC']}): {eq(pv, 10)}; else: calc(var(--isStr) * (var(--ptNL) + var(--ptNul) * var(--prLN)) + (1 - var(--isStr)) * var(--pfin) * var(--prLN)));",
-       "--npst: calc(var(--isStr) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)) + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pph) + 1));"]
+       f"--npst: if(style(--ptrap: 1): {pc}; else: calc(var(--isStr) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)) + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pph) + 1)));"]
 for i in range(4):
     pr.append(f"--pch{i}: " + (f"if(style(--op: {OP['PUTC']}): {pv}; else: " if i == 0 else "") +
               f"calc(var(--isStr) * (var(--pr{i}) * var(--pb{i}) + {eq('var(--pe)', i)} * var(--ptNul) * var(--prSP) * 32)"
               f" + (1 - var(--isStr)) * clamp(0, var(--pn) - {i}, 1) * var(--pnb{i}))" + (")" if i == 0 else "") + ";")
-pr += ["--ok: calc((1 - min(1, calc(var(--mx) + var(--mpp)))) * (1 - var(--cw)));",
+pr += ["--ok: calc((1 - min(1, calc(var(--mx) + var(--mpp)))) * (1 - var(--cw) * (1 - var(--ptrap))));",
        "--mb: calc(var(--mx) * var(--bx) + (1 - var(--mx)) * (var(--mpp) * var(--bp) + (1 - var(--mpp)) * -1));"]
-pr += nexts({}, "var(--pfin)")
+pr += nexts({'pc': f"if(style(--ptrap: 1): {ENT['pstub']}; else: calc({pc} + 2 * var(--pfin)))",
+             'steps': "calc(var(--steps) + max(var(--pfin), var(--ptrap)))"})
 # cell i of the chunk goes to optr + i, bank (optr + i) mod 4 (OUT_BASE is a multiple of 4)
-pr += ["--pout: var(--ok);", "--ncw: min(1, var(--pn));",
+pr += ["--pout: calc(var(--ok) * (1 - var(--ptrap)));", "--ncw: min(1, var(--pn));",
        f"--noptr: mod(var(--pnl) * (round(down, (var(--optr) + var(--pn)) / {COLS}) + 1) * {COLS} + (1 - var(--pnl)) * (var(--optr) + var(--pn)), {OUT_SIZE});"]
 for w in range(WB):
     pr += [f"--pi{w}: mod({w} - var(--optr), 4);", f"--dp{w}: clamp(0, var(--pn) - var(--pi{w}), 1);",
@@ -308,17 +415,24 @@ P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "
      "t", "stop", "cw", "op", "A", "B", "C", "cls", "rom", "rh", "rl", "vf", "vg", "mf", "ok", "mb", "npc", "nfp", "nsteps", "nstop", "nhalt",
      "kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
-     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
+     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
+     "wval2", "vh"]
+# the new classes' scratch (.x only)
+XNEW = ["kA", "aA", "zA", "dslow", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
+        "oroom", "oq", "ohit", "oend", "onext", "oc", "V", "oaddr", "oval", "oen", "w2", "odone", "ojump"]
+P += XNEW
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
 P += [f"n{r[0]}" for r in WREGS]
 P += [x + n for n in READS for x in LOOKUP] + [f"v{n}" for n in READS if n not in ("w", "p")]
 P = list(dict.fromkeys(P))
+_unreg = {m for _, d in cls_rules.values() for x in d for m in re.findall(r'(?:^|;\s*)--([\w-]+):', x)} - set(P)
+assert not _unreg, f'declared by an instruction class but not registered: {sorted(_unreg)}'
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
-LOCAL |= {"kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv"}
+LOCAL |= {"kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv", "ptrap"} | set(XNEW)
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
@@ -590,7 +704,7 @@ else:
 </body>
 </html>
 """
-import re, collections
+import collections
 def lint(text, ints):
     """a registered <integer> whose value isn't one term (a number, or one function: calc(), if(), var(), …) is invalid at
     computed-value time and silently takes its initial value, 0: `--m: (1 - a) * b` must be `calc((1 - a) * b)`"""
