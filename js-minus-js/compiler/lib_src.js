@@ -556,7 +556,7 @@ function netw(x) { var s = 4096 - peek(__NETSEQ__); poke(__NETSEQ__, s); return 
 function fetch(d, u) {
   if (isstr(u) == 0) { u = tostr(u, 0); }
   var p = u + __STRTAG__; var c = peek(p);
-  while (c) { netw(256 + c); p++; c = peek(p); }
+  while (c) { if (netw(256 + c) < 0) { return -1; } p++; c = peek(p); }     // (a URL byte answers 0; -1: no gateway, give up)
   return netw(512);
 }
 function read(d) { return netw(768); }

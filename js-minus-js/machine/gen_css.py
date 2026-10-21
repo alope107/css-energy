@@ -77,13 +77,13 @@ regs += [("rLm", 256, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n}
         [(f"rLp{j}", M20, M20 // 2, f"var(--Lp{j})") for j in range(4)]
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
-# NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the passes this request has
-# waited (go passes only, so a frame settles; a new request starts again from 0: consecutive words always differ, by the
-# sequence bit, even when a read() loop's next NET stalls in the pass the last one completed); NWAIT passes without an
-# answer give -1 (no gateway: a file: URL, a static server)
-NWAIT = 2400
+# NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the clock (--t, 600 a second)
+# when this request began: a new request takes the time (consecutive words always differ, by the sequence bit, even when
+# a read() loop's next NET stalls in the pass the last one completed). NWAIT ticks without an answer give -1 (no gateway:
+# a file: URL, a static server). (Counting passes was too slow a clock: a waiting page settles to ~10 passes a second.)
+NWAIT = 12000          # 20 s
 regs += [("rreq", 16384, 0, "var(--req)"),
-         ("rnwt", NWAIT + 1, 0, f"calc(var(--go) * min(1, var(--req)) * {eq('var(--req)', 'var(--rreq)')} * min({NWAIT}, var(--rnwt) + 1) + (1 - var(--go)) * var(--rnwt))")]
+         ("rnt0", 60000, 0, f"calc(var(--go) * (min(1, var(--req)) * {eq('var(--req)', 'var(--rreq)')} * var(--rnt0) + (1 - min(1, var(--req)) * {eq('var(--req)', 'var(--rreq)')}) * mod(var(--t), 60000)) + (1 - var(--go)) * var(--rnt0))")]
 regs += WREGS
 WNAMES = [r[0] for r in WREGS]
 
@@ -268,7 +268,7 @@ NET_PRE = ["--nR: var(--nans);", "--nvalid: mod(var(--nR), 2);", "--nrseq: mod(r
            "--nws: mod(round(down, var(--vs1) / 4096), 2);", "--nd: round(down, var(--nR) / 4);",
            f"--ndata: calc(var(--nd) - {1 << 18} * clamp(0, var(--nd) - {(1 << 17) - 1}, 1));",
            f"--nmatch: calc(var(--nvalid) * {eq('var(--nrseq)', 'var(--nws)')});",
-           f"--ntime: clamp(0, var(--rnwt) - {NWAIT - 1}, 1);", "--nok: min(1, calc(var(--nmatch) + var(--ntime)));",
+           f"--ntime: clamp(0, mod(var(--t) - var(--rnt0), 60000) - {NWAIT - 1}, 1);", "--nok: min(1, calc(var(--nmatch) + var(--ntime)));",
            "--nval: calc(var(--nmatch) * var(--ndata) - (1 - var(--nmatch)) * var(--ntime));"]
 CLASSES['net'] = dict(ops=['NET'], pre=NET_PRE, reads=[("s1", f"{sp} - 1", None)], write=(None, "var(--nval)", "s1", "1"), nx={})
 def first_miss(acc):

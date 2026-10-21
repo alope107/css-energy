@@ -328,8 +328,8 @@ modem iframe:
 
 - **The class `net`** reads `sp - 1` and stalls without a miss until the answer for its word has come (ENGINE_NOTES 56).
   While it waits it leaves `--req = 1 + (word mod 8192)` at the chain's end, the register `rreq`. When the answer
-  comes it writes it at `sp - 1`. `rnwt` counts the passes one request has waited; after 2,400 (about 30 s) the
-  answer is `-1`.
+  comes it writes it at `sp - 1`. `rnt0` holds the clock (`--t`, 600 a second) when this request
+  began; 20 s without an answer give `-1` (a waiting page settles to ~10 passes a second, so passes are no clock).
 - **The request**: `.modem`, an `<iframe loading="lazy" src="/net/m0.html#t">`, is `1 + rreq` px tall. `.nlatch` (a
   transition latch) shows it from the first waiting `NET` on; before that nothing loads.
 - **The modem's documents** have no doctype (quirks mode) and reload alternating `m0.html#t` and `m1.html#t` (a refresh

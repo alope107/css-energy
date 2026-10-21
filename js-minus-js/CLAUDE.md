@@ -158,5 +158,5 @@ net/       server.js (web server + network gateway: the modem's documents and pr
 - The network (`NET`, ARCHITECTURE §3.8): the gateway's words exist four times, `net/server.js` (the page),
   `net/device.py` (cc_ref, cssref, csssim, the fuzzer), `net/shim.js` (Node) and `lib_src.js`; change them together.
   The modem's answer is a fragment scroll, which crosses same-origin documents only: keep the modem on the page's
-  origin. The repo-root `http.server` has no gateway: there `fetch` waits ~30 s and returns -1. A network program's
+  origin. The repo-root `http.server` has no gateway: there `fetch` waits ~20 s and returns -1. A network program's
   time is its round trips, not its steps: `suite_ui.py` lists every `net_*` program for `make l5-net`.

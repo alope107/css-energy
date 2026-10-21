@@ -205,7 +205,8 @@ const PROBES = [
     docs: 'js-minus-js docs/ENGINE_NOTES.md 51-52, 57 (the first NET modem; a data: child\'s return channel)',
     http: {
       'index.html': ['text/html', '<!doctype html><style>iframe{border:0;width:50px;frame-sizing:content-height}</style>' +
-        '<iframe id=t src="c.html?h=345"></iframe><iframe id=s src="c.html?h=40"></iframe><iframe id=n src="n.html"></iframe>'],
+        '<iframe id=t loading=lazy src="c.html?h=345"></iframe><iframe id=s loading=lazy src="c.html?h=40"></iframe><iframe id=n src="n.html"></iframe>'],
+      // (lazy: a child whose load fires before the page's first layout reports 0 px, crbug 575887314; bugs/README.md)
       // 153 reads the meta's content as the allowed origins, 155+ as allow-origins=…: one of the two opts in
       'c.html': ['text/html', q => `<meta name=responsive-embedded-sizing content="*"><meta name=responsive-embedded-sizing content="allow-origins=*">` +
         `<style>html,body{margin:0}</style><div style="height:${q.get('h')}px"></div>`],

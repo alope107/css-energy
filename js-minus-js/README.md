@@ -168,7 +168,7 @@ costs time per live object. A key built at run time is first matched by its char
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
 - **Network**: one request at a time, GET only, no headers; a status above 511 reads as 511. Each URL byte and each body
   byte is one round trip, about a quarter of a second on the page. Without the gateway (`file:`, a static server)
-  `fetch` returns `-1` after about 30 s. `fetch` and `read` are reserved names.
+  `fetch` returns `-1` after about 20 s. `fetch` and `read` are reserved names.
 
 ### Error codes
 

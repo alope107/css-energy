@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A responsive iframe that has no box while its document loads stays 0px tall</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  .row { display: flex; gap: 16px; align-items: flex-start; margin: 12px 0; }
+  .row p { margin: 0; width: 420px; }
+  /* the slot is as tall as the taller of the iframe and the expected height --e: red under the iframe shows a
+     too-short iframe, red from --e down (clipped to the slot) shows a too-tall one */
+  .slot { position: relative; display: grid; width: 200px; overflow: clip; flex: none; }
+  .slot::before { content: ""; grid-area: 1 / 1; height: var(--e); background: red; }
+  .slot::after { content: ""; position: absolute; z-index: 2; left: 0; right: 0; top: var(--e); height: 10000px; background: red; }
+  iframe { grid-area: 1 / 1; z-index: 1; align-self: start; display: block; border: 0; width: 200px; frame-sizing: content-height; }
+  /* display: none for the first half second (while the child loads), then the iframe's own display again */
+  .hidden { animation: hide 0.5s; }
+  @keyframes hide { from, to { display: none; } }
+</style>
+<p>Each green box should exactly cover its red one, with no red showing, once the page has loaded (1 s). Each
+iframe is 200px wide with <code>frame-sizing: content-height</code>; its same-origin <code>srcdoc</code> child opts
+in and is green. Serve over http. Needs Chrome 154+, or Chrome 153 with
+<code>--enable-blink-features=ResponsiveIframes</code>.</p>
+<div class="row"><div class="slot" style="--e: 200px"><iframe id=f1 srcdoc='<meta name="responsive-embedded-sizing" content="*"><meta name="responsive-embedded-sizing" content="allow-origins=*"><style>html{background:green}body{margin:0}</style><div style="height:200px"></div>'></iframe></div>
+  <p>1. Visible from the start; the child is a 200px-tall block. Expected 200px. A race (already reported, see the comment at the end): red on most loads in headless 153; reload a few times.</p></div>
+<div class="row"><div class="slot" style="--e: 200px"><iframe id=f2 class="hidden" srcdoc='<meta name="responsive-embedded-sizing" content="*"><meta name="responsive-embedded-sizing" content="allow-origins=*"><style>html{background:green}body{margin:0}</style><div style="height:200px"></div>'></iframe></div>
+  <p>2. As 1, but <code>display: none</code> for the first 0.5 s, while its child loads (a closed tab panel, say). Expected 200px.</p></div>
+<div class="row"><div class="slot" style="--e: 200px"><iframe id=f3 class="hidden" srcdoc='<meta name="responsive-embedded-sizing" content="*"><meta name="responsive-embedded-sizing" content="allow-origins=*"><style>html{background:green}body{margin:0}</style><div style="height:200px;width:10px"></div>'></iframe></div>
+  <p>3. As 2, but the block is 10px wide. Expected 200px.</p></div>
+<div class="row"><div class="slot" style="--e: 200px"><iframe id=f4 loading="lazy" srcdoc='<meta name="responsive-embedded-sizing" content="*"><meta name="responsive-embedded-sizing" content="allow-origins=*"><style>html{background:green}body{margin:0}</style><div style="height:200px"></div>'></iframe></div>
+  <p>4. Control: as 1 with <code>loading="lazy"</code> (the child loads after the page has laid the iframe out). Expected 200px.</p></div>
+<!--
+Observed (Linux, 2026-10-21): Chrome 153.0.8010.12 headless with --enable-blink-features=ResponsiveIframes, served
+over http, 30 loads: 2 and 3 are 0px tall on every load (red 200px box); 4 is green; 1 is 0px tall on 25 of 30.
+1's rate depends on timing: with children loaded from URLs, 7-8 of 20 loads with three iframes, 1 of 20 with one;
+always the first iframe whose child reaches DOMContentLoaded before the page's first layout (a ResizeObserver trace
+matched this on 20 of 20 loads). The race report below sees it less often by hand than headless. Nothing
+corrects it later: calling requestResize() in the child after it is shown leaves 1 and 2 at 0px (3 becomes
+200px). Not tested on 154+ (none here); the code below is the same on main.
+
+Spec: css-sizing-4 §5.3.1 (https://drafts.csswg.org/css-sizing-4/#iframe-frame-sizing): "The internal layout
+intrinsic size is first set by the results of the embedded document's first layout after it fires its
+DOMContentLoaded event, and again when the load event is fired at the Window." A child that isn't laid out while its
+iframe has no box has its first layout after DOMContentLoaded when the iframe is shown, and that layout is 200px tall.
+"If the document's responsive embedded sizing flag is true when it performs a layout, and its locked embedded ICB
+size is null, it records its current initial containing block size as its locked embedded ICB size." §5.3.2
+requestResize(): "Set the internal layout intrinsic size of host element to the width and height of the scrolling
+area" (cssom-view-1: its bottom edge is "the bottom-most edge of the bottom edge of the initial containing block and
+the bottom margin edge of all of the viewport's descendants' boxes"), so even at a 0x0 ICB a 200px block gives 200px.
+
+Likely cause (153; main 22b3b159 the same): a child frame's view starts 0x0 (LocalFrame::CreateView,
+core/frame/local_frame.cc:479) until the parent's post-layout UpdateGeometriesIfNeeded sizes it
+(core/frame/local_frame_view.cc:1935). Document::RequestResizeResponsiveIframe (core/dom/document.cc:8315-8333; run
+at DOMContentLoaded, 8097, and load, 4348) records the natural size from LocalFrameView::layout_overflow_size_.
+- 2 and 3: the child is not laid out while the iframe has no box (3's 10px block also reports 0, so no layout ran;
+  inference: one of the early returns in LocalFrameView::UpdateStyleAndLayout, local_frame_view.cc:3460-3463), so
+  RecordNaturalDimensions (local_frame_view.cc:1220-1226) stores the never-set 0x0. Only DOMContentLoaded, load and
+  requestResize() report (also local_dom_window.cc:2936); showing the iframe doesn't, so it stays 0px. The first
+  NaturalSizeLayoutScope also locks the ICB at the 0x0 view size (local_frame_view.cc:1187-1195), so a later
+  requestResize() lays the child out at 0x0 (1196-1205).
+- 1 (the race): the scope is constructed before UpdateStyleAndLayout, and so reads the view's size before that call
+  lays out the parent (Document::UpdateStyleAndLayout lays out the owner document first, document.cc:3117-3118) and
+  gives the view its 200x150 size. When the child reaches DOMContentLoaded before the page's first layout, the locked
+  ICB is 0x0 though the child's layout ran at 200x150: the DOMContentLoaded report is right (a ResizeObserver saw the
+  iframe at the right height for one frame), then the load report lays the child out at the locked 0x0 ICB.
+- The 0 (rather than too tall) in 1 and 2: at a 0px-wide ICB the block is 0px wide, and Blink drops empty rects from
+  scrollable overflow (LayoutBox::SetScrollableOverflowFromLayoutResults returns on scrollable_overflow->IsEmpty(),
+  layout_box.cc:3255; also ScrollableOverflowCalculator::AddOverflow), so the view's DocumentRect is its 0x0 padding
+  box. Content wider than 0 (3's 10px block) or text (wrapped one word per line) gives a size instead, too tall for
+  text.
+
+Main since: ResponsiveIframesShrink (crrev.com/c/8584857, main@{#1721627}, 2026-10-19, crbug 570579609) reports the
+overflow without the padding box, taken from ScrollableOverflowCalculator::Result with UniteEvenIfEmpty, which may
+turn 1's 0 into 200 (inference, untested). CL 8597128 (crbug 565383556, in review; WPT PR 63950) locks only the
+frame-sizing axis, which would stop 1's width lock (inference). Neither makes showing the iframe report a size, so 2
+should stay 0.
+
+Already reported (1): https://issues.chromium.org/issues/575887314 (2026-10-20, assigned, P2) with text content
+(stuck too tall); it says a fixed-height block "does not trigger the bug" because its check only flags a too-tall
+iframe. Not reported (2, 3): no tracker issue or WPT test covers an iframe without a box while its child loads.
+-->
