@@ -10,7 +10,7 @@ const { serve } = require('../server.js');
   const [pg, www, prog] = process.argv.slice(2);
   let loads = 0, words = 0;
   const reqT = [];
-  const log = k => { if (k === 'req') { words++; reqT.push(Date.now()); } };
+  const seq = []; const log = (k, ...a) => { if (k === 'req') { words++; reqT.push(Date.now()); seq.push(a.join(':')); } };
   const srv = await serve(path.resolve(www), 0, {}, { log });
   const origEmit = srv.emit.bind(srv);
   srv.emit = (ev, req, ...r) => { if (ev === 'request' && /\/net\/s\/\d+\/m[01]\.html/.test(req.url)) loads++; return origEmit(ev, req, ...r); };
@@ -44,6 +44,7 @@ const { serve } = require('../server.js');
   console.log(JSON.stringify({ prog: path.basename(prog), runS: +t.toFixed(2), words: words - w0, msPerWord: Math.round(1000 * t / Math.max(1, words - w0)),
     gapMs: { min: gaps[0], p25: q(0.25), median: q(0.5), p75: q(0.75), max: gaps[gaps.length - 1] },
     modemLoadsPerS: +((loads - l0) / t).toFixed(1), framesPerS: +(fr / t).toFixed(1), steps: r.steps }));
+  if (process.env.SEQ) console.log(reqT.map((x, i) => `${seq[i]}@${i ? x - reqT[i - 1] : 0}`).join(' '));
   if (!process.env.QUIET) console.log(gridText(await consoleCodes(p)));
   await b.close(); srv.close();
 })().catch(e => { console.error(e); process.exit(1); });

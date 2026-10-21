@@ -57,7 +57,8 @@ class Machine:
         if op == 'NOP': pass
         elif op == 'PUSHI': wr(sp, imm); sp += 1
         elif op == 'PUSHS': wr(sp, imm - STRTAG); sp += 1
-        elif op == 'NET': wr(sp - 1, st.setdefault('net', R.Device())(rd(sp - 1)))
+        elif op == 'NET':
+            for a, v in R.netw(st.setdefault('net', R.Device())(rd(sp - 1))): wr(sp - 1 if a is None else a, v)
         elif op == 'LOADG': wr(sp, rd(imm)); sp += 1
         elif op == 'STOREG': sp -= 1; wr(imm, rd(sp))
         elif op == 'LOADL': wr(sp, rd(fp + simm)); sp += 1

@@ -15,7 +15,7 @@ const fs = require('fs'), path = require('path');
   const blocks = []; let printed = 0, next = 0;
   const flush = () => { while (printed < progs.length && blocks[printed] !== undefined) { if (blocks[printed]) console.log(blocks[printed]); printed++; } };
   const NR = process.env.NETROOT;
-  const srv = NR && await require(path.join(__dirname, '..', 'net', 'server.js')).serve(path.resolve(NR), 0);
+  const srv = NR && await require(path.join(__dirname, '..', 'net', 'server.js')).serve(path.resolve(NR), 0, {}, { log: process.env.NETLOG ? (...a) => console.log('net', ...a) : undefined });
   const at = NR ? `http://127.0.0.1:${srv.address().port}/${path.relative(NR, pg)}` : fileUrl(pg);
   async function session() {
     const b = await launch({ extraArgs: envArgs('FLAGS') });

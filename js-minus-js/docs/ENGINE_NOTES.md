@@ -194,4 +194,17 @@ chats.
 58. **Several modem children run side by side, paced by the page's frames**: beside the page running a `read()` loop
     (34 frames/s, 4.3 words/s), one more child doing its own round trips ran at 4.0–4.2 words/s and the page's own
     stayed at 4.0–4.2 (8.0–8.2 in all); three more: 3.6 each, 14.3 in all. A word takes about 8 page frames whichever
-    child carries it. *(measured 2026-10-21; `net/probe/probe7.js`, the extra children driven by the harness)*
+    child carries it. *(measured 2026-10-21; `net/probe/probe7.js`, the extra children driven by the harness)* Built
+    into the page (4 modems, 2 bytes each), a body takes half the time, not a quarter: the 4 modems' reloads cost the
+    page a third of its frames (32 → 22 frames/s), and the CPU then works through 8 bytes per word (BENCHMARKS §14).
+59. **A box that goes `display: none` keeps its scroll offset and gets it back when it shows again**
+    (`PaintLayerScrollableArea`: saved into the element when the box is destroyed, restored when it is made again;
+    `paint_layer_scrollable_area.cc` 173 / 219 in 153). A scroll timeline on it then reads the old offset at once. With
+    the modems inside `#clk` (hidden by Edit), the last run's answers came back on Run and passed for the first word's
+    (the gateway never saw it). Hence the modems' boxes outside `#clk`, never hidden; a hidden *child* (the iframe) only
+    leaves its box nothing to scroll, which clamps the offset to 0. *(measured 2026-10-21)*
+60. **A transition latch fed by a value that an animation changes didn't hold here**: `--nlive: min(1, var(--rreq));
+    transition: --nlive 0s calc((1 - min(1, var(--rreq))) * 1000000s)`, with `--rreq` from a scroll-driven animation on
+    the same element or inherited from its parent, followed `--rreq` back to 0 within the frame, where memtree's group
+    latch (fed by registers) holds. A held register (`rlive`, zeroed by Edit like the others) latches instead.
+    *(observed 2026-10-21, not reduced)*

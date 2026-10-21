@@ -159,4 +159,6 @@ net/       server.js (web server + network gateway: the modem's documents and pr
   `net/device.py` (cc_ref, cssref, csssim, the fuzzer), `net/shim.js` (Node) and `lib_src.js`; change them together.
   The modem's answer is a fragment scroll, which crosses same-origin documents only: keep the modem on the page's
   origin. The repo-root `http.server` has no gateway: there `fetch` waits ~20 s and returns -1. A network program's
-  time is its round trips, not its steps: `suite_ui.py` lists every `net_*` program for `make l5-net`.
+  time is its round trips, not its steps: `suite_ui.py` lists every `net_*` program for `make l5-net`. The modems'
+  boxes stay outside `#clk` (a hidden box restores its scroll offset: stale answers, ENGINE_NOTES 59), and the read
+  path's runtime cells sit in cache sets the stack and code don't use (`layout.json` pads `rt_cells`).

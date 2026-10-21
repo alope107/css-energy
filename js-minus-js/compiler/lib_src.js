@@ -548,15 +548,34 @@ function okey(o, k) {
   }
   return k;
 }
-// ---------------- the network (net/device.py has the protocol). NET's words: 256 + byte appends a URL byte, 512 GETs the
-// URL (the HTTP status, -1 if it failed), 768 is the body's next byte (-1 past its end). Bit 12 alternates (the cell
-// NETSEQ), so on the page consecutive words always differ: the modem tells a new request from the last, and its answer
-// carries the bit (machine/gen_css.py). fetch(url) / read() are called like parseInt (cc_ref GLOBALS): d is a dummy.
-function netw(x) { var s = 4096 - peek(__NETSEQ__); poke(__NETSEQ__, s); return __op(__W_NET__, x + s); }
+// ---------------- the network (net/device.py has the protocol). netw(p) sends payload p as NET's word 2 p + s, s a sequence
+// bit the lib alternates (the cell NETSEQ), so on the page consecutive words always differ; p = 4 arg + op (op 0 URL bytes,
+// 1 GET, 2 READ). NET returns part 0's answer, and leaves every part's bytes in RBUF0 … (-1: none). URL bytes go two per
+// word; RLEFT counts the buffer's bytes not read yet (0: refill). fetch(url) / read() are called like parseInt (cc_ref
+// GLOBALS): d is a dummy.
+function netw(p) { var s = 1 - peek(__NETSEQ__); poke(__NETSEQ__, s); return __op(__W_NET__, 2 * p + s); }
 function fetch(d, u) {
   if (isstr(u) == 0) { u = tostr(u, 0); }
-  var p = u + __STRTAG__; var c = peek(p);
-  while (c) { if (netw(256 + c) < 0) { return -1; } p++; c = peek(p); }     // (a URL byte answers 0; -1: no gateway, give up)
-  return netw(512);
+  poke(__RLEFT__, 0);
+  var p = u + __STRTAG__; var c = peek(p); var c2 = 0;
+  while (c) {
+    c2 = peek(p + 1);
+    if (netw(4 * (c + 256 * c2)) < 0) { return -1; }     // (a URL word answers 0; -1: no gateway, give up)
+    if (c2) { p = p + 2; c = peek(p); } else { c = 0; }
+  }
+  var r = netw(1);
+  if (r < 1) { return -1; }
+  return r - 1;
 }
-function read(d) { return netw(768); }
+function read(d) {
+  var r = peek(__RLEFT__);
+  if (r) {
+    var b = peek(__RBUF0__ + __NBUF__ - r);
+    if (b < 0) { return -1; }                 // (the body ended in this buffer: -1 from now on)
+    poke(__RLEFT__, r - 1); return b;
+  }
+  if (netw(2) < 0) { return -1; }
+  r = peek(__RBUF0__);
+  if (r < 0) { return -1; }
+  poke(__RLEFT__, __NBUF__ - 1); return r;
+}

@@ -354,8 +354,21 @@ the extra ones the same way):
 | 2 | 3.99–4.16 | 7.98–8.24 | 32.0–32.9 |
 | 4 | 3.57 | 14.29 | 28.3 |
 
-A word costs about 8 page frames whichever modem carries it, so throughput is bytes per word × modems (HISTORY: open
-leads).
+A word costs about 8 page frames whichever modem carries it, so throughput is bytes per word × modems.
+
+**Built in (2026-10-21): 4 modems, 2 bytes each.** A word brings 2 URL bytes or 8 body bytes. Interleaved against the
+single-byte, single-modem page (`e9198b2`), 3 rounds each, `net/probe/pagenet.js`, compiled → HALT:
+
+| Program | 1 byte, 1 modem | 2 bytes, 4 modems | Words | Median word | Page frames/s |
+|---|---|---|---|---|---|
+| `net_long.js` (62 bytes, summed) | 22.6–22.9 s | 11.2–11.4 s (2.0×) | 85 → 20 | 247–252 → 372–390 ms | 32 → 22 |
+| `net_fetch.js` (17 bytes, printed) | 8.4–9.9 s | 4.9–5.1 s (1.7×) | 29 → 9 | 241–263 → 312–342 ms | 28–34 → 26–27 |
+
+Not the 6.6× the parallel probe suggested: the 4 modems' reloads (16–18 a second in all) cost the page a third of its
+frames, so a word takes ~9 frames instead of ~8, and the CPU then works through 8 bytes. On the way: the lib's
+unpacking loop (~250 steps per READ) moved into `NET` itself, which writes the bytes; and the read path's runtime cells
+moved out of cache sets 9 and 10, where they evicted the stack and the code on every byte (`net_long` in csssim: 524 →
+91 passes). Steps per byte, `net_long`: 51 (one byte per word) → 59.
 
 What it costs programs that don't use the network (FizzBuzz; `ab.js`, fresh browser per run; `main` at `212175a`):
 

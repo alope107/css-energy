@@ -73,6 +73,11 @@ PARAM0 = 6144                           # parameter i's symbol address until its
 OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)       # = machine/uarch.py
+RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
+def netw(ans):
+    """NET's writes for the parts' answers: [(address, value)], part 0's whole answer last (at sp - 1: address None)"""
+    out = [(RBUF0 + 2 * j + k, (d >> 8 * k) & 255 if d >> 16 > k else -1) for j, d in enumerate(ans) for k in (0, 1)]
+    return out + [(None, ans[0])]
 VECS = {n: LAYOUT['vec_base'] + i for i, n in enumerate(LAYOUT['vectors'])}
 GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print'))
 ARRTAG = LAYOUT['arrtag']
@@ -1010,7 +1015,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) & AMASK]
         elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) & AMASK]
         elif op == PUSHS: mem[sp] = imm - STRTAG; sp += 1
-        elif op == NET: mem[sp - 1] = s20(net(mem[sp - 1]))
+        elif op == NET:                                    # the answers' bytes into RBUF0 …, part 0's answer on the stack
+            for a, v in netw(net(mem[sp - 1])): mem[sp - 1 if a is None else a] = s20(v)
         # arrays and dynamic operators: the fast case here, the rest in ROM (a trap: the return address pushed, as by CALL)
         elif op in (IDXA, STOREX):
             x, k = (mem[sp - 2], mem[sp - 1]) if op == IDXA else (mem[sp - 3], mem[sp - 2])
