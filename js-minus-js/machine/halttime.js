@@ -1,4 +1,4 @@
-// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every POLL ms (default 250); checks console output against IMG (harness only)
+// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every POLL ms (default 250); runMs: first step -> HALT; checks console output against IMG (harness only)
 const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const { consoleCodes, gridRows } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs');
@@ -17,7 +17,7 @@ const fs = require('fs');
   const th = Date.now() - t0;
   const rows = gridRows(await consoleCodes(p), im.rows, im.cols);
   const ok = rows.join('\n').replace(/\s+$/, '') === im.expected.replace(/\s+$/, '');
-  console.log(JSON.stringify({ page: pg, loadMs: tl, firstStepMs: first, haltMs: th, steps: r.steps, kind: r.kind, outputOk: ok }));
+  console.log(JSON.stringify({ page: pg, loadMs: tl, firstStepMs: first, haltMs: th, runMs: first === null ? null : th - first, steps: r.steps, kind: r.kind, outputOk: ok }));
   if (!ok) console.log(JSON.stringify({ got: rows.join('\n'), want: im.expected }));
   await b.close();
 })();
