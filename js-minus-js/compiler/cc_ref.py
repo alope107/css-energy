@@ -70,7 +70,6 @@ OD, CD, NS, NF, NL, NI = 8, 8, 32, 16, 64, 32  # NI: interned strings and proper
 ODN = 10                                # the operand stack (its temps T(0) ... T(9))
 TBMAX = 24                              # descriptors + collapsed arguments: a frame's live words stay below TRAPOFF
 EMAX = 7                                # instructions per step (14 code words)
-NOTSUB = 90                             # a construct the register machine doesn't have yet
 SDATA = 256                             # globals: data_base + 1 .. + SDATA - 1 (data_base itself holds STRTAG, for the lib)
 STR0 = LAYOUT['data_base'] + SDATA      # the string area: STR0 (the lib's empty DONE marker) .. SEND
 SEND = STR0 + LAYOUT['str_size']

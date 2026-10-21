@@ -40,6 +40,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   idle levels 269 µs), an `if()` ~70 ns per entry it contains, size containers above a subtree restyling it once per
   container (7 times per fill). FizzBuzz on the page 10.5 → 3.9 s after Run; CPU-only pages 2.8–7.3× faster
   (BENCHMARKS §12). The font CPU's code was removed; it last exists at commit `181cbb7`.
+- **13, the register machine (2026-10-21).** A proof of concept on a subset (`exp/regvm/`) ran compute-bound programs
+  2.0–2.6× faster than the stack machine at the same compile time, so the whole language moved over: two-word
+  three-address instructions, a stack of operand descriptors instead of a register allocator, the runtime library
+  compiled by `cc_ref` itself, and instructions that do in CSS what the stack machine left to ROM routines: the dynamic
+  operators, `a[i]` and `o.x` in place, NEW, a string's `+` written word by word (the cat class), traps that write their
+  frame one word per execution. The full language first compiled 8–13% slower than main (median per program); inlining
+  the DSL's single-use temps and materialising each code record's word brought it to 3% (BENCHMARKS §14). Run times:
+  §14. The stack machine last exists at `212175a`.
 
 ## Dead ends and superseded approaches
 
@@ -85,6 +93,18 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
 | 39 | NEW zero-filling its chunk | 12 micro-cycles, two lines per object | NEW zeroes nothing; ENDK |
 | 40 | Every identifier writing its bytes to the string area | FizzBuzz compiled ~7% slower | only after `.`, `{` or `,` |
+| 41 | A trap's frame written by one instruction | the CPU writes one word (one cache set) per execution | the frame word by word, `--pst` counting |
+| 42 | PRINT writing a trap frame for an array or object | a memory write in the out class would cost every PRINT | `pstub` (TENTER), `ptrap` decodes the PRINT |
+| 43 | SETX / SETP frames at a fixed fp + 48 | a function's live temps could reach it | TRAPOFF 60; `TBMAX` bounds the live frame |
+| 44 | Call arguments as operand descriptors | `[1, [2, [3, [4, [5]]]]]` overflowed the 10 descriptors | arguments leave the stack in their temps (`tb`) |
+| 45 | `tb` only as the current base | a snapshot under a call copied a global over a collapsed argument (fuzz) | each descriptor keeps the `tb` it was pushed at |
+| 46 | The 511-word code area, 6 instructions per token | 22% / 7% of generated programs rejected (main: 14% / 0%) | 1,023 words, `EMAX` 7, `PIECES` 4 |
+| 47 | Inlining every single-use DSL temp | a ternary's else operand appears twice in css2's text: nested ones doubled, 344 KB declarations, out of memory | uses weighted by occurrences in the text |
+| 48 | The operand stack's top in its own DSL variable | no smaller: pushes still write a slot, pops then read one | slots only |
+| 49 | One-hot index flags shared between the slot selects | −1.5% CSS text, +7% declarations | inline selects |
+| 50 | `pow2` by a loop in the collector's bitmap | 22% of the suite's steps (`mapbuild` 14% more) | a 16-word table of powers of two |
+| 51 | One output instruction per pass, 8 columns | every line starts in bank 0: one short line per pass | a mask of the banks written, 9 columns |
+| 52 | The runtime's `join` and `repeat` calling `cat` | the ROM copy loop and allocation per piece (stars: 5,205 steps) | `__dadd`, the cat class (1,082) |
 
 ## Open leads (untried)
 
@@ -105,5 +125,12 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
-- **Language**: a wider console; built strings; printing objects, `undefined`, `in` / `delete`, prototypes; booleans
-  as parameters; specific error codes on the page.
+- **Language**: a wider console; printing objects, `undefined`, `in` / `delete`, prototypes; booleans as parameters;
+  specific error codes on the page.
+- **More in CSS**: string comparison (`DEQ` / `DLT` on two strings go to `scmp` in ROM), `push`, a number's `tostr`
+  outside `+`; a console write set of two cells per bank (output-bound programs fill the four cells of every pass).
+- **Compile time**: the register compiler writes 53K characters of CSS per token level against the stack machine's
+  41K (BENCHMARKS §14), mostly the operand-descriptor slots (selects and conditional updates over 10 slots) and the 7
+  instruction slots' muxes; fewer descriptor slots, or slots indexed by a one-hot register, would cut both.
+- **Precise frames**: zeroing a frame's temps at a call (or typed slots) would let the collector skip its bitmap
+  (`mapbuild` is 17% of the suite's steps, most of it in the GC tests).

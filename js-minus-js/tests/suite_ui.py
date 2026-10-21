@@ -24,7 +24,7 @@ open(f'{EXP}/fizzbuzz.grid', 'w').write(grid(open(os.path.join(HERE, 'suite', 'f
 for f in [f'{EXP}/user_report.js'] + sorted(glob.glob(os.path.join(HERE, 'suite', '*.js'))):
     if len(args) >= 2 * limit: break
     c, r = R.compile_and_run(open(f).read(), lib)
-    if r is None or r[0] > maxsteps: continue          # (r None: a program the compiler doesn't take yet, error 90)
+    if r is None or r[0] > maxsteps: continue          # (r None: the compiler rejects it)
     name = os.path.basename(f)[:-3]
     open(f'{EXP}/{name}.grid', 'w').write(grid(open(f[:-3] + '.out').read()) + '\n')
     args += [f, f'{EXP}/{name}.grid']

@@ -702,7 +702,6 @@ class Prog(Base):
             if reach is not None and md not in reach: return self.when(K(0))
             return self.when(and_(live(), eq(mode(), md)))
         PNL, PRB = P(R.T_NL), P(125)
-        NOTSUB = R.NOTSUB
         # a newline token means nothing outside the modes where it can end a statement
         with self.when(and_(PNL, not_(anyeq(mode(), (R.S_NAMES, R.S_NAMEE, R.S_OPER, R.S_VARAFTER, R.S_INC, R.S_OPND))))): self.done()
         # ---- S_NAMES
