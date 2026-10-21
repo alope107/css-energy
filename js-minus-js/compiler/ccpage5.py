@@ -35,10 +35,11 @@ DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v'))
 PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
 
 def mux_shift(prop, n, base, shift=0):
-    """--c<v + shift> for v in [base, base+n): prop holds v, prop-h holds (v - base) // 32"""
+    """--c<v + shift> for v in [base, base+n): prop holds v, prop-h holds (v - base) // 32; shift may be a function of v"""
     hi = []
+    sh = shift if callable(shift) else (lambda v: shift)
     for h in range((n + 31) // 32):
-        lo = ' '.join(f'style(--{prop}: {base + h * 32 + l}): --c{base + h * 32 + l + shift};' for l in range(32) if h * 32 + l < n)
+        lo = ' '.join(f'style(--{prop}: {base + h * 32 + l}): --c{base + h * 32 + l + sh(base + h * 32 + l)};' for l in range(32) if h * 32 + l < n)
         hi.append(f'style(--{prop}-h: {h}): if({lo} else: none);')
     return f'if({" ".join(hi)} else: none)'
 
@@ -187,7 +188,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append(lbl.group('String bytes: in-flow words'))
     N.add('l-o_sa-h', False)
     css.append(f'.ovs {{ display: none; height: 0; }} @container style(--l-o_sv: 1) {{ .ovs {{ display: block; --l-o_sa-h: round(down, (var(--l-o_sa) - {data_cells}) / 32);'
-               f' anchor-name: {mux_shift("l-o_sa", data_cells, data_cells)}; width: calc((var(--l-o_sw) + {WOFF}) * 1px); }} }}')
+               f' anchor-name: {mux_shift("l-o_sa", R.LAYOUT['str_size'], data_cells)}; width: calc((var(--l-o_sw) + {WOFF}) * 1px); }} }}')
     init = {f's-{n}-A': v for n, v in D.initial_lex(data_base).items() if n != 'pp'}
     init['s-nt-A'] = 0
     ch_html = []
@@ -216,7 +217,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append('#cc { ' + ' '.join(f'--{n}: {v};' for n, v in init.items()) + ' }')
     # ================= token chain
     css.append(lbl.group('Token chain: group sources', 'one source per group of 32 tokens animates their fields from the token registers'))
-    css.append(f'#tcr {{ contain: strict; position: relative; height: 0; --ntf: var(--s-nt-{fo}); }}')
+    css.append(f'#tcr {{ contain: strict; position: relative; height: 0; --ntf: var(--s-nt-{fo}); --sdf: var(--s-sdp-{fo}); }}')
     N.add('ntf', True)
     # one source element per group of G tokens (names alternate by group parity, so the previous group's last
     # token stays visible to the first level of the next group). It also passes on what the next level's
@@ -322,7 +323,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         css.append(f'@container style(--q-o_v{s}: 1) {{ .ov.k{s} {{ {body} }} }}')
     N.add('q-o_da-h', False)
     css.append(f'@container style(--q-o_dv: 1) {{ .ovd {{ display: block; --q-o_da-h: round(down, var(--q-o_da) / 32);'
-               f' anchor-name: {mux_shift("q-o_da", data_cells, 0, ishift)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
+               f' anchor-name: {mux_shift("q-o_da", data_cells + R.LAYOUT['str_size'], 0, lambda v: ishift if v < data_cells else 0)}; width: calc((var(--q-o_dw) + {WOFF}) * 1px); }} }}')
     css.append('.lp { display: none; height: 0; }')
     for k in range(NLP):
         css.append(f'@container style(--q-o_lv{k}: 1) {{ .lp{k} {{ display: block; anchor-name: {mux_lab(f"q-o_lj{k}", R.NL)};'
@@ -336,15 +337,18 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: var(--p-cp-{y}); --dpf: var(--p-dp-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
                f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
-               # the lib's string untag constant, staged for the first data cell
-               f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - data_base}; width: {R.STRTAG + WOFF}px; }}'
-               ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
+               # the string untag constant at data_base (the program never writes it)
+               f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c0; width: {R.STRTAG + WOFF}px; }}'
+               + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{data_cells + 1 + i}; width: {w + WOFF}px; }}' for i, w in enumerate(R.SEED))
+               # the string area's end, for the runtime's key lookups
+               + f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
+               + ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
                ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
-    for n in ('e', 'done', 'n', 'dpf'): N.add(n, True)
+    for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(R.SEED))) + '<b class="dn"></b><b class="di"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

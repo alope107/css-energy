@@ -4,7 +4,7 @@
 // literals (as NUL-terminated char arrays), array literals (static), a[i] read/write, + - * / %,
 // comparisons, && || ! (no short circuit), calls, console.log(number | "string").
 // Environment globals (set by whoever runs it): src (char array / address), srcLen, codeBase,
-// dataPtr, and the addresses of print and puts. Builtins: putc, peek, poke, alloc, exec, halt, net.
+// dataPtr, and the addresses of print and puts. Builtins: putc, peek, poke, alloc, exec, halt.
 //
 // Word = op * 8192 + imm.  Opcodes:
 var OP_NOP = 0; var OP_PUSHI = 1; var OP_LOADG = 2; var OP_STOREG = 3; var OP_LOADL = 4; var OP_STOREL = 5;
@@ -12,7 +12,7 @@ var OP_LOADI = 6; var OP_STOREI = 7; var OP_ADD = 8; var OP_SUB = 9; var OP_MUL 
 var OP_MOD = 12; var OP_LT = 13; var OP_GT = 14; var OP_LE = 15; var OP_GE = 16; var OP_EQ = 17; var OP_NE = 18;
 var OP_AND = 19; var OP_OR = 20; var OP_NOT = 21; var OP_NEG = 22; var OP_JMP = 23; var OP_JZ = 24;
 var OP_JNZ = 25; var OP_CALL = 26; var OP_ENTER = 27; var OP_RET = 28; var OP_POP = 29; var OP_DUP = 30;
-var OP_PUTC = 31; var OP_HALT = 32; var OP_JMPI = 33; var OP_SHL13 = 34; var OP_INCG = 35; var OP_INCL = 36; var OP_IDX = 37; var OP_IDXL = 38; var OP_PRINT = 39; var OP_NET = 54;
+var OP_PUTC = 31; var OP_HALT = 32; var OP_JMPI = 33; var OP_SHL13 = 34; var OP_INCG = 35; var OP_INCL = 36; var OP_IDX = 37; var OP_IDXL = 38; var OP_PRINT = 39;
 
 var src; var srcLen; var codeBase; var dataPtr; var printFn; var putsFn;
 
@@ -23,7 +23,7 @@ var pos = 0; var tok = 0; var tokVal = 0; var tokStart = 0; var tokLen = 0;
 // character classes: 1 alpha, 3 digit (odd = identifier char), 4 space
 var ctype = [0,0,0,0,0,0,0,0,0,4,4,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,3,3,3,3,3,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0];
 var tokHash = 0;
-var H_VAR = 1845; var H_IF = 3357; var H_ELSE = 3765; var H_WHILE = 289; var H_FOR = 3285; var H_RETURN = 8147; var H_FUNCTION = 4077; var H_PUTC = 4313; var H_PEEK = 4862; var H_POKE = 6461; var H_ALLOC = 3971; var H_EXEC = 6670; var H_HALT = 455; var H_CONSOLE = 4188; var H_PRINT = 1452; var H_PUTS = 4329; var H_PRN = 4793; var H_NET = 2474;
+var H_VAR = 1845; var H_IF = 3357; var H_ELSE = 3765; var H_WHILE = 289; var H_FOR = 3285; var H_RETURN = 8147; var H_FUNCTION = 4077; var H_PUTC = 4313; var H_PEEK = 4862; var H_POKE = 6461; var H_ALLOC = 3971; var H_EXEC = 6670; var H_HALT = 455; var H_CONSOLE = 4188; var H_PRINT = 1452; var H_PUTS = 4329; var H_PRN = 4793; var H_FP = 527; var H_OP = 806;
 
 function next() {
   var c = src[pos]; var t = ctype[c]; var d = 0;
@@ -69,9 +69,9 @@ function expectP(c) { if (!isP(c)) { fail(1000 + c); } next(); return 0; }
 function fail(code) { putc(69); putc(82); putc(82); putc(32); printNum(code); putc(32); printNum(pos); halt(); return 0; }
 
 // ---------------- symbols
-var MAXSYM = 128;
-var symStart = alloc(128); var symLen = alloc(128); var symKind = alloc(128); var symAddr = alloc(128);
-var symScope = alloc(128); var nsym = 0;
+var MAXSYM = 256;
+var symStart = alloc(256); var symLen = alloc(256); var symKind = alloc(256); var symAddr = alloc(256);
+var symScope = alloc(256); var nsym = 0;
 var K_GLOBAL = 1; var K_LOCAL = 2; var K_FUNC = 3;
 var curFunc = 0;      // 0 at top level, else 1
 var nlocals = 0;      // locals allocated in the current function
@@ -102,14 +102,14 @@ function patch(at, op, imm) { if (imm < 0) { imm = imm + 8192; } poke(codeBase +
 function here() { return codeBase + cp; }
 
 // forward references to functions: fixups by name, patched at the end
-var fixAt = alloc(96); var fixStart = alloc(96); var fixLen = alloc(96); var nfix = 0;
+var fixAt = alloc(512); var fixStart = alloc(512); var fixLen = alloc(512); var nfix = 0;
 function emitCall(sym) {
   if (symAddr[sym] >= 0) { emit(OP_CALL, symAddr[sym]); }
   else { emitFix(symStart[sym], symLen[sym]); }
   return 0;
 }
 function emitFix(start, len) {
-  if (nfix >= 96) { fail(11); }
+  if (nfix >= 512) { fail(11); }
   fixAt[nfix] = cp; fixStart[nfix] = start; fixLen[nfix] = len; nfix++; emit(OP_CALL, 0);
   return 0;
 }
@@ -150,12 +150,14 @@ function parsePrimary() {
   if (isP(40)) {
     if (h == H_PUTC) { if (identIs(start, n, "putc")) { next(); parseExpr(); expectP(41); emit(OP_PUTC, 0); emit(OP_PUSHI, 0); return 0; } }
     if (h == H_PRN) { if (identIs(start, n, "prn")) { next(); parseExpr(); expectP(41); emit(OP_PRINT, 0); emit(OP_PUSHI, 0); return 0; } }   // the machine's PRINT (no separator)
-    if (h == H_NET) { if (identIs(start, n, "net")) { next(); parseExpr(); expectP(41); emit(OP_NET, 0); return 0; } }   // the machine's NET (net/device.py)
     if (h == H_PEEK) { if (identIs(start, n, "peek")) { next(); parseExpr(); expectP(41); emit(OP_LOADI, 0); return 0; } }
     if (h == H_POKE) { if (identIs(start, n, "poke")) { next(); parseExpr(); expectP(44); parseExpr(); expectP(41); emit(OP_STOREI, 0); emit(OP_PUSHI, 0); return 0; } }
     if (h == H_ALLOC) { if (identIs(start, n, "alloc")) { next(); addr = dataPtr; dataPtr = dataPtr + tokVal; next(); expectP(41); emit(OP_PUSHI, addr); return 0; } }
     if (h == H_EXEC) { if (identIs(start, n, "exec")) { next(); parseExpr(); expectP(41); emit(OP_JMPI, 0); emit(OP_PUSHI, 0); return 0; } }
     if (h == H_HALT) { if (identIs(start, n, "halt")) { next(); expectP(41); emit(OP_HALT, 0); emit(OP_PUSHI, 0); return 0; } }
+    // __fp(): the word at fp (in a function: its caller's fp). __op(W, e, ...): the operands, then the instruction word W itself
+    if (h == H_FP) { if (identIs(start, n, "__fp")) { next(); expectP(41); emit(OP_LOADL, 0); return 0; } }
+    if (h == H_OP) { if (identIs(start, n, "__op")) { next(); addr = tokVal; next(); while (isP(44)) { next(); parseExpr(); } expectP(41); poke(codeBase + cp, addr); cp++; return 0; } }
   }
   if (h == H_CONSOLE) {                         // console.log(x) -> print or puts
     expectP(46); next();                        // .log
@@ -248,7 +250,9 @@ function parseAssignOrCall() {              // NAME = e | NAME[e] = e | NAME++ |
   }
   // otherwise an expression statement: rewind and parse as expression, drop the value
   pos = save; tok = saveTok; tokVal = saveVal; tokStart = start; tokLen = n;
-  parseExpr(); emit(OP_POP, 0); return 0;
+  parseExpr();
+  if (peek(codeBase + cp - 1) == OP_PUSHI * 8192) { cp = cp - 1; } else { emit(OP_POP, 0); }   // a builtin's dummy 0, dropped
+  return 0;
 }
 
 function parseBlock() { expectP(123); while (!isP(125)) { parseStatement(); } next(); return 0; }

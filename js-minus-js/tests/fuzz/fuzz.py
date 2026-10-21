@@ -1,4 +1,4 @@
-"""fuzz.py MODE [-n N] [-s SEED] [--l2] [--l4] [-v] — differential tests of the compiler against Node, without a browser.
+"""fuzz.py MODE [-n N] [-s SEED] [--l2] [--c1] [-v] — differential tests of the compiler against Node, without a browser.
 
 Modes (each program is checked against Node, which is the oracle, by the levels below):
   gen   random programs from progen.py (the whole language, typed so that only real bugs differ);
@@ -12,7 +12,8 @@ Levels:
   L1    cc_ref compiles and its 20-bit simulator runs; output compared with Node's. Also on the page's padded text
         (24 x 64, as ccpage5.padded_source) when the program fits the editor;
   L2    (--l2) the DSL, level by level, against cc_ref (state, tables, every code word, label and data word);
-  L4    (--l4) the font CPU's model (uarch4) runs the image; output compared with Node's.
+  C1    (--c1) the CSS CPU's model (machine/csssim.py) runs the image of the page's padded text; output compared
+        with Node's.
 A failure is written to build/fuzz/ as the program and Node's version, shrunk (lines removed while it still fails).
 Exit status 1 if anything failed.
 """
@@ -21,6 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(os.pat
 sys.path[:0] = [HERE] + [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback')]
 import cc_ref as R, progen
 from ccpage5 import padded_source
+sys.path.insert(0, os.path.join(ROOT, 'tests')); from par import pmap
 LIB = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 LIMIT_ERRS = {20, 21, 22, 23, 24, 25, 26, 61, 62, 68}          # the compiler's documented limits
 OUT = os.path.join(ROOT, 'build', 'fuzz')
@@ -53,12 +55,14 @@ def fits(src):
 NUM = re.compile(r'-?\d+')
 def outside(out):
     """Node printed something our machine cannot (README Limits): a non-integer, NaN, undefined, a number outside
-    20 bits or in the string-tag / object-pointer ranges, an object"""
-    if re.search(r'\d\.\d|NaN|Infinity|undefined|\[object|e\+', out): return True
+    20 bits or in the string / object / array value ranges"""
+    if re.search(r'\d\.\d|NaN|Infinity|undefined|e\+', out): return True
     for m in NUM.finditer(out):
         v = int(m.group())
-        if not -524288 <= v <= 524287 or -257792 <= v <= -257537 or -480384 <= v <= -474241: return True
+        if not -524288 <= v <= 524287 or any(lo <= v < hi for lo, hi in TAGGED): return True
     return False
+# values that are strings, objects or arrays on our machine (cc_ref): numbers there print as those
+TAGGED = [(R.STRV_LO, R.STRV_HI), (R.HEAP0 - R.OBJTAG, R.HEAP_HI - R.OBJTAG), (R.HEAP0 + R.ARRTAG, R.HEAP_HI + R.ARRTAG)]
 
 # ---------------- checks of one program
 class Res:
@@ -89,25 +93,31 @@ def check(name, src, nres, opts, res, expect_reject=False, mutated=False):
         perr, pout, plim = ours(padded_source(src.rstrip('\n'), 24, 64))
         if (perr, pout) != (0, out) and plim != 'steps': return f'L1 on the padded page text differs: err {perr} {plim or ""}\n{pout}'
         res.c['fits the page'] += 1
-    if opts.l4 and fits(src):
-        o4 = l4(src)
-        if o4 != nres['out']: return f'L4 output differs:\n{o4}'
+    if opts.c1 and fits(src):
+        oc = c1(src)
+        if oc != nres['out']: return f'C1 output differs:\n{oc}'
     res.c['ok'] += 1
     return None
+
+def check_all(opts, res, jobs):
+    """check() on each job (name, src, nres, kwargs) in worker processes (tests/par.py), adding their counts to res;
+    yields each job's failure description or None, in order"""
+    def one(j): r = Res(); return check(j[0], j[1], j[2], opts, r, **j[3]), r.c
+    for why, c in pmap(one, jobs): res.c.update(c); yield why
 
 dsl_check = None
 def load_l2():
     global dsl_check
-    os.environ['SPEC'] = '1'; sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    os.environ['SPEC'] = '1'
     import cmp_dsl; dsl_check = cmp_dsl.check
 
-def l4(src):
-    from uarch4 import Machine4
-    from uarch import ROM
+def c1(src):
+    import cssref, csssim
     c = R.Compiler(R.LAYOUT['data_base'], R.LAYOUT['code_base'], LIB); words, data = c.compile(padded_source(src.rstrip('\n'), 24, 64))
-    mem = R.image_mem(c, words, data, LIB['init'])
-    m = Machine4(dict(rom=LIB['rom'], ram=[mem.get(ROM + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0']), 16)
-    m.run(32); return ''.join(map(chr, m.out))
+    mem = R.image_mem(c, words, data, LIB['init']); rom = R.LAYOUT['rom_size']
+    s = csssim.Sim(cssref.from_image(dict(rom=LIB['rom'], romSize=rom, ram=[mem.get(rom + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0'])))
+    while not s.st['halt'] and s.passes < 200000: s.run_pass(32)
+    return ''.join(map(chr, s.st['out']))
 
 # ---------------- shrinking: drop lines (the same lines from both versions) while the failure stays
 def shrink(ol, nl, fails_with):
@@ -140,11 +150,11 @@ def mode_gen(opts, res):
     progs = []
     for k in (opts.k or range(opts.n)):
         seed = opts.seed * 100003 + k
-        o, n = progen.generate(seed, opts.size * random.Random(seed).uniform(0.3, 1.2))     # small ones fit the page (padded text, L4)
+        o, n = progen.generate(seed, opts.size * random.Random(seed).uniform(0.3, 1.2))     # small ones fit the page (padded text, C1)
         progs.append((seed, '\n'.join(o) + '\n', '\n'.join(n) + '\n'))
     nres = node([(n, progen.PRELUDE) for _, _, n in progs])
-    for (seed, o, n), nr in zip(progs, nres):
-        why = check(f'gen{seed}', o, nr, opts, res)
+    whys = check_all(opts, res, [(f'gen{seed}', o, nr, {}) for (seed, o, _), nr in zip(progs, nres)])
+    for (seed, o, n), why in zip(progs, whys):
         if why:
             def fails_with(ol, nl):
                 r2 = node([('\n'.join(nl) + '\n', progen.PRELUDE)])[0]
@@ -181,8 +191,8 @@ def suite_programs():
 def mode_fmt(opts, res):
     items = [(f'{name}.{v}', s) for name, src in suite_programs() for v, s in variants(src).items()]
     nres = node([(s, '') for _, s in items])
-    for (name, s), nr in zip(items, nres):
-        why = check(name, s, nr, opts, res, mutated=name.endswith('.tokenlines'))
+    whys = check_all(opts, res, [(name, s, nr, dict(mutated=name.endswith('.tokenlines'))) for (name, s), nr in zip(items, nres)])
+    for (name, s), why in zip(items, whys):
         if why:
             def fails_with(ol, nl):
                 t = '\n'.join(ol) + '\n'; r2 = node([(t, '')])[0]
@@ -210,8 +220,8 @@ def mode_mut(opts, res):
             else: ts[i] = r.choice(INS)
         items.append((f'mut{opts.seed}_{k}_{name}', ''.join(ts)))
     nres = node([(s, '') for _, s in items])
-    for (name, s), nr in zip(items, nres):
-        why = check(name, s, nr, opts, res, mutated=True)
+    whys = check_all(opts, res, [(name, s, nr, dict(mutated=True)) for (name, s), nr in zip(items, nres)])
+    for (name, s), why in zip(items, whys):
         if why and kind(why).startswith('L1 output differs') and not opts.strict:
             # a mutant can leave the language in ways no filter sees (a string compared with a number, + on a string in
             # a parameter): saved and listed for a look, not a failure (--strict makes it one)
@@ -249,7 +259,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(); ap.add_argument('mode', choices=['gen', 'fmt', 'mut', 'dump'])
     ap.add_argument('--dir', default=os.path.join(OUT, 'l3'))
     ap.add_argument('-n', type=int, default=200); ap.add_argument('-s', '--seed', type=int, default=1)
-    ap.add_argument('--size', type=float, default=1.0); ap.add_argument('--l2', action='store_true'); ap.add_argument('--l4', action='store_true')
+    ap.add_argument('--size', type=float, default=1.0); ap.add_argument('--l2', action='store_true'); ap.add_argument('--c1', action='store_true')
     ap.add_argument('--k', type=int, nargs='*', help='gen: only these program numbers'); ap.add_argument('--strict', action='store_true', help='mut: an output difference fails'); ap.add_argument('-v', action='store_true'); ap.add_argument('--noshrink', action='store_true')
     opts = ap.parse_args()
     if opts.l2: load_l2()

@@ -12,7 +12,7 @@ chats.
 2. **A calc()-computed registered `<integer>` crossing `var()` keeps 6 significant digits**: 1048575 serializes as
    `1.04858e+06`, reads back in `calc()` as 1048580, and a plain `--y: var(--x)` into another registered `<integer>`
    is invalid at computed-value time (initial value, silently). Literals keep all digits. So words crossing `var()`
-   are signed, |v| < 2^19 (`gen_fvm4.py`). *(measured 2026-10-14; probe: `var-6-digits`)*
+   are signed, |v| < 2^19 (`gen_css.py`). *(measured 2026-10-14; probe: `var-6-digits`)*
 3. **Registered integers are stored as floats.** The DSL keeps |value| < 2^24 (`dsl.py`).
 4. **Every registered property costs time on every animated element, used or not.** Temps share a pool of names
    (`ccpage5.py`); the page has 4,229 `@property` rules (2026-10-18).
@@ -65,6 +65,9 @@ chats.
     `:has()` invalidation over 10k elements.
 
 ## HarfBuzz and fonts
+
+25–33 are what the font CPU relied on (removed; its code last exists at commit `181cbb7`). The readback font
+(`mkfont2.py`) still relies on 31.
 
 25. **One Lookup can be referenced many times from the LookupList**, so one shaping runs S cycles. fontTools can't
     express it, hence `otl.py`.

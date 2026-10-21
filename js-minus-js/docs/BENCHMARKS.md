@@ -1,6 +1,7 @@
 # Benchmarks
 
-Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`.
+Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`. §1–§11 measured the font CPU,
+removed on 2026-10-20 (last at commit `181cbb7`); they stay as the baseline the CSS CPU (§12) is compared with.
 
 **Conventions.** Measured 2026-10-17 on the Ubuntu mini PC (Intel i5-12600H, no GPU), headless Chromium
 153.0.8010.12 launched by `tools/browser.js` (profile `fontcpu`), nothing else running unless noted; desktop Chrome
@@ -85,9 +86,10 @@ All halted with correct output. *(derived)* FizzBuzz:
 
 ### 4a. L3 suite
 
-`make l3`: one page; each program is written into the latch cells, Run pressed, Run → done anchor timed, every word
-checked against `cc_ref`. 104/104 pass (90 valid, 14 error programs). Valid: min 229 / median 380 / max 1,488 ms
-(`else_if_long`, 137 words); ms ≈ 189 + 7.6 × words (r = 0.90) *(derived)*. FizzBuzz 580 ms. Errors: 187–522 ms.
+`make l3 SHARDS=1` (one browser; `make l3` runs 6 at once): one page; each program is written into the latch cells,
+Run pressed, Run → done anchor timed, every word checked against `cc_ref`. 104/104 pass (90 valid, 14 error
+programs). Valid: min 229 / median 380 / max 1,488 ms (`else_if_long`, 137 words); ms ≈ 189 + 7.6 × words (r = 0.90)
+*(derived)*. FizzBuzz 580 ms. Errors: 187–522 ms.
 
 ### 4b. (removed)
 
@@ -142,7 +144,8 @@ An array literal's length word costs 16 steps once, when the ROM's startup copie
 
 ### 5b. The L5 suite
 
-`make l5`: acts as a user (Edit, retype, Run, poll every 100 ms). 101 of 101 ok (87 run to HALT, 14 errors); 11.4 min.
+`make l5 SHARDS=1` (one browser): acts as a user (Edit, retype, Run, poll every 100 ms). 101 of 101 ok (87 run to
+HALT, 14 errors); 11.4 min.
 
 - Compile, valid programs: 1,708 / 2,199 / 5,847 ms (min / median / max); ≈ 1,562 + 26.0 × words (r = 0.90).
 - Error detection: 1,662–2,502 ms, median 1,720.
@@ -236,33 +239,94 @@ Model (`tools/traps.py`), steps / shapings / misses: obj_basic 365 / 77 / 47; ob
   obj_func 18.0 s, obj_nested 24.1 s, obj_keys 24.4 s; `obj_gc_small` (500 objects through the 384-chunk heap) 216 s,
   output and step count exact.
 
-## 12. The network (2026-10-19)
+## 12. The CSS CPU (2026-10-19)
 
-`fetch` / `read` through the modem (ARCHITECTURE §3.6). Headless Chromium 153 with
-`--enable-blink-features=ResponsiveIframes`, page and gateway on one machine (`net/server.js`).
+`machine/gen_css.py`; the build-up, ablations and Blink's style costs are in `exp/csscpu/README.md`. Headless
+Chromium 153, mini PC.
 
-| Measure | Value |
-|---|---|
-| A word, the modem beside a trivial page (`net/probe/probe3.js`, harness as the CPU) | median 31–55 ms; the first after idle ~1 s (the idle reload is 1 s) |
-| 600 random bytes through `read()`, same probe | 609 words, 24.4 s, byte for byte |
-| `net_fetch.js` on the page, Run → HALT (`make l5-net`) | 15.2 s (FizzBuzz 11.1 s in the same run); 29 words |
-| A word on the page (`net/probe/pagenet.js`), modem out of process | ~0.5 s: median 416 ms between requests, ~3 frames; the page at 5–6 frames/s, the modem ~40 loads/s |
-| Same, modem in the page's process | 0.7–0.8 s per word; 11–13 frames/s but ~3 modem loads/s |
-| First version (in process, waiting passes still shaping) | 1.7 s per word (`net_fetch` 56.6 s) |
+**Editor page, FizzBuzz** (`machine/ui_seq.js`, one browser, the two pages alternately, three rounds each):
 
-What it costs programs that don't use it (FizzBuzz, `ab.js` interleaved, fresh browser per run, `ui_seq.js`):
-
-| Measure | Before (`4e2f35d`) | After | Ratio (median, IQR) |
+| Page | compiledMs | haltMs | run |
 |---|---|---|---|
-| A vs A (noise), Run → HALT, 4 rounds | 10.21 s | 10.16 s | 0.995 (0.984–0.997) |
-| Run → HALT, 6 rounds | 10.48 s | 10.71 s | 1.023 (1.004–1.038) |
-| Run → compiled, 6 rounds | 2,606 ms | 2,623 ms | 0.990 (0.985–1.007) |
-| Parser variants / rules; subtables per cycle | 330 / 198; 392 | 330 / 198; 392 | |
+| font CPU (`181cbb7`) | 2,678–2,771 | 10,453–10,581 | ~7.8 s |
+| CSS CPU (`make page`) | 2,431–2,492 | 3,876–3,951 | ~1.45 s |
 
-About 2% on the run, just past the noise: probably the `.np` / `.nvp` reader level now around every read port (the
-modem itself is `display: none` until the first `NET`). Not chased; moving the reader inside `.vp3` is untried.
+*(derived)* HALT 2.7× sooner, run ~5.4× faster.
 
-A word costs about 3 page frames: one to run the CPU to the next `NET` (a `putc` between two `read()`s is a second
-trap), then the modem's round trip (2 loads) plus the height reaching the page, which lands in a frame already
-running. Waiting passes no longer shape (`--go`): 63 shapings for `net_fetch` instead of 152. Faster needs more bytes
-per word (HISTORY open leads).
+**CPU-only pages**, load → HALT (`exp/csscpu/halt.js`, `POLL=30` for both, run alternately, two runs each):
+
+| Program | Steps | CSS CPU | Font CPU | Speed-up |
+|---|---|---|---|---|
+| FizzBuzz | 462 | 985–1,033 ms | 5,714–5,753 ms | 5.7× |
+| `gcd.js` | 122 | 420–436 ms | 1,677–1,691 ms | 3.9× |
+| `primes.js` | 1,774 | 1,732–1,779 ms | 12,787–13,022 ms | 7.3× |
+| `array_sort.js` | 647 | 1,004–1,049 ms | 4,689–4,788 ms | 4.6× |
+| `str_table.js` | 165 | 656–695 ms | 2,682–2,779 ms | 4.0× |
+| `bool_print.js` | 46 | 392–400 ms | 1,097–1,127 ms | 2.8× |
+
+**Long programs**, load → HALT (one run each, one browser; CSS pages by `tests/csscpu_pages.js`, font pages by
+`exp/csscpu/halt.js`):
+
+| Program | Steps | CSS CPU | Font CPU | Speed-up |
+|---|---|---|---|---|
+| `fib.js` | 8,353 | 8.6 s | 81.7 s | 9.6× |
+| `deep_recursion.js` | 8,445 | 56.1 s | 196.5 s | 3.5× |
+| `obj_gc_small.js` | 12,432 | 40.1 s | 152.0 s | 3.8× |
+| `obj_gc.js` | 40,443 | 287.2 s | not halted at 900 s (30,042 steps) | > 3.1× |
+
+(`halt.js` compares the console with the raw output, so it reports fib's wrapped console as wrong on the font page;
+its step count was exact.)
+
+- Correctness: L5 164/164 and L5-input 14/14 on the CSS CPU page; C2 111/111 (every suite program under 1,500 steps,
+  objects included) and the nine longer ones; C1 120/120.
+- Misses dominate long runs: deep recursion and heap allocation evict dirty lines, so the prefetch (clean victims
+  only) never helps and each pass fills one block (`deep_recursion`: 1,413 of 1,415 passes end on a miss). The font
+  CPU, with a 16-line cache and a trap per miss, is slower still.
+
+
+## 13. Strings and arrays (2026-10-20)
+
+Heap strings and growable arrays (ARCHITECTURE §3.6): ROM 6,144 words (a jsc-compiled runtime and hand-written
+routines), new instructions PUSHS, IDXA, STOREX, DYN, `JZ` / `JNZ` / `NOT` reading a string's length, `ENTER` zeroing
+its locals. Main is `22295b9`, built in its own worktree; headless Chromium 153, mini PC, nothing else running, the
+two pages alternately.
+
+**Editor page, FizzBuzz** (`machine/ui_seq.js`, three rounds):
+
+| Page | compiledMs | haltMs |
+|---|---|---|
+| main | 2,512–2,555 | 4,022–4,075 |
+| strings and arrays | 2,437–2,467 | 3,607–3,625 |
+
+*(derived)* HALT ~10% sooner: no startup copy (`__init` is gone: globals start at 0, `data_base`'s constant is an
+overlay), no heap setup, 415 steps against 462.
+
+**CPU-only pages** (`machine/halttime.js`, `POLL=30`, two runs each; run = first step → HALT):
+
+| Program | Steps main / now | Run main | Run now |
+|---|---|---|---|
+| FizzBuzz | 462 / 415 | 678–683 ms | 610–620 ms |
+| `gcd.js` | 122 / 91 | 104–111 ms | 42–46 ms |
+| `primes.js` | 1,774 / 1,695 | 1,564 ms | 1,605–1,619 ms |
+| `str_table.js` | 165 / 118 | 354–358 ms | 285–290 ms |
+| `obj_basic.js` | 360 / 232 | 1,456 ms | 968–1,058 ms |
+| `array_sort.js` | 647 / 545 | 659–695 ms | 794–813 ms |
+| `str_concat.js` | 82 / 93 | 318–372 ms | 414–423 ms |
+
+- `array_sort` is slower: its array is a heap block (header and elements: more blocks to fill than the old static
+  array next to the globals), and `a[i]` is `LOADG a; i; IDXA` (the arr class) where the old static arrays had one IDX.
+  DYN in a class of its own took it from ~960 to ~890 ms (A/B, three runs each).
+- `str_concat`: `console.log("n = " + n)` prints its pieces through a ROM routine (`pnK`) instead of a PRINT each, so
+  that `"a" + b == c` inside `console.log` is right.
+- Load (navigation → first step) is the same as main's: the ROM has no leaf elements (a data read below RAM gives 0).
+  With leaves for its ~6,000 words, each frame cost ~8 ms more: the editor's readback (one column a frame) compiled
+  ~0.5 s later and FizzBuzz halted at ~4.3 s.
+- The ROM fetch table is split into tiers of 1,024 words (a rule each): `str_concat` with the runtime's ~4,000 words in
+  one table ran 1,174–1,212 ms, in tiers 1,024–1,052 ms (before the other changes above).
+
+**Long string and array programs** (C2 pages, three browsers at once, so not timings to compare): `str_build` 7,586
+steps 18.6 s, `str_methods` 13,633 steps 27.0 s, `arr_methods` 38,653 steps 83.2 s, `arr_nested` 15,937 steps 37.5 s.
+String building and the methods run in ROM (jsc's code, ~1.5 ms a step).
+
+**Compiler size** (`tools/vsz.py`): 338 variants, 70,478 temps (main: 355, 71,815); on the page 317 variants in 185
+rules. `popops` emitting one word per operator (not one per case) took it from 104,872 temps.

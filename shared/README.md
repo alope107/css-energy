@@ -71,6 +71,36 @@ since it last passed:
   load). Make compares mtimes, not content: any touch re-runs a check, and a copy that keeps an old mtime (`cp -p`,
   `tar`) can hide a change. Each worktree has its own logs.
 
+### Parallel runs
+
+A check whose verdict can't depend on timing spreads its work over the machine; a check that measures in real time
+runs alone.
+
+| Check | What runs at once | Knob (default) |
+|---|---|---|
+| js-minus-js `l1`, `l2`, `l4`, `fuzz-quick`, `fuzz` | one program per worker process (`js-minus-js/tests/par.py`) | `JOBS` (every CPU) |
+| js-minus-js `l3`, `fuzz-l3`, `l5`, `l5-smoke`, `l5-input` | browsers taking the next program (or editor case) off one queue | `SHARDS` (6) |
+| paint `test-selftest` | the four hosts, each with its own server, profile and browser | `SHARDS` (4) |
+
+- **Same verdicts.** Lines print in the serial order. On the mini PC every output matched the serial run's line for
+  line, timings aside: `fuzz` on all its programs, `l3` at 2–8 browsers, `l5` at 4, 6 and 8, `l5-input` and the
+  self-test at 4. These verdicts compare words, console text or lights, so load can slow them, not change them; a
+  fixed wait too short under load would show as a failure, and none did at 8 browsers. Each `l5` browser runs the
+  initial FizzBuzz first (checked `SHARDS` times), so every program is typed after a Run, as in the serial order.
+  `l5-input`'s highlight case counts frames, so it runs after the others, alone. The self-test's correct host runs
+  beside the faulty ones: its all-PASS shows the waits were long enough under that load.
+- **The harnesses alone default to 1** (`node tests/suite_css.js …`, `machine/ui_seq.js`): their ms columns are
+  timings, and timing wants an idle machine (BENCHMARKS.md). `make l5 SHARDS=1` runs a check serially, under another
+  config hash.
+- **Serial, and why.** css-physics's checks run the physics in real time: three field pages at once ran at ~27 fps
+  instead of ~36, grabtest's samples came ~155 ms apart instead of ~136 and the shake kicked bodies less, and three
+  grabtest browsers caught its planted bug (BOOLQ=1 without the `_MULTI` guard) in 2 of 60 presses against 4 of 30
+  serially. So `smoke.sh` runs one check at a time, and nothing else should run beside it: no other browser job, no
+  fuzz. paint `e2e` is one chain of dependent steps and `goaway` waits for the network to go quiet; `engine-costs`
+  times the style engine.
+- `fuzz`'s parallel speed-up is capped by the DSL's parser variants: each worker builds the ones its programs reach
+  (~37 ms each, up to a few hundred), which a cache shared from the parent didn't beat (pickling them is slower).
+
 ## Labels in generated CSS
 
 Every generated stylesheet is labelled, so a reader can find their way around a 2–30 MB page. The generators write
@@ -101,7 +131,7 @@ python3 shared/py/csslabel.py --check js-minus-js/build/*.xhtml  # exit 1 if a s
 - Labels cost only bytes (a few KB per page, a few hundred per paint cell document); the CSS parser drops comments.
 
 **What gets a label**
-- Every rule sits under a section, hand-written CSS a generator inlines too (`ui3d.css`, `gen_fvm4.py`'s `static`).
+- Every rule sits under a section, hand-written CSS a generator inlines too (`ui3d.css`, `gen_css.py`'s `static`).
   Each generator calls `csslabel.check()` on what it writes and stops the build if a rule comes before the first
   section.
 - A section per subsystem a reader would look for, named as the project's `docs/ARCHITECTURE.md` names it (state
