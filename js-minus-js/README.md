@@ -21,6 +21,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
   their common methods, and `console.log` prints arrays and objects as Node does.
 - On the page, FizzBuzz 1–15 compiles in about 2.45 s from Run (including the 1.2 s readback sweep), runs in about
   1.2 s, and halts about 3.6 s after Run. On CPU-only pages FizzBuzz halts ~0.95 s after load.
+- `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)): a byte
+  costs about 0.3 s on the page, and nothing else runs any slower within the noise.
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start

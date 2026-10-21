@@ -330,3 +330,41 @@ String building and the methods run in ROM (jsc's code, ~1.5 ms a step).
 
 **Compiler size** (`tools/vsz.py`): 338 variants, 70,478 temps (main: 355, 71,815); on the page 317 variants in 185
 rules. `popops` emitting one word per operator (not one per case) took it from 104,872 temps.
+
+## 14. The network (2026-10-21, branch `css-fetch`)
+
+`fetch` / `read` through the fragment-scroll modem (ARCHITECTURE §3.8), headless Chromium 153, no flags; page and gateway
+(`net/server.js`) on one machine. The machine was shared with other sessions' browser jobs: absolute times swing ~2×
+between runs, so the comparisons below are interleaved.
+
+| Measure | Value |
+|---|---|
+| A word beside a trivial page (`net/probe/probe3.js`: the harness as the CPU) | median 20–23 ms; the first after idle ~1 s (the idle reload) |
+| 600 random bytes through it | 609 words, 14.9 s, byte for byte |
+| `net_fetch.js` on the page, compiled → HALT (`net/probe/pagenet.js`, 5 runs) | 9.5–10.9 s; 29 words |
+| A word on the page, median gap between the gateway's requests (5 runs) | 283–330 ms (the font CPU's modem: 0.5–0.8 s); page 25–29 frames/s, modem 5.4–6.2 loads/s |
+| `fetch` with no gateway (`file:`): Run → `-1` | 23 s (the 20 s timeout, then `fetch` gives up) |
+
+Parallel modems (`net/probe/probe7.js`; the page's CPU drives its own modem through a `read()` loop, the harness drives
+the extra ones the same way):
+
+| Modems | Words/s per modem | Words/s in all | Page frames/s |
+|---|---|---|---|
+| 1 | 4.33–4.41 | 4.33–4.41 | 34.6–35.4 |
+| 2 | 3.99–4.16 | 7.98–8.24 | 32.0–32.9 |
+| 4 | 3.57 | 14.29 | 28.3 |
+
+A word costs about 8 page frames whichever modem carries it, so throughput is bytes per word × modems (HISTORY: open
+leads).
+
+What it costs programs that don't use the network (FizzBuzz; `ab.js`, fresh browser per run; `main` at `212175a`):
+
+| Measure | A vs A | `main` vs this branch |
+|---|---|---|
+| CPU-only page, load → HALT (`halttime.js`, POLL=30) | 0.996 (0.984–1.005), 8 rounds | 1.110 (0.986–1.142), 12 rounds; then 0.976 (0.945–1.094), 16 rounds |
+| Editor page, Run → HALT (`ui_seq.js`) | 1.032 (1.026–1.094), 4 rounds | 1.065 (0.924–1.136), 8 rounds |
+| Editor page, Run → compiled | | 1.014 (0.850–1.082), 6 rounds |
+| Parser variants; temps (`tools/vsz.py`) | | 338 → 338; 70,478 → 70,499 |
+
+No difference shows above this machine's noise; the second CPU-only run had another session's benchmark beside it.
+To settle a few percent, re-measure on a quiet machine.
