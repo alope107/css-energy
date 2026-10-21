@@ -115,7 +115,7 @@ def c1(src):
     import cssref, csssim
     c = R.Compiler(R.LAYOUT['data_base'], R.LAYOUT['code_base'], LIB); words, data = c.compile(padded_source(src.rstrip('\n'), 24, 64))
     mem = R.image_mem(c, words, data, LIB['init']); rom = R.LAYOUT['rom_size']
-    s = csssim.Sim(cssref.from_image(dict(rom=LIB['rom'], romSize=rom, ram=[mem.get(rom + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0'])))
+    s = csssim.Sim(cssref.from_image(dict(rom=LIB['rom'], romSize=rom, ram=[mem.get(rom + i, 0) for i in range(R.LAYOUT['ram_size'])], sp0=R.LAYOUT['sp0'], entries=LIB['entries'])))
     while not s.st['halt'] and s.passes < 200000: s.run_pass(32)
     return ''.join(map(chr, s.st['out']))
 

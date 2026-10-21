@@ -14,6 +14,7 @@ steady to ±0.5% (10.79 s median, 8 runs); a CPU-only page's load → HALT to ±
 
 | What | Current | Section |
 |---|---|---|
+| Register machine against the stack machine (2026-10-21) | samples on CPU-only pages 1.07–2.75× faster (compute 1.9–2.8×, FizzBuzz output-bound 1.07×), 3.0× fewer suite steps; compile time median ×1.03 | §14 |
 | FizzBuzz 1–15 on the page | 476 steps, 103 shapings; compiled 2.51–2.58 s after Run, HALT at 10.75–10.90 s (run ≈ 8.3 s). Before: 1,329 steps, 193 shapings, HALT 18.2–18.3 s | §5a |
 | FizzBuzz on the CPU alone (no editor, no compile chain) | HALT 6.25–6.48 s after load | §5c |
 | Suite shapings (model) | 4,147 (1,309 MISS, 1,104 EXT, ~230 PRINT); before: 5,967 | §1 |
@@ -330,3 +331,69 @@ String building and the methods run in ROM (jsc's code, ~1.5 ms a step).
 
 **Compiler size** (`tools/vsz.py`): 338 variants, 70,478 temps (main: 355, 71,815); on the page 317 variants in 185
 rules. `popops` emitting one word per operator (not one per case) took it from 104,872 temps.
+
+## 14. The register machine (2026-10-21)
+
+The stack machine (main, `212175a`, built in its own worktree) against the register machine (ARCHITECTURE §1–§3);
+headless Chromium 153, the mini PC, the two pages alternately, nothing else running unless noted.
+
+**Steps and passes** (`cc_ref`, each machine's `csssim.py`, K = 32; the 135 suite programs):
+
+| | Stack machine | Register machine |
+|---|---|---|
+| steps | 829,910 | 277,403 |
+| passes | 44,678 | 31,301 |
+| passes ending on a miss / full (K) / output | 24,841 / 19,014 / 688 | 28,168 / 2,753 / 245 |
+
+The register machine runs 3.0× fewer steps (a three-address instruction does what took two to four stack
+instructions; strings, arrays and objects have instructions of their own) in 30% fewer passes, and now most passes end
+on a cache miss. Over the ten samples the misses fall on code 588, heap 533, stack 381, strings 129, globals 71, the
+runtime's cells 55: user code shares the 128-word cache with the data.
+
+**CPU-only pages** (`machine/halttime.js`, `POLL=30`, three interleaved rounds; run = first step → HALT, median;
+rounds within ±3%). The samples' pages; "no cat" is the register page built with `NOCAT=1` (a string's `+` traps to
+the ROM's `cat`, as before the cat class; the runtime's `join` and `repeat` too):
+
+| Sample | Steps stack / register | Stack machine | Register machine | Speed-up | No cat |
+|---|---|---|---|---|---|
+| primes | 31,636 / 6,585 | 54.8 s | 19.9 s | 2.75× | 30.4 s |
+| sort | 10,398 / 1,728 | 17.3 s | 6.7 s | 2.57× | 12.3 s |
+| stars | 11,347 / 1,082 | 18.4 s | 7.6 s | 2.41× | 11.5 s |
+| fib | 56,772 / 23,252 | 50.3 s | 23.0 s | 2.18× | |
+| caesar | 9,818 / 2,056 | 21.5 s | 10.3 s | 2.10× | 13.4 s |
+| collatz | 8,088 / 3,673 | 7.2 s | 3.8 s | 1.91× | 3.8 s |
+| tree | 10,665 / 2,273 | 22.1 s | 14.3 s | 1.55× | 18.8 s |
+| bank | 3,633 / 1,060 | 7.8 s | 5.4 s | 1.43× | 5.7 s |
+| hanoi | 627 / 273 | 1.29 s | 1.15 s | 1.12× | 1.59 s |
+| fizzbuzz | 791 / 324 | 1.03 s | 0.96 s | 1.07× | |
+
+- Compute (fib, collatz, primes' sieve) gains 1.9–2.8×; string building gains another 1.3–1.8× from the cat class.
+- FizzBuzz is output-bound: a pass writes at most one console cell per RAM bank (4 cells), and 24 of its 40 passes
+  end there. Packing several output instructions into a pass's free banks (9 columns, so rows start one bank apart)
+  took it from 51 to 40 passes in the model (the suite's 1–15 from 29 to 22). Eight console banks would take it to ~33
+  (model) for 32 more registers, which every pass of every program pays for: not done.
+- The collector's powers of two from a table instead of a loop: suite steps 600,813 → 467,215 (−22%, before the
+  cat class), mostly in the GC tests.
+
+**Compile time** (`tests/suite_css.js`, the L3 page, each program compiled after a different one, as on the real page;
+main's page and ours alternately, one browser; per-program ratio register / stack):
+
+| Version | Median ratio (IQR) | Total over 135 programs |
+|---|---|---|
+| full language, first (96,580 temps), rounds 1–2 | 1.080 (1.000–1.166), 1.133 (1.065–1.230) | 96.0 vs 106.1 s, 95.4 vs 111.2 s |
+| `popcap`, 4-iteration `print_call` (93,130 temps) | 1.134 (1.049–1.232) | 93.1 vs 108.0 s |
+| single-use temps inlined, one word temp per record (79,100 temps) | 1.029 (0.979–1.098) | 93.5 vs 98.2 s |
+
+- A compile is two frames, ~90% style recalc (a trace of `arr_methods`: 1,976 of 2,166 ms). Recompiling the same
+  program again hides most of the difference (Blink's caches: 1,723 vs 1,556 ms), so compare cold compiles.
+- What predicts it is the CSS text a token level evaluates more than its declaration count: weighted by how often
+  the suite's tokens hit each variant, the stack compiler evaluates 349 temps and 40.7K characters per token, the first
+  register compiler 451 and 73.4K, the current one 394 and 53.0K. A fit over the suite (first register version):
+  stack ms ≈ 199 + 4.6 × tokens + 0.7 × words, register ≈ 201 + 4.4 × tokens + 2.4 × words.
+- The biggest cuts: the 7 instruction slots' word mux had each record's `op × 8192 + A` written out in every slot
+  (31% of a `)` level's text: now one temp per record); inlining single-use temps (`dsl.Ctx.inline`, −15% temps).
+  Tried and dropped: the operand stack's top in its own variable (no smaller), shared one-hot slot flags (−1.5% text,
+  +7% declarations).
+
+**Compiler size** (`tools/vsz.py`): 338 variants, 79,100 temps (stack machine 338, 70,489); on the page 317 variants
+in 185 rules; the suite_css page 12.9 MB (10.3).

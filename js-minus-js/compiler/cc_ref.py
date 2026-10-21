@@ -682,7 +682,9 @@ class Compiler:
                 self.lcon = int(tok == ('ID', KW['console']))
             self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 125, 7, 8))) + int(tok == ('ID', KW['return']))
             cp0 = self.cp; self.token(*tok)
-            if self.cp - cp0 > EMAX: self.fail(61)       # (instructions)
+            if self.cp - cp0 > EMAX:                     # (instructions; the page's EMAX slots don't hold the rest)
+                self.fail(61)
+                for k in range(cp0 + EMAX, self.cp): self.code.pop(k, None)
 
     def newline(self):
         """a newline (also in a comment): after return a T_NL at once; after another token that can end a statement, pending"""
@@ -909,7 +911,7 @@ class Compiler:
             if isP(41) and self.top_op()[0] == M_INTR:
                 self.osp -= 1; self.intr_end(self.opv[self.osp]); self.mode = S_OPER; return
             if isP(41) and self.top_op()[0] == M_METH:       # x.m() (or x.m(a, ) with a trailing comma)
-                self.osp -= 1; return self.meth_end(self.opv[self.osp], 0)
+                self.osp -= 1; self.mode = S_OPER; return self.meth_end(self.opv[self.osp], 0)
             if isP(93) and self.top_op()[0] == M_ARR:         # [] (or [a, ] with a trailing comma)
                 self.osp -= 1; return self.arr_end(self.opv[self.osp], 0)
             if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:
