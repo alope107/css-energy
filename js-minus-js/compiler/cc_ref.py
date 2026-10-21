@@ -111,7 +111,7 @@ def isK(o): return 768 <= o < 1024
 KBIG, TMP, CND = 1024, 1025, 1028
 CNDOPS = CMPS + (NOT,)
 
-INTR = ['peek', 'poke', '__fp', 'prn', 'halt']
+INTR = ['peek', 'poke', '__fp', 'prn', 'halt', '__dadd']     # (__dadd: the dynamic + instruction: a string built in CSS)
 def h1h2(s):
     a = b = 0
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
@@ -562,15 +562,16 @@ class Compiler:
     def intr_end(self, tv):
         """an intrinsic's ')': its operands from d0 + 1 (d0: the slot of its value)"""
         n, d0 = tv % 8, tv // 8; a = [self.src(i) for i in range(d0 + 1, self.nd)]
-        want = (1, 2, 0, 1, 0)[n]
+        want = (1, 2, 0, 1, 0, 2)[n]
         if len(a) != want: return self.fail(77)
         name = INTR[n]
         if name == 'peek': self.emit('LDI', self.tmp(d0), a[0], (K(0), 0))
         elif name == 'poke': self.emit('STI', a[0], (K(0), 0), a[1])
         elif name == '__fp': self.emit('GETFP', self.tmp(d0))
         elif name == 'prn': self.emit('PRINT', (0, 0), a[0])
+        elif name == '__dadd': self.emit('DADD', self.tmp(d0), a[0], a[1])
         else: self.emit('HALT')
-        self.nd = d0; self.push_od(TMP if name in ('peek', '__fp') else K(0), 0)
+        self.nd = d0; self.push_od(TMP if name in ('peek', '__fp', '__dadd') else K(0), 0)
 
     def print_end(self):
         """console.log(...) ended. Its PRINTs printed every argument, so it leaves no value: it must be a statement of its own

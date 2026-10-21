@@ -1,5 +1,5 @@
 """suite_ui.py [maxsteps [limit]] — level 5 setup: for every suite test the machine can finish quickly, write the expected
-console (Node's output laid out on the page's 8 x 16 console grid, as the PUTC service does) to build/ui_exp, and
+console (Node's output laid out on the page's console grid, layout.json's cols x rows, as the output instructions do) to build/ui_exp, and
 print the ui_seq.js argument list. The user's program from the bug report is first."""
 import sys, os, json, glob
 import os, sys; ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path[:0] = [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback')]  # repo root
@@ -7,7 +7,7 @@ import cc_ref as R
 HERE = os.path.dirname(os.path.abspath(__file__))
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 EXP = os.path.join(ROOT, 'build', 'ui_exp')
-COLS, ROWS = 8, 16
+COLS, ROWS = R.LAYOUT['cols'], R.LAYOUT['rows']
 def grid(out):
     g = [' '] * (COLS * ROWS); p = 0
     for ch in out:

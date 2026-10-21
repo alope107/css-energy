@@ -23,7 +23,7 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
   .frame {{ background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }}
   .frame:focus-within {{ border-color: var(--accent); }}
   .ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
-  {lbl.group('Sample picker', 'radio buttons beside #run (#pk<i>) pick the editor that shows; each keeps its own edits')}
+  {lbl.group('Sample picker', 'radio buttons beside #run (#pk0, #pk1, ...) pick the editor that shows; each keeps its own edits')}
   .pkr {{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }}
   .picker {{ display: flex; flex-wrap: wrap; gap: .4rem; }}
   .picker label {{ cursor: pointer; user-select: none; font: 500 .8rem/1 system-ui, sans-serif; padding: .38rem .72rem; border-radius: 999px;

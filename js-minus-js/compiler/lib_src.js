@@ -1,6 +1,7 @@
 // The register machine's runtime library, compiled into ROM by compiler/cc_ref.py (rom mode: rtlib.py fills in the upper-case
 // constants between double underscores). The dialect: functions, locals, while / for / if, peek(a) / poke(a, v) and p[i] on raw
-// memory, putc, prn(v) (PRINT), halt(), __fp() (this frame's fp). No globals and no string literals (they would land in the
+// memory, putc, prn(v) (PRINT), halt(), __fp() (this frame's fp), __dadd(a, b) (the + of a string in CSS: the cat class; a
+// full heap traps to dadd, whose cat collects). No globals and no string literals (they would land in the
 // program's data area). Locals live in frames, which the collector scans; a raw address must not be held across anything that
 // allocates.
 //
@@ -290,9 +291,9 @@ function join(x, sep) {
   if (sep == 0) { sep = newstr(1); poke(sep + __STRTAG__, 44); }
   r = newstr(0);
   while (i < n) {
-    if (i > 0) { r = cat(r, sep, 0); }
+    if (i > 0) { r = __dadd(r, sep); }
     a = x - __ARRTAG__; e = peek(peek(a) + i);
-    r = cat(r, e, 0); i++;
+    r = __dadd(r, e); i++;
   }
   return r;
 }
@@ -410,7 +411,7 @@ function substr1(x, a) { return substring(x, a, peek(x - 1)); }
 // a.concat(b): an array of a's elements then b's (or b itself), or the strings joined
 function concat(x, y) {
   var n = 0; var m = 1; var r = 0; var p = 0; var i = 0;
-  if (isarr(x) == 0) { return cat(x, y, 0); }
+  if (isarr(x) == 0) { return __dadd(x, y); }
   n = peek(x - 1);
   if (isarr(y)) { m = peek(y - 1); }
   r = newarr(n + m, n + m); p = peek(r);
@@ -478,7 +479,7 @@ function endswith(s, t) {
 function repeat(s, n) {
   var r = newstr(0);
   if (isstr(s) == 0) { return r; }
-  while (n > 0) { r = cat(r, s, 0); n = n - 1; }
+  while (n > 0) { r = __dadd(r, s); n = n - 1; }
   return r;
 }
 // s.split(sep): the pieces between the occurrences of sep (sep "": the characters) as an array

@@ -1,14 +1,16 @@
 # JavaScript, compiled and run by a stylesheet
 
 `dist/js_in_css.xhtml` is one static XHTML page, and no script runs on it. You type a JavaScript program into its
-editor and press Run. The program then goes through four stages:
+editor (or pick one of ten samples) and press Run. The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
-2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates bytecode.
-3. **CSS runs it.** Each layout pass executes up to 32 instructions as a chain of nested elements, out of a cache of
-   RAM held in custom properties. (Until 2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text; its code last
-   exists at commit `181cbb7`.)
-4. **The output appears.** It shows in an 8 × 16 console.
+2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
+3. **CSS runs it.** Each layout pass executes up to 32 instructions of a register machine as a chain of nested
+   elements, out of a cache of RAM held in custom properties. Strings, arrays and objects have instructions of their
+   own: `+` builds a string in CSS, `a[i]` and `o.x` read and write in place, a trap calls the runtime library in ROM
+   for the rest. (Until 2026-10-21 it was a stack machine, last at commit `212175a`; until 2026-10-19 a GSUB "CPU"
+   font ran it while Chrome shaped text, last at `181cbb7`.)
+4. **The output appears.** It shows in a 9 × 16 console.
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
@@ -55,6 +57,9 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
   anywhere, and bodies fall through until `break`.
 - **Values**: integers, `true` / `false`, `null`, strings, arrays and objects. `0` and `""` are false, as are `false`
   and `null`.
+- **Samples**: the chips above the editor switch between your program and ten samples (`samples/`: FizzBuzz, a
+  sieve, recursive Fibonacci, a diamond of stars, Hanoi, insertion sort and binary search, a binary search tree,
+  a Caesar cipher, Collatz, a bank account with `switch`). Each editor keeps its edits.
 - **Strings**:
   - Literals in `"..."` or `'...'` with escapes `\n \t \r \\ \" \'`.
   - Built anywhere with `+` and `+=`: `"n = " + n`, `s += c`, `1 + 2 + "x"` (`"3x"`). A number joins as its decimal
@@ -100,42 +105,48 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
 
 ### How values work
 
-- A string is a tagged pointer (its first character's address minus 2^18), an array its header's address plus 2^18,
-  an object its chunk's address minus 15 · 2^15: the machine tells them from numbers at run time by range. A string
-  is `[length][characters][0]`, in the program's string area (literals and property names, interned: equal literals
-  are one string) or in the heap.
-- `a[i]` is one instruction (IDXA) for an array inside its length; `a[i] = v` likewise (STOREX). Anything else (an
+- The machine has three-address instructions (`ADD x, a, b`) on globals, a function's frame slots and small
+  constants; the compiler keeps an expression's values in the frame's temps past the locals, with no allocator.
+- A string is a tagged pointer (its first character's address minus 2^18), an array its pointer word's address plus
+  2^18, an object its chunk's address minus 15 · 2^15: the machine tells them from numbers at run time by range. A
+  string is `[length][characters][0]`, in the program's string area (literals and property names, interned: equal
+  literals are one string) or in the heap.
+- `a[i]` is one instruction (GETX) for an array inside its length; `a[i] = v` likewise (SETX). Anything else (an
   object, a string, an index past the end) goes to a routine in ROM. `+` and the comparisons are one instruction
-  (DYN) that computes numbers and hands strings, arrays and objects to ROM, so arithmetic on values of unknown type
-  costs nothing extra; where the compiler knows both are numbers it emits the plain instruction.
+  (DADD, DLT, …) that computes numbers; `+` with a string builds the new string in CSS, one word per execution; arrays,
+  objects and string comparisons go to ROM. Where the compiler knows both are numbers it emits the plain instruction.
 - The compiler tracks types statically (boolean, string, number, unknown; from comparisons and `!`, literals and
   arithmetic, a variable's last assignment, a function's returns, a method's result) so that booleans print as
   `true` / `false`: `console.log(1 < 2)` prints `true`. Only 0 / 1 depend on the static type; strings, arrays,
   objects and numbers are told apart at run time.
 - Each `console.log` argument is one PRINT instruction, which writes up to 4 console cells per execution and repeats
-  until it is done. A `+` chain with a string in it isn't built: its pieces stay on the stack and a ROM routine prints
-  them in turn (or, if a comparison, `&&` / `||` or `?:` follows, joins them into one string first).
+  until it is done; several share a layout pass when their cells fall in different RAM banks (the console's rows start
+  one bank apart). A `+` chain with a string in it isn't built: its pieces (up to 4) are printed in turn (or, if a
+  comparison, `&&` / `||` or `?:` follows, joined into one string first).
 
 ### How objects work
 
-An object is an 8-word heap chunk (three key/value pairs and an overflow link). `o.x` is two instructions whose key is
-the string's interned address; allocation is a pointer bump; a copying collector in ROM runs when the heap is full and
-costs time per live object. A key built at run time is first matched by its characters against the program's strings
+An object is an 8-word heap chunk (three key/value pairs and an overflow link). `o.x` is one instruction (GETP) whose
+key is the string's interned address, probing one pair per execution; allocation is a pointer bump (NEW); a copying
+collector in ROM runs when the heap is full. A key built at run time is first matched by its characters against the program's strings
 (then the object's own keys), so it finds the same property as the literal. Details:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.6.
 
 ### Limits
 
-- **Program size**: 24 lines of 64 columns, 400 tokens, 511 code words; 768 words of string data (the length + 2 for
-  every string literal and every `.name` in the program) and 255 words of globals; 64 labels (a `switch` takes 2, plus
-  2 per `case` and 1 for a `default`), 32 variables in scope, 16 functions; 32 distinct strings and property names (one
-  interning table; a method's name doesn't count when `(` follows it directly); blocks and expressions nest 8 deep (a
-  long `else if` chain counts as one level).
-- **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has about 8,000 words, so recursion can go a few
-  thousand calls deep. The heap holds 3,072 words of live data: about 384 objects of up to 3 pairs, or strings
-  (length + 3 words) and arrays (4 words + 1 per element), each rounded up to 8; more halts with `out of memory`.
-- **Numbers**: 20-bit integers (−524288 … 524287) that wrap; `/` truncates. Numbers in −255744 … −239745 are strings to
-  the machine, in −475264 … −469121 objects and in 278400 … 284543 arrays: they print as those, and the collector may
+- **Program size**: 24 lines of 64 columns, 400 tokens, 1,023 code words (511 instructions); 768 words of string data
+  (the length + 2 for every string literal and every `.name` in the program) and 255 words of globals; 64 labels (a
+  `switch` takes 2, plus 2 per `case` and 1 for a `default`), 32 variables in scope, 16 functions; 32 distinct strings
+  and property names (one interning table; a method's name doesn't count when `(` follows it directly); blocks and
+  expressions nest 8 deep (a long `else if` chain counts as one level), with at most 10 values pending in an expression
+  and 24 counting the arguments of the calls under way; at most 4 unary operators in a row before a binary one
+  (`!!!!x * y` is fine, `!!!!!x * y` isn't); an array literal of at most 127 elements.
+- **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has about 7,500 words, so recursion can go a few
+  hundred to a thousand calls deep (a call takes its frame: the parameters, the locals and the expression's temps).
+  The heap holds 3,072 words of live data: about 384 objects of up to 3 pairs, or strings (length + 3 words) and arrays
+  (4 words + 1 per element), each rounded up to 8; more halts with `out of memory`.
+- **Numbers**: 20-bit integers (−524288 … 524287) that wrap; `/` truncates. Numbers in −255744 … −239761 are strings to
+  the machine, in −475280 … −469137 objects and in 278384 … 284527 arrays: they print as those, and the collector may
   change them. Number keys must lie in −262143 … 262143.
 - **Booleans** are 0 / 1 at run time: they print as `1` / `0` when passed as a parameter, returned by a function called
   before its definition, or stored in an array or object (`[1 < 2]` prints `[ 1 ]`). A value of `c ? a : b`, `a && b`
@@ -162,7 +173,7 @@ costs time per live object. A key built at run time is first matched by its char
   `Object.keys`; a property assignment is a statement, not an expression.
 - **Not supported**: `undefined`, `typeof`, nested functions or closures, template literals, expression statements
   starting with a literal or `(`.
-- **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
+- **Console**: 9 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
 
 ### Error codes
 
@@ -176,13 +187,13 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 9–10 | name expected after `var` / `++` | 47 | unbalanced `(` |
 | 20 | too many labels (64) | 48 | unexpected token after an operand |
 | 21 | blocks nested too deeply (8) | | |
-| 22 | expression too deep (8) | 50–53 | statement or `for` header ended in the wrong place |
+| 22 | expression too deep (8 operators, 10 values, 24 with pending arguments, 5 unary operators in a row, 127 array elements) | 50–53 | statement or `for` header ended in the wrong place |
 | 23 | too many functions (16) | 54–55 | unexpected `}` |
 | 24 | too many variables (32) | 56 | `break` / `continue` outside a loop |
 | 25 | too many globals (255) | 57 | `return` outside a function |
 | 26 | too much string data | 60 | undefined function |
-| 30, 38–39 | malformed `console.log`, or used as a value | 61 | a statement emits too much code at once |
-| 32–37 | malformed `if` / `while` / `for` / `function` header | 62 | program too long (more than 511 words) |
+| 30, 38–39 | malformed `console.log`, or used as a value | 61 | a token emits too much code at once (7 instructions) |
+| 32–37 | malformed `if` / `while` / `for` / `function` header | 62 | program too long (more than 1,023 words) |
 | 40 | missing `}` at end of input | 77 | a method called with a number of arguments it doesn't take |
 | 64 | assignment to a `const` | 65 | `const` without `=` |
 | 66 | `while` expected after a `do` body | 67 | `:` without `?` |

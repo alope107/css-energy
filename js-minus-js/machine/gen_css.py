@@ -26,7 +26,7 @@ code_base, fp at sp0.
 Cost model (measured: exp/csscpu/README.md): a container-query test ~2 us, a declaration ~1.3 us, an if() branch ~0.3 us, per
 element. A rule evaluates every declaration in it whether the instruction needs it or not, so a class reads only what its
 instructions read; .c commits a whole cache set (16 rules) rather than a word (128).
-Env: K (levels, default 32), ISSUE (passes per frame, default 2), UI=1: the editor page (XHTML; the image's RAM is
+Env: K (levels, default 32), ISSUE (passes per frame, default 2), NOCAT=1 (a string's + in the ROM), UI=1: the editor page (XHTML; the image's RAM is
 empty: the compile chain's overlays hold the program): Run starts the scan, the compiler, then the CPU;
 Edit zeroes the registers and RAM. BENCH=1 PROG=prog.js (STALL=1): the chain alone, for exp/csscpu/chainbench.js."""
 import sys, os, json, re, html as _h
@@ -185,9 +185,10 @@ DYNE = {o: BINE['ADD' if o[1] == 'A' else o[1:]] for o in DYNOPS}
 bothstr = f"calc({isstr_v(xB)} * {isstr_v(yC)})"
 # A string's + (no array or object, pst 0) goes to the cat class: pst CAT0 from the next execution (dcat)
 CATT, CAT0 = 1024, 2048
+NOCAT = os.environ.get('NOCAT') == '1'     # (measurement only: a string's + traps to the ROM's cat, as before the cat class)
 anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)}))"
 DYN_PRE = (OPND + [f"--aA: {oaddr('var(--A)')};", f"--dslow: {by_op({'DEQ': bothstr, 'DNE': bothstr}, f'min(1, calc({isref_v(xB)} + {isref_v(yC)}))')};",
-                   f"--dcat: calc({opin('DADD', 'DADDR')} * (1 - min(1, var(--pst))) * var(--dslow) * (1 - {anyao}));"] +
+                   f"--dcat: calc({opin('DADD', 'DADDR')} * (1 - min(1, var(--pst))) * var(--dslow) * (1 - {anyao}) * {0 if NOCAT else 1});"] +
            trap("min(1, calc(var(--pst) + var(--dslow) * (1 - var(--dcat))))", "var(--pst)", 2, "var(--aA)", f"if(style(--pst: 0): {yC}; else: {xB})",
                 f"calc((var(--A) - 256) * 8192 + {pc} + 2)"))
 DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
@@ -211,20 +212,20 @@ CAT_PRE = OPND + [f"--aA: {oaddr('var(--A)')};",
     f"--cbx: calc({eq('var(--op)', OP['DADDL'])} * {bool01(xB)});", f"--cby: calc({eq('var(--op)', OP['DADDR'])} * {bool01(yC)});",
     f"--cla: if(style(--csx: 1): var(--vz); style(--cbx: 1): calc(5 - {xB}); else: {ndig(xB)});",
     f"--clb: if(style(--csy: 1): var(--ve); style(--cby: 1): calc(5 - {yC}); else: {ndig(yC)});",
-    "--cn: calc(var(--cla) + var(--clb));", "--cnw: calc(round(down, (var(--cn) + 10) / 8) * 8);",
+    "--ctn: calc(var(--cla) + var(--clb));", "--cnw: calc(round(down, (var(--ctn) + 10) / 8) * 8);",
     f"--cfull: clamp(0, var(--vk) + var(--cnw) - var(--vj) - {HS}, 1);",
     f"--ck: calc(var(--pst) - {CAT0});", f"--cbase: calc({HEAP0} + var(--vk) - var(--cnw));",
     # the byte: i = k - 3 of X, or i - la of Y
     "--ci: calc(var(--ck) - 3);", "--cfx: clamp(0, var(--cla) - var(--ci), 1);", "--cj: calc(var(--ci) - (1 - var(--cfx)) * var(--cla));",
-    f"--cv: if(style(--cfx: 1): {xB}; else: {yC});", "--cvs: if(style(--cfx: 1): var(--csx); else: var(--csy));",
+    f"--cvv: if(style(--cfx: 1): {xB}; else: {yC});", "--cvs: if(style(--cfx: 1): var(--csx); else: var(--csy));",
     "--cvb: if(style(--cfx: 1): var(--cbx); else: var(--cby));",
-    f"--cbyte: if(style(--cvs: 1): var(--vs); style(--cvb: 1): {boolch('var(--cv)', 'var(--cj)')}; else: {numch('var(--cv)', 'var(--cj)')});",
-    f"--cin: calc(clamp(0, var(--ck) - 2, 1) * clamp(0, var(--cn) + 3 - var(--ck), 1));"] + \
+    f"--cbyte: if(style(--cvs: 1): var(--vs); style(--cvb: 1): {boolch('var(--cvv)', 'var(--cj)')}; else: {numch('var(--cvv)', 'var(--cj)')});",
+    f"--cin: calc(clamp(0, var(--ck) - 2, 1) * clamp(0, var(--ctn) + 3 - var(--ck), 1));"] + \
     trap(f"calc(clamp(0, {CAT0} - var(--pst), 1) + {eq('var(--pst)', CAT0)} * var(--cfull))", f"calc(clamp(0, {CAT0} - var(--pst), 1) * (var(--pst) - {CATT}))",
          2, "var(--aA)", f"if(style(--ts: 0): {yC}; else: {xB})", f"calc((var(--A) - 256) * 8192 + {pc} + 2)") + [
-    "--clast: calc((1 - var(--tr)) * " + eq('var(--ck)', 'var(--cn) + 4') + ");",
+    "--clast: calc((1 - var(--tr)) * " + eq('var(--ck)', 'var(--ctn) + 4') + ");",
     f"--caddr: if(style(--tr: 1): var(--taddr); style(--ck: 0): {HP}; style(--clast: 1): var(--aA); else: calc(var(--cbase) + var(--ck) - 1));",
-    f"--cval: if(style(--tr: 1): var(--tval); style(--ck: 0): calc(var(--vk) + var(--cnw)); style(--ck: 1): calc(-2 - var(--cnw)); style(--ck: 2): var(--cn);"
+    f"--cval: if(style(--tr: 1): var(--tval); style(--ck: 0): calc(var(--vk) + var(--cnw)); style(--ck: 1): calc(-2 - var(--cnw)); style(--ck: 2): var(--ctn);"
     f" style(--clast: 1): calc(var(--cbase) + {2 - STRTAG}); style(--cin: 1): var(--cbyte); else: 0);"]
 CAT_NX = {'pc': f"if(style(--clast: 1): calc({pc} + 2); style(--tlast: 1): {by_op({'DADD': ENT['dadd'], 'DADDL': ENT['daddl']}, ENT['daddr'])}; else: {pc})",
           'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + var(--clast) + var(--tlast))",
@@ -232,7 +233,7 @@ CAT_NX = {'pc': f"if(style(--clast: 1): calc({pc} + 2); style(--tlast: 1): {by_o
 CAT_CLASS = dict(ops=[], pre=CAT_PRE,
                  reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"),
                         ("z", f"mod({xB} + {STRTAG - 1}, 32768)", "var(--csx)"), ("e", f"mod({yC} + {STRTAG - 1}, 32768)", "var(--csy)"),
-                        ("k", HP, "1"), ("s", f"mod(var(--cv) + {STRTAG} + var(--cj), 32768)", "calc(var(--cin) * var(--cvs) * (1 - var(--tr)))")],
+                        ("k", HP, "1"), ("s", f"mod(var(--cvv) + {STRTAG} + var(--cj), 32768)", "calc(var(--cin) * var(--cvs) * (1 - var(--tr)))")],
                  pair={'k': 'j'}, write=("var(--caddr)", "var(--cval)", None, "1"), nx=CAT_NX,
                  deps={'z': [('x', None)], 'e': [('y', None)], 's': [('x', None), ('y', None), ('z', None)]})
 # GETX / SETX: X the array (B / A), Y the index (C / B); z its length and h its ptr (the words before and at its value's address,
@@ -320,7 +321,8 @@ CLASSES = {
                 write=(by_op({'LDI': "var(--aA)"}, f"mod(var(--zA) + {xB}, 32768)"), by_op({'LDI': "var(--vz)"}, yC), None, "1"),
                 nx={'pc': f"calc({pc} + 2)"}, deps={'z': [('x', ['LDI']), ('y', ['LDI'])]}),
     'dyn': dict(ops=DYNOPS, pre=DYN_PRE, reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)")],
-                write=("if(style(--tr: 1): var(--taddr); else: var(--aA))", f"if(style(--tr: 1): var(--tval); else: {by_op({o: DYNE[o] for o in DYNOPS[:-1]}, DYNE[DYNOPS[-1]])})", None, "1"),
+                write=("if(style(--tr: 1): var(--taddr); else: var(--aA))", f"if(style(--tr: 1): var(--tval); else: {by_op({o: DYNE[o] for o in DYNOPS[:-1]}, DYNE[DYNOPS[-1]])})", None,
+                       "calc(1 - var(--dcat))"),                 # (the hand-off to the cat class writes nothing)
                 nx=DYN_NX),
     'arr': dict(ops=['GETX', 'SETX'], pre=ARR_PRE,
                 reads=[("x", by_op({'GETX': "var(--aB)"}, "var(--aA)"), by_op({'GETX': "calc(1 - var(--kB))"}, "calc(1 - var(--kA))")),
@@ -477,8 +479,8 @@ P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "
      "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pf", "pcut", "pn0", "pblk", "pfr0", "pfr1", "pfr2", "pfr3", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
      "wval2", "vh", "vj"]
 # the new classes' scratch (.x only)
-XNEW = ["kA", "aA", "zA", "dslow", "dcat", "csx", "csy", "cbx", "cby", "cla", "clb", "cn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
-        "cv", "cvs", "cvb", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
+XNEW = ["kA", "aA", "zA", "dslow", "dcat", "csx", "csy", "cbx", "cby", "cla", "clb", "ctn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
+        "cvv", "cvs", "cvb", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
         "oroom", "oq", "ohit", "oend", "onext", "oc", "V", "oaddr", "oval", "oen", "w2", "odone", "ojump"]
 P += XNEW
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
