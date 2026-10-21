@@ -25,7 +25,7 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
   .ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
   {lbl.group('Sample picker', 'radio buttons beside #run (#pk0, #pk1, ...) pick the editor that shows; each keeps its own edits')}
   .pkr {{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }}
-  .picker {{ display: flex; flex-wrap: wrap; gap: .4rem; }}
+  .picker {{ display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 .7rem; }}
   .picker label {{ cursor: pointer; user-select: none; font: 500 .8rem/1 system-ui, sans-serif; padding: .38rem .72rem; border-radius: 999px;
     border: 1px solid var(--rule); background: var(--sheet); color: var(--muted); transition: background .15s, color .15s, border-color .15s; }}
   .picker label::before {{ content: attr(data-icon); margin-right: .35em; }}

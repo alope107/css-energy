@@ -14,7 +14,7 @@ steady to ±0.5% (10.79 s median, 8 runs); a CPU-only page's load → HALT to ±
 
 | What | Current | Section |
 |---|---|---|
-| Register machine against the stack machine (2026-10-21) | samples on CPU-only pages 1.07–2.75× faster (compute 1.9–2.8×, FizzBuzz output-bound 1.07×), 3.0× fewer suite steps; compile time median ×1.03 | §14 |
+| Register machine against the stack machine (2026-10-21) | samples on CPU-only pages 1.07–2.75× faster (compute 1.9–2.8×, FizzBuzz output-bound 1.07×), 3.0× fewer suite steps; compile time median ×1.03; FizzBuzz on the page compiled as fast, HALT 3.1 s (main 3.4 s) | §14 |
 | FizzBuzz 1–15 on the page | 476 steps, 103 shapings; compiled 2.51–2.58 s after Run, HALT at 10.75–10.90 s (run ≈ 8.3 s). Before: 1,329 steps, 193 shapings, HALT 18.2–18.3 s | §5a |
 | FizzBuzz on the CPU alone (no editor, no compile chain) | HALT 6.25–6.48 s after load | §5c |
 | Suite shapings (model) | 4,147 (1,309 MISS, 1,104 EXT, ~230 PRINT); before: 5,967 | §1 |
@@ -397,3 +397,17 @@ main's page and ours alternately, one browser; per-program ratio register / stac
 
 **Compiler size** (`tools/vsz.py`): 338 variants, 79,100 temps (stack machine 338, 70,489); on the page 317 variants
 in 185 rules; the suite_css page 12.9 MB (10.3).
+
+**The editor page, FizzBuzz 1–15** (`machine/ui_seq.js`, the initial program; main's page and ours alternately, three
+rounds):
+
+| Page | compiledMs | haltMs |
+|---|---|---|
+| stack machine (main) | 2,275–2,342 | 3,330–3,412 |
+| register machine | 2,282–2,361 | 3,092–3,153 |
+
+- Compiled as fast, HALT ~7% sooner: the run after compiling is ~0.80 s against ~1.06 s (148 steps against 415).
+- The sample picker first made the compile ~1.7 s slower (4,081–4,430 ms): the per-line checks became one `:has()`
+  per editor and line on `#app`, each a search of its ~10,000 elements. On the editors' section with child combinators
+  (`.pane:not(:has(> .frame > .ed<i> > div:nth-of-type(k))) ~ .probes …`) they cost less than main's 24 on `#app`
+  (without the picker, compiled 2,426–2,475 ms, HALT 3,240–3,357).

@@ -586,7 +586,10 @@ if UI:
     SAMPLES = [('fizzbuzz', 'FizzBuzz', '\U0001F41D'), ('primes', 'primes', '\U0001F9EE'), ('fib', 'Fibonacci', '\U0001F41A'),
                ('stars', 'stars', '\u2728'), ('hanoi', 'Hanoi', '\U0001F5FC'), ('sort', 'sort', '\U0001F4CA'), ('tree', 'tree', '\U0001F333'),
                ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6')]
+    if os.environ.get('NOPICK') == '1': SAMPLES = []     # (measurement: the page without the picker)
     SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
+    # (an editor's initial text starts at its line 1, so UIL - 1 lines of it are read)
+    assert all(len(t.rstrip('\n').split('\n')) <= UIL - 1 and max(map(len, t.split('\n'))) <= UIP for t in SRC), 'a sample longer than the editor reads'
     EDS = 1 + len(SAMPLES)
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
@@ -722,12 +725,13 @@ else:
              f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "
              f"stylesheet, runs over those characters: a lexer on a chain of one element per character, then a parser on a chain of one element "
              f"per token, each parser rule picked by a container query. Every instruction word it emits is an element named after its RAM cell. Then "
-             f"the CPU, also a stylesheet, runs the program: each layout pass executes up to {K} instructions as a chain of nested elements, out of a "
-             f"cache of RAM held in custom properties. Output appears in the console on the left.</p>"
+             f"the CPU, also a stylesheet, runs the program: each layout pass executes up to {K} instructions of a register machine as a chain of "
+             f"nested elements, out of a cache of RAM held in custom properties. Output appears in the console on the left.</p>"
              f"<p>The language is a small JavaScript subset: <code>var</code>, <code>function</code>, <code>if</code>/<code>else</code>, "
              f"<code>while</code>, <code>for</code>, <code>switch</code>, <code>return</code>, integer arithmetic, strings, arrays, objects, "
              f"<code>console.log(x)</code> and <code>putc(c)</code>. Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
-             f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine.</p>")
+             f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine. The chips above the "
+             f"editor switch to a sample program; each keeps your edits.</p>")
     page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
 <meta charset="utf-8"/>

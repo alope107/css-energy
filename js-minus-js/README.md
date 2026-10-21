@@ -14,15 +14,17 @@ editor (or pick one of ten samples) and press Run. The program then goes through
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-20).**
+**Status (2026-10-21).**
 
-- Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, plus
-  differential tests that check thousands of generated, reformatted and mutated programs against Node (`make fuzz`).
-  The CPU's checks: C1 (its model, every program) and C2 (a CPU-only page per program, 111 under 1,500 steps).
-- Strings and arrays are values: strings are built anywhere and compared by their characters, arrays grow, both have
-  their common methods, and `console.log` prints arrays and objects as Node does.
-- On the page, FizzBuzz 1–15 compiles in about 2.45 s from Run (including the 1.2 s readback sweep), runs in about
-  1.2 s, and halts about 3.6 s after Run. On CPU-only pages FizzBuzz halts ~0.95 s after load.
+- Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, the ten
+  samples through the compiler in Chrome and on the page, plus differential tests that check thousands of generated,
+  reformatted and mutated programs against Node (`make fuzz`). The CPU's checks: C1 (its model, every program) and C2
+  (a CPU-only page per program, 118 under 1,500 steps).
+- The machine is a register machine since 2026-10-21. Against the stack machine it replaced, programs take 2.2–4.8×
+  fewer steps and run 1.1–2.8× faster on CPU-only pages (compute-bound ones 1.9–2.8×; FizzBuzz is bound by the
+  console's 4 cells per pass), with compile time within ~3% (BENCHMARKS §14).
+- On the page, FizzBuzz 1–15 compiles in about 2.3 s from Run (including the 1.2 s readback sweep) and halts about
+  3.1 s after Run.
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start

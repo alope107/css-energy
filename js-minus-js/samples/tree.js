@@ -7,8 +7,7 @@ function insert(t, k) {
 }
 function walk(t, out) {
   if (t === null) return out;
-  walk(t.l, out);
-  out.push(t.k);
+  walk(t.l, out); out.push(t.k);
   return walk(t.r, out);
 }
 function depth(t) {

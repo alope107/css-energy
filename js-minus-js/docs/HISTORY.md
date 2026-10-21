@@ -105,6 +105,7 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 50 | `pow2` by a loop in the collector's bitmap | 22% of the suite's steps (`mapbuild` 14% more) | a 16-word table of powers of two |
 | 51 | One output instruction per pass, 8 columns | every line starts in bank 0: one short line per pass | a mask of the banks written, 9 columns |
 | 52 | The runtime's `join` and `repeat` calling `cat` | the ROM copy loop and allocation per piece (stars: 5,205 steps) | `__dadd`, the cat class (1,082) |
+| 53 | The picker's per-line checks as `:has()` on `#app`, per editor | 264 searches of ~10,000 elements: compile +1.7 s | `:has(> .frame > …)` on the editors' section |
 
 ## Open leads (untried)
 

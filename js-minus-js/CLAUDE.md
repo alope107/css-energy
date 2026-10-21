@@ -30,6 +30,7 @@ make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
+node tests/picker.js build/js_in_css.xhtml [sample...]   # the sample picker on the page (default: three quick ones)
 make dist            # copy the built page to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
@@ -62,7 +63,7 @@ machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compile
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
            picker.js (the sample picker on the page)
-samples/   the picker's programs (each fits the editor and the 9-column console; output = Node's)
+samples/   the picker's programs (at most 23 lines: an editor's initial text starts at its line 1; output = Node's, 9 columns)
 tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 ```
 

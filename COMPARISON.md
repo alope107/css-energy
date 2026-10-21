@@ -1,8 +1,8 @@
 # css-physics, js-minus-js and paint: techniques compared
 
 css-physics runs a rigid-body solver as registered custom properties gated by `@container` queries. js-minus-js
-compiles JavaScript with CSS and runs the bytecode in CSS too: a chain of instruction levels per layout pass (until
-2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text). paint stores state
+compiles JavaScript with CSS and runs it in CSS too, as a register machine's code: a chain of instruction levels per
+layout pass (a stack machine until 2026-10-21; until 2026-10-19 a GSUB "CPU" font ran it while Chrome shaped text). paint stores state
 in Chrome's compression-dictionary store. Numbers are from each project's `docs/BENCHMARKS.md`.
 
 ## What css-physics and js-minus-js share

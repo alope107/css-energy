@@ -134,12 +134,14 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
         g.append(f'.ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}')
     for k in range(L):
         g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); }}')
+    # (:has() on the editors' section with child combinators: on #app it searched ~10,000 elements, per rule and editor,
+    # and the picker's eleven editors made a compile ~1.7 s slower)
     for e in range(EDS):
-        app = f'#pk{e}:checked ~ #app' if EDS > 1 else '#app'
+        pane = f'#pk{e}:checked ~ #app > .pane' if EDS > 1 else '#app > .pane'
         for k in range(1, L):
-            g.append(f'{app}:not(:has(.ed{e} > div:nth-of-type({k}))) .probe:nth-child({k + 1}) {{ display: none; }}')
-        g.append(f'{app}:has(.ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
-        g.append(f'{app}:has(.ed{e} div div) .nested {{ display: block; }}')
+            g.append(f'{pane}:not(:has(> .frame > .ed{e} > div:nth-of-type({k}))) ~ .probes .probe:nth-child({k + 1}) {{ display: none; }}')
+        g.append(f'{pane}:has(> .frame > .ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
+        g.append(f'{pane}:has(> .frame > .ed{e} div div) .nested {{ display: block; }}')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1
