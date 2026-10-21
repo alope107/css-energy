@@ -77,11 +77,13 @@ regs += [("rLm", 256, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n}
         [(f"rLp{j}", M20, M20 // 2, f"var(--Lp{j})") for j in range(4)]
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
-# NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the passes it has waited (go
-# passes only, so a frame settles); NWAIT passes without an answer give -1 (no gateway: a file: URL, a static server)
+# NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the passes this request has
+# waited (go passes only, so a frame settles; a new request starts again from 0: consecutive words always differ, by the
+# sequence bit, even when a read() loop's next NET stalls in the pass the last one completed); NWAIT passes without an
+# answer give -1 (no gateway: a file: URL, a static server)
 NWAIT = 2400
 regs += [("rreq", 16384, 0, "var(--req)"),
-         ("rnwt", NWAIT + 1, 0, f"calc(var(--go) * min(1, var(--req)) * min({NWAIT}, var(--rnwt) + 1) + (1 - var(--go)) * var(--rnwt))")]
+         ("rnwt", NWAIT + 1, 0, f"calc(var(--go) * min(1, var(--req)) * {eq('var(--req)', 'var(--rreq)')} * min({NWAIT}, var(--rnwt) + 1) + (1 - var(--go)) * var(--rnwt))")]
 regs += WREGS
 WNAMES = [r[0] for r in WREGS]
 
