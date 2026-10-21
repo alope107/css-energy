@@ -12,6 +12,9 @@ Changes from the original:
     :has()), which makes the editor read-only: one full sweep (--rbsr counts frames since Run), then it stops and raises
     --rbrd, which shows the compiler. Edit lowers it again. While the user edits, the editor's font axis stays at 0
     (scanning reshapes the text every frame, which made a selection's highlight jump) and the registers are frozen.
+  - several editors (.ed: #ed, the page's program, then the sample programs), one shown at a time by the picker's radio
+    buttons (#pk<i>, after #run): a hidden editor is display: none, so the line anchors are the shown one's, and the
+    per-line checks (:has) are made per editor, under its radio button.
 XHTML-safe output.
 """
 import base64, html, subprocess, os, re
@@ -33,7 +36,7 @@ def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 REGS = ['tp', 'sc', 'sr', 'rd']
 
-def css(L, P, GS, SWEEPS=1, DWELL=1):
+def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
     NG = P // GS; GSW = GS * 10
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
@@ -86,12 +89,12 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
   --rbdet: calc(var(--rbrun) * clamp(0, var(--rbsr) - {SWEEPS * DWELL} * var(--rbR) - 7, 1));    /* a few frames after the compiler took the text */
 }}
 #run:checked ~ #app {{ --rbrun: 1; }}
-#run:checked ~ #app #ed {{ -webkit-user-modify: read-only; opacity: .75; }}
+#run:checked ~ #app .ed {{ -webkit-user-modify: read-only; opacity: .75; }}
 .rbreg {{ position: absolute; left: 0; top: 0; width: 1px; height: 4096px; overflow: hidden; visibility: hidden; }}
 .rbreg > div {{ display: block; width: 1px; }} .rbreg > .rbsp {{ height: calc(var(--rbin) * 1px); }} .rbreg > .rbsub {{ height: 1px; }} .rbreg > .rbpad {{ height: 4096px; }}
 .width-reader {{ position: absolute; left: 0; bottom: 100%; width: 1px; height: anchor-size(--rbed width, 0px);
   view-timeline: --rbedw block; view-timeline-inset: -10000px 100%; visibility: hidden; pointer-events: none; }}
-#ed {{
+.ed {{
   anchor-name: --rbed; font: 16px/24px "AsciiProbe", monospace;
   font-kerning: normal; font-feature-settings: normal; letter-spacing: 0; word-spacing: 0;
   /* nowrap, not pre: where newlines are preserved, Chrome pastes plain text and inserts Shift+Enter as '\n' inside one
@@ -104,13 +107,13 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
    and pasting such lines nests them inside the line at the caret. Pasted rich text (p, b, span, ...) shows inline and
    unstyled; a div nested in a line (Chrome makes one on Enter in a line typed straight into the empty editor, or when
    lines are pasted into an empty line) shows inline too, so the line looks the way the scan reads it (.nested says so). */
-#ed :not(div, br) {{ all: unset; display: inline; }}
-#ed div div {{ display: inline; unicode-bidi: normal; }}   /* a div isolates (UA style): its own shaping run, unread */
+.ed :not(div, br) {{ all: unset; display: inline; }}
+.ed div div {{ display: inline; unicode-bidi: normal; }}   /* a div isolates (UA style): its own shaping run, unread */
 /* a <br> in a line would start a second row that the scan doesn't read (the line's sentinel is on its last row): Chrome's
    placeholder in an empty line made it two rows tall and put everything below one row off, Shift+Enter inserts one,
    and so does a nest. The sentinel gives an empty line its height. */
-#ed div br {{ display: none; }}
-#ed::before, #ed > div::after {{ content: "\\2058"; }}
+.ed div br {{ display: none; }}
+.ed::before, .ed > div::after {{ content: "\\2058"; }}
 .rbout {{ anchor-name: --rbout; height: 0; visibility: hidden; }}
 .probe {{ position: absolute; top: calc(anchor(--rbout top) + var(--rbk) * 24px); left: anchor(--rbout left);
   width: calc({P} * 10px); container-type: size; visibility: hidden; }}
@@ -126,19 +129,21 @@ def css(L, P, GS, SWEEPS=1, DWELL=1):
 .row i::before {{ content: counter(rbch, rbascii); }}
 """)
     g.append(lbl.group('Line probes: one per editor line', 'each line\'s end is an anchor; its probe is as tall as the line is long'))
-    g.append('#ed::before { anchor-name: --rbs0; }')
+    g.append('.ed::before { anchor-name: --rbs0; }')
     for k in range(1, L):
-        g.append(f'#ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}')
+        g.append(f'.ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}')
     for k in range(L):
         g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); }}')
-    for k in range(1, L):
-        g.append(f'#app:not(:has(#ed > div:nth-of-type({k}))) .probe:nth-child({k + 1}) {{ display: none; }}')
-    g.append(f'#app:has(#ed > div:nth-of-type({L})) .limit {{ display: block; }}')
-    g.append('#app:has(#ed div div) .nested { display: block; }')
+    for e in range(EDS):
+        app = f'#pk{e}:checked ~ #app' if EDS > 1 else '#app'
+        for k in range(1, L):
+            g.append(f'{app}:not(:has(.ed{e} > div:nth-of-type({k}))) .probe:nth-child({k + 1}) {{ display: none; }}')
+        g.append(f'{app}:has(.ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
+        g.append(f'{app}:has(.ed{e} div div) .nested {{ display: block; }}')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1
-        g.append(f'@container rbscan style(--rbscan: {k}) {{ #ed {{ font-variation-settings: "SCAN" {k}; }} .row > b:nth-child({G}) {{ --rbgj: {j}; }} .scanpos {{ --rbcol: {k}; }} }}')
+        g.append(f'@container rbscan style(--rbscan: {k}) {{ .ed {{ font-variation-settings: "SCAN" {k}; }} .row > b:nth-child({G}) {{ --rbgj: {j}; }} .scanpos {{ --rbcol: {k}; }} }}')
     g.append('@property --rbcol { syntax: "<integer>"; inherits: false; initial-value: 0; }')
     g.append('.scanpos { counter-reset: rbcol var(--rbcol); } .scanpos::before { content: "reading column " counter(rbcol); }'
              ' @container rbscan style(--rbscan: 0) { .scanpos { visibility: hidden; } }')

@@ -157,6 +157,11 @@ def prec(code):
     return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, AND: 3, OR: 2, M_TELSE: 1,
             NOT: 8, NEG: 8}.get(code, 0)
 
+# popops pops at most popcap(minprec) operators: between markers the binary operators' precedences increase upwards (one per
+# class from minprec to 7, M_TELSE at 1), and unary ones (8) stack only on top: UNARYRUN of them at most (more: error 22). The CSS
+# compiler's popops loops that many times
+UNARYRUN = 4
+def popcap(minprec): return min(OD, 8 - minprec + UNARYRUN)
 # + at the top level of a console.log argument (value: the left operand's static type); precedence of +. M_PRINT's value: 2 after a
 # ',' (until the next argument starts) + 4 * the pieces of a + chain already on the operand stack (PIECES at most)
 M_CADD = 50
@@ -375,7 +380,10 @@ class Compiler:
         if (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec and self.nd and self.desc(self.nd - 1) == KBIG
                 and not (self.ops[self.osp - 1] == M_CADD and 2 in (self.opv[self.osp - 1], self.otype(self.nd - 1))
                          and self.opv[self.osp - 2] < 4 * (PIECES - 1))): self.src(self.nd - 1)        # (M_PRINT is below M_CADD)
+        npop = 0
         while not self.err and self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
+            if npop == popcap(minprec): return self.fail(22)
+            npop += 1
             self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
             last = not (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec)
             dest = mode[1] if last and isinstance(mode, tuple) else None
@@ -1165,6 +1173,18 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         nonlocal fp, pc
         for i, x in enumerate(args): wr(fp + base + 1 + i, x)
         wr(fp + base, base * 8192 + ret); fp += base; pc = ent[name]
+    def chars(v, boolean):
+        """a string, number or boolean operand of +: its characters"""
+        if isstr(v): p = (v + STRTAG) & AMASK; return [rd(p + i) for i in range(rd(p - 1))]
+        return [ord(ch) for ch in ('true' if v else 'false')] if boolean and v in (0, 1) else [ord(ch) for ch in str(v)]
+    def cat(a, x, y, bx, by):
+        """the + of a string with a string, number or boolean (bx / by: DADDL / DADDR's boolean side) into A, as the ROM's cat lays
+        it out (newstr: [hdr][len][bytes][0] from HP); False if the heap is full (the ROM's cat collects)"""
+        t = chars(x, bx) + chars(y, by); n = len(t); nw = (n + 10) // 8 * 8; hp = rd(HP)
+        if hp + nw - 8 >= rd(GCLIM) + LAYOUT['heap_size'] - 7: return False
+        base = HEAP0 + hp; wr(HP, hp + nw)
+        for i, w in enumerate([-2 - nw, n] + t + [0]): wr(base + i, w)
+        wr(addr(a), base + 2 - STRTAG); return True
     def probe(o, key):
         """GETP / SETP: the address of key's word in object o's chunks, or of the word that ends its keys (0)"""
         cur = (o + OBJTAG) & AMASK
@@ -1219,8 +1239,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'PUTC': emit(val(b))
         elif op in ('DADD', 'DADDL', 'DADDR'):
             x, y = val(b), val(c)
-            if isref(x) or isref(y): trap(TRAPS[op], a - 256, [x, y], pc)
-            else: wr(addr(a), x + y)
+            if not (isref(x) or isref(y)): wr(addr(a), x + y)
+            elif isarr(x) or isobj(x) or isarr(y) or isobj(y) or not cat(a, x, y, op == 'DADDL', op == 'DADDR'): trap(TRAPS[op], a - 256, [x, y], pc)
         elif op in ('DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE'):
             x, y = val(b), val(c)
             if (isstr(x) and isstr(y)) if op in ('DEQ', 'DNE') else (isref(x) or isref(y)): trap(TRAPS[op], a - 256, [x, y], pc)

@@ -12,8 +12,10 @@ NS-nlet..NS-1 block-scoped let / const. Control-stack entry k: csA = kind * 4096
 type * 4096 + descriptor (cc_ref's od). An operand is a pair (field, temp?): a temp's field gets the function's frame label added.
 """
 from dsl import *
+import os
 import cc_ref as R
 
+INLINE = os.environ.get('INLINE', '1') == '1'     # (dsl.Ctx.inline: single-use temps into their users)
 OD, CD, NS, NF, NL, NI, ODN, TBMAX = R.OD, R.CD, R.NS, R.NF, R.NL, R.NI, R.ODN, R.TBMAX
 H1M, H2M = R.H1M, R.H2M
 KW = R.KW
@@ -90,7 +92,7 @@ class Prog(Base):
         X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0))
         X.cur.update({f'sc{c}{f}': K(0) for c in 'AOT' for f in ('', 'l', 'x')}); X.cur['ptop'] = K(0); X.cur['psp'] = K(0)
         if mode is not None: X.cur['mode'] = K(mode); X.cur['err'] = K(0)
-        self.code = []      # (valid, instruction index, op, A, word0's label or -1, word1, word1's multiplier, frame label)
+        self.code = []      # (valid, instruction index, word0 (op * 8192 + A), 0, word0's label or -1, word1, word1's multiplier, frame label)
         self.labs = []      # (valid, label, value)
         self.data = []      # (valid, addr, value)
         self.symw = []      # (valid, index, h1, h2, sk)
@@ -100,6 +102,7 @@ class Prog(Base):
         self.parser()
         self.outputs()
         self.x.dce(self.out)
+        if INLINE: self.x.inline(set(self.out))
 
     # ---------------- primitives
     def v(self, n): return self.x.v(n)
@@ -119,7 +122,7 @@ class Prog(Base):
         elif isinstance(w1, tuple): w, m = lift(w1[0]), lift(w1[1])
         else: w, m = lift(w1), K(0)
         la = lift(label) if label is not None else ite(a[1], fl, -1)
-        self.code.append((X.g, X.cur['cp'], lift(op), a[0], self.m(la, 'ela'), self.m(w, 'ew'), self.m(m, 'em'), fl))
+        self.code.append((X.g, X.cur['cp'], self.m(add(mul(lift(op), 8192), a[0]), 'ew0'), K(0), self.m(la, 'ela'), self.m(w, 'ew'), self.m(m, 'em'), fl))
         self.set('cp', self.v('cp') + 1)
     def deflab(self, l, val): self.labs.append((self.x.g, lift(l), lift(val)))
     def datum(self, addr, val): self.data.append((self.x.g, lift(addr), lift(val)))
@@ -301,7 +304,6 @@ class Prog(Base):
     def branch(self, lab, sense):
         """cc_ref.branch: pop the top value and jump to lab if its truth is sense (a pending comparison fuses into the jump)"""
         sense = lift(sense); nd = self.m(self.v('nd'), 'bnd'); i = self.m(nd - 1, 'bi'); d = self.desc(i); t = self.otype(i)
-        self.set('nd', i)
         cnd = self.m(ge(d, CND), 'bcnd'); e = self.m(sub(d, CND), 'bce'); ci = self.m(fdiv(e, 4), 'bci')
         pk = self.v('pk')
         bF, cF = (self.m(add(fdiv(pk, 1024), 512), 'bbf'), self.m(mod(fdiv(e, 2), 2), 'bbt')), (self.m(mod(pk, 1024), 'bcf'), self.m(mod(e, 2), 'bct'))
@@ -313,6 +315,7 @@ class Prog(Base):
         jumpc = self.m(or_(and_(isk, eq(ne(d, R.K(0)), sense)), and_(kbn, eq(ne(pk, 0), sense))), 'bjc')
         other = self.m(not_(or_(cnd, isk, kbn)), 'both')
         with self.when(other): o = self.src(i)
+        self.set('nd', i)
         with self.when(or_(cnd, jumpc, other)):
             op = ite(cnd, jop, ite(other, ite(sense, OP['JNZ'], OP['JZ']), OP['JMP']))
             self.emit(op, b=(ite(cnd, bF[0], ite(other, o[0], 512)), ite(cnd, bF[1], mul(other, o[1]))),
@@ -443,9 +446,9 @@ class Prog(Base):
         split0 = and_(eq(c0, R.M_CADD), or_(eq(v0, 2), eq(self.otype(nd0 - 1), 2)), lt(v1, 4 * (R.PIECES - 1)))
         with self.when(and_(gt(self.v('osp'), 0), gt(p0, 0), ge(p0, minprec), gt(nd0, 0), not_(split0))): self.src(nd0 - 1)
         self.set('ptop', self.odv(nd0 - 1)); popped = K(0)
-        go = K(1)
-        for _ in range(OD):
-            code, val = self.top_op(); p = self.prec(code)
+        go = K(1); cap = R.popcap(minprec.v) if isK(minprec) else OD      # (a binary operator's variant: cc_ref.popcap)
+        code, val = c0, v0; p = p0
+        for _ in range(cap):
             go = self.m(and_(go, eq(self.v('err'), 0), gt(self.v('osp'), 0), gt(p, 0), ge(p, minprec)), 'pop')
             with self.when(go):
                 self.set('osp', self.v('osp') - 1)
@@ -493,6 +496,9 @@ class Prog(Base):
                              ite(and_(isd, or_(isUN, isBIN)), dfield, TMP))))
                 self.setif('ptop', and_(ok, not_(split)), ae)
                 self.setif('pk', and_(ok, or_(pnot, pcmp)), ite(pnot, mul(sub(oR[0], 512), 1024), add(mul(sub(oL[0], 512), 1024), oR[0])))
+            code, val, p = c2, v2, p2                      # (the next top: read once)
+        if cap < OD:                                       # more to pop than cc_ref.popcap allows
+            with self.when(and_(go, eq(self.v('err'), 0), gt(self.v('osp'), 0), gt(p, 0), ge(p, minprec))): self.fail(22)
         self.set_od(self.v('nd') - 1, self.v('ptop'), c=popped)
         with self.when(self.v('psp')):                      # a + chain split (M_CADD is right above M_PRINT: at most one per call)
             _, pv = self.top_op(); self.set_top_op(R.M_PRINT, add(pv, 4)); self.set('psp', 0)
@@ -513,10 +519,11 @@ class Prog(Base):
         """cc_ref.print_call: the argument's pieces (M_PRINT's value // 4 + 1 of them, on top of the operand stack), one PRINT each
         (PRINTK for the big constant on top); the last with the separator"""
         _, pv = self.top_op(); c = self.m(fdiv(pv, 4), 'pcc'); nd = self.m(self.v('nd'), 'pnd'); d0 = self.m(sub(sub(nd, 1), c), 'pd0')
-        for k in range(ODN):
-            with self.when(and_(ge(k, d0), lt(k, nd))):
-                d = self.m(mod(self.v(f'od{k}'), 4096), 'prd'); kb = self.m(eq(d, KBIG), 'prk'); o = self.opnd(K(k))
-                flags = add(mul(eq(k, nd - 1), 2 * R.SEP[sep]), eq(mod(fdiv(self.v(f'od{k}'), 4096), 4), 1), mul(gt(c, 0), 8))
+        for j in range(R.PIECES):                           # (at most PIECES of them)
+            k = self.m(add(d0, j), 'prk')
+            with self.when(lt(k, nd)):
+                w = self.odv(k); d = self.m(mod(w, 4096), 'prd'); kb = self.m(eq(d, KBIG), 'prkb'); o = self.opnd(k, d)
+                flags = add(mul(eq(k, nd - 1), 2 * R.SEP[sep]), eq(mod(fdiv(w, 4096), 4), 1), mul(gt(c, 0), 8))
                 self.emit(ite(kb, OP['PRINTK'], OP['PRINT']), (flags, 0), w1=(ite(kb, self.v('pk'), mul(sub(o[0], 512), 1024)), mul(not_(kb), mul(o[1], 1024))))
         self.set('nd', d0)
 
@@ -578,11 +585,12 @@ class Prog(Base):
         """cc_ref.meth_end: a method call's ')' (tv: the method + 64 * its commas; last: an argument just ended)"""
         mi = self.m(mod(tv, 64), 'mmi'); argc = self.m(add(fdiv(tv, 64), last), 'margc')
         pairs = [(i, a, e) for i, m in enumerate(R.ALLM) for a, e in m[1].items()]
-        ok = self.m(or_(*[and_(eq(mi, i), eq(argc, a)) for i, a, e in pairs]), 'mok')
+        mk = self.m(add(mul(mi, 4), mn(argc, 3)), 'mkey')                # (one key per method and argument count)
+        ok = self.m(or_(*[eq(mk, 4 * i + a) for i, a, e in pairs]), 'mok')
         with self.when(not_(ok)): self.fail(77)
         with self.when(ok):
             sb = self.m(and_(eq(mi, R.GLOBAL_INDEX[KW['String']]), eq(self.otype(self.v('nd') - 1), 1)), 'msb')    # String(a boolean)
-            e = self.m(ite(sb, self.ent.get('tostringb', 0), add(*[mul(and_(eq(mi, i), eq(argc, a)), self.ent.get(e, 0)) for i, a, e in pairs])), 'ment')
+            e = self.m(ite(sb, self.ent.get('tostringb', 0), add(*[mul(eq(mk, 4 * i + a), self.ent.get(e, 0)) for i, a, e in pairs])), 'ment')
             ty = self.m(add(*[mul(eq(mi, i), m[2]) for i, m in enumerate(R.ALLM)]), 'mty')
             if last: self.arg_end()
             self.set('tb', sub(self.v('tb'), argc + 1)); d0 = self.m(self.v('nd') - 1, 'md0'); f = self.tmp(d0)
@@ -1283,11 +1291,11 @@ class Prog(Base):
         for s in range(E):
             sels = [X.mat(and_(g, eq(ip, add(cp0, s))), 'sel') for g, ip, op, a, la, w, m, fl in code]
             group(f'o_v{s}', or_(*sels), [
-                (f'o_w{s}', add(*[mul(sel, add(mul(op, 8192), a)) for sel, (g, ip, op, a, la, w, m, fl) in zip(sels, code)])),
+                (f'o_w{s}', add(*[mul(sel, op) for sel, (g, ip, op, a, la, w, m, fl) in zip(sels, code)])),     # (op: word0, ew0)
                 (f'o_l{s}', sub(add(*[mul(sel, add(la, 1)) for sel, (g, ip, op, a, la, w, m, fl) in zip(sels, code)]), 1)),
                 (f'o_x{s}', add(*[mul(sel, w) for sel, (g, ip, op, a, la, w, m, fl) in zip(sels, code)])),
                 (f'o_m{s}', add(*[mul(sel, m) for sel, (g, ip, op, a, la, w, m, fl) in zip(sels, code)])),
-                (f'o_f{s}', add(*[mul(sel, fl) for sel, (g, ip, op, a, la, w, m, fl) in zip(sels, code)])),
+                (f'o_f{s}', add(*[mul(f, add(*[sel for sel, r in zip(sels, code) if r[7] == f])) for f in dict.fromkeys(r[7] for r in code)])),   # (by frame label: one per step in practice)
                 (f'o_a{s}', add(mul(cp0, 2), self.cb + 2 * s - self.db))])      # RAM index (address - rom_size = data_base)
         self.nlports = len(labs)
         for k, (g, l, v) in enumerate(labs):               # label definitions: one anchor element per port
@@ -1333,3 +1341,4 @@ class LexProg(Prog):
         self.named('o_sa', sub(add(*[mul(g, a) for g, a, v in self.data]), self.db))
         self.named('o_sw', add(*[mul(g, v) for g, a, v in self.data]))
         self.x.dce(self.out)
+        if INLINE: self.x.inline(set(self.out))

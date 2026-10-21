@@ -62,7 +62,7 @@ def opin(lo, hi): return f"clamp(0, var(--op) - {OP[lo] - 1}, 1) * clamp(0, {OP[
 # the latchable reads and their bits: the fetch (f, and g, its second word, under the same bit), the operands B (x) and C (y),
 # a third word (z: RET's return word, a string's length; h: the word after it, under the same bit), a string chunk (p), a fourth
 # word (e: an array's element, SETX's C)
-LATCH = {"f": 1, "g": 1, "x": 2, "y": 4, "z": 8, "h": 8, "p": 16, "e": 32}
+LATCH = {"f": 1, "g": 1, "x": 2, "y": 4, "z": 8, "h": 8, "p": 16, "e": 32, "k": 64, "j": 64, "s": 128}
 # ---------------- registers: (name, H, OFF), value range [-OFF, H - OFF); the subject's expression at the chain's end
 regs = [("rpc", A15, 0, "var(--pc)"), ("rfp", A15, 0, "var(--fp)"), ("optr", 256, 0, "var(--optr)"),
         ("pst", A15, 0, "var(--pst)"), ("steps", 1 << 21, 0, "var(--steps)"), ("halt", 2, 0, "var(--halt)"), ("pend", 8192, 0, "var(--pend)"),
@@ -124,7 +124,7 @@ def read(n, A):
 def miss(n):
     return f"(1 - var(--h{n}) - var(--H{n}))" + (f" * (1 - var(--lat) * var(--Lb{n}))" if n in LATCH else "")
 LOOKUP = ("b", "u", "q", "h", "H")
-READS = ("f", "x", "y", "z", "e", "w", "p")
+READS = ("f", "x", "y", "z", "e", "k", "s", "w", "p")
 def read_pair(n, A, m):
     """read n of an even address A and the word after it (latch m)"""
     return read(n, A) + [f"--v{m}: " + latched(m, sel(f"q{n}", NSET, lambda s: f"if(style(--H{n}: 1): {word2(n, 2 * s + 1)}; else: {word2(n, 2 * s)})")) + ";"]
@@ -183,12 +183,58 @@ def trap(tr, s, n, F, args, retw):
 DYNOPS = ['DADD', 'DADDL', 'DADDR', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE']
 DYNE = {o: BINE['ADD' if o[1] == 'A' else o[1:]] for o in DYNOPS}
 bothstr = f"calc({isstr_v(xB)} * {isstr_v(yC)})"
-DYN_PRE = (OPND + [f"--aA: {oaddr('var(--A)')};", f"--dslow: {by_op({'DEQ': bothstr, 'DNE': bothstr}, f'min(1, calc({isref_v(xB)} + {isref_v(yC)}))')};"] +
-           trap("min(1, calc(var(--pst) + var(--dslow)))", "var(--pst)", 2, "var(--aA)", f"if(style(--pst: 0): {yC}; else: {xB})",
+# A string's + (no array or object, pst 0) goes to the cat class: pst CAT0 from the next execution (dcat)
+CATT, CAT0 = 1024, 2048
+anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)}))"
+DYN_PRE = (OPND + [f"--aA: {oaddr('var(--A)')};", f"--dslow: {by_op({'DEQ': bothstr, 'DNE': bothstr}, f'min(1, calc({isref_v(xB)} + {isref_v(yC)}))')};",
+                   f"--dcat: calc({opin('DADD', 'DADDR')} * (1 - min(1, var(--pst))) * var(--dslow) * (1 - {anyao}));"] +
+           trap("min(1, calc(var(--pst) + var(--dslow) * (1 - var(--dcat))))", "var(--pst)", 2, "var(--aA)", f"if(style(--pst: 0): {yC}; else: {xB})",
                 f"calc((var(--A) - 256) * 8192 + {pc} + 2)"))
-DYN_NX = {'pc': f"if(style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
-          'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast))",
-          'pst': "if(style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"}
+DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
+          'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--dcat))",
+          'pst': f"if(style(--dcat: 1): {CAT0}; style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"}
+# The cat class (DADD, DADDL, DADDR with pst >= CATT; csssim.Sim.cat): one word per execution, pst CAT0 + k: k 0 HP += nw (the
+# heap full: the ROM's routine through a trap, pst CATT + its step), 1 the header, 2 the length, 3 ... the bytes, the terminator,
+# then A. Reads: x, y; z, e: X's and Y's length words (strings); k, j: HP and GCLIM; s: the byte (from a string)
+def ndig(v): return f"calc(clamp(0, -1 * {v}, 1) + 1" + "".join(f" + clamp(0, max({v}, -1 * {v}) - {10 ** d - 1}, 1)" for d in range(1, 6)) + ")"
+def numch(v, g):
+    """character g of number v's decimal form"""
+    a = f"max({v}, -1 * {v})"; ng = f"clamp(0, -1 * {v}, 1)"
+    return (f"calc({ng} * {eq(g, 0)} * 45 + (1 - {ng} * {eq(g, 0)}) * (48 + mod(round(down, {a} / pow(10, {ndig(v)} - 1 - {g})), 10)))")
+def boolch(v, g):
+    T_, F_ = [ord(c) for c in 'true'], [ord(c) for c in 'false']
+    return "calc(" + " + ".join(f"{eq(g, kk)} * ({v} * {T_[kk] if kk < 4 else 0} + (1 - {v}) * {F_[kk]})" for kk in range(5)) + ")"
+def bool01(v): return f"calc({eq(v, 0)} + {eq(v, 1)})"
+ck = "var(--ck)"
+CAT_PRE = OPND + [f"--aA: {oaddr('var(--A)')};",
+    f"--csx: {isstr_v(xB)};", f"--csy: {isstr_v(yC)};",
+    f"--cbx: calc({eq('var(--op)', OP['DADDL'])} * {bool01(xB)});", f"--cby: calc({eq('var(--op)', OP['DADDR'])} * {bool01(yC)});",
+    f"--cla: if(style(--csx: 1): var(--vz); style(--cbx: 1): calc(5 - {xB}); else: {ndig(xB)});",
+    f"--clb: if(style(--csy: 1): var(--ve); style(--cby: 1): calc(5 - {yC}); else: {ndig(yC)});",
+    "--cn: calc(var(--cla) + var(--clb));", "--cnw: calc(round(down, (var(--cn) + 10) / 8) * 8);",
+    f"--cfull: clamp(0, var(--vk) + var(--cnw) - var(--vj) - {HS}, 1);",
+    f"--ck: calc(var(--pst) - {CAT0});", f"--cbase: calc({HEAP0} + var(--vk) - var(--cnw));",
+    # the byte: i = k - 3 of X, or i - la of Y
+    "--ci: calc(var(--ck) - 3);", "--cfx: clamp(0, var(--cla) - var(--ci), 1);", "--cj: calc(var(--ci) - (1 - var(--cfx)) * var(--cla));",
+    f"--cv: if(style(--cfx: 1): {xB}; else: {yC});", "--cvs: if(style(--cfx: 1): var(--csx); else: var(--csy));",
+    "--cvb: if(style(--cfx: 1): var(--cbx); else: var(--cby));",
+    f"--cbyte: if(style(--cvs: 1): var(--vs); style(--cvb: 1): {boolch('var(--cv)', 'var(--cj)')}; else: {numch('var(--cv)', 'var(--cj)')});",
+    f"--cin: calc(clamp(0, var(--ck) - 2, 1) * clamp(0, var(--cn) + 3 - var(--ck), 1));"] + \
+    trap(f"calc(clamp(0, {CAT0} - var(--pst), 1) + {eq('var(--pst)', CAT0)} * var(--cfull))", f"calc(clamp(0, {CAT0} - var(--pst), 1) * (var(--pst) - {CATT}))",
+         2, "var(--aA)", f"if(style(--ts: 0): {yC}; else: {xB})", f"calc((var(--A) - 256) * 8192 + {pc} + 2)") + [
+    "--clast: calc((1 - var(--tr)) * " + eq('var(--ck)', 'var(--cn) + 4') + ");",
+    f"--caddr: if(style(--tr: 1): var(--taddr); style(--ck: 0): {HP}; style(--clast: 1): var(--aA); else: calc(var(--cbase) + var(--ck) - 1));",
+    f"--cval: if(style(--tr: 1): var(--tval); style(--ck: 0): calc(var(--vk) + var(--cnw)); style(--ck: 1): calc(-2 - var(--cnw)); style(--ck: 2): var(--cn);"
+    f" style(--clast: 1): calc(var(--cbase) + {2 - STRTAG}); style(--cin: 1): var(--cbyte); else: 0);"]
+CAT_NX = {'pc': f"if(style(--clast: 1): calc({pc} + 2); style(--tlast: 1): {by_op({'DADD': ENT['dadd'], 'DADDL': ENT['daddl']}, ENT['daddr'])}; else: {pc})",
+          'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + var(--clast) + var(--tlast))",
+          'pst': f"if(style(--clast: 1): 0; style(--tlast: 1): 0; style(--tr: 1): calc({CATT} + var(--ts) + 1); else: calc(var(--pst) + 1))"}
+CAT_CLASS = dict(ops=[], pre=CAT_PRE,
+                 reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"),
+                        ("z", f"mod({xB} + {STRTAG - 1}, 32768)", "var(--csx)"), ("e", f"mod({yC} + {STRTAG - 1}, 32768)", "var(--csy)"),
+                        ("k", HP, "1"), ("s", f"mod(var(--cv) + {STRTAG} + var(--cj), 32768)", "calc(var(--cin) * var(--cvs) * (1 - var(--tr)))")],
+                 pair={'k': 'j'}, write=("var(--caddr)", "var(--cval)", None, "1"), nx=CAT_NX,
+                 deps={'z': [('x', None)], 'e': [('y', None)], 's': [('x', None), ('y', None), ('z', None)]})
 # GETX / SETX: X the array (B / A), Y the index (C / B); z its length and h its ptr (the words before and at its value's address,
 # read only for an array); e the element (GETX, inside the length) or C (SETX)
 ARR_PRE = OPND + OPNDA + [
@@ -306,7 +352,7 @@ def nexts(nx, done="1"):
     return [f"--npc: {nx.get('pc', f'calc({pc} + 2 * {done})')};", f"--nfp: {nx.get('fp', fp)};",
             f"--nsteps: {nx.get('steps', f'calc(var(--steps) + {done})')};"] + ([f"--npst: {nx['pst']};"] if 'pst' in nx else [])
 cls_rules = {}
-for c, k in CLASSES.items():
+def build_class(c, k):
     d, acc = list(k.get('pre', [])), []
     for n, A, ops_n in k['reads']:
         d += read_pair(n, A, k['pair'][n]) if n in k.get('pair', {}) else read(n, A); acc.append((n, need(ops_n)))
@@ -325,6 +371,7 @@ for c, k in CLASSES.items():
           f"--mb: {first_miss(acc)};" if acc else "--mb: -1;"] + nexts(k['nx'])
     if c == 'jump': d += [f"--nstop: {eq('var(--op)', OP['HALT'])};", f"--nhalt: {eq('var(--op)', OP['HALT'])};"]
     cls_rules[c] = (k['ops'], d)
+for c, k in CLASSES.items(): build_class(c, k)
 
 # 'out': PRINT B, PRINTK (the value in word1) and PUTC B, as gen_css.py's print service: up to 4 console cells per execution,
 # one per bank; a string chunk ends at its block (the block's line must be cached), at a NUL (the value is out) or a newline
@@ -351,7 +398,7 @@ pr += [f"--mpp: calc(var(--isStr) * (1 - var(--pdone)) * {miss('p')});",
        f"--pa: max({pv}, -1 * {pv});", f"--pneg: clamp(0, -1 * {pv}, 1);",
        "--pL: calc(1 + " + " + ".join(f"clamp(0, var(--pa) - {10 ** dd - 1}, 1)" for dd in range(1, 6)) + ");",
        f"--ptot: calc(var(--isNum) * (var(--pneg) + var(--pL)) + var(--isBool) * (5 - {pv}) + var(--prSP));",
-       "--pph: calc((1 - var(--isStr)) * var(--pst));", "--pbase: calc(4 * var(--pph));"]
+       "--pbase: calc((1 - var(--isStr)) * var(--pst));"]          # (a number's characters out so far)
 for i in range(4):
     g = f"var(--pg{i})"
     inum = f"clamp(0, var(--pneg) + var(--pL) - {g}, 1)"; ineg = f"clamp(0, var(--pneg) - {g}, 1)"
@@ -370,33 +417,45 @@ pr += ["--pe: calc((1 - var(--pdone)) * (var(--pr0) + var(--pr1) + var(--pr2) + 
        "--pbE: calc(" + " + ".join(f"{eq('var(--pe)', i)} * var(--pb{i})" for i in range(4)) + ");",
        f"--ptNul: calc(var(--pdone) + (1 - var(--pdone)) * var(--pvE) * {eq('var(--pbE)', 0)});",
        f"--ptNL: calc((1 - var(--pdone)) * var(--pvE) * {eq('var(--pbE)', 10)});",
-       f"--pn: if(style(--op: {OP['PUTC']}): calc(1 - {eq(pv, 10)}); else: calc(var(--isStr) * (var(--pe) + var(--ptNul) * var(--prSP)) + (1 - var(--isStr)) * clamp(0, var(--ptot) - var(--pbase), 4)));",
-       f"--pfin: if(style(--op: {OP['PUTC']}): 1; else: calc(var(--isStr) * var(--ptNul) + (1 - var(--isStr)) * clamp(0, var(--pbase) + 5 - var(--ptot), 1)));",
-       f"--pnl: if(style(--op: {OP['PUTC']}): {eq(pv, 10)}; else: calc(var(--isStr) * (var(--ptNL) + var(--ptNul) * var(--prLN)) + (1 - var(--isStr)) * var(--pfin) * var(--prLN)));",
-       f"--npst: if(style(--ptrap: 1): {pc}; else: calc(var(--isStr) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)) + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pph) + 1)));"]
+       # the console banks this pass has written (cw, a mask): the run of free ones from optr's (pf) takes a chunk, cut there
+       # (pcut: a string's characters, or its separator, past it; a number's, by pf alone)
+       ] + [f"--pfr{j}: calc(1 - mod(round(down, var(--cw) / pow(2, mod(var(--optr) + {j}, 4))), 2));" for j in range(4)] + [
+       "--pf: calc(var(--pfr0) * (1 + var(--pfr1) * (1 + var(--pfr2) * (1 + var(--pfr3)))));",
+       f"--pcut: calc(var(--isStr) * (clamp(0, var(--pe) - var(--pf), 1) + {eq('var(--pe)', 'var(--pf)')} * var(--ptNul) * var(--prSP)));",
+       f"--pn0: if(style(--op: {OP['PUTC']}): calc(1 - {eq(pv, 10)}); else: calc(var(--isStr) * (var(--pe) + var(--ptNul) * var(--prSP)) + (1 - var(--isStr)) * clamp(0, var(--ptot) - var(--pbase), 4)));",
+       f"--pn: if(style(--op: {OP['PUTC']}): var(--pn0); else: calc(var(--pcut) * min(var(--pe), var(--pf)) + (1 - var(--pcut)) * min(var(--pn0), var(--pf))));",
+       f"--pfin: if(style(--op: {OP['PUTC']}): 1; else: calc(var(--isStr) * (1 - var(--pcut)) * var(--ptNul) + (1 - var(--isStr)) * clamp(0, var(--pbase) + min(4, var(--pf)) + 1 - var(--ptot), 1)));",
+       f"--pnl: if(style(--op: {OP['PUTC']}): {eq(pv, 10)}; else: calc(var(--isStr) * (1 - var(--pcut)) * (var(--ptNL) + var(--ptNul) * var(--prLN)) + (1 - var(--isStr)) * var(--pfin) * var(--prLN)));",
+       f"--npst: if(style(--ptrap: 1): {pc}; else: calc(var(--isStr) * (var(--pcut) * (var(--pq) + min(var(--pe), var(--pf))) + (1 - var(--pcut)) * (1 - var(--ptNul)) * (var(--pq) + var(--pe) + var(--ptNL)))"
+       " + (1 - var(--isStr)) * (1 - var(--pfin)) * (var(--pbase) + var(--pn))));",
+       # nothing fits this pass: the chain stops (no fill)
+       f"--pblk: calc((1 - var(--ptrap)) * if(style(--op: {OP['PUTC']}): clamp(0, var(--pn0) - var(--pf), 1); else: calc((1 - min(1, var(--pn))) * (1 - var(--pfin)) * (1 - var(--pnl)))));"]
 for i in range(4):
     pr.append(f"--pch{i}: " + (f"if(style(--op: {OP['PUTC']}): {pv}; else: " if i == 0 else "") +
-              f"calc(var(--isStr) * (var(--pr{i}) * var(--pb{i}) + {eq('var(--pe)', i)} * var(--ptNul) * var(--prSP) * 32)"
+              f"calc(var(--isStr) * (var(--pr{i}) * var(--pb{i}) + {eq('var(--pe)', i)} * var(--ptNul) * var(--prSP) * (1 - var(--pcut)) * 32)"
               f" + (1 - var(--isStr)) * clamp(0, var(--pn) - {i}, 1) * var(--pnb{i}))" + (")" if i == 0 else "") + ";")
-pr += ["--ok: calc((1 - min(1, calc(var(--mx) + var(--mpp)))) * (1 - var(--cw) * (1 - var(--ptrap))));",
+pr += ["--ok: calc((1 - min(1, calc(var(--mx) + var(--mpp)))) * (1 - var(--pblk)));",
        "--mb: calc(var(--mx) * var(--bx) + (1 - var(--mx)) * (var(--mpp) * var(--bp) + (1 - var(--mpp)) * -1));"]
 pr += nexts({'pc': f"if(style(--ptrap: 1): {ENT['pstub']}; else: calc({pc} + 2 * var(--pfin)))",
              'steps': "calc(var(--steps) + max(var(--pfin), var(--ptrap)))"})
 # cell i of the chunk goes to optr + i, bank (optr + i) mod 4 (OUT_BASE is a multiple of 4)
-pr += ["--pout: calc(var(--ok) * (1 - var(--ptrap)));", "--ncw: min(1, var(--pn));",
+pr += ["--pout: calc(var(--ok) * (1 - var(--ptrap)));",
+       "--ncw: calc(" + " + ".join(f"{1 << w} * max(mod(round(down, var(--cw) / {1 << w}), 2), var(--dp{w}))" for w in range(WB)) + ");",
        f"--noptr: mod(var(--pnl) * (round(down, (var(--optr) + var(--pn)) / {COLS}) + 1) * {COLS} + (1 - var(--pnl)) * (var(--optr) + var(--pn)), {OUT_SIZE});"]
 for w in range(WB):
     pr += [f"--pi{w}: mod({w} - var(--optr), 4);", f"--dp{w}: clamp(0, var(--pn) - var(--pi{w}), 1);",
            f"--nwA{w}: calc(var(--dp{w}) * (round(down, mod(var(--optr) + var(--pi{w}), {OUT_SIZE}) / 4) + 1));",
            f"--nwD{w}: calc(" + " + ".join(f"{eq(f'var(--pi{w})', i)} * var(--pch{i})" for i in range(4)) + ");"]
 cls_rules['out'] = (['PRINT', 'PRINTK', 'PUTC'], pr)
+build_class('cat', CAT_CLASS)                 # (no opcode of its own: a DADD's pst picks it, cls_of)
 CLS = {c: i + 1 for i, c in enumerate(cls_rules)}
 assert sorted(RC.OPN) == sorted(o for ops, _ in cls_rules.values() for o in ops), 'every instruction in one class'
 opcls = {o: CLS[c] for c, (ops, _) in cls_rules.items() for o in ops}
 assert [opcls[o] for o in RC.OPN] == sorted(opcls[o] for o in RC.OPN), 'rc_ref.OPN in class order'
 # the class from the opcode's range (rc_ref.OPN is in class order); 0 for no instruction (--op 255: the fetch missed)
 bounds = [i for i in range(1, len(RC.OPN)) if opcls[RC.OPN[i]] != opcls[RC.OPN[i - 1]]]
-cls_of = f"calc(clamp(0, {len(RC.OPN)} - var(--op), 1) * (1" + "".join(f" + clamp(0, var(--op) - {b - 1}, 1)" for b in bounds) + "))"
+cls_of = (f"calc(clamp(0, {len(RC.OPN)} - var(--op), 1) * (1" + "".join(f" + clamp(0, var(--op) - {b - 1}, 1)" for b in bounds) +
+          f") + {CLS['cat'] - CLS['dyn']} * {opin('DADD', 'DADDR')} * clamp(0, var(--pst) - {CATT - 1}, 1))")
 
 # the ROM's instructions (fetch only), two-level on the pc: 32 instructions (64 words) per group. An if() costs ~70 ns per entry
 # it holds wherever it is evaluated, so the ROM is split into tiers of ROMTIER words, each a rule of its own matched by
@@ -415,10 +474,11 @@ P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "
      "t", "stop", "cw", "op", "A", "B", "C", "cls", "rom", "rh", "rl", "vf", "vg", "mf", "ok", "mb", "npc", "nfp", "nsteps", "nstop", "nhalt",
      "kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
-     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
-     "wval2", "vh"]
+     "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pf", "pcut", "pn0", "pblk", "pfr0", "pfr1", "pfr2", "pfr3", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
+     "wval2", "vh", "vj"]
 # the new classes' scratch (.x only)
-XNEW = ["kA", "aA", "zA", "dslow", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
+XNEW = ["kA", "aA", "zA", "dslow", "dcat", "csx", "csy", "cbx", "cby", "cla", "clb", "cn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
+        "cv", "cvs", "cvb", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
         "oroom", "oq", "ohit", "oend", "onext", "oc", "V", "oaddr", "oval", "oen", "w2", "odone", "ojump"]
 P += XNEW
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
@@ -433,7 +493,8 @@ props = [lbl.section('Registered properties', 'registers, the chain\'s state and
 # temps that only the element declaring them reads (.x's reads and scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
 LOCAL |= {"kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv", "ptrap"} | set(XNEW)
-LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
+LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pe", "pvE", "pbE", "pf", "pcut", "pn0", "pblk",
+          "pfr0", "pfr1", "pfr2", "pfr3",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
@@ -494,8 +555,9 @@ css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --fp: var(--nfp);
            f" --lat: 0; --rom: {rom_of('var(--npc)')}; }} }}")
 css.append("@container style(--ok: 0) { .c { --stop: 1; --pend: calc(var(--mb) + 1); --Lm: var(--hm);"
            + " ".join(f" --L{n}: var(--v{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--pw{j});" for j in range(4)) + " } }")
-css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --cw: var(--ncw); " +
-           " ".join(f"--cA{w}: var(--nwA{w}); --cD{w}: var(--nwD{w});" for w in range(WB)) + " } }")
+css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --cw: var(--ncw); } }")
+# (bank by bank: an earlier output instruction of the pass keeps the banks it wrote)
+css += [f"@container style(--pout: 1) and style(--dp{w}: 1) {{ .c {{ --cA{w}: var(--nwA{w}); --cD{w}: var(--nwD{w}); }} }}" for w in range(WB)]
 css += [f"@container style(--wz: {s + 1}) {{ .c {{ " + " ".join(f"--W{2 * s + i // 4}_{i % 4}: var(--n{i});" for i in range(8)) +
         f" --T{2 * s}: var(--nT0); --T{2 * s + 1}: var(--nT1); }} }}" for s in range(NSET)]
 
@@ -518,6 +580,12 @@ css.append(lbl.section('RAM', f'memtree.py: {len(CH)} write channels per bank, e
 if UI:
     import ccpage5, ui_rb, uipage
     UIL, UIP, UIT = (int(os.environ.get(k_, d_)) for k_, d_ in (('UIL', 24), ('UIP', 64), ('UIT', 400)))
+    # the picker's sample programs (samples/<file>.js): (file, label, icon); #ed (the page's program) comes first
+    SAMPLES = [('fizzbuzz', 'FizzBuzz', '\U0001F41D'), ('primes', 'primes', '\U0001F9EE'), ('fib', 'Fibonacci', '\U0001F41A'),
+               ('stars', 'stars', '\u2728'), ('hanoi', 'Hanoi', '\U0001F5FC'), ('sort', 'sort', '\U0001F4CA'), ('tree', 'tree', '\U0001F333'),
+               ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6')]
+    SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
+    EDS = 1 + len(SAMPLES)
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
@@ -665,18 +733,19 @@ else:
 <style><![CDATA[
 {lbl.header('js-minus-js/machine/gen_css.py (page, CPU, RAM), compiler/ccpage5.py (compiler), readback/ui_rb.py (editor scan)', 'js-minus-js/docs/ARCHITECTURE.md')}
 {static}
-{uipage.static(COLS, ROWS, UIL, UIP, WOFF)}
+{uipage.static(COLS, ROWS, UIL, UIP, WOFF, EDS)}
 {chr(10).join(props)}
 {chr(10).join(ui_props)}
 {chr(10).join(css)}
 {lbl.section('Editor scan', 'a font reads the editor back one column per frame and latches each character into a register')}
-{ui_rb.css(UIL, UIP, 8)}
+{ui_rb.css(UIL, UIP, 8, EDS=EDS)}
 {lbl.section('Compiler', 'the lexer on a chain of one element per character, the parser on a chain of one element per token')}
 {ui_css}
 ]]></style>
 </head>
 <body>
 <input type="checkbox" id="run" class="runcb" aria-label="Run"/>
+{"".join(f'<input type="radio" name="pk" id="pk{e}" class="pkr"{' checked="checked"' if e == 0 else ''}/>' for e in range(EDS))}
 {mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
 <main id="app">
 <div class="width-reader"></div>{ui_rb.regs_html()}
@@ -684,7 +753,8 @@ else:
 <p class="lede">Type a program and press Run. No JavaScript runs on this page.</p></header>
 <section class="pane">
 <div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span></div>
-<div class="frame"><div id="ed" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div></div>
+<div class="picker" role="radiogroup" aria-label="Programs"><label for="pk0" data-icon="\u270E">yours</label>{"".join(f'<label for="pk{e + 1}" data-icon="{ic}">{_h.escape(lb)}</label>' for e, (_, lb, ic) in enumerate(SAMPLES))}</div>
+<div class="frame"><div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
 <p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>

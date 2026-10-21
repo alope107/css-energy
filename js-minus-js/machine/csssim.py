@@ -34,6 +34,7 @@ import cc_ref as R
 from cc_ref import OPN, s20
 from uarch import STRP_HI, HEAP0, HP, GCLIM, OBJTAG, ARRTAG
 TRAPOFF, HS = R.TRAPOFF, LA['heap_size']
+CATT, CAT0 = 1024, 2048        # a DADD's pst: the cat class's trap (+ its step) and its executions (+ k)
 
 NSET, NWAY = 16, 2
 ROMF = PREF = True
@@ -81,8 +82,35 @@ class Sim:
             self.tag[s][w] = nb; self.fifo[s] ^= 1
             self.words[s][w] = [self.st['mem'].get(4 * nb + j, 0) if nb >= RB0 else 0 for j in range(4)]
         return cw
-    def chunk(self, flags, v):
-        """one PRINT execution (flags: separator * 2 + boolean): (cells written, newline after, done, next pst); reads may stall"""
+    def cat(self, op, a, x, y, ps, pc, trap, wr, addr):
+        """one execution of a string's + (cc_ref.run's cat), pst CAT0 + k: k 0 HP += the block's words (or, the heap full, the ROM's
+        cat through a trap, pst CATT + its step), 1 the header, 2 the length, 3 ... the bytes (one each), then the terminator, then
+        A. The reads: X's and Y's lengths (a string's length word), HP and GCLIM, a string's byte"""
+        rd = self.rd; st = self.st
+        def ln(v, boolean):
+            if R.isstr(v): return rd((v + STRTAG - 1) & AMASK)
+            return (4 if v else 5) if boolean and v in (0, 1) else len(str(v))
+        def ch(v, boolean, i):
+            if R.isstr(v): return rd((v + STRTAG + i) & AMASK)
+            return ord((('true' if v else 'false') if boolean and v in (0, 1) else str(v))[i])
+        la, lb = ln(x, op == 'DADDL'), ln(y, op == 'DADDR'); n = la + lb; nw = (n + 10) // 8 * 8
+        hp, gl = rd(HP), rd(GCLIM)
+        self.npst, self.cdone = 0, True
+        if ps < CAT0 or (ps == CAT0 and hp + nw - 8 >= gl + HS - 7):
+            r = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.TRAPS[op], 0 if ps == CAT0 else ps - CATT)
+            self.npst = self.npst_t + CATT if self.npst_t else 0; self.cdone = self.done_t; return r
+        k = ps - CAT0; base = HEAP0 + hp - nw
+        if k == 0: wr(HP, hp + nw)
+        elif k <= n + 3:
+            i = k - 3
+            wr(base + k - 1, -2 - nw if k == 1 else n if k == 2 else 0 if k == n + 3 else
+               ch(x, op == 'DADDL', i) if i < la else ch(y, op == 'DADDR', i - la))
+        else: wr(addr(a), base + 2 - STRTAG); return pc
+        self.npst, self.cdone = ps + 1, False; return pc - 2
+    def chunk(self, flags, v, f):
+        """one PRINT execution (flags: separator * 2 + boolean): (cells written, newline after, done, next pst); reads may stall.
+        f: the cells this pass can still take (the free run of console banks from optr's): a longer chunk is cut there and
+        goes on next execution (a string's pst: the next byte's address; a number's: its characters out so far)"""
         st = self.st; sep = (0, 32, 10)[flags // 2 % 4]
         isb = flags % 2; p = v + STRTAG
         if STR_LO <= p < STR_HI:
@@ -95,16 +123,22 @@ class Sim:
                 e += 1
                 if (q + e) % 4 == 0: break
             text = [self.rd(q + i) for i in range(e)]
+            if e > f: return text[:f], False, False, q + f
             if term == 10: return text, True, False, q + e + 1
             if term is None: return text, False, False, q + e
+            if sep == 32 and e == f: return text, False, False, q + e      # (the separator next time)
             return text + ([32] if sep == 32 else []), sep == 10, True, 0
-        text = [ord(ch) for ch in (('true' if v else 'false') if isb and v in (0, 1) else str(v))]
-        done_chunks = st['pst'] - 1 if st['pst'] else 0
-        text = text[4 * done_chunks:] + ([32] if sep == 32 else [])
-        if len(text) > 4: return text[:4], False, False, done_chunks + 2
-        return text, sep == 10, True, 0
+        text = [ord(ch) for ch in (('true' if v else 'false') if isb and v in (0, 1) else str(v))] + ([32] if sep == 32 else [])
+        k = st['pst']; n = min(len(text) - k, 4, f)
+        if k + n < len(text): return text[k:k + n], False, False, k + n
+        return text[k:], sep == 10, True, 0
+    def free(self, cw):
+        """the console cells this pass can still write from optr on: the run of banks (optr + j) mod 4 not in cw"""
+        f = 0
+        while f < 4 and not (cw >> ((self.st['optr'] + f) % 4)) & 1: f += 1
+        return f
     def execute(self, cw):
-        """one instruction, or Stall; returns cw (the console write set used)"""
+        """one instruction, or Stall; returns cw (the console banks this pass has written, a mask)"""
         st = self.st; mem_w = {}; rd = self.rd
         def wr(a, v):
             a &= AMASK
@@ -122,8 +156,8 @@ class Sim:
         def trap(F, args, retw, name, s):
             """one execution of a trap: argument s from the last, or (s = len(args)) the return word, fp = F, pc = the routine"""
             nonlocal fp, npst, done
-            n = len(args)
-            if s < n: wr(F + n - s, args[n - 1 - s]); npst = s + 1; done = False; return pc - 2
+            n = len(args); self.npst_t, self.done_t = 0, True
+            if s < n: wr(F + n - s, args[n - 1 - s]); npst = self.npst_t = s + 1; done = self.done_t = False; return pc - 2
             wr(F, retw); fp = F; return st['ent'][name]
         pc += 2; out = None; done = True
         if op in ALU: x, y = val(b), val(c); wr(addr(a), ALU[op](x, y))
@@ -135,10 +169,14 @@ class Sim:
         elif op == 'LDI': x, y = val(b), val(c); wr(addr(a), rd(x + y))
         elif op == 'STI': x, y = val(b), val(c); z = val(a); wr(z + x, y)
         elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + ps + 2); fp += TRAPOFF; pc = a
+        elif op in ('DADD', 'DADDL', 'DADDR') and ps >= CATT:      # the cat class (a string's +, below)
+            x, y = val(b), val(c); pc = self.cat(op, a, x, y, ps, pc, trap, wr, addr); npst, done = self.npst, self.cdone
         elif op in ('DADD', 'DADDL', 'DADDR', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE'):
             x, y = val(b), val(c)
             slow = R.isstr(x) and R.isstr(y) if op in ('DEQ', 'DNE') else R.isref(x) or R.isref(y)
-            if ps or slow: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.TRAPS[op], ps)
+            cat = op[1] == 'A' and not ps and slow and not any(R.isarr(v) or R.isobj(v) for v in (x, y))
+            if cat: npst = CAT0; done = False; pc -= 2           # a string's +: the cat class from the next execution
+            elif ps or slow: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.TRAPS[op], ps)
             else: wr(addr(a), ALU['ADD' if op[1] == 'A' else op[1:]](x, y))
         elif op in ('GETX', 'SETX'):                     # x: the array (B / A), y: the index (C / B), z: its len and ptr, e: the
             g = op == 'GETX'                             # element (GETX, inside the length) or C (SETX)
@@ -186,22 +224,24 @@ class Sim:
         elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b))): npst = pc - 2; pc = st['ent']['pstub']
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1
-            if cw: raise Stall()
-            cells, nl, done, npst = self.chunk(a, v)
+            f = self.free(cw)
+            cells, nl, done, npst = self.chunk(a, v, f)
+            if not cells and not done and not nl: raise Stall()          # (nothing fits this pass)
             out = (cells, nl)
             if not done: pc -= 2
         elif op == 'PUTC':
-            if cw: raise Stall()
-            ch = val(b); out = ([], True) if ch == 10 else ([ch], False)
+            ch = val(b)
+            if ch != 10 and not self.free(cw): raise Stall()
+            out = ([], True) if ch == 10 else ([ch], False)
         else: raise SystemExit(f'op {op} not in csssim.py')
         # commit
         for (s, w, j), v in mem_w.items(): self.words[s][w][j] = v; self.dirty[s][w] = 1
         if out:
             cells, nl = out
             for ch in cells:
+                cw |= 1 << (st['optr'] % 4)
                 st['mem'][OUT_BASE + st['optr']] = ch; st['out'].append(ch); st['optr'] = (st['optr'] + 1) % (COLS * ROWS)
             if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
-            if cells: cw = 1
         st['pc'], st['fp'], st['pst'] = pc, fp, npst; st['steps'] += 1 if done else 0
         return cw
     def run_pass(self, K):
