@@ -202,7 +202,7 @@ const PROBES = [
   {
     id: 'responsive-iframe', kind: 'fact', flags: ['--enable-blink-features=ResponsiveIframes'],
     claim: 'responsive iframes (on by default from 155; a flag in 153): frame-sizing: content-height sizes the iframe to an opted-in child\'s content height, but no lower than the iframe\'s height when the child loaded',
-    docs: 'js-minus-js docs/ENGINE_NOTES.md 51-52 (the NET modem\'s answers are its height)',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 51-52, 57 (the first NET modem; a data: child\'s return channel)',
     http: {
       'index.html': ['text/html', '<!doctype html><style>iframe{border:0;width:50px;frame-sizing:content-height}</style>' +
         '<iframe id=t src="c.html?h=345"></iframe><iframe id=s src="c.html?h=40"></iframe><iframe id=n src="n.html"></iframe>'],
@@ -215,6 +215,22 @@ const PROBES = [
     read: () => Object.fromEntries(['t', 's', 'n'].map(i => [i, document.getElementById(i).getBoundingClientRect().height])),
     judge: r => ({ control: r.n === 150, holds: r.t === 345 && r.s === 150,
       note: `content 345 px: ${r.t}; content 40 px (in a 150 px iframe): ${r.s}; not opted in: ${r.n} (150 = default)` }),
+  },
+  {
+    id: 'fragment-scroll', kind: 'fact',
+    claim: 'a same-origin child navigated to #t scrolls the page\'s overflow: hidden box around it to bring #t into view, in both directions',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 56 (the NET modem\'s answers are that scrollLeft)',
+    http: {
+      'index.html': ['text/html', '<!doctype html><style>.s{width:100px;height:1px;overflow:hidden}iframe{display:block;border:0;width:5000px;height:1px}</style>' +
+        '<div class=s id=a><iframe src="c.html?w=345#t"></iframe></div><div class=s id=b><iframe src="c.html?w=2000#t"></iframe></div>' +
+        '<div class=s id=n><iframe src="c.html?w=345"></iframe></div>'],
+      'c.html': ['text/html', q => `<style>html,body{margin:0;overflow:hidden}body{white-space:nowrap;font-size:0;height:1px}span{display:inline-block;height:1px}</style>` +
+        `<span style="width:${q.get('w')}px"></span><span id=t style="width:100px"></span>`],
+    },
+    wait: 1000,
+    read: () => Object.fromEntries(['a', 'b', 'n'].map(i => [i, document.getElementById(i).scrollLeft])),
+    judge: r => ({ control: r.n === 0, holds: r.a === 345 && r.b === 2000,
+      note: `#t after 345 px: scrollLeft ${r.a}; after 2000 px: ${r.b}; no fragment: ${r.n}` }),
   },
   {
     id: 'var-ident', kind: 'watch',

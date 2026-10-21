@@ -314,6 +314,43 @@ its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output): `uarch.py` / `
 `machine/hbtest.py` the font in uharfbuzz. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12); ENGINE_NOTES
 25–33 are what it relied on.
 
+### 3.8 The network: `NET` and the modem
+
+`fetch(url)` and `read()` are ROM routines (`lib_src.js`, called like `parseInt`: cc_ref `GLOBALS`) made of one
+instruction, `NET` (opcode 58): pop a word, push the gateway's answer. The words (`net/device.py`): `256 + b` appends
+a URL byte, `512` GETs the URL (the status), `768` is the body's next byte (`-1` past its end). Bit 12 is a sequence
+bit the lib alternates (the runtime cell `NETSEQ`), so consecutive words always differ. `cc_ref.run()`, `cssref.py` and
+`csssim.py` answer at once from `net/device.py`, which serves `tests/net/`; in csssim a `NET` ends its pass and runs
+first in the next, as on the page.
+
+On the page the CPU can't make requests, so it talks to a gateway (`net/server.js`, which has the protocol) through a
+modem iframe:
+
+- **The class `net`** reads `sp - 1` and stalls without a miss until the answer for its word has come (ENGINE_NOTES 56).
+  While it waits it leaves `--req = 1 + (word mod 8192)` at the chain's end, the register `rreq`. When the answer
+  comes it writes it at `sp - 1`. `rnwt` counts the passes one request has waited; after 2,400 (about 30 s) the
+  answer is `-1`.
+- **The request**: `.modem`, an `<iframe loading="lazy" src="/net/m0.html#t">`, is `1 + rreq` px tall. `.nlatch` (a
+  transition latch) shows it from the first waiting `NET` on; before that nothing loads.
+- **The modem's documents** have no doctype (quirks mode) and reload alternating `m0.html#t` and `m1.html#t` (a refresh
+  to the same URL doesn't reload). Each load reads its height (`100vh`) and sends four hex digits of it plus a check
+  digit as `background-image: if(style(--x: …): url(d/<i>/<nonce>/<v>); …)`. A resize restyles the document, so a new
+  word goes out without a reload. Each load also loads `rx`, served as `application/json`, as a stylesheet
+  (ENGINE_NOTES 50): `--rx: R`, `R = valid + 2 seq + 4 (answer mod 2^18)`.
+- **The answer**: the document lays out a span `R` px wide, then `#t` (100 px), and the load scrolls to `#t`. The
+  scroll reaches `.nslot`, the page's 100 px wide `overflow: hidden` box around the iframe (2^20 + 100 px wide), so its
+  `scrollLeft` is `R`. The scroll timeline `--nans` maps it onto `#cpu`'s property `--nans`. An answer counts when it is
+  valid and its seq is the word's bit 12. Fragment scrolls cross only same-origin documents, so the modem is in the
+  page's process.
+- **The gateway** gives each modem a session: the first request is redirected to `/net/s/<id>/m0.html` (the fragment
+  carries over) and the modem's URLs are relative to that, so two pages can't mix their words. It acts on a load's
+  request if every digit came in once with a matching check digit (a load that saw its height change sends a second
+  value), once per distinct word. It resolves relative URLs against the page (the first request's referrer). The modem
+  reloads at once while words come, and once a second after 3 s without one.
+
+A word takes about 8 page frames, about a quarter of a second (BENCHMARKS §14). Several modems would read in
+parallel: each runs at nearly the same rate, paced by the page's frames (HISTORY: open leads).
+
 ---
 
 ## 4. Editor readback (`readback/ui_rb.py`)
@@ -344,6 +381,7 @@ its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output): `uarch.py` / `
 | C1 | `make c1` | `csssim.py`, the CSS CPU pass by pass, runs every compiled image | Node output, cc_ref's steps |
 | C2 | `make c2` | a CPU-only page per program under 1,500 steps (`tests/csscpu_pages.py`) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
+| L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
 - `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 120 programs (each must fit the editor, or
   `suite_ref.py` fails it), `tests/suite_err/` 46; `tests/programs/` has the demos t1–t4.

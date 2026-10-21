@@ -170,8 +170,28 @@ chats.
     document (with `Cache-Control: no-store`), while `@import` and `<link>` are fetched whatever their media.
     *(measured)*
 55. **A same-process child gets few loads when the page's frames are heavy, and a cross-site child slows the page's
-    frames.** Beside the CPU page the modem loaded about 3 times a second in process (the page at 11–13 frames/s,
+    frames.** (Measured with the font CPU's height-channel modem, superseded by 56.) Beside the CPU page the modem loaded about 3 times a second in process (the page at 11–13 frames/s,
     0.7–0.8 s per word). Cross-site (the page on 127.0.0.1, the modem on localhost: `net/server.js` rewrites the
     iframe's URL) it loads about 40 times a second in its own process, but the page dropped to 5–6 frames/s; still
     0.5 s per word, about 3 frames. Pacing the modem to 9 loads/s gave 14.5 frames/s but 1.06 s per word; layout
     containment around the iframe changed nothing. *(measured 2026-10-19)*
+56. **A same-origin child's fragment scroll moves the page's scroll containers**: an iframe navigated to `x.html#t`
+    scrolls its `overflow: hidden` ancestors on the page so that `#t` is in view. With `#t` as wide as the box and after a
+    span R px wide, the box's `scrollLeft` is R (larger or smaller than before), and a scroll timeline reads it. This is
+    the modem's answer channel: no flag (unlike responsive iframes, 51), 2 ms after the child's load. Facts:
+    a cross-origin or `data:` child scrolls nothing; `<meta http-equiv="refresh" content="0">` to the same URL doesn't
+    reload (alternate two URLs: 118 loads/s beside an idle page); the box may be `position: fixed; visibility: hidden`;
+    `scrollLeft` is exact to 2^25 px, but a scroll timeline's registered integer is off by 2–4 above 2^24 (floats), so
+    answers stay below 2^20; the fragment survives a redirect and a form GET (`action="x.html#t"`). From the user's
+    `net/xhtml-tests/readback`. *(measured 2026-10-20; `net/probe/probe5.js`)*
+57. **A quirks-mode `data:` child reads any CORS-enabled response as CSS**: a cross-origin `<link rel=stylesheet
+    crossorigin>` applies whatever its Content-Type (JSON, `text/plain`, `text/html`) if the response has
+    `Access-Control-Allow-Origin`; without `crossorigin` only `text/css` or none applies. A `data:` or `srcdoc` child
+    can opt in to responsive sizing (51) when the page is http (an `about:blank` page matches no source list), also when
+    reached by a form GET; each navigation resets the iframe to 150 px first, so answers below 150 read 150. `data:` URL
+    navigations load up to between 2,030 and 2,050 KB. Trap: Chrome's memory cache hands a URL's earlier response to a
+    later request in another CORS mode; give each probe its own URL. *(measured 2026-10-20; `net/probe/probe4.js`)*
+58. **Several modem children run side by side, paced by the page's frames**: beside the page running a `read()` loop
+    (34 frames/s, 4.3 words/s), one more child doing its own round trips ran at 4.0–4.2 words/s and the page's own
+    stayed at 4.0–4.2 (8.0–8.2 in all); three more: 3.6 each, 14.3 in all. A word takes about 8 page frames whichever
+    child carries it. *(measured 2026-10-21; `net/probe/probe7.js`, the extra children driven by the harness)*
