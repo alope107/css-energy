@@ -77,6 +77,11 @@ regs += [("rLm", 256, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n}
         [(f"rLp{j}", M20, M20 // 2, f"var(--Lp{j})") for j in range(4)]
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
+# NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the passes it has waited (go
+# passes only, so a frame settles); NWAIT passes without an answer give -1 (no gateway: a file: URL, a static server)
+NWAIT = 2400
+regs += [("rreq", 16384, 0, "var(--req)"),
+         ("rnwt", NWAIT + 1, 0, f"calc(var(--go) * min(1, var(--req)) * min({NWAIT}, var(--rnwt) + 1) + (1 - var(--go)) * var(--rnwt))")]
 regs += WREGS
 WNAMES = [r[0] for r in WREGS]
 
@@ -252,6 +257,18 @@ CLASSES['arr'] = dict(ops=['IDXA', 'STOREX'], pre=ARR_PRE,
 CLASSES['dyn'] = dict(ops=['DYN'], pre=DYN_PRE, reads=[("s1", f"{sp} - 1", None), ("s2", f"{sp} - 2", None)],
     write=(f"calc(var(--dtr) * {sp} + (1 - var(--dtr)) * ({sp} - 2))", f"calc(var(--dtr) * ({pc} + 1) + (1 - var(--dtr)) * var(--dres))", None, "1"),
     nx={'sp': f"calc(var(--dtr) * ({sp} + 1) + (1 - var(--dtr)) * ({sp} - 1))", 'pc': f"calc(var(--dtr) * {DYNVEC} + (1 - var(--dtr)) * ({pc} + 1))"})
+# NET (net/server.js has the modem's protocol): a stall without a miss until the modem's answer for this word has come.
+# The answer R = valid + 2 seq + 4 (value mod 2^18) is the modem slot's scrollLeft, read by the scroll timeline --nans on
+# #cpu; it counts when it is valid and its seq is the word's bit 12 (the lib alternates it). While it waits, the class
+# leaves --req = 1 + (word mod 8192) for the chain's end (the register rreq: the iframe's height, the request).
+from net_slot import SLOT, NW
+NET_PRE = ["--nR: var(--nans);", "--nvalid: mod(var(--nR), 2);", "--nrseq: mod(round(down, var(--nR) / 2), 2);",
+           "--nws: mod(round(down, var(--vs1) / 4096), 2);", "--nd: round(down, var(--nR) / 4);",
+           f"--ndata: calc(var(--nd) - {1 << 18} * clamp(0, var(--nd) - {(1 << 17) - 1}, 1));",
+           f"--nmatch: calc(var(--nvalid) * {eq('var(--nrseq)', 'var(--nws)')});",
+           f"--ntime: clamp(0, var(--rnwt) - {NWAIT - 1}, 1);", "--nok: min(1, calc(var(--nmatch) + var(--ntime)));",
+           "--nval: calc(var(--nmatch) * var(--ndata) - (1 - var(--nmatch)) * var(--ntime));"]
+CLASSES['net'] = dict(ops=['NET'], pre=NET_PRE, reads=[("s1", f"{sp} - 1", None)], write=(None, "var(--nval)", "s1", "1"), nx={})
 def first_miss(acc):
     """the block of the first missing access (dependency order) among [(name, mask)], -1 for none"""
     e = "-1"
@@ -282,6 +299,8 @@ for c, k in CLASSES.items():
     d += [f"--ok: calc(1 - min(1, calc({' + '.join(f'{m}{miss(n)}' for n, m in acc)})));" if acc else "--ok: 1;",
           f"--mb: {first_miss(acc)};" if acc else "--mb: -1;"] + nexts(k['nx'])
     if c == 'jump': d += [f"--nstop: {eq('var(--op)', OP['HALT'])};", f"--nhalt: {eq('var(--op)', OP['HALT'])};"]
+    if c == 'net': d += [f"--ok: calc((1 - {miss('s1')}) * var(--nok));",      # (replaces the generic --ok above: it waits)
+                         f"--req: calc((1 - var(--nok)) * (1 - {miss('s1')}) * (1 + mod(var(--vs1), 8192)));"]
     cls_rules[c] = (k['ops'], d)
 
 # 'out': the PRINT family and PUTC (the font CPU's print service): up to 4 console cells per execution,
@@ -374,7 +393,8 @@ P = ["pc", "rsp", "rfp", "sp", "fp", "optr", "pst", "steps", "halt", "pend", "in
      "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "imm", "simm", "cls", "rom", "rh", "rl", "vf", "mf", "ok", "mb", "npc", "nsp", "nfp", "nsteps", "nstop", "nhalt",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr", "epk", "emore",
-     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT"]
+     "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT",
+     "req", "nans", "nlive", "nR", "nvalid", "nrseq", "nws", "nd", "ndata", "nmatch", "ntime", "nok", "nval"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
@@ -385,6 +405,7 @@ props = [lbl.section('Registered properties', 'registers, the chain\'s state and
 # temps that only the element declaring them reads (.x's reads and PRINT scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl"}
 LOCAL |= {"xA", "xk", "xarr", "xa", "xin", "xrd", "xtrap", "df", "dres", "isRef", "dtr", "tstr", "tz", "nstr", "epk", "emore"}
+LOCAL |= {"nR", "nvalid", "nrseq", "nws", "nd", "ndata", "nmatch", "ntime", "nok", "nval"}
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pph", "pbase", "pe", "pvE", "pbE",
           "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
@@ -393,11 +414,18 @@ props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; init
 
 css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines'),
        "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
-       "#cpu {\n  timeline-scope: " + ", ".join(f"--{r[0]}" for r in regs if r[0] not in WNAMES) +
-       ";\n  animation-name: " + ", ".join(f"r-{r[0]}" for r in regs) + ";\n  animation-timeline: " + ", ".join(f"--{r[0]}" for r in regs) +
+       "#cpu {\n  timeline-scope: " + ", ".join([f"--{r[0]}" for r in regs if r[0] not in WNAMES] + ["--nans"]) +
+       ";\n  animation-name: " + ", ".join([f"r-{r[0]}" for r in regs] + ["r-nans"]) + ";\n  animation-timeline: " + ", ".join([f"--{r[0]}" for r in regs] + ["--nans"]) +
        ";\n  animation-duration: auto;\n  animation-timing-function: linear;\n  animation-fill-mode: both;\n  " + "\n  ".join(cpu) + "\n}"]
 css.append(lbl.group('Register keyframes', 'each register\'s view timeline mapped onto its value range'))
 css += [f"@keyframes r-{n} {{ from {{ --{n}: {H - OFF}; }} to {{ --{n}: {-1 - OFF}; }} }}" for n, H, OFF, _ in regs]
+css += [lbl.group('NET: the modem', 'its slot\'s scrollLeft is the answer (the scroll timeline --nans); its height is the request (rreq)'),
+        f"@keyframes r-nans {{ from {{ --nans: 0; }} to {{ --nans: {NW - SLOT}; }} }}",
+        # live from the first waiting NET on (a transition latch: 0 s to take it, a 1,000,000 s delay to hold it)
+        ".nlatch { height: 0; --nlive: min(1, var(--rreq)); transition: --nlive 0s calc((1 - min(1, var(--rreq))) * 1000000s); }",
+        f".nslot {{ display: if(style(--nlive: 1): block; else: none); position: fixed; left: 0; top: 0; width: {SLOT}px; height: 1px;"
+        " overflow: hidden; visibility: hidden; scroll-timeline: --nans x; }",
+        f".modem {{ display: block; border: 0; width: {NW}px; height: calc((1 + var(--rreq)) * 1px); }}"]
 
 # a read port's leaf name: a two-level if() on the block's 64-block group (h) and place in it (l). An if() costs ~70 ns per
 # entry it contains, taken or not (exp/csscpu/README.md), so a 4,352-block mux costs ~0.3 ms wherever it is evaluated: each port
@@ -422,7 +450,7 @@ for i in range(2 * WB):
     css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(RB0, BLKS)) - set(HOT), leaf, '--rom')}; }} }}")   # (ROM: no leaf, reads 0)
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
-css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0; --lat: 1;"
+css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --cw: 0; --lat: 1; --req: 0;"
            f" --rom: {rom_of('var(--pc)')}; --Lm: calc((1 - var(--go)) * var(--rLm));"
            + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
@@ -600,6 +628,7 @@ if not UI:
     <div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b>
      halt <b class="num" style="--v: var(--halt)"></b></div>
     </div>
+    <div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
     <div class="fl">{chain}</div>
     </div></div>
     </html>
@@ -658,6 +687,7 @@ else:
 <div class="head">
 <div class="status"><span>steps <b class="num" style="--v: var(--steps)"></b></span><span>pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b></span></div>
 </div>
+<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
 <div class="fl">{chain}</div>
 </div></div></div>
 </body>

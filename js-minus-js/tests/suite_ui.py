@@ -28,7 +28,7 @@ progs = [f for f in progs if os.path.basename(f).startswith('net_') == NET]
 for f in ([] if NET else [f'{EXP}/user_report.js']) + progs:
     if len(args) >= 2 * limit: break
     c, r = R.compile_and_run(open(f).read(), lib)
-    if r[0] > maxsteps: continue
+    if r[0] > maxsteps and not NET: continue      # (a network program's time is its round trips, not its steps)
     name = os.path.basename(f)[:-3]
     open(f'{EXP}/{name}.grid', 'w').write(grid(open(f[:-3] + '.out').read()) + '\n')
     args += [f, f'{EXP}/{name}.grid']
