@@ -99,7 +99,37 @@ for 2.2–2.5× the work.
 | collatz | 350, 388 | 378, 391 |
 | fib | (main's bench page fails its end-state check) | 450, 456 |
 
-**Run time in Chrome**: see below (`bench.sh`).
+**Run time in Chrome** (`MAXLOAD=8 VARIANTS="base reg regl" exp/regvm/bench.sh 5`, 2026-10-21, headless Chromium 153,
+mini PC; other sessions kept the load at 5–8, so absolute times are ~1.3–1.9× a quiet machine's: main's primes ran
+1,487 ms quiet, 1,876 here). Run time is first step → HALT (`machine/halttime.js` runMs, polled every 30 ms), six
+interleaved rounds per program, a fresh browser per run; the ratio is the median of the per-round ratios to main
+(IQR in brackets). reg: the register CPU; regl: with `LOOPCOPY=2`.
+
+| Program | Main ms | Register ms | Ratio | Register + loop copy ms | Ratio |
+|---|---|---|---|---|---|
+| primes | 1,876 | 886 | 0.50 (0.49–0.53) | 844 | 0.49 (0.44–0.50) |
+| collatz | 3,132 | 1,355 | 0.43 (0.42–0.43) | 1,179 | 0.38 (0.37–0.38) |
+| func_recursion | 2,309 | 938 | 0.41 (0.40–0.46) | 918 | 0.40 (0.37–0.41) |
+| fib | 12,460 | 6,178 | 0.50 (0.44–1.27 †) | 5,308 | 0.44 (0.43–0.46) |
+| cond_logic | 1,387 | 860 | 0.63 (0.58–0.64) | 768 | 0.56 (0.53–0.57) |
+| else_if_long | 3,143 | 1,975 | 0.63 (0.59–0.63) | 1,952 | 0.63 (0.60–0.65) |
+| is_prime | 1,199 | 987 | 0.81 (0.71–0.82) | 952 | 0.86 (0.72–0.89) |
+| fizzbuzz | 1,731 | 1,295 | 0.67 (0.59–0.97) | 1,300 | 0.81 (0.50–0.86) |
+| nested_loops | 363 | 252 | 0.98 (0.69–1.06 †) | 174 | 0.67 (0.48–0.68) |
+| gcd | 220 | 177 | 0.77 (0.54–0.88) | 63 | 0.28 (0.24–0.73) |
+
+A repeat of primes, 30 rounds (load ~7–9): main 2,830 ms, register 1,365 ms, ratio 0.491 (0.470–0.497).
+gcd and nested_loops run for a few polling intervals: their ratios are noise.
+
+Compute-bound programs run 2.0–2.6× faster: half the passes, each level ~5–9% dearer. Output-bound ones (is_prime,
+FizzBuzz) gain 1.2–1.5×: a pass writes one console chunk whatever the ISA.
+
+† **Three runs didn't halt** in this session: one each of register primes, fib and nested_loops (of 60 register-page
+runs; 0 of 60 main and 0 of 60 loop-copy runs) ran to halttime's 300 s limit with the page responsive. Not
+reproduced since: 232 more runs of the same pages with the same harness, alone or 4 at once, and C2 three times for
+each machine at load ~20 (main 3 × 111/111, register 3 × 85/85). One earlier C2 run (6 browsers, load ~20) showed a
+page halted with the right step count and an empty console (`str_escape`), also not reproduced. halttime.js now
+prints the CPU's registers when a run doesn't halt, so the next one can be diagnosed.
 
 ## Leads
 

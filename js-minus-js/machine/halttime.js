@@ -1,4 +1,4 @@
-// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every POLL ms (default 250); runMs: first step -> HALT; checks console output against IMG (harness only)
+// halttime.js page.html [maxSec] — time from navigation to HALT (the page's --isHALT), polled every POLL ms (default 250); runMs: first step -> HALT; a run that doesn't halt prints the CPU's registers; checks console output against IMG (harness only)
 const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const { consoleCodes, gridRows } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs');
@@ -19,5 +19,8 @@ const fs = require('fs');
   const ok = rows.join('\n').replace(/\s+$/, '') === im.expected.replace(/\s+$/, '');
   console.log(JSON.stringify({ page: pg, loadMs: tl, firstStepMs: first, haltMs: th, runMs: first === null ? null : th - first, steps: r.steps, kind: r.kind, outputOk: ok }));
   if (!ok) console.log(JSON.stringify({ got: rows.join('\n'), want: im.expected }));
+  if (!r.halted) console.log(JSON.stringify({ notHalted: await p.evaluate(() => { const cs = getComputedStyle(document.querySelector('#cpu'));
+    return Object.fromEntries(['steps', 'pc', 'rpc', 'sp', 'fp', 'pend', 'optr', 'pst', 'k', 'par', 'go', 'init', 'rLm', 'stale', 'pstale', 't', 'tprev']
+      .map(n => [n, cs.getPropertyValue('--' + n).trim()])); }) }));
   await b.close();
 })();
