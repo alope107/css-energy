@@ -36,32 +36,33 @@ const ND = 5;                              // request digits: 4 hex digits of K,
 const SLOT = 100;                          // the page's slot width = #t's width
 
 // a modem document: quirks mode (no doctype); reloads itself as `next` (m0 <-> m1) after `refresh` seconds
-function modemHtml(next, refresh) {
+function modemHtml(next, refresh, show = false) {
   const prop = n => `@property --${n} { syntax: "<integer>"; inherits: true; initial-value: 0; }`;
   const dig = [...Array(4).keys()].map(i => `--d${i}: mod(round(down, var(--k) / ${16 ** i}), 16);`).join(' ');
   const req = [...Array(ND).keys()].map(i => `#q${i} { --x: calc(var(--nn) * 16 + var(--d${i})); background-image: if(` +
     [...Array(32).keys()].map(x => `style(--x: ${x}): url(d/${i}/${x >> 4}/${x & 15})`).join('; ') + `); }`).join('\n');
+  const plain = !show;      // (a demo page's modem, /net/m0.html?show, paints a ruler and #t)
   return `<html><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="${refresh}; url=${next}#t">
 <link rel="stylesheet" href="rx">
 <style>
 ${['k', 'd0', 'd1', 'd2', 'd3', 'd4', 'x', 'nn'].map(prop).join('\n')}
-html, body { margin: 0; overflow: hidden; } body { white-space: nowrap; height: 40px; font-size: 0; }
+html, body { margin: 0; overflow: hidden; } body { white-space: nowrap; height: ${plain ? 1 : 40}px; font-size: 0; }
 :root { --k: max(0, calc(100vh / 1px - 1)); ${dig} --d4: mod(calc(var(--d0) + var(--d1) + var(--d2) + var(--d3)), 16); }
 i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; }
 ${req}
-span { display: inline-block; height: 40px; } .v { width: calc(var(--rx, 0) * 1px); } #t { width: ${SLOT}px; }
-/* what shows on a demo page (gen_css.py NETSHOW=1; on the page itself the modem is visibility: hidden): a ruler, 10 px
-   ticks and 100 px marks, up to #t, which is orange */
+span { display: inline-block; height: ${plain ? 1 : 40}px; } .v { width: calc(var(--rx, 0) * 1px); } #t { width: ${SLOT}px; }
+${plain ? '' : `/* what shows on a demo page (gen_css.py NETSHOW=1, whose iframe asks for /net/m0.html?show): a ruler, 10 px ticks and
+   100 px marks, up to #t, which is orange */
 .v { background: repeating-linear-gradient(90deg, #17212b 0 2px, transparent 2px 100px) 0 0 / auto 40px no-repeat,
   repeating-linear-gradient(90deg, #8a96a3 0 1px, transparent 1px 10px) 0 24px / auto 16px no-repeat, #eef4ff; }
-#t { background: #e8590c; }
+#t { background: #e8590c; }`}
 </style></head><body>${[...Array(ND).keys()].map(i => `<i id="q${i}"></i>`).join('')}<span class="v"></span><span id="t"></span></body></html>
 `;
 }
 
 // a gateway session: the protocol above over one modem's loads
-function session(port, base, log) {
+function session(port, base, log, show) {
   let nonce = 0, digits = [], done = -1, lastReq = 0, resp = 0;     // resp: R
   let url = [], body = Buffer.alloc(0), pos = 0;
   const answer = (s, v) => { resp = 1 + 2 * s + 4 * (((v % (1 << 18)) + (1 << 18)) % (1 << 18)); };
@@ -98,7 +99,7 @@ function session(port, base, log) {
       finish();
       const idle = Date.now() - lastReq > 3000;
       res.writeHead(200, { 'Content-Type': 'text/html', ...NOSTORE });
-      return res.end(modemHtml(file === 'm0.html' ? 'm1.html' : 'm0.html', idle ? 1 : 0));
+      return res.end(modemHtml(file === 'm0.html' ? 'm1.html' : 'm0.html', idle ? 1 : 0, show));
     }
     if (file === 'rx') {
       nonce ^= 1; digits = [];
@@ -117,7 +118,7 @@ function session(port, base, log) {
 function gateway(port, log = () => {}) {
   const sessions = new Map(); let next = 0;
   const open = (req, res, u) => {          // a modem's first request: its session
-    const id = ++next; sessions.set(id, session(port, req.headers.referer || null, log));
+    const id = ++next; sessions.set(id, session(port, req.headers.referer || null, log, u.searchParams.has('show')));
     if (sessions.size > 32) sessions.delete(sessions.keys().next().value);
     res.writeHead(302, { Location: `/net/s/${id}/${path.basename(u.pathname)}`, ...NOSTORE }); res.end();
   };

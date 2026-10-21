@@ -669,7 +669,7 @@ if not UI:
     <div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b>
      halt <b class="num" style="--v: var(--halt)"></b></div>
     </div>
-    {NSHOW_HTML}<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
+    {NSHOW_HTML}<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html{'?show' if NETSHOW else ''}#t" title="network modem" aria-hidden="true"></iframe></div></div>
     <div class="fl">{chain}</div>
     </div></div>
     </html>
@@ -728,7 +728,7 @@ else:
 <div class="head">
 <div class="status"><span>steps <b class="num" style="--v: var(--steps)"></b></span><span>pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b></span></div>
 </div>
-{NSHOW_HTML}<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
+{NSHOW_HTML}<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html{'?show' if NETSHOW else ''}#t" title="network modem" aria-hidden="true"></iframe></div></div>
 <div class="fl">{chain}</div>
 </div></div></div>
 </body>
