@@ -30,7 +30,7 @@ C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).
 CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
 
 .PHONY: help all lib image page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net c1 c2 fuzz fuzz-quick fuzz-l3 clean
+        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net net-demo c1 c2 fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> page: editor, compile chain, CSS CPU; ~40 s)"
@@ -131,6 +131,12 @@ $(B)/ui_exp/net-args.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
 $(B)/l5-net.$(UICONF).log: $(B)/ui_exp/net-args.txt $(UI) $(NET)
 	rm -rf $(B)/net-www && mkdir -p $(B)/net-www && cp -r tests/net/. $(B)/net-www/ && ln -s ../js_in_css.xhtml $(B)/net-www/js_in_css.xhtml
 	SHARDS=$(SHARDS) NETROOT=$(B)/net-www EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/net-www/js_in_css.xhtml $$(cat $<)
+# a demo page with the modem showing (NETSHOW=1) and net/demo.js in the editor: serve build/net-www with net/server.js
+net-demo: $(B)/net-www/net_demo.xhtml
+$(B)/net-www/net_demo.xhtml: net/demo.js $(CC)/lib.json $(CC)/mkimage.py machine/gen_css.py machine/uipage.py $(wildcard $(CC)/*.py readback/*.py)
+	@mkdir -p $(@D) && cp -r tests/net/. $(@D)/
+	$(PY) $(CC)/mkimage.py net/demo.js $(B)/ccimg_demo.json
+	UI=1 NETSHOW=1 $(PY) machine/gen_css.py $(B)/ccimg_demo.json $@
 l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what the scan reads is what the editor shows
 	$(call report,$<,2)
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)

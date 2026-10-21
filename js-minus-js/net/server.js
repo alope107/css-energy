@@ -46,11 +46,16 @@ function modemHtml(next, refresh) {
 <link rel="stylesheet" href="rx">
 <style>
 ${['k', 'd0', 'd1', 'd2', 'd3', 'd4', 'x', 'nn'].map(prop).join('\n')}
-html, body { margin: 0; overflow: hidden; } body { white-space: nowrap; height: 1px; font-size: 0; }
+html, body { margin: 0; overflow: hidden; } body { white-space: nowrap; height: 40px; font-size: 0; }
 :root { --k: max(0, calc(100vh / 1px - 1)); ${dig} --d4: mod(calc(var(--d0) + var(--d1) + var(--d2) + var(--d3)), 16); }
 i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; }
 ${req}
-span { display: inline-block; height: 1px; } .v { width: calc(var(--rx, 0) * 1px); } #t { width: ${SLOT}px; }
+span { display: inline-block; height: 40px; } .v { width: calc(var(--rx, 0) * 1px); } #t { width: ${SLOT}px; }
+/* what shows on a demo page (gen_css.py NETSHOW=1; on the page itself the modem is visibility: hidden): a ruler, 10 px
+   ticks and 100 px marks, up to #t, which is orange */
+.v { background: repeating-linear-gradient(90deg, #17212b 0 2px, transparent 2px 100px) 0 0 / auto 40px no-repeat,
+  repeating-linear-gradient(90deg, #8a96a3 0 1px, transparent 1px 10px) 0 24px / auto 16px no-repeat, #eef4ff; }
+#t { background: #e8590c; }
 </style></head><body>${[...Array(ND).keys()].map(i => `<i id="q${i}"></i>`).join('')}<span class="v"></span><span id="t"></span></body></html>
 `;
 }

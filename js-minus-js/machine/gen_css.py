@@ -264,6 +264,7 @@ CLASSES['dyn'] = dict(ops=['DYN'], pre=DYN_PRE, reads=[("s1", f"{sp} - 1", None)
 # #cpu; it counts when it is valid and its seq is the word's bit 12 (the lib alternates it). While it waits, the class
 # leaves --req = 1 + (word mod 8192) for the chain's end (the register rreq: the iframe's height, the request).
 from net_slot import SLOT, NW
+NETSHOW = os.environ.get('NETSHOW') == '1'      # a demo page: the modem's box shows (scaled 3x) with its request and answer
 NET_PRE = ["--nR: var(--nans);", "--nvalid: mod(var(--nR), 2);", "--nrseq: mod(round(down, var(--nR) / 2), 2);",
            "--nws: mod(round(down, var(--vs1) / 4096), 2);", "--nd: round(down, var(--nR) / 4);",
            f"--ndata: calc(var(--nd) - {1 << 18} * clamp(0, var(--nd) - {(1 << 17) - 1}, 1));",
@@ -428,6 +429,44 @@ css += [lbl.group('NET: the modem', 'its slot\'s scrollLeft is the answer (the s
         f".nslot {{ display: if(style(--nlive: 1): block; else: none); position: fixed; left: 0; top: 0; width: {SLOT}px; height: 1px;"
         " overflow: hidden; visibility: hidden; scroll-timeline: --nans x; }",
         f".modem {{ display: block; border: 0; width: {NW}px; height: calc((1 + var(--rreq)) * 1px); }}"]
+if NETSHOW:     # the panel at the top right; the slot itself at 3x (a transform: its scrollLeft, the answer, is unchanged)
+    css += [lbl.group('NETSHOW: the modem, visible', 'a demo of the fragment-scroll answers'),
+            ".nshow { position: fixed; right: 16px; top: 16px; width: 380px; height: 560px; box-sizing: border-box; padding: 12px 16px;"
+            " background: #fff; border: 1px solid #c9d1d9; border-radius: 8px; font: 13px/1.45 system-ui, sans-serif; color: #17212b; z-index: 5; }",
+            ".nshow h2 { font-size: 15px; margin: 0 0 6px; } .nshow p { margin: 0 0 8px; color: #5b6875; }",
+            ".nshow .kv { font: 13px/1.6 ui-monospace, monospace; } .nshow .kv b { font-weight: 600; }",
+            ".nreq { counter-set: nq var(--rreq); } .nreq::after { content: counter(nq); }",
+            ".nR { counter-set: nr var(--nans); } .nR::after { content: counter(nr); }",
+            ".nbits { counter-set: nv mod(var(--nans), 2) ns mod(round(down, var(--nans) / 2), 2) nd round(down, var(--nans) / 4) nc mod(round(down, var(--nans) / 4), 256); }",
+            ".nbits::after { content: \"valid \" counter(nv) \"  seq \" counter(ns) \"  value \" counter(nd) \"  '\" counter(nc, ascii) \"'\"; }",
+            ".ntape { position: relative; height: 22px; margin: 8px 0 4px; background: repeating-linear-gradient(90deg, #c9d1d9 0 1px, transparent 1px 17.3px), #f3f5f7; border-radius: 3px; }",
+            ".nneedle { position: absolute; top: -3px; width: 3px; height: 28px; background: #e8590c; border-radius: 2px;"
+            " left: calc(min(var(--nans), 2048) * 346px / 2048); transition: left .25s ease-out; }",
+            ".ntapel { display: flex; justify-content: space-between; font: 11px ui-monospace, monospace; color: #5b6875; }",
+            # the word: K - 1 mod 4096 (256 + byte: a URL byte, 512 GET, 768 READ)
+            ".nword { counter-set: nw mod(max(0, var(--rreq) - 1), 4096) nb clamp(0, mod(max(0, var(--rreq) - 1), 4096) - 256, 255); }",
+            ".nword::after { content: \"word \" counter(nw) \"  (URL byte '\" counter(nb, ascii) \"' / 512 GET / 768 READ)\"; }",
+            # a mirror of the real box, wider and smoothed: the modem's ruler slides so that the answer's x is under the orange #t
+            ".nfilm { position: relative; height: 40px; margin: 10px 0 2px; overflow: hidden; border: 1px solid #5b6875; border-radius: 3px;"
+            " background: repeating-linear-gradient(90deg, #17212b 0 2px, transparent 2px 100px) 0 0 / auto 40px repeat-x,"
+            " repeating-linear-gradient(90deg, #8a96a3 0 1px, transparent 1px 10px) 0 24px / auto 16px repeat-x, #eef4ff;"
+            " background-position-x: calc(120px - 1px * var(--nans)), calc(120px - 1px * var(--nans)); transition: background-position-x .45s ease-in-out; }",
+            ".nfilm::before { content: \"\"; position: absolute; left: 120px; top: 0; width: 100px; height: 40px; background: #e8590c; opacity: .85; }",
+            ".nfilml { font: 11px ui-monospace, monospace; color: #5b6875; margin-bottom: 6px; }",
+            ".nslot { left: auto; right: 276px; top: 420px; height: 40px; visibility: visible; transform: scale(3); transform-origin: 0 0;"
+            " outline: 1px solid #5b6875; background: #fff; z-index: 6; }",
+            ".nwait { position: absolute; left: 16px; top: 412px; width: 290px; color: #5b6875; }"]     # (the slot, opaque, covers it once the modem shows)
+NSHOW_HTML = ('<div class="nshow"><h2>The network modem</h2>'
+              "<p>No script. A NET word sets the modem iframe's height (the request). The modem's document reloads all the time; "
+              "each load lays out a span as wide as the answer, then the orange #t, and scrolls to it. That scroll moves the box "
+              "below (100 px wide, shown 3&#215;), and a scroll timeline reads its scrollLeft back.</p>"
+              '<div class="kv">request <b class="nreq"></b> (iframe height &#8722; 1)</div>'
+              '<div class="kv">answer <b class="nR"></b> = scrollLeft</div><div class="kv nbits"></div>'
+              '<div class="kv nword"></div>'
+              '<div class="ntape"><div class="nneedle"></div></div><div class="ntapel"><span>0</span><span>1024</span><span>2048 px</span></div>'
+              '<div class="nfilm"></div><div class="nfilml">the modem\'s ruler, slid to the answer (smoothed; a 100 px mark every 100 px)</div>'
+              '<div class="nwait">(the modem appears at the program\'s first fetch)</div>'
+              '<div class="nfilml" style="position: absolute; left: 16px; top: 532px">the real box, 3&#215;: it always ends on #t</div></div>') if NETSHOW else ""
 
 # a read port's leaf name: a two-level if() on the block's 64-block group (h) and place in it (l). An if() costs ~70 ns per
 # entry it contains, taken or not (exp/csscpu/README.md), so a 4,352-block mux costs ~0.3 ms wherever it is evaluated: each port
@@ -630,7 +669,7 @@ if not UI:
     <div class="status">steps <b class="num" style="--v: var(--steps)"></b> pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b>
      halt <b class="num" style="--v: var(--halt)"></b></div>
     </div>
-    <div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
+    {NSHOW_HTML}<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
     <div class="fl">{chain}</div>
     </div></div>
     </html>
@@ -689,7 +728,7 @@ else:
 <div class="head">
 <div class="status"><span>steps <b class="num" style="--v: var(--steps)"></b></span><span>pc <b class="num" style="--v: var(--pc)"></b> sp <b class="num" style="--v: var(--sp)"></b></span></div>
 </div>
-<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
+{NSHOW_HTML}<div class="nlatch"><div class="nslot"><iframe class="modem" loading="lazy" src="/net/m0.html#t" title="network modem" aria-hidden="true"></iframe></div></div>
 <div class="fl">{chain}</div>
 </div></div></div>
 </body>
