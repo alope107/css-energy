@@ -51,7 +51,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Label the CSS you add (`lbl.section` / `lbl.group` in gen3d.py and build3d.py, `/* === … === */` in ui3d.css;
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py out/p16.html` prints a page's outline.
 - Touch (ARCHITECTURE.md "Touch") rests on three Chrome behaviours `make engine-check` probes: layout re-snaps wait while a scroll gesture is active (the "finger down" bit), `scroll-axis-lock: none`, touch deltas unprojected onto a 3D-transformed scroller. Anything inherited from `#TI` changes every frame of a drag: zero it where unused (`.view`, `.rz`), as `--sx` is.
-- WebKit (ARCHITECTURE.md §7): no `if()` before Safari 27.x; one step per frame (two-thirds speed at 60 Hz), as in Firefox.
+- WebKit (ARCHITECTURE.md §7): no `if()` before Safari 27.x; one step per frame (two-thirds speed at 60 Hz), as in Firefox; `atan2()` of a relative length (`cqw`, `em`) is wrong in Safari: divide lengths with typed division instead (`calc(100cqw / 900px)`), with the old form declared first for Firefox 157.
 - Firefox (ARCHITECTURE.md §6): `style(--flag)` is always true (hence `BOOLQ=0`); `x - hypot(…)` is `x + hypot(…)` (hence `1 * hypot`); no `if()`; style-query rules aren't re-matched after animation-driven changes (the `#LM` size-container clock forces it, so anything below #LM positioned in percentages or sized in `cq*` units follows #LM's box: register such a value, like `--u`).
 
 ## When compacting

@@ -227,7 +227,7 @@ Chrome to float noise, after these changes (Chrome cost: BENCHMARKS.md §1 Firef
 | Negating `hypot()` negates its arguments, leaving it unchanged: `100 - hypot(3, 4)` is 105 (also in a subtracted `min`/`max`/`sign`/sum, through `var()`) | every `hypot(` becomes `1 * hypot(` after `simp.py` (`HYPOT1=0` off) |
 | No `if()` (the names `--A{i}`) | `@supports not (width: if(…))`: every body always named on #L0 (also Safari, §7) |
 | Style-container rules aren't re-matched when the container's value changes through an animation (all state does): gates kept their first result | Firefox re-matches the subtree of a size container whose size changed: Firefox-only, #LM's box is sized from `--ffk = any × now` (two incommensurate periods), so it changes every frame while anything is awake (padding alone doesn't trigger it). #LW restores the arena's size (`VW × --u`); `--u` is registered so its `100cqw` resolves on `.arena`, not #LM (`tools/overlaycheck.js`). `FFQ=0` off. |
-| No typed division before 158 | `scale(tan(atan2(100cqw, 900px)))` |
+| No typed division before 158 | the view's scale is declared twice, `scale(tan(atan2(100cqw, 900px)))` then `scale(calc(100cqw / 900px))`: without typed division the second is dropped |
 | Intersecting 3D planes drawn in document order (a shadow over its body) | the shadow comes first in each body |
 
 Three are unreported Firefox bugs, with reproductions in `../../bugs/` (hypot, style-query re-match, boolean query).
@@ -248,6 +248,7 @@ custom properties in 18). Checked in Playwright's WebKit 27.2 (WPE, Linux, headl
 | WebKit behaviour | Workaround |
 |---|---|
 | No `if()` before Safari 27.x | Firefox's fallback (§6), on a feature query: every body always named on #L0 |
+| `atan2()` of a relative length (`100cqw`) comes out wrong in Safari (probably [248513](https://bugs.webkit.org/show_bug.cgi?id=248513)); the view was scaled by `tan(atan2(100cqw, 900px))` | typed division (Safari 26) is declared after it and wins; `experiments/safari/probe.html` B2 prints the values |
 | `var()` of a registered number keeps 6 decimal places, as CSSOM serializes a number (Chrome and Firefox keep 6 significant digits): `1e-8` is 0, `45.999999` stays | registers read back a hair off (46 as 45.999999, −1600 as −1599.999924) and Chrome's rounding hid it; WebKit's exact tests on them woke every sleeping body on every pass (a 16-body tower never slept; one box rocked in a two-step cycle). `SC` and `GYP` are compared with a margin of 0.5 |
 | An animated registered `<integer>` isn't rounded ([327925](https://bugs.webkit.org/show_bug.cgi?id=327925)) | why the margin and not `<integer>` registers |
 | One step per frame (timelines are sampled once per frame, as in Firefox): 60 steps/s at 60 Hz against `RATE` 90 | left as is: two-thirds speed |

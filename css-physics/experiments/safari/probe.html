@@ -133,9 +133,11 @@ a{color:#7fb4ff}
 .m8 .t{--ok:calc(1 - min(1, abs(clamp(0, 5, 3) - 3) * 1000))}
 .m9 .t{--ok:calc(1 - min(1, abs(cos(1rad) - 0.540302) * 1000))}
 .m10 .t{--ok:calc(1 - min(1, abs(tan(atan2(100px, 50px)) - 2) * 1000))}
-/* (a table can't be a size container: a div is, as .stage is on the page) */
-.m11{container-type:inline-size;width:900px;padding:5px 6px}
-.m11 .t{display:inline-block;margin-right:1em;--ok:calc(1 - min(1, abs(tan(atan2(100cqw, 900px)) - 1) * 1000))}
+/* B2: a 900px size container (a table can't be one: a div is, as .stage is on the page) */
+.trig{container-type:inline-size;width:900px}
+.ruler,.scaled{height:8px;margin:4px 0;width:300px}
+.ruler{background:#666}
+.scaled{background:#fc0;transform-origin:0 0;transform:scale(tan(atan2(100cqw, 900px)));transform:scale(calc(100cqw / 900px))}
 .m12{--tiny:calc(1 / 81000000)}
 .m12 .t{--ok:calc(1 - min(1, abs(var(--tiny) * 81000000 - 1) * 1000))}
 .m13 .t{--ok:calc(1 - min(1, abs(calc(var(--x) * 0 + 7) - 7) * 1000))}
@@ -202,7 +204,6 @@ way) and the two that need the mouse. Please send a screenshot of the whole page
 <tr class="m8"><td class="t"></td><td></td><td><code>clamp(0, 5, 3)</code> = 3</td></tr>
 <tr class="m9"><td class="t"></td><td></td><td><code>cos(1rad)</code> = 0.540302</td></tr>
 <tr class="m10"><td class="t"></td><td></td><td><code>tan(atan2(100px, 50px))</code> = 2</td></tr>
-<tr><td colspan="3" style="padding:0"><div class="m11"><span class="t"></span><code>tan(atan2(100cqw, 900px))</code> = 1 in a 900px container (the view's scale)</div></td></tr>
 <tr class="m12"><td class="t info"></td><td></td><td><code>var()</code> of a registered 1/81,000,000 keeps its value (Chrome, Firefox yes; WebKit rounds to 6 decimals: 0)</td></tr>
 <tr class="m13"><td class="t"></td><td></td><td><code>calc()</code> nested in <code>calc()</code> with <code>var()</code></td></tr>
 <tr class="b7"><td class="t"></td><td><label><input type="checkbox" id="hb"> tick</label></td><td><code>:has(:checked)</code> (the page's controls): tick the box</td></tr>
@@ -213,6 +214,27 @@ way) and the two that need the mouse. Please send a screenshot of the whole page
 <tr class="rd8"><td class="t"></td><td class="n">x <span class="vx cnt"></span>, y <span class="vy cnt"></span></td><td>the mouse: hover a cell at the left or right end of the grid; the dot follows (anchor positioning on <code>:hover</code>) and x, y change (a view timeline reads the dot)</td></tr>
 </table>
 <div class="gr8"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><b class="pm"></b></div>
+</div>
+
+<h2>B2. Trigonometry and division (values × 1000)</h2>
+<div class="trig">
+<table>
+<tr><th>result</th><th>value</th><th>expected</th><th>expression</th></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(tan(atan2(100px, 50px)) - 2) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(tan(atan2(100px, 50px)) * 1000))"></td><td class="n">2000</td><td><code>tan(atan2(100px, 50px))</code> — atan2 of lengths, then tan</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(tan(atan2(2, 1)) - 2) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(tan(atan2(2, 1)) * 1000))"></td><td class="n">2000</td><td><code>tan(atan2(2, 1))</code> — atan2 of numbers, then tan</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(tan(atan2(100cqw, 900px)) - 1) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(tan(atan2(100cqw, 900px)) * 1000))"></td><td class="n">1000</td><td><code>tan(atan2(100cqw, 900px))</code> — the old view scale (this box is a 900px container)</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(tan(45deg) - 1) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(tan(45deg) * 1000))"></td><td class="n">1000</td><td><code>tan(45deg)</code></td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(tan(0.785398) - 1) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(tan(0.785398) * 1000))"></td><td class="n">1000</td><td><code>tan(0.785398)</code> — a number is radians</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(sin(30deg) - 0.5) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(sin(30deg) * 1000))"></td><td class="n">500</td><td><code>sin(30deg)</code></td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(cos(1) - 0.540302) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(cos(1) * 1000))"></td><td class="n">540</td><td><code>cos(1)</code> — radians, as the engine's shake and camera ray use</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(sin(atan2(3, 4)) - 0.6) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(sin(atan2(3, 4)) * 1000))"></td><td class="n">600</td><td><code>sin(atan2(3, 4))</code></td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(calc(atan2(1, 1) / 1deg) - 45) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(calc(atan2(1, 1) / 1deg) * 1000))"></td><td class="n">45000</td><td><code>calc(atan2(1, 1) / 1deg)</code> — the angle atan2 gives, in degrees (typed division)</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(calc(100cqw / 900px) - 1) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(calc(100cqw / 900px) * 1000))"></td><td class="n">1000</td><td><code>calc(100cqw / 900px)</code> — typed division: the new view scale</td></tr>
+<tr><td class="t" style="--ok:calc(1 - min(1, abs(progress(100cqw, 0px, 900px) - 1) * 1000))"></td><td class="n v cnt" style="counter-reset:v calc(round(progress(100cqw, 0px, 900px) * 1000))"></td><td class="n">1000</td><td><code>progress(100cqw, 0px, 900px)</code> — progress(): another way to the same number</td></tr>
+</table>
+<p>The view's scale as the page declares it (<code>tan(atan2())</code>, then typed division, which wins where it parses):
+the yellow bar must be exactly as long as the grey one.</p>
+<div class="ruler"></div><div class="scaled"></div>
 </div>
 
 <h2>C. The real pages</h2>
