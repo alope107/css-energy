@@ -131,9 +131,9 @@ $(B)/ui_exp/net-args.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
 $(B)/l5-net.$(UICONF).log: $(B)/ui_exp/net-args.txt $(UI) $(NET)
 	rm -rf $(B)/net-www && mkdir -p $(B)/net-www && cp -r tests/net/. $(B)/net-www/ && ln -s ../js_in_css.xhtml $(B)/net-www/js_in_css.xhtml
 	SHARDS=$(SHARDS) NETROOT=$(B)/net-www EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/net-www/js_in_css.xhtml $$(cat $<)
-# a demo page with the modem showing (NETSHOW=1) and net/demo.js in the editor: serve build/net-www with net/server.js
-net-demo: $(B)/net-www/net_demo.xhtml
-$(B)/net-www/net_demo.xhtml: net/demo.js $(CC)/lib.json $(CC)/mkimage.py machine/gen_css.py machine/uipage.py $(wildcard $(CC)/*.py readback/*.py)
+# a demo page with the modem showing (NETSHOW=1) and net/demo.js in the editor: serve build/net-demo with net/server.js
+net-demo: $(B)/net-demo/net_demo.xhtml
+$(B)/net-demo/net_demo.xhtml: net/demo.js $(CC)/lib.json $(CC)/mkimage.py machine/gen_css.py machine/uipage.py $(wildcard $(CC)/*.py readback/*.py)
 	@mkdir -p $(@D) && cp -r tests/net/. $(@D)/
 	$(PY) $(CC)/mkimage.py net/demo.js $(B)/ccimg_demo.json
 	UI=1 NETSHOW=1 $(PY) machine/gen_css.py $(B)/ccimg_demo.json $@
