@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>rigid3d.css probe</title>
+<!--
+  What rigid3d.css needs from a browser, one row each, pass/fail without script (a script below only prints the user
+  agent). Part A is the engine's loop in miniature, built as the generated pages build it (css-physics/docs/ARCHITECTURE.md
+  §1-§2): timeline-scope wrappers, #LS reading registers through view timelines of elements in a 1,000,000 px
+  scroller, levels gated by @container style() queries on their parent, named through container-name: var(--AN),
+  registers written back from the last level. Part B tests single features. Part C links pages for drawing.
+  Part C's static page comes from static.py (python3 experiments/safari/static.py out/rigid3d-16.html out/static16.html).
+  Open it from the repo root server: http://localhost:8765/css-physics/experiments/safari/probe.html
+-->
+<style>
+/* === Probe page === */
+:root{color-scheme:dark;--bg:#14161a;--ink:#e6e8ec;--dim:#8a919c;--line:#2a2f38}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+main{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:22px 0 6px}
+p{margin:4px 0 8px;color:var(--dim)}
+table{border-collapse:collapse;width:100%}
+td,th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:400}
+td.n{white-space:nowrap}
+code{color:var(--ink)}
+a{color:#7fb4ff}
+#ua{color:var(--ink)}
+
+/* --- Result cells ---
+   --ok: 1 pass, 0 fail (registered, so a missing feature leaves 0); kind info: yellow, the engine copes either way */
+@property --ok{syntax:'<number>';inherits:false;initial-value:0}
+@counter-style pf{system:fixed;symbols:"FAIL" "PASS"}
+@counter-style yn{system:fixed;symbols:"no" "yes"}
+.t{width:5em;text-align:center;font-weight:700;color:#fff;
+  background:color-mix(in srgb,#1f8a3a calc(var(--ok) * 100%),#b3261e);counter-reset:ok calc(var(--ok) + 1)}
+.t::after{content:counter(ok,pf)}
+.t.info{background:color-mix(in srgb,#1f8a3a calc(var(--ok) * 100%),#8a6d00)}
+.t.info::after{content:counter(ok,yn)}
+.t.nv{background:#3a3f48}.t.nv::after{content:"info"}
+
+/* === A. The loop in miniature === */
+/* registers: read on #LS (raw, then rounded where they hold whole numbers), written from #L3 */
+@property --Ar{syntax:'<number>';inherits:true;initial-value:0}
+@property --Mr{syntax:'<number>';inherits:true;initial-value:0}
+@property --S{syntax:'<number>';inherits:true;initial-value:0}
+@property --G{syntax:'<number>';inherits:true;initial-value:0}
+@property --A{syntax:'<number>';inherits:true;initial-value:0}
+@property --M{syntax:'<number>';inherits:true;initial-value:0}
+@property --now{syntax:'<number>';inherits:true;initial-value:0}
+@property --on{syntax:'<number>';inherits:true;initial-value:0}
+@property --f{syntax:'<number>';inherits:true;initial-value:0}
+@property --g1{syntax:'<number>';inherits:true;initial-value:0}
+@property --g2{syntax:'<number>';inherits:true;initial-value:0}
+@property --g3{syntax:'<number>';inherits:true;initial-value:0}
+@property --g4{syntax:'<number>';inherits:true;initial-value:0}
+@property --NA{syntax:'<number>';inherits:true;initial-value:0}
+@property --NM{syntax:'<number>';inherits:true;initial-value:0}
+@property --run{syntax:'<number>';inherits:true;initial-value:0}
+@keyframes q0{from{--Ar:0}to{--Ar:100000}}
+@keyframes q1{from{--Mr:0}to{--Mr:64}}
+@keyframes q2{from{--S:0}to{--S:49}}
+@keyframes q3{from{--G:-2000}to{--G:2000}}
+@keyframes clk{from{--now:0}to{--now:100}}
+/* timeline names hoisted on wrappers above #LS, 24 names each as the pages do (the extra names are unused) */
+#ts0{timeline-scope:--t0,--t1,--u2,--u3,--u4,--u5,--u6,--u7,--u8,--u9,--u10,--u11,--u12,--u13,--u14,--u15,--u16,--u17,--u18,--u19,--u20,--u21,--u22,--u23}
+#ts1{timeline-scope:--t2,--t3,--v2,--v3,--v4,--v5,--v6,--v7,--v8,--v9,--v10,--v11,--v12,--v13,--v14,--v15,--v16,--v17,--v18,--v19,--v20,--v21,--v22,--v23}
+#LS{animation-name:q0,q1,q2,q3,clk;animation-duration:auto,auto,auto,auto,100s;animation-iteration-count:1,1,1,1,infinite;
+  animation-timing-function:linear;animation-fill-mode:both;animation-timeline:--t0,--t1,--t2,--t3,auto;
+  --A:calc(round(var(--Ar)));--M:calc(round(var(--Mr)));--on:1}
+/* the names: if() where there is one, every body named where there isn't (the engine's fallback) */
+#L0{--A0:if(style(--on: 1): b0; else: );--AN:q var(--A0);
+  --f:calc(mod(round(down, var(--A) / 8), 2));--run:sign(max(0, var(--A) - 30))}
+@supports not (width: if(style(--x: 1): 1px; else: 2px)){#L0{--A0:b0}}
+#L0,#L1,#L2,#L3{container-name:var(--AN)}
+/* gates: each level queries its parent; --f changes every 8 steps, always through the register animation */
+#L1{--g1:0;--g2:0}
+@container style(--f: 1){#L1{--g1:1}}
+@container b0 style(--f: 1){#L1{--g2:1}}
+#L2{--g3:0;--g4:0}
+@container style(--f: 1){#L2{--g3:1}}
+@container b0 style(--f: 1){#L2{--g4:1}}
+/* next state: the counter, and the mismatches seen so far as bits of M (after 4 warm-up steps) */
+#L3{--NA:mod(var(--A) + 1, 100000);
+  --NM:calc(var(--M)
+    + (1 - mod(round(down, var(--M) / 1), 2)) * abs(var(--f) - var(--g1)) * sign(max(0, var(--A) - 4)) * 1
+    + (1 - mod(round(down, var(--M) / 2), 2)) * abs(var(--f) - var(--g2)) * sign(max(0, var(--A) - 4)) * 2
+    + (1 - mod(round(down, var(--M) / 4), 2)) * abs(var(--f) - var(--g3)) * sign(max(0, var(--A) - 4)) * 4
+    + (1 - mod(round(down, var(--M) / 8), 2)) * abs(var(--f) - var(--g4)) * sign(max(0, var(--A) - 4)) * 8)}
+.regs{position:fixed;left:0;top:0;width:0;height:0;overflow:clip;visibility:hidden}
+.regs .sc{position:absolute;left:0;top:0;width:1000000px;height:1000000px;overflow:hidden}
+.regs i{position:absolute;width:1px;height:1px}
+#r0{view-timeline:--t0 block,--t1 inline;top:calc((1000000 - clamp(0, (var(--NA) - 0) / 100000, 1) * 1000001) * 1px);
+  left:calc((1000000 - clamp(0, (var(--NM) - 0) / 64, 1) * 1000001) * 1px)}
+#r1{view-timeline:--t2 block,--t3 inline;top:calc((1000000 - clamp(0, (46 - 0) / 49, 1) * 1000001) * 1px);
+  left:calc((1000000 - clamp(0, (-1600 - -2000) / 4000, 1) * 1000001) * 1px)}
+/* readouts */
+.cnt::after{content:counter(v)}
+#a-loop .t{--ok:var(--run)}
+#a-loop .v{counter-reset:v calc(round(var(--A)))}
+#a-rate .v{counter-reset:v calc(round(var(--A) / max(var(--now), 0.01)))}
+#a-g1 .t{--ok:calc(var(--run) * (1 - mod(round(down, var(--M) / 1), 2)))}
+#a-g2 .t{--ok:calc(var(--run) * (1 - mod(round(down, var(--M) / 2), 2)))}
+#a-g3 .t{--ok:calc(var(--run) * (1 - mod(round(down, var(--M) / 4), 2)))}
+#a-g4 .t{--ok:calc(var(--run) * (1 - mod(round(down, var(--M) / 8), 2)))}
+#a-reg .t{--ok:calc(1 - min(1, abs(var(--S) - 46) * 100))}
+#a-reg .v{counter-reset:v calc(round((var(--S) - 46) * 1000000))}
+#a-exact .t{--ok:calc(1 - sign(max(0, 46 - var(--S))))}
+#a-gyp .v{counter-reset:v calc(round((var(--G) + 1600) * 1000000))}
+
+/* === B. Single features === */
+@property --x{syntax:'<number>';inherits:true;initial-value:0}
+@property --tiny{syntax:'<number>';inherits:true;initial-value:0}
+.b1{--x:1}
+@container style(--x: 1){.b1 .t{--ok:1}}
+.b2{--x:1;container-name:b0}
+@container b0 style(--x: 1){.b2 .t{--ok:1}}
+.b3{--x:1;--AN:q b0 b1;container-name:var(--AN)}
+@container b1 style(--x: 1){.b3 .t{--ok:1}}
+.b4 .t{--x:1;--ok:if(style(--x: 1): 1; else: 0)}
+.b5{--x:1;--A0:if(style(--x: 1): b0; else: );container-name:var(--A0)}
+@supports not (width: if(style(--x: 1): 1px; else: 2px)){.b5{--A0:b0}}
+@container b0 style(--x: 1){.b5 .t{--ok:1}}
+/* math: 1 when the result is within 1e-3 of the expected value */
+.m1 .t{--ok:calc(1 - min(1, abs(sign(-3) - -1) * 1000))}
+.m2 .t{--ok:calc(1 - min(1, abs(abs(-2.5) - 2.5) * 1000))}
+.m3 .t{--ok:calc(1 - min(1, abs(100 - hypot(3, 4) - 95) * 1000))}
+.m4 .t{--ok:calc(1 - min(1, abs(mod(-1, 3) - 2) * 1000))}
+.m5 .t{--ok:calc(1 - min(1, abs(round(down, 3.7) - 3) * 1000))}
+.m6 .t{--ok:calc(1 - min(1, abs(pow(2, 10) - 1024) * 1000))}
+.m7 .t{--ok:calc(1 - min(1, abs(sqrt(16) - 4) * 1000))}
+.m8 .t{--ok:calc(1 - min(1, abs(clamp(0, 5, 3) - 3) * 1000))}
+.m9 .t{--ok:calc(1 - min(1, abs(cos(1rad) - 0.540302) * 1000))}
+.m10 .t{--ok:calc(1 - min(1, abs(tan(atan2(100px, 50px)) - 2) * 1000))}
+/* (a table can't be a size container: a div is, as .stage is on the page) */
+.m11{container-type:inline-size;width:900px;padding:5px 6px}
+.m11 .t{display:inline-block;margin-right:1em;--ok:calc(1 - min(1, abs(tan(atan2(100cqw, 900px)) - 1) * 1000))}
+.m12{--tiny:calc(1 / 81000000)}
+.m12 .t{--ok:calc(1 - min(1, abs(var(--tiny) * 81000000 - 1) * 1000))}
+.m13 .t{--ok:calc(1 - min(1, abs(calc(var(--x) * 0 + 7) - 7) * 1000))}
+/* :has() (the page's controls) */
+main:has(#hb:checked) .b7 .t{--ok:1}
+/* anchor positioning on :hover, read through a view timeline (the mouse pointer) */
+@property --sx{syntax:'<number>';inherits:true;initial-value:0}
+@property --sy{syntax:'<number>';inherits:true;initial-value:0}
+@keyframes pmx{from{--sx:150}to{--sx:-150}}
+@keyframes pmy{from{--sy:60}to{--sy:-60}}
+.b8{timeline-scope:--pmx,--pmy}
+.gr8{position:relative;width:300px;height:120px;overflow:hidden;display:grid;grid-template-columns:repeat(5,1fr);
+  border:1px solid var(--line);cursor:crosshair}
+.gr8 i{display:block;border:1px dotted #333}
+.gr8 i:hover{anchor-name:--hov}
+.pm{position:absolute;width:0;height:0;pointer-events:none;left:anchor(center,50%);top:anchor(center,50%);
+  position-anchor:--hov;view-timeline:--pmx x,--pmy y}
+.pm::before{content:"";position:absolute;width:10px;height:10px;margin:-5px;border-radius:50%;background:#fc0}
+.rd8{animation:pmx linear both,pmy linear both;animation-timeline:--pmx,--pmy}
+.rd8 .t{--ok:sign(max(0, abs(var(--sx)) - 20))}
+.rd8 .vx{counter-reset:v calc(round(var(--sx)))}
+.rd8 .vy{counter-reset:v calc(round(var(--sy)))}
+</style>
+</head>
+<body>
+<main>
+<h1>rigid3d.css probe</h1>
+<p>Every row should say PASS once the page has run a few seconds, except yellow rows (information: the engine copes either
+way) and the two that need the mouse. Please send a screenshot of the whole page.</p>
+<p>Browser: <span id="ua">(scripting is off; Safari &rsaquo; About Safari gives the version)</span></p>
+
+<h2>A. The engine's loop in miniature</h2>
+<div id="ts0"><div id="ts1"><div id="LS"><div id="L0"><div id="L1"><div id="L2"><div id="L3">
+<table>
+<tr><th>result</th><th>value</th><th>what it checks</th></tr>
+<tr id="a-loop"><td class="t"></td><td class="n v cnt"></td><td>steps run: state written into layout, read back through view timelines, next state computed from it (the counter must climb)</td></tr>
+<tr id="a-rate"><td class="t nv"></td><td class="n v cnt"></td><td>steps per second (Chrome about 2 per frame, so ~120 at 60 Hz; Firefox and WebKit 1 per frame)</td></tr>
+<tr id="a-g1"><td class="t"></td><td></td><td>a <code>@container style(--f: 1)</code> gate follows its parent's value as it changes through the registers (never a stale result)</td></tr>
+<tr id="a-g2"><td class="t"></td><td></td><td>the same with a named container from <code>container-name: var(--AN)</code> (<code>if()</code> or the fallback)</td></tr>
+<tr id="a-g3"><td class="t"></td><td></td><td>the unnamed gate one level deeper</td></tr>
+<tr id="a-g4"><td class="t"></td><td></td><td>the named gate one level deeper</td></tr>
+<tr id="a-reg"><td class="t"></td><td class="n v cnt"></td><td>a register holding 46 reads back as 46 (value: the error in millionths)</td></tr>
+<tr id="a-exact"><td class="t info"></td><td></td><td>…exactly (Chrome yes, WebKit no: the engine compares with a margin)</td></tr>
+<tr id="a-gyp"><td class="t nv"></td><td class="n v cnt"></td><td>a register holding −1600: the error in millionths</td></tr>
+</table>
+<div class="regs"><div class="sc"><i id="r0"></i><i id="r1"></i></div></div>
+</div></div></div></div></div></div></div>
+
+<h2>B. Single features</h2>
+<table>
+<tr><th>result</th><th></th><th>what it checks</th></tr>
+<tr class="b1"><td class="t"></td><td></td><td><code>@container style(--x: 1)</code> on a registered number (Safari 18+)</td></tr>
+<tr class="b2"><td class="t"></td><td></td><td>a named container: <code>@container b0 style(--x: 1)</code></td></tr>
+<tr class="b3"><td class="t"></td><td></td><td>names from <code>container-name: var(--AN)</code>, <code>--AN: q b0 b1</code></td></tr>
+<tr class="b4"><td class="t info"></td><td></td><td><code>if()</code> (Safari 27.0 has none; the engine falls back, next row)</td></tr>
+<tr class="b5"><td class="t"></td><td></td><td>a name from <code>if()</code> or, without it, from the <code>@supports not (width: if(…))</code> fallback</td></tr>
+<tr class="m1"><td class="t"></td><td></td><td><code>sign(-3)</code> = −1</td></tr>
+<tr class="m2"><td class="t"></td><td></td><td><code>abs(-2.5)</code> = 2.5</td></tr>
+<tr class="m3"><td class="t"></td><td></td><td><code>100 - hypot(3, 4)</code> = 95</td></tr>
+<tr class="m4"><td class="t"></td><td></td><td><code>mod(-1, 3)</code> = 2</td></tr>
+<tr class="m5"><td class="t"></td><td></td><td><code>round(down, 3.7)</code> = 3</td></tr>
+<tr class="m6"><td class="t"></td><td></td><td><code>pow(2, 10)</code> = 1024</td></tr>
+<tr class="m7"><td class="t"></td><td></td><td><code>sqrt(16)</code> = 4</td></tr>
+<tr class="m8"><td class="t"></td><td></td><td><code>clamp(0, 5, 3)</code> = 3</td></tr>
+<tr class="m9"><td class="t"></td><td></td><td><code>cos(1rad)</code> = 0.540302</td></tr>
+<tr class="m10"><td class="t"></td><td></td><td><code>tan(atan2(100px, 50px))</code> = 2</td></tr>
+<tr><td colspan="3" style="padding:0"><div class="m11"><span class="t"></span><code>tan(atan2(100cqw, 900px))</code> = 1 in a 900px container (the view's scale)</div></td></tr>
+<tr class="m12"><td class="t info"></td><td></td><td><code>var()</code> of a registered 1/81,000,000 keeps its value (Chrome, Firefox yes; WebKit rounds to 6 decimals: 0)</td></tr>
+<tr class="m13"><td class="t"></td><td></td><td><code>calc()</code> nested in <code>calc()</code> with <code>var()</code></td></tr>
+<tr class="b7"><td class="t"></td><td><label><input type="checkbox" id="hb"> tick</label></td><td><code>:has(:checked)</code> (the page's controls): tick the box</td></tr>
+</table>
+
+<div class="b8">
+<table>
+<tr class="rd8"><td class="t"></td><td class="n">x <span class="vx cnt"></span>, y <span class="vy cnt"></span></td><td>the mouse: hover a cell at the left or right end of the grid; the dot follows (anchor positioning on <code>:hover</code>) and x, y change (a view timeline reads the dot)</td></tr>
+</table>
+<div class="gr8"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><b class="pm"></b></div>
+</div>
+
+<h2>C. The real pages</h2>
+<p><a href="../../out/rigid3d-8.html">8 bodies</a> · <a href="../../out/rigid3d-16.html">16 bodies</a>: the published pages.
+<a href="../../out/static16.html">Static scene</a>: the 16-body page with every body held at its start pose (drawing only, no read-back):
+a tower of boxes in the middle, spheres and boxes around it, on a gridded floor in a walled tray, seen from the front and above.</p>
+</main>
+<script>document.getElementById('ua').textContent=navigator.userAgent</script>
+</body>
+</html>
