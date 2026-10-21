@@ -11,13 +11,14 @@ H = L['heap_size']
 DB, INIT, SP0 = L['data_base'], L['init'], L['sp0']
 CELL = U.CELL
 MAP, MAPN = L['rt_base'] + 32, H // 8 // 16     # the collector's bitmap of from-space's block starts (16 bits to a word)
+POWT = MAP + MAPN                                # its powers of two
 assert H % 8 == 0 and U.HEAP0 % 8 == 0 and U.HEAP0 + 2 * H <= L['rom_size'] + L['ram_size'] - L['cols'] * L['rows']
-assert MAP + MAPN <= SP0
+assert POWT + 16 <= SP0
 
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=R.SDATA, STR_LO=U.STR_LO, HEAP0=U.HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=R.STRTAG, OBJTAG=U.OBJTAG, ARRTAG=U.ARRTAG,
-             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPN=MAPN)
+             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPN=MAPN, POWT=POWT)
     k.update(CELL)
     return k
 

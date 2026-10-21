@@ -373,7 +373,8 @@ class Compiler:
         A big constant on top goes to its temp before the first pop (unless that pop splits a console.log + chain), so each pop
         emits at most one instruction"""
         if (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec and self.nd and self.desc(self.nd - 1) == KBIG
-                and not (self.ops[self.osp - 1] == M_CADD and 2 in (self.opv[self.osp - 1], self.otype(self.nd - 1)))): self.src(self.nd - 1)
+                and not (self.ops[self.osp - 1] == M_CADD and 2 in (self.opv[self.osp - 1], self.otype(self.nd - 1))
+                         and self.opv[self.osp - 2] < 4 * (PIECES - 1))): self.src(self.nd - 1)        # (M_PRINT is below M_CADD)
         while not self.err and self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
             self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
             last = not (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec)
@@ -458,7 +459,7 @@ class Compiler:
         """a + chain's pieces (M_PRINT on top) before an operator that is not +: joined into one string (the left operand)"""
         t, tv = self.top_op()
         if t != M_PRINT or tv < 4: return
-        d0 = self.nd - 1 - tv // 4
+        d0 = self.nd - 1 - tv // 4; self.src(self.nd - 1)    # (a big constant on top first: one instruction per join)
         for k in range(d0 + 1, self.nd):
             lt, rt = self.otype(d0), self.otype(k)
             self.emit(self.dynop(ADD, lt, rt), self.tmp(d0), self.src(d0), self.src(k)); self.set_od(d0, TMP, 2)
@@ -467,7 +468,7 @@ class Compiler:
     def prop_read(self, i, key, keep=False):
         """o.key with [o] at i: its value replaces it (keep: pushed above it, for o.key op= e)"""
         o = self.src(i); d = self.nd if keep else i
-        if keep and self.nd >= ODN: return self.fail(22)
+        if keep and (self.nd >= ODN or self.nd + self.tb >= TBMAX): return self.fail(22)
         self.emit('GETP', self.tmp(d), o, (key - self.db, 0))
         if keep: self.set_od(d, TMP, 0); self.nd += 1
         else: self.set_od(i, TMP, 0); self.nd = i + 1
@@ -541,7 +542,7 @@ class Compiler:
         """x[k] with [x, k] at i, i + 1: its value replaces them (keep: pushed above them, for x[k] op= e)"""
         x, k = self.src(i), self.src(i + 1)
         d = self.nd if keep else i
-        if keep and self.nd >= ODN: return self.fail(22)
+        if keep and (self.nd >= ODN or self.nd + self.tb >= TBMAX): return self.fail(22)
         self.emit('LDI' if self.rom else 'GETX', self.tmp(d), x, k)    # (GETX: an array in bounds inline, else getx)
         if keep: self.set_od(d, TMP, 0); self.nd += 1
         else: self.set_od(i, TMP, 0); self.nd = i + 1
@@ -930,6 +931,7 @@ class Compiler:
                     if not isP(61):                            # the old value, above [o] / [x, k]
                         if dyn: self.index_read(self.nd - 2, keep=True)
                         else: self.prop_read(self.nd - 1, key, keep=True)
+                        if self.err: return
                     if isP(7) or isP(8):                       # o.x++ / x[k]--
                         i = self.nd - 1; self.emit('ADD' if isP(7) else 'SUB', self.tmp(i), self.tmp(i), (K(1), 0))
                         if dyn: self.index_write(i - 2, self.tmp(i))

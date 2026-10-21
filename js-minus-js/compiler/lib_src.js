@@ -63,20 +63,22 @@ function oom() {
   return 0;
 }
 // the block starts of from-space [b, e), one bit per 8 words, 16 to a word at MAP
-function pow2(n) { var r = 1; while (n > 0) { r = r * 2; n = n - 1; } return r; }
+// the bitmap (16 bits a word) and its table of powers of two (POWT: 1, 2, 4, ... 32768)
 function mapbuild(b, e) {
-  var i = 0; var h = 0; var x = 0;
+  var i = 0; var h = 0; var x = 1;
+  while (i < 16) { poke(__POWT__ + i, x); x = x * 2; i++; }
+  i = 0;
   while (i < __MAPN__) { poke(__MAP__ + i, 0); i++; }
   i = b;
   while (i < e) {
-    x = (i - b) / 8; poke(__MAP__ + x / 16, peek(__MAP__ + x / 16) + pow2(x % 16));
+    x = (i - b) / 8; h = __MAP__ + x / 16; poke(h, peek(h) + peek(__POWT__ + x % 16));
     h = peek(i);
     if (h >= 0) { i = i + 8; }
     else { x = 0 - 2 - h; i = i + x - x % 8; }
   }
   return 0;
 }
-function mapget(b, flo) { var x = (b - flo) / 8; return (peek(__MAP__ + x / 16) / pow2(x % 16)) % 2; }
+function mapget(b, flo) { var x = (b - flo) / 8; return (peek(__MAP__ + x / 16) / peek(__POWT__ + x % 16)) % 2; }
 // a copied block's references: an object's keys and values up to its first free pair (and its link if all three are used), an
 // array's elements up to its length. -> the block's size
 function scan(s) {

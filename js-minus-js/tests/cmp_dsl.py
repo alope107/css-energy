@@ -18,7 +18,7 @@ def ref_state(c):
     st = dict(lx=c.lx, q=c.q, lt=c.lt, tkc=c.tkc, acc=c.acc, h1=c.h1, h2=c.h2, p2=c.p2, sstart=c.sstart, dp=c.dp, mode=c.mode, pn1=c.pn[0], pn2=c.pn[1],
               sdp=c.sdp, pnl=c.pnl, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
               osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
-              pendLa=c.pendLa, err=c.err, nd=c.nd)
+              pendLa=c.pendLa, err=c.err, nd=c.nd, tb=c.tb)
     for k in range(R.ODN): st[f'od{k}'] = c.od[k] if k < c.nd else None
     st['pk'] = c.pk if c.nd and c.desc(c.nd - 1) >= R.KBIG and c.desc(c.nd - 1) != R.TMP else None     # (a big constant or comparison on top)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
@@ -90,7 +90,8 @@ def check(text):
     code = {a: (w, l, m if l is not None else 0) for a, (w, l, m) in code.items()}
     lab = {j: v for j, v in lab.items() if j < R.NL}   # (labels past NL exist only after error 20)
     ok = not diff and code == rcode and data == ref.data and lab == rlab
-    return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}')
+    cd = next((f' first code difference at {a}: DSL {code.get(a)} ref {rcode.get(a)}' for a in sorted(set(code) | set(rcode)) if code.get(a) != rcode.get(a)), '')
+    return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}{cd}')
 if __name__ == '__main__':                       # (tests/fuzz/fuzz.py imports check())
     from par import pmap                         # one program per worker process; the counts come back with it
     def one(f):

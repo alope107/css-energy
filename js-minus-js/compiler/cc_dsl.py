@@ -8,13 +8,13 @@ Table encodings: sk_j = (type + 4 * const) * 65536 + kind * 16384 + addr + 8192 
 slot 1 + i, resolved when read); fl_k = label + 64 * type + 256 * (argument count + 1, or 0 while unknown) (type: 0
 number/unknown, 1 boolean, 2 string); iv_k = an interned string's address. Symbols 0..nsym-1 are function / program level,
 NS-nlet..NS-1 block-scoped let / const. Control-stack entry k: csA = kind * 4096 + a * 64 + b, csB = e * 4096 + c * 64 + d
-(e: nlet when pushed, restored when a body closes). Operator-stack entry: code * 8192 + value. Operand-stack entry: type * 4096
-+ descriptor (cc_ref's od). An operand is a pair (field, temp?): a temp's field gets the function's frame label added.
+(e: nlet when pushed, restored when a body closes). Operator-stack entry: code * 8192 + value. Operand-stack entry: tb * 16384 +
+type * 4096 + descriptor (cc_ref's od). An operand is a pair (field, temp?): a temp's field gets the function's frame label added.
 """
 from dsl import *
 import cc_ref as R
 
-OD, CD, NS, NF, NL, NI, ODN = R.OD, R.CD, R.NS, R.NF, R.NL, R.NI, R.ODN
+OD, CD, NS, NF, NL, NI, ODN, TBMAX = R.OD, R.CD, R.NS, R.NF, R.NL, R.NI, R.ODN, R.TBMAX
 H1M, H2M = R.H1M, R.H2M
 KW = R.KW
 OP = R.OP
@@ -24,7 +24,7 @@ LEX_STATE = ['lx', 'q', 'lt', 'tkc', 'acc', 'h1', 'h2', 'p2', 'sstart', 'sdp', '
 
 def parse_state_names():
     s = ['dp', 'mode', 'pn1', 'pn2', 'osp', 'csp', 'nsym', 'nlet', 'nfn', 'nlab', 'cp', 'curf', 'cfn', 'nfdef', 'nloc', 'npar', 'fsym', 'pendLa',
-         'err', 'nint', 'pm', 'nd', 'pk']
+         'err', 'nint', 'pm', 'nd', 'pk', 'tb']
     s += [f'op{k}' for k in range(OD)]
     s += [f'csA{k}' for k in range(CD)] + [f'csB{k}' for k in range(CD)]
     s += [f'od{k}' for k in range(ODN)]
@@ -249,14 +249,17 @@ class Prog(Base):
     # ---------------- operands (cc_ref's operand stack)
     def odv(self, i): return self.m(add(*[mul(eq(i, k), self.v(f'od{k}')) for k in range(ODN)]), 'odv') if not isK(lift(i)) else self.v(f'od{lift(i).v}')
     def desc(self, i): return self.m(mod(self.odv(i), 4096), 'dsc')
-    def otype(self, i): return self.m(fdiv(self.odv(i), 4096), 'oty')
+    def otype(self, i): return self.m(mod(fdiv(self.odv(i), 4096), 4), 'oty')
     def set_od(self, i, d, t=None, c=K(1)):
-        """entry i := descriptor d of type t (t None: d is the whole entry), if c; a dynamic i selects inside each entry's update
-        (no guard per entry)"""
-        w = self.m(add(mul(t, 4096), d) if t is not None else d, 'odw'); i = lift(i)
+        """entry i := descriptor d of type t at the current tb (t None: d is the whole entry), if c; a dynamic i selects inside each
+        entry's update (no guard per entry)"""
+        w = self.m(add(mul(self.v('tb'), 16384), mul(t, 4096), d) if t is not None else d, 'odw'); i = lift(i)
         if isK(i): self.setif(f'od{i.v}', c, w); return
         for k in range(ODN): self.setif(f'od{k}', and_(c, eq(i, k)), w)
-    def tmp(self, i): return (self.m(add(257, mul(self.v('npar'), self.v('curf')), i), 'tmpf'), self.v('curf'))
+    def tmp(self, i): return (self.m(add(257, mul(self.v('npar'), self.v('curf')), self.v('tb'), i), 'tmpf'), self.v('curf'))
+    def arg_end(self):
+        """cc_ref.arg_end: the top into its temp, off the operand stack (tb past it)"""
+        i = self.m(self.v('nd') - 1, 'aei'); self.to_temp(i); self.set('nd', i); self.set('tb', self.v('tb') + 1)
     def opnd(self, i, d=None):
         """descriptor i (d: its descriptor, if known) as an operand (field, temp?), where it can't be a big constant"""
         d = self.desc(i) if d is None else d; ist = self.m(eq(d, TMP), 'ist'); t = self.tmp(i)
@@ -276,9 +279,9 @@ class Prog(Base):
         self.put(self.tmp(i), i); self.set_od(i, TMP, self.otype(i))
     def push_od(self, d, t, k=None):
         """cc_ref.push_od: a big constant below the new entry goes to its temp first"""
-        nd = self.m(self.v('nd'), 'pnd0')
-        with self.when(ge(nd, ODN)): self.fail(22)
-        with self.when(lt(nd, ODN)):
+        nd = self.m(self.v('nd'), 'pnd0'); full = self.m(or_(ge(nd, ODN), ge(add(nd, self.v('tb')), TBMAX)), 'pfull')
+        with self.when(full): self.fail(22)
+        with self.when(not_(full)):
             with self.when(gt(nd, 0)): self.src(nd - 1)
             self.set_od(nd, d, t); self.set('nd', nd + 1)
             if k is not None:
@@ -287,9 +290,11 @@ class Prog(Base):
         """cc_ref.snapshot: operands below n that are variables hit(descriptor) are copied to their temps"""
         n = self.v('nd') if n is None else n
         for k in range(ODN):
-            d = self.m(mod(self.v(f'od{k}'), 4096), 'sdsc')
-            with self.when(and_(lt(k, n), lt(d, 768), hit(d))):
-                self.emit(OP['MOV'], self.tmp(k), (d, 0)); self.set_od(k, TMP, fdiv(self.v(f'od{k}'), 4096))
+            w = self.v(f'od{k}'); d = self.m(mod(w, 4096), 'sdsc')
+            with self.when(and_(lt(k, n), lt(d, 768), hit(d))):        # (its temp: at the tb it was pushed at)
+                tbk = self.m(fdiv(w, 16384), 'stb')
+                self.emit(OP['MOV'], (self.m(add(257, mul(self.v('npar'), self.v('curf')), tbk, k), 'stf'), self.v('curf')), (d, 0))
+                self.set_od(k, add(mul(tbk, 16384), mul(mod(fdiv(w, 4096), 4), 4096), TMP))
     def pend(self, i, ci, b, c):
         """cc_ref.pend: descriptor i := the pending comparison ci (CNDOPS' index) of b and c"""
         self.set_od(i, add(CND + 0, mul(ci, 4), mul(b[1], 2), c[1]), 1); self.set('pk', add(mul(sub(b[0], 512), 1024), c[0]))
@@ -300,8 +305,8 @@ class Prog(Base):
         cnd = self.m(ge(d, CND), 'bcnd'); e = self.m(sub(d, CND), 'bce'); ci = self.m(fdiv(e, 4), 'bci')
         pk = self.v('pk')
         bF, cF = (self.m(add(fdiv(pk, 1024), 512), 'bbf'), self.m(mod(fdiv(e, 2), 2), 'bbt')), (self.m(mod(pk, 1024), 'bcf'), self.m(mod(e, 2), 'bct'))
-        jt = [OP['J' + R.NAME[c]] for c in R.CMPS] + [OP['JNZ']]                       # by CNDOPS' index, when sense
-        jf = [OP['J' + R.NAME[R.INV[c]]] for c in R.CMPS] + [OP['JZ']]
+        jt = [OP['J' + R.NAME[c]] for c in R.CMPS] + [OP['JZ']]                        # by CNDOPS' index, when sense (! b: b false)
+        jf = [OP['J' + R.NAME[R.INV[c]]] for c in R.CMPS] + [OP['JNZ']]
         jop = self.m(ite(sense, add(*[mul(eq(ci, k), v_) for k, v_ in enumerate(jt)]), add(*[mul(eq(ci, k), v_) for k, v_ in enumerate(jf)])), 'bjop')
         isk = self.m(and_(ge(d, 768), lt(d, 1024)), 'bisk')
         kbn = self.m(and_(eq(d, KBIG), ne(t, 2)), 'bkbn')
@@ -433,8 +438,9 @@ class Prog(Base):
         left operand's for && || and binary operators, else the right one's): the top is kept in ptop through the pops and
         written once at the end."""
         minprec, br, dvalid, dfield = lift(minprec), lift(br), lift(dvalid), lift(dfield)
-        c0, v0 = self.top_op(); p0 = self.prec(c0); nd0 = self.m(self.v('nd'), 'ppn')
-        split0 = and_(eq(c0, R.M_CADD), or_(eq(v0, 2), eq(self.otype(nd0 - 1), 2)))
+        c0, v0 = self.top_op(); p0 = self.prec(c0); nd0 = self.m(self.v('nd'), 'ppn'); osp0 = self.m(self.v('osp'), 'ppo')
+        v1 = self.m(mod(add(*[mul(eq(osp0, k + 2), self.v(f'op{k}')) for k in range(OD - 1)]), 8192), 'ppv1')     # (M_PRINT below M_CADD)
+        split0 = and_(eq(c0, R.M_CADD), or_(eq(v0, 2), eq(self.otype(nd0 - 1), 2)), lt(v1, 4 * (R.PIECES - 1)))
         with self.when(and_(gt(self.v('osp'), 0), gt(p0, 0), ge(p0, minprec), gt(nd0, 0), not_(split0))): self.src(nd0 - 1)
         self.set('ptop', self.odv(nd0 - 1)); popped = K(0)
         go = K(1)
@@ -443,27 +449,29 @@ class Prog(Base):
             go = self.m(and_(go, eq(self.v('err'), 0), gt(self.v('osp'), 0), gt(p, 0), ge(p, minprec)), 'pop')
             with self.when(go):
                 self.set('osp', self.v('osp') - 1)
-                c2, _ = self.top_op(); p2 = self.prec(c2)
+                c2, v2 = self.top_op(); p2 = self.prec(c2)
                 last = self.m(not_(and_(gt(self.v('osp'), 0), gt(p2, 0), ge(p2, minprec))), 'plast')
                 nd = self.m(self.v('nd'), 'pnd'); iR, iL = self.m(nd - 1, 'piR'), self.m(nd - 2, 'piL')
-                ptop = self.v('ptop'); dR, tR, tL = self.m(mod(ptop, 4096), 'pdR'), self.m(fdiv(ptop, 4096), 'ptR'), self.otype(iL)
+                ptop = self.v('ptop'); dR, tR, tL = self.m(mod(ptop, 4096), 'pdR'), self.m(mod(fdiv(ptop, 4096), 4), 'ptR'), self.otype(iL)
                 oR, oL, TR, TL = self.opnd(iR, dR), self.opnd(iL), self.tmp(iR), self.tmp(iL)
                 isAO = self.m(or_(eq(code, R.AND), eq(code, R.OR)), 'pao'); isTE = self.m(eq(code, R.M_TELSE), 'pte')
                 isUN = self.m(or_(eq(code, R.NOT), eq(code, R.NEG)), 'pun'); isCA = self.m(eq(code, R.M_CADD), 'pca')
                 hasstr = self.m(or_(eq(val, 2), eq(tR, 2)), 'pstr')
-                bad = self.m(or_(and_(eq(code, R.ADD), hasstr), and_(inrange(code, R.LT, R.GE), or_(eq(tL, 2), eq(tR, 2)))), 'pbad')
                 popped = self.m(or_(popped, go), 'ppd')
-                self.setif('err', and_(bad, eq(self.v('err'), 0)), R.NOTSUB); self.setif('live', bad, 0)       # (fail)
-                ok = self.m(not_(bad), 'pok')
-                split = self.m(and_(isCA, hasstr), 'psplit')
+                ok = K(1)
+                split = self.m(and_(isCA, hasstr, lt(v2, 4 * (R.PIECES - 1))), 'psplit')     # (past PIECES: the last two joined)
                 isBIN = self.m(not_(or_(isAO, isTE, isUN, split)), 'pbin')            # (M_CADD that doesn't split: ADD)
+                binc = self.m(ite(isCA, R.ADD, code), 'pbc')
+                num = lambda t: or_(eq(t, 1), eq(t, 3))                         # cc_ref.isdyn: a string, array or object possible
+                dyn = self.m(and_(isBIN, ite(eq(binc, R.ADD), not_(and_(num(tL), num(tR))), and_(inrange(binc, R.LT, R.NE), not_(or_(num(tL), num(tR)))))), 'pdyn')
                 pnot = self.m(and_(eq(code, R.NOT), last, br), 'pnot')
-                pcmp = self.m(and_(isBIN, last, br, inrange(code, R.LT, R.NE)), 'pcmp')
-                isd = self.m(and_(last, dvalid), 'pisd')
+                pcmp = self.m(and_(isBIN, not_(dyn), last, br, inrange(code, R.LT, R.NE)), 'pcmp')
+                isd = self.m(and_(last, dvalid, not_(dyn)), 'pisd')               # (a dynamic operator's destination is its temp)
                 # the one instruction: && / || MOV T(iL), right; M_TELSE MOV T(iR), right (if not there); ! / - (dest or T(iR));
                 # binary (dest or T(iL)) left op right
                 with self.when(and_(ok, or_(isAO, and_(isTE, ne(dR, TMP)), and_(isUN, not_(pnot)), and_(isBIN, not_(pcmp))))):
-                    op = ite(or_(isAO, isTE), OP['MOV'], ite(isUN, ite(eq(code, R.NOT), OP['NOT'], OP['NEG']), ite(isCA, OP['ADD'], sub(code, R.ADD))))
+                    dop = ite(eq(binc, R.ADD), ite(eq(tL, 1), OP['DADDL'], ite(eq(tR, 1), OP['DADDR'], OP['DADD'])), add(OP['DLT'] - R.LT, binc))
+                    op = ite(or_(isAO, isTE), OP['MOV'], ite(isUN, ite(eq(code, R.NOT), OP['NOT'], OP['NEG']), ite(dyn, dop, sub(binc, R.ADD))))
                     dst = ite(isAO, TL[0], ite(or_(isTE, and_(isUN, not_(isd))), TR[0], ite(isd, dfield, TL[0])))
                     dstt = mul(not_(and_(isd, not_(isAO), not_(isTE))), self.v('curf'))
                     un = or_(isAO, isTE, isUN)
@@ -478,7 +486,9 @@ class Prog(Base):
                 # the right one's), a pending comparison's operands in pk
                 two = self.m(and_(ok, or_(isAO, isBIN)), 'ptwo')
                 self.setif('nd', two, iR)
-                ae = add(mul(4096, ite(or_(isAO, isTE), self.tmerge(fdiv(val, 64), tR), ite(or_(pnot, pcmp, and_(isUN, eq(code, R.NOT)), inrange(code, R.LT, R.NE)), 1, 3))),
+                ae = add(mul(16384, self.v('tb')), mul(4096, ite(or_(isAO, isTE), self.tmerge(fdiv(val, 64), tR),
+                                                    ite(or_(pnot, pcmp, and_(isUN, eq(code, R.NOT)), inrange(code, R.LT, R.NE)), 1,
+                                                        ite(dyn, mul(2, or_(eq(tL, 2), eq(tR, 2))), 3)))),
                          ite(pnot, add(CND + 24, mul(oR[1], 2)), ite(pcmp, add(CND - 4 * R.LT, mul(code, 4), mul(oL[1], 2), oR[1]),
                              ite(and_(isd, or_(isUN, isBIN)), dfield, TMP))))
                 self.setif('ptop', and_(ok, not_(split)), ae)
@@ -506,24 +516,126 @@ class Prog(Base):
         for k in range(ODN):
             with self.when(and_(ge(k, d0), lt(k, nd))):
                 d = self.m(mod(self.v(f'od{k}'), 4096), 'prd'); kb = self.m(eq(d, KBIG), 'prk'); o = self.opnd(K(k))
-                flags = add(mul(eq(k, nd - 1), 2 * R.SEP[sep]), eq(fdiv(self.v(f'od{k}'), 4096), 1))
+                flags = add(mul(eq(k, nd - 1), 2 * R.SEP[sep]), eq(mod(fdiv(self.v(f'od{k}'), 4096), 4), 1), mul(gt(c, 0), 8))
                 self.emit(ite(kb, OP['PRINTK'], OP['PRINT']), (flags, 0), w1=(ite(kb, self.v('pk'), mul(sub(o[0], 512), 1024)), mul(not_(kb), mul(o[1], 1024))))
         self.set('nd', d0)
+
+    # ---------------- the language past the PoC (cc_ref's helpers of the same names)
+    def key_name(self, tv, th1, th2):
+        """cc_ref.key_name: a property name -> (key, ok); tv: strtok()"""
+        ta = self.m(mod(tv, 2048), 'kta'); big = self.m(ge(ta, 1024), 'kbig')
+        with self.when(big): self.fail(26)
+        with self.when(not_(big)): e, ok = self.intern(th1, th2, add(ta, self.db), mod(fdiv(tv, 2048), 128))
+        return self.m(e, 'kname'), self.m(and_(not_(big), ok), 'kok')
+    def stmt_level(self):
+        return self.m(and_(eq(self.v('osp'), 0), eq(self.top()[0], R.C_EXPR)), 'stl')
+    def marker(self):
+        """cc_ref.marker: the innermost marker on the operator stack (0: none)"""
+        osp = self.m(self.v('osp'), 'mko')
+        best = self.m(mx(*[mul(and_(lt(k, osp), ge(self.v(f'op{k}'), 100 * 8192)), k + 1) for k in range(OD)]), 'mkb')
+        return self.m(fdiv(add(*[mul(eq(best, k + 1), self.v(f'op{k}')) for k in range(OD)]), 8192), 'mkc')
+    def num(self, t): return or_(eq(t, 1), eq(t, 3))
+    def daddop(self, tl, tr): return ite(eq(tl, 1), OP['DADDL'], ite(eq(tr, 1), OP['DADDR'], OP['DADD']))     # cc_ref.dynop(ADD)
+    def join_pieces(self):
+        """cc_ref.join_pieces: a + chain's pieces (M_PRINT on top) joined into one string, its first piece's temp"""
+        tc, tv = self.top_op()
+        with self.when(and_(eq(tc, R.M_PRINT), ge(tv, 4))):
+            nd = self.m(self.v('nd'), 'jnd'); d0 = self.m(sub(sub(nd, 1), fdiv(tv, 4)), 'jd0')
+            self.src(nd - 1)
+            for j in range(1, R.PIECES):
+                k = self.m(add(d0, j), 'jk')
+                with self.when(lt(k, nd)):
+                    self.emit(self.daddop(self.otype(d0), self.otype(k)), self.tmp(d0), self.opnd(d0), self.opnd(k)); self.set_od(d0, TMP, 2)
+            self.set('nd', d0 + 1); self.set_top_op(R.M_PRINT, mod(tv, 4))
+    def read_elem(self, dyn, key, keep):
+        """cc_ref.index_read (dyn: [x, k] on top) / prop_read ([o], key): GETX / GETP into the first's temp, or (keep) pushed above"""
+        keep = lift(keep); nd = self.m(self.v('nd'), 'rnd'); i = self.m(sub(nd, add(1, dyn)), 'rei')
+        top = self.src(nd - 1)
+        full = self.m(and_(keep, or_(ge(nd, ODN), ge(add(nd, self.v('tb')), TBMAX))), 'refull')
+        with self.when(full): self.fail(22)
+        with self.when(not_(full)):
+            xo = self.opnd(i); d = self.m(ite(keep, nd, i), 'red')
+            self.emit(ite(dyn, OP['GETX'], OP['GETP']), self.tmp(d), (ite(dyn, xo[0], top[0]), ite(dyn, xo[1], top[1])),
+                      (ite(dyn, top[0], sub(key, self.db)), mul(dyn, top[1])))
+            self.set_od(d, TMP, 0); self.set('nd', d + 1)
+    def write_elem(self, dyn, key, val):
+        """cc_ref.index_write ([x, k, v]) / prop_write ([o, v]): SETX / SETP with val v's operand; they are popped"""
+        nd = self.m(self.v('nd'), 'wnd'); b = self.m(sub(nd, add(2, dyn)), 'web')
+        xo = self.opnd(b); ko = self.opnd(b + 1)
+        self.emit(ite(dyn, OP['SETX'], OP['SETP']), xo, (ite(dyn, ko[0], val[0]), ite(dyn, ko[1], val[1])),
+                  (ite(dyn, val[0], sub(key, self.db)), mul(dyn, val[1])))
+        self.set('nd', b)
+    def compound(self, code, i, o, otemp):
+        """cc_ref.compound: x op= e, the old value at i, e above it, into o (otemp: o is i's temp) -> the static type"""
+        tl, tr = self.otype(i), self.otype(i + 1)
+        dyn = self.m(and_(eq(code, R.ADD), not_(and_(self.num(tl), self.num(tr)))), 'cdyn')
+        r = self.src(i + 1); l = self.opnd(i); t = self.tmp(i)
+        self.emit(ite(dyn, self.daddop(tl, tr), sub(code, R.ADD)), (ite(dyn, t[0], o[0]), ite(dyn, t[1], o[1])), l, r)
+        if not otemp:
+            with self.when(dyn): self.emit(OP['MOV'], o, t)
+        return self.m(ite(dyn, mul(2, or_(eq(tl, 2), eq(tr, 2))), 3), 'cty')
+    def meth_end(self, tv, last):
+        """cc_ref.meth_end: a method call's ')' (tv: the method + 64 * its commas; last: an argument just ended)"""
+        mi = self.m(mod(tv, 64), 'mmi'); argc = self.m(add(fdiv(tv, 64), last), 'margc')
+        pairs = [(i, a, e) for i, m in enumerate(R.ALLM) for a, e in m[1].items()]
+        ok = self.m(or_(*[and_(eq(mi, i), eq(argc, a)) for i, a, e in pairs]), 'mok')
+        with self.when(not_(ok)): self.fail(77)
+        with self.when(ok):
+            sb = self.m(and_(eq(mi, R.GLOBAL_INDEX[KW['String']]), eq(self.otype(self.v('nd') - 1), 1)), 'msb')    # String(a boolean)
+            e = self.m(ite(sb, self.ent.get('tostringb', 0), add(*[mul(and_(eq(mi, i), eq(argc, a)), self.ent.get(e, 0)) for i, a, e in pairs])), 'ment')
+            ty = self.m(add(*[mul(eq(mi, i), m[2]) for i, m in enumerate(R.ALLM)]), 'mty')
+            if last: self.arg_end()
+            self.set('tb', sub(self.v('tb'), argc + 1)); d0 = self.m(self.v('nd') - 1, 'md0'); f = self.tmp(d0)
+            self.emit(OP['CALL'], (e, 0), w1=(sub(f[0], 256), f[1])); self.set_od(d0, TMP, ty)
+            self.set('mode', R.S_OPER); self.done()
+    def arr_make(self, n):
+        """cc_ref.arr_make: mkarrN of the n collapsed elements above the slot"""
+        self.set('tb', sub(self.v('tb'), n)); d0 = self.m(self.v('nd') - 1, 'amd'); f = self.tmp(d0)
+        self.emit(OP['CALL'], (add(*[mul(eq(n, k), self.ent.get(f'mkarr{k}', 0)) for k in range(9)]), 0), w1=(sub(f[0], 256), f[1]))
+        self.set_od(d0, TMP, 0)
+    def arr_store(self, k):
+        """cc_ref.arr_store: element k (past the eighth, on top) into the array below it"""
+        with self.when(gt(k, 127)): self.fail(22)
+        with self.when(le(k, 127)):
+            i = self.m(self.v('nd') - 1, 'asi'); vo = self.src(i)
+            self.emit(OP['SETX'], self.opnd(i - 1), (add(k, 896), 0), vo); self.set('nd', i)
+    def okey_end(self, tv, close):
+        """cc_ref.okey_end: an object literal's pair (tv: its key's offset, 0: a number key below the value)"""
+        close = lift(close)
+        self.set('osp', self.v('osp') - 1)
+        i = self.m(self.v('nd') - 1, 'oki'); nk = self.m(eq(tv, 0), 'oknk'); vo = self.src(i)
+        xo = self.opnd(sub(i, add(1, nk))); ko = self.opnd(i - 1)
+        self.emit(ite(nk, OP['SETX'], OP['SETP']), xo, (ite(nk, ko[0], vo[0]), ite(nk, ko[1], vo[1])), (ite(nk, vo[0], tv), mul(nk, vo[1])))
+        self.set('nd', sub(i, nk))
+        with self.when(close): self.set('osp', self.v('osp') - 1)
+        self.set('mode', ite(close, R.S_OPER, R.S_OKEY)); self.done()
+    def case_end(self):
+        """cc_ref.case_end: J!= Tnext, T(0), value (DEQ + JZ when either may be a string)  Bk:"""
+        c = self.pop_cs(); tn = self.newlab()
+        dyn = self.m(not_(or_(self.num(self.otype(K(0))), self.num(self.otype(K(1))))), 'ksdyn')
+        r = self.src(K(1)); l = self.opnd(K(0)); t1 = self.tmp(K(1)); fl = self.frame_label()
+        self.emit(ite(dyn, OP['DEQ'], OP['JNE']), (mul(dyn, t1[0]), mul(dyn, t1[1])), l, r, label=ite(dyn, ite(t1[1], fl, -1), tn))
+        with self.when(dyn): self.emit(OP['JZ'], b=t1, label=tn)
+        self.set('nd', 0)
+        with self.when(c[2]): self.deflab(c[1], self.here())
+        t = self.top()
+        self.set_top(add(R.C_SWITCH * 4096, mul(tn, 64), t[2]), add(mul(t[5], 4096), mul(t[3], 64), t[4], sub(1, mod(t[4], 2))))
+        self.set('mode', R.S_STMT); self.done()
 
     def fn_sel(self, k, f): return self.m(add(*[mul(eq(k, i), I(f'{f}{i}')) for i in range(NF)]), f)
     def call_end(self, tv, last):
         """cc_ref.call_end: CALL, after checking (or recording) the function's argument count"""
         k = self.m(mod(tv, 16), 'cfk'); argc = self.m(add(fdiv(tv, 64), last), 'argc')
-        if last: self.to_temp(self.v('nd') - 1)
+        if last: self.arg_end()
         fl = self.fn_sel(k, 'fl_'); exp = self.m(fdiv(fl, 256), 'cexp')
         bad = self.m(and_(ne(exp, 0), ne(exp, add(argc, 1))), 'cbad')
         with self.when(bad): self.fail(76)
         with self.when(not_(bad)):
             with self.when(eq(exp, 0)):
                 self.fnw.append((self.x.g, k, self.fn_sel(k, 'fh1_'), self.fn_sel(k, 'fh2_'), add(mod(fl, 256), mul(add(argc, 1), 256))))
-            d0 = self.m(sub(sub(self.v('nd'), argc), 1), 'cd0'); f = self.tmp(d0)
+            self.set('tb', sub(self.v('tb'), argc)); d0 = self.m(self.v('nd') - 1, 'cd0'); f = self.tmp(d0)
             self.emit(OP['CALL'], label=mod(fl, 64), w1=(sub(f[0], 256), f[1]))
-            self.set('nd', d0); self.push_od(TMP, mod(fdiv(tv, 16), 4))
+            self.set_od(d0, TMP, mod(fdiv(tv, 16), 4))
             self.done()
 
     def print_end(self):
@@ -576,7 +688,7 @@ class Prog(Base):
         # with a known starting mode, only the fallthrough chains below can run: other blocks are folded away
         # (after a dynamic mode change the analysis could not prove them unreachable)
         FALL = {R.S_NAMES: (R.S_NAMEE, R.S_OPER), R.S_NAMEE: (R.S_OPER,), R.S_ELSE: (R.S_DOWHILE, R.S_STMT), R.S_AFTERELSE: (R.S_STMT,),
-                R.S_LBRACE: (R.S_STMT,), R.S_CONFIRST: (R.S_OPND,)}
+                R.S_LBRACE: (R.S_STMT,), R.S_CONFIRST: (R.S_OPND,), R.S_SWCASE: (R.S_STMT,)}
         reach = None if self.spec_mode is None else {self.spec_mode, *FALL.get(self.spec_mode, ())}
         def block(md):
             if reach is not None and md not in reach: return self.when(K(0))
@@ -610,20 +722,22 @@ class Prog(Base):
                 with self.when(not_(P(46))): self.fail(30)
                 with self.when(P(46)): self.set('mode', R.S_CONLOG); self.done()
             with self.when(and_(not_(iscon), P(40))):
-                gi = self.m(or_(*[and_(eq(pn1, KW[g[0]][0]), eq(pn2, KW[g[0]][1])) for g in R.GLOBALS]), 'gi')
+                gi = self.m(add(*[mul(and_(eq(pn1, KW[g[0]][0]), eq(pn2, KW[g[0]][1])), R.GLOBAL_INDEX[KW[g[0]]] + 1) for g in R.GLOBALS]), 'gi')
                 with self.when(isputc): self.push_op(R.M_PUTC)
-                with self.when(and_(not_(isputc), gi)): self.fail(NOTSUB)
-                with self.when(and_(not_(isputc), not_(gi))):
+                with self.when(and_(not_(isputc), ne(gi, 0))):            # parseInt(s), ...: a method on a dummy receiver
+                    self.push_od(TMP, 0); self.set('tb', self.v('tb') + 1); self.push_op(R.M_METH, sub(gi, 1))
+                with self.when(and_(not_(isputc), eq(gi, 0))):
                     self.snapshot(lambda d: lt(d, 256))                     # the callee may change a global still on the stack
                     fi, _, fb = self.fnfind(pn1, pn2); self.push_op(R.M_CALL, add(fi, mul(fb, 16))); self.push_od(TMP, 0)    # its slot
-                with self.when(not_(and_(not_(isputc), gi))): self.set('mode', R.S_OPND); self.done()
+                self.set('mode', R.S_OPND); self.done()
             p78n = self.m(or_(P(7), P(8)), 'p78n')
             with self.when(and_(not_(iscon), not_(P(40)))):
                 j = self.lookup(pn1, pn2)
                 k, o, b, cst = self.symkind_addr(j)
                 with self.when(p78n): self.incdec(pn1, pn2, tv, 2, (j, k, o, b, cst))     # x++ in an expression
-                isstr_ = self.m(and_(eq(pn1, KW['String'][0]), eq(pn2, KW['String'][1])), 'isString')
-                with self.when(and_(not_(p78n), lt(j, 0))): self.fail(ite(isstr_, NOTSUB, 4))
+                sdot = self.m(and_(not_(p78n), lt(j, 0), eq(pn1, KW['String'][0]), eq(pn2, KW['String'][1]), P(46)), 'sdot')
+                with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', R.S_DOT); self.done()     # String.fromCharCode
+                with self.when(and_(not_(p78n), lt(j, 0), not_(sdot))): self.fail(4)
                 with self.when(and_(not_(p78n), ge(j, 0))): self.push_od(o, b); self.set('mode', R.S_OPER)
         # ---- S_ELSE
         with block(R.S_ELSE):
@@ -652,11 +766,16 @@ class Prog(Base):
         # ---- S_LBRACE
         with block(R.S_LBRACE):
             tkind = self.top()[0]
-            with self.when(P(123)): self.set('mode', R.S_STMT); self.done()
+            with self.when(P(123)): self.set('mode', ite(eq(tkind, R.C_SWITCH), R.S_SWCASE, R.S_STMT)); self.done()
             with self.when(not_(P(123))):
                 okb = self.m(anyeq(tkind, (R.C_IFB, R.C_LOOPB, R.C_DOB)), 'okb')
                 with self.when(not_(okb)): self.fail(33)
                 with self.when(okb): self.set_topA(lambda A: add(A, R.BRACELESS * 4096)); self.set('mode', R.S_STMT)
+        # ---- S_SWCASE: a switch body's first token
+        with block(R.S_SWCASE):
+            okc = self.m(or_(KWc('case'), KWc('default'), PRB), 'okc')
+            with self.when(not_(okc)): self.fail(74)
+            with self.when(okc): self.set('mode', R.S_STMT)
         # ---- S_STMT
         with block(R.S_STMT):
             t0 = self.top()[0]
@@ -678,7 +797,22 @@ class Prog(Base):
                 with self.when(or_(KWc('var'), KWc('let'), KWc('const'))):
                     self.set('pn1', add(KWc('let'), mul(KWc('const'), 2))); self.set('pn2', 0); self.set('mode', R.S_VAR); self.done()
                 with self.when(KWc('if')): self.push_cs(R.C_IFC); self.set('mode', R.S_LPAREN); self.done()
-                with self.when(or_(KWc('switch'), KWc('case'), KWc('default'))): self.fail(NOTSUB)
+                with self.when(KWc('switch')): self.push_cs(R.C_SWITCHC); self.set('mode', R.S_LPAREN); self.done()
+                with self.when(or_(KWc('case'), KWc('default'))):         # cc_ref; one label, one JMP, one label port for both
+                    t = self.top(); seen = self.m(mod(t[4], 2), 'swseen'); insw = self.m(eq(t[0], R.C_SWITCH), 'insw')
+                    isc = KWc('case'); dup = self.m(and_(not_(isc), mod(fdiv(t[4], 2), 2)), 'swdup')
+                    with self.when(not_(insw)): self.fail(73)
+                    with self.when(and_(insw, dup)): self.fail(75)
+                    with self.when(and_(insw, not_(dup))):
+                        with self.when(or_(seen, not_(isc))): l = self.newlab()     # case: Bk (after a body); default: its label
+                        with self.when(ite(isc, seen, not_(seen))): self.emit(OP['JMP'], label=ite(isc, l, t[1]))
+                        self.deflab(ite(isc, t[1], l), self.here())
+                        with self.when(isc):                       # the switch's value (T(0)), then this one's
+                            self.push_od(TMP, fdiv(t[4], 4)); self.push_cs(R.C_CASE, mul(seen, l), seen); self.set('mode', R.S_OPND)
+                        with self.when(not_(isc)):
+                            self.set_top(add(R.C_SWITCH * 4096, mul(t[1], 64), t[2]), add(mul(t[5], 4096), mul(l, 64), sub(t[4], mod(t[4], 4)), 3))
+                            self.set('mode', R.S_OCOLON)
+                        self.done()
                 with self.when(KWc('while')):
                     lh = self.newlab(); self.deflab(lh, self.here()); self.push_cs(R.C_WHILEC, lh); self.set('mode', R.S_LPAREN); self.done()
                 with self.when(KWc('do')):
@@ -775,8 +909,43 @@ class Prog(Base):
                 self.set('osp', self.v('osp') - 1); self.emit(OP['PUTC'], b=(R.K(10), 0)); self.print_end()
             with self.when(not_(P(41))):
                 self.set_top_op(R.M_PRINT, 0); self.set('mode', R.S_OPND)
-        for md in (R.S_DOT, R.S_OKEY, R.S_OCOLON, R.S_SWCASE):
-            with block(md): self.fail(NOTSUB)
+        # ---- objects (cc_ref)
+        with block(R.S_DOT):
+            with self.when(not_(isID)): self.fail(69)
+            isl = self.m(and_(isID, eq(th1, KW['length'][0]), eq(th2, KW['length'][1])), 'islen')
+            mi = self.m(add(*[mul(and_(eq(th1, KW[m[0]][0]), eq(th2, KW[m[0]][1])), i + 1) for i, m in enumerate(R.METHODS)]), 'mi')
+            direct = self.m(and_(isID, not_(isl), ne(mi, 0), ge(tv, 262144)), 'mdir')     # x.name( for a method's name
+            with self.when(and_(or_(isl, direct), lt(mod(tv, 2048), 1024))): self.datum(add(mod(tv, 2048), self.db - 1), mod(fdiv(tv, 2048), 128))    # (its length word)
+            with self.when(isl):                               # a string's or an array's length: the word before its value's address
+                i = self.m(self.v('nd') - 1, 'lni'); o = self.src(i)
+                self.emit(OP['LDI'], self.tmp(i), o, (R.K(-1), 0)); self.set_od(i, TMP, 3); self.set('mode', R.S_OPER); self.done()
+            with self.when(direct): self.set('pn1', 0); self.set('pn2', 0); self.set('pm', add(mi, 3)); self.set('mode', R.S_OPER); self.done()
+            with self.when(and_(isID, not_(isl), not_(direct))):
+                ks, ok = self.key_name(tv, th1, th2)
+                with self.when(ok):
+                    self.set('pn1', ks); self.set('pn2', 0); self.set('pm', ite(eq(mi, 0), 1, add(mi, 3))); self.set('mode', R.S_OPER); self.done()
+        with block(R.S_OKEY):
+            with self.when(P(125)): self.set('osp', self.v('osp') - 1); self.set('mode', R.S_OPER); self.done()     # {} or a trailing comma
+            nk = self.m(not_(P(125)), 'onk')
+            with self.when(and_(nk, not_(or_(isID, isSTR, isNUM)))): self.fail(71)
+            if self.spec_tk in (None, 2):
+                with self.when(and_(nk, isID)): ksI, okI = self.key_name(tv, th1, th2)
+            else: ksI, okI = K(0), K(0)
+            if self.spec_tk in (None, 3):
+                tsa = self.m(mod(tv, 2048), 'otsa'); bigS = self.m(and_(nk, isSTR, ge(tsa, 1024)), 'obig')
+                with self.when(bigS): self.fail(26)
+                with self.when(and_(nk, isSTR, not_(bigS))): eS, okS = self.intern(th1, th2, add(tsa, self.db), fdiv(tv, 2048))
+                ksS = self.m(eS, 'oks'); okS = self.m(and_(not_(bigS), okS), 'okS')
+            else: ksS, okS = K(0), K(0)
+            with self.when(and_(nk, isNUM)):                  # a number key: as o[n] = v
+                v20 = self.m(sub(mod(add(tv, 1 << 19), 1 << 20), 1 << 19), 'kn20'); small = self.m(and_(ge(v20, -128), lt(v20, 128)), 'knsm')
+                self.push_od(ite(small, add(v20, 896), KBIG), 3, v20)
+            okk = self.m(or_(and_(isID, okI), and_(isSTR, okS), and_(isNUM, eq(self.v('err'), 0))), 'okk')
+            with self.when(and_(nk, okk)):
+                self.push_op(R.M_OKEY, mul(not_(isNUM), sub(add(mul(isID, ksI), mul(isSTR, ksS)), self.db))); self.set('mode', R.S_OCOLON); self.done()
+        with block(R.S_OCOLON):
+            with self.when(P(58)): self.set('mode', ite(eq(self.top()[0], R.C_SWITCH), R.S_STMT, R.S_OPND)); self.done()     # (default's ':')
+            with self.when(not_(P(58))): self.fail(72)
         # ---- S_OPND
         with block(R.S_OPND):
             with self.when(isNUM):
@@ -791,7 +960,10 @@ class Prog(Base):
                     with self.when(ok): self.push_od(KBIG, 2, sub(e, R.STRTAG)); self.set('mode', R.S_OPER); self.done()
             tf = self.m(or_(KWc('true'), KWc('false'), KWc('null')), 'tf')
             with self.when(tf): self.push_od(add(896, KWc('true')), not_(KWc('null'))); self.set('mode', R.S_OPER); self.done()
-            with self.when(or_(P(123), P(91))): self.fail(NOTSUB)
+            with self.when(P(123)):                            # an object literal: NEW, then each pair as o.key = v
+                i = self.m(self.v('nd'), 'obi'); self.push_od(TMP, 0)
+                with self.when(eq(self.v('err'), 0)): self.emit(OP['NEW'], self.tmp(i)); self.push_op(R.M_OBJ); self.set('mode', R.S_OKEY); self.done()
+            with self.when(P(91)): self.push_od(TMP, 0); self.push_op(R.M_ARR, 0); self.done()     # an array literal: its slot, the elements
             with self.when(P(40)): self.push_op(R.M_PAREN); self.done()
             with self.when(P(33)): self.push_op(R.NOT); self.done()
             with self.when(P(45)): self.push_op(R.NEG); self.done()
@@ -801,35 +973,68 @@ class Prog(Base):
             with self.when(rest):
                 tc, tvv = self.top_op()
                 t = self.top()
-                cA = self.m(and_(P(41), gt(self.v('osp'), 0), eq(tc, R.M_CALL)), 'oA')
+                cA = self.m(and_(P(41), gt(self.v('osp'), 0), anyeq(tc, (R.M_CALL, R.M_METH))), 'oA')
+                cR = self.m(and_(P(93), gt(self.v('osp'), 0), eq(tc, R.M_ARR)), 'oR')
                 cB = self.m(and_(not_(cA), or_(P(59), PNL, PRB), eq(t[0], R.C_RETURN), eq(self.v('osp'), 0)), 'oB')
                 cC = self.m(and_(not_(cA), not_(cB), P(59), eq(t[0], R.C_FORCOND), eq(self.v('osp'), 0)), 'oC')
                 cN = self.m(and_(not_(cB), PNL), 'oN')
                 with self.when(cN): self.done()
                 with self.when(cA):
-                    self.set('osp', self.v('osp') - 1); self.set('mode', R.S_OPER); self.call_end(tvv, 0)
+                    self.set('osp', self.v('osp') - 1); self.set('mode', R.S_OPER)
+                    with self.when(eq(tc, R.M_CALL)): self.call_end(tvv, 0)
+                    with self.when(eq(tc, R.M_METH)): self.meth_end(tvv, 0)
+                with self.when(cR):                            # [] or a trailing comma
+                    self.set('osp', self.v('osp') - 1)
+                    with self.when(lt(tvv, 8)): self.arr_make(tvv)
+                    self.set('mode', R.S_OPER); self.done()
                 with self.when(cB):
                     self.push_od(R.K(0), 0); self.set('f_expr', 1)
                     with self.when(PRB): self.set('f_asic', 1)
                 with self.when(cC): self.push_od(R.K(1), 1); self.set('f_expr', 1)
-                with self.when(and_(not_(cA), not_(cB), not_(cC), not_(cN))): self.fail(3)
+                with self.when(and_(not_(cA), not_(cB), not_(cC), not_(cN), not_(cR))): self.fail(3)
         # ---- S_OPER
         with block(R.S_OPER):
-            pm0 = self.m(self.v('pm'), 'pm0') if self.spec_mode in (None, R.S_OPER) else K(0)
-            pinc = self.m(eq(pm0, 3), 'pinc')                  # after x++ / ++x (cc_ref): no '.' or '[' may follow
+            # pm is set only on the way out of S_OPER (S_DOT, x[k]'s ']'): a variant starting in another mode knows it is 0
+            pmr = self.m(self.v('pm'), 'pmr') if self.spec_mode in (None, R.S_OPER) else K(0)
+            pinc = self.m(eq(pmr, 3), 'pinc')                  # after x++ / ++x (cc_ref): no '.' or '[' may follow
             pbad = self.m(and_(pinc, or_(P(46), P(91))), 'pbad')
-            with self.when(pbad): self.fail(48)
             with self.when(pinc): self.set('pm', 0)
-            with self.when(and_(not_(pbad), or_(P(46), P(91)))): self.fail(NOTSUB)
-            with self.when(P(93)): self.fail(45)
+            with self.when(pbad): self.fail(48)
+            pm4 = self.m(ge(pmr, 4), 'pm4')                     # x.name for a method's name: a call, or else the property
+            mcall = self.m(and_(pm4, P(40)), 'mcall')
+            with self.when(mcall):                             # the receiver: an argument above its slot
+                i = self.m(self.v('nd') - 1, 'mci')
+                self.put(self.tmp(i + 1), i); self.set_od(i, TMP, 0); self.set('tb', self.v('tb') + 1)
+                self.push_op(R.M_METH, sub(pmr, 4)); self.set('pm', 0); self.set('mode', R.S_OPND); self.done()
+            pmv = self.m(mul(not_(mcall), ite(pm4, 1, mul(pmr, not_(pinc)))), 'pmv')     # 1: o.x pending, 2: x[k]
+            with self.when(ne(pmv, 0)):
+                dyn = self.m(eq(pmv, 2), 'mdyn'); key = self.m(self.v('pn1'), 'mks')
+                p78 = self.m(or_(P(7), P(8)), 'p78'); asgm = self.m(or_(P(61), ne(compound, 0), p78), 'masg')
+                self.set('pm', 0)
+                with self.when(asgm):
+                    stl = self.stmt_level()
+                    with self.when(not_(stl)): self.fail(70)
+                    with self.when(stl):
+                        with self.when(not_(P(61))): self.read_elem(dyn, key, 1)     # the old value, above [o] / [x, k]
+                        go = self.m(eq(self.v('err'), 0), 'mgo')
+                        with self.when(and_(go, p78)):         # o.x++ / x[k]--
+                            i = self.m(self.v('nd') - 1, 'mpi'); t = self.tmp(i)
+                            self.emit(ite(P(7), OP['ADD'], OP['SUB']), t, t, (R.K(1), 0)); self.write_elem(dyn, key, t)
+                            self.pop_cs(); self.set('mode', R.S_INC); self.done()
+                        with self.when(and_(go, not_(p78))):
+                            t = self.top(); off = self.m(mul(not_(dyn), sub(key, self.db)), 'koff')
+                            self.set_top(add(R.C_PSET * 4096, mul(dyn, 64), compound), add(mul(t[5], 4096), mul(fdiv(off, 64), 64), mod(off, 64)))
+                            self.set('mode', R.S_OPND); self.done()
+                with self.when(not_(asgm)): self.read_elem(dyn, key, 0)
             binop = self.m(add(*[mul(P(ch), op) for ch, op in R.BIN.items()]), 'binop')
             nomark, tk0, dok, dop = self.cond_dest()
             csp_ = self.m(self.v('csp'), 'cspa')            # the entry below the top: a for header takes no semicolon insertion
             k2 = self.m(add(*[mul(eq(csp_, k + 2), fdiv(self.v(f'csA{k}'), 4096)) for k in range(CD - 1)]), 'k2nd')
-            asiok = self.m(and_(nomark, anyeq(tk0, (R.C_ASSIGN, R.C_EXPR, R.C_RETURN)), not_(anyeq(k2, (R.C_FORINIT, R.C_FORSTEP)))), 'asiok')
+            asiok = self.m(and_(nomark, anyeq(tk0, (R.C_ASSIGN, R.C_EXPR, R.C_RETURN, R.C_PSET)), not_(anyeq(k2, (R.C_FORINIT, R.C_FORSTEP)))), 'asiok')
             semi = self.m(or_(P(59), and_(or_(PNL, PRB), asiok)), 'semi')
-            with self.when(and_(PNL, not_(asiok))): self.done()
-            closer = self.m(and_(live(), or_(ne(binop, 0), P(41), P(44), P(58), P(63), semi)), 'closer')
+            okb = self.m(and_(PRB, eq(self.marker(), R.M_OKEY)), 'okb')       # '}' ending an object literal's value
+            with self.when(and_(live(), PNL, not_(asiok))): self.done()
+            closer = self.m(and_(live(), or_(ne(binop, 0), P(41), P(44), P(58), P(63), P(93), okb, semi)), 'closer')
             br = self.m(or_(P(63), and_(P(41), nomark, anyeq(tk0, (R.C_IFC, R.C_WHILEC, R.C_DOB, R.C_DOB1))),
                             and_(or_(P(59), PNL), nomark, eq(tk0, R.C_FORCOND))), 'pbr')
             dv = self.m(and_(not_(br), or_(P(41), P(44), semi), dok), 'pdv')
@@ -838,30 +1043,42 @@ class Prog(Base):
             tc, tvv = self.top_op()
             osp0 = self.m(self.v('osp'), 'osp0')
             tc = self.m(mul(tc, gt(osp0, 0)), 'tt')
+            with self.when(and_(live(), P(46))): self.set('mode', R.S_DOT); self.done()                        # o.x
+            with self.when(and_(live(), P(91))): self.push_op(R.M_INDEX); self.set('mode', R.S_OPND); self.done()    # x[k]
+            with self.when(and_(live(), P(93))):              # x[k]: the read is pending (pm 2); or an array literal's end
+                with self.when(eq(tc, R.M_INDEX)): self.set('osp', osp0 - 1); self.set('pm', 2); self.done()
+                with self.when(eq(tc, R.M_ARR)):
+                    self.set('osp', osp0 - 1)
+                    with self.when(ge(tvv, 8)): self.arr_store(tvv)
+                    with self.when(lt(tvv, 8)): self.arg_end(); self.arr_make(tvv + 1)
+                    self.set('mode', R.S_OPER); self.done()
+                with self.when(not_(anyeq(tc, (R.M_INDEX, R.M_ARR)))): self.fail(45)
+            with self.when(and_(live(), okb)): self.okey_end(tvv, 1)
             with self.when(and_(live(), ne(binop, 0))):
                 nd = self.m(self.v('nd'), 'bnd'); ty = self.otype(nd - 1)
                 inpr = self.m(eq(tc, R.M_PRINT), 'inpr'); npc = self.m(fdiv(tvv, 4), 'npc')
-                piece = self.m(and_(eq(binop, R.ADD), inpr, or_(ne(npc, 0), eq(ty, 2))), 'piece')     # a piece, kept on the stack
-                join = self.m(and_(not_(piece), ne(binop, R.ADD), lt(self.prec(binop), 7), inpr, ne(npc, 0)), 'join')   # pieces joined: a built string
+                piece = self.m(and_(eq(binop, R.ADD), inpr, or_(ne(npc, 0), eq(ty, 2)), lt(tvv, 4 * (R.PIECES - 1))), 'piece')     # a piece, kept on the stack
                 with self.when(piece): self.set_top_op(R.M_PRINT, add(tvv, 4))
-                with self.when(join): self.fail(NOTSUB)
-                logic = self.m(and_(not_(piece), not_(join), or_(eq(binop, R.AND), eq(binop, R.OR))), 'logic')
                 plus = self.m(and_(not_(piece), eq(binop, R.ADD)), 'plus')
                 with self.when(plus): self.push_op(ite(inpr, R.M_CADD, R.ADD), ty)
+                rest = self.m(and_(not_(piece), not_(plus)), 'brest')
+                with self.when(and_(rest, not_(gt(self.prec(binop), 6)))): self.join_pieces()     # (* / % bind tighter: they end no piece)
+                nd2 = self.m(self.v('nd'), 'bnd2'); ty2 = self.otype(nd2 - 1)
+                logic = self.m(and_(rest, or_(eq(binop, R.AND), eq(binop, R.OR))), 'logic')
                 with self.when(logic):                         # a: tested in its temp; b joins it there (popops)
-                    l = self.newlab(); i = self.m(nd - 1, 'li'); self.to_temp(i); self.snapshot(lambda d: K(1), i)
+                    l = self.newlab(); i = self.m(nd2 - 1, 'li'); self.to_temp(i); self.snapshot(lambda d: K(1), i)
                     self.emit(ite(eq(binop, R.AND), OP['JZ'], OP['JNZ']), b=self.tmp(i), label=l)
-                    self.push_op(binop, add(l, mul(ty, 64)))
-                with self.when(and_(not_(piece), not_(join), not_(logic), not_(plus))): self.push_op(binop, ty)     # (the left operand's type)
-                with self.when(not_(join)): self.set('mode', R.S_OPND); self.done()
+                    self.push_op(binop, add(l, mul(ty2, 64)))
+                with self.when(and_(rest, not_(logic))): self.push_op(binop, ty2)     # (the left operand's type)
+                self.set('mode', R.S_OPND); self.done()
             with self.when(and_(live(), P(63))):               # c ? ... (cc_ref)
-                with self.when(and_(eq(tc, R.M_PRINT), ge(tvv, 4))): self.fail(NOTSUB)
-                with self.when(not_(and_(eq(tc, R.M_PRINT), ge(tvv, 4)))):
-                    self.snapshot(lambda d: K(1), self.v('nd') - 1)
-                    l = self.newlab(); self.branch(l, 0); self.push_op(R.M_TERN, add(l, mul(eq(tc, R.M_TELSE), 64)))
-                    self.set('mode', R.S_OPND); self.done()
-            with self.when(and_(live(), P(58))):               # c ? a : ...
-                with self.when(ne(tc, R.M_TERN)): self.fail(67)
+                self.join_pieces(); self.snapshot(lambda d: K(1), self.v('nd') - 1)
+                l = self.newlab(); self.branch(l, 0); self.push_op(R.M_TERN, add(l, mul(eq(tc, R.M_TELSE), 64)))
+                self.set('mode', R.S_OPND); self.done()
+            with self.when(and_(live(), P(58))):               # c ? a : ...; a case value's end
+                cse = self.m(and_(ne(tc, R.M_TERN), eq(osp0, 0), eq(self.top()[0], R.C_CASE)), 'cse')
+                with self.when(cse): self.case_end()
+                with self.when(and_(ne(tc, R.M_TERN), not_(cse))): self.fail(67)
                 with self.when(eq(tc, R.M_TERN)):
                     reuse = self.m(ge(tvv, 64), 'treu')
                     self.set('osp', osp0 - 1)
@@ -875,18 +1092,27 @@ class Prog(Base):
             with self.when(and_(live(), P(44))):
                 vasg = self.m(and_(eq(osp0, 0), eq(self.top()[0], R.C_ASSIGN), ne(self.top()[3], 0)), 'vasg')
                 with self.when(eq(tc, R.M_PRINT)): self.print_call(32); self.set_top_op(R.M_PRINT, 2); self.set('mode', R.S_CONFIRST); self.done()
-                with self.when(eq(tc, R.M_CALL)): self.to_temp(self.v('nd') - 1); self.set_top_op(tc, tvv + 64)       # count the arguments
-                with self.when(anyeq(tc, (R.M_CALL, R.M_PUTC))): self.set('mode', R.S_OPND); self.done()
-                with self.when(and_(not_(anyeq(tc, (R.M_PRINT, R.M_CALL, R.M_PUTC))), vasg)): self.set('f_expr', 1)
-                with self.when(not_(or_(anyeq(tc, (R.M_PRINT, R.M_CALL, R.M_PUTC)), vasg))): self.fail(44)
+                with self.when(eq(tc, R.M_OKEY)): self.okey_end(tvv, 0)
+                with self.when(eq(tc, R.M_ARR)):              # cc_ref.arr_elem
+                    with self.when(ge(tvv, 8)): self.arr_store(tvv)
+                    with self.when(lt(tvv, 8)):
+                        self.arg_end()
+                        with self.when(eq(tvv, 7)): self.arr_make(8)
+                    self.set_top_op(R.M_ARR, tvv + 1); self.set('mode', R.S_OPND); self.done()
+                with self.when(anyeq(tc, (R.M_CALL, R.M_METH))): self.arg_end(); self.set_top_op(tc, tvv + 64)       # count the arguments
+                with self.when(anyeq(tc, (R.M_CALL, R.M_METH, R.M_PUTC))): self.set('mode', R.S_OPND); self.done()
+                known = anyeq(tc, (R.M_PRINT, R.M_OKEY, R.M_ARR, R.M_CALL, R.M_METH, R.M_PUTC))
+                with self.when(and_(not_(known), vasg)): self.set('f_expr', 1)
+                with self.when(not_(or_(known, vasg))): self.fail(44)
             with self.when(and_(live(), P(41))):
                 with self.when(eq(tc, R.M_PAREN)): self.set('osp', osp0 - 1); self.done()
                 with self.when(eq(tc, R.M_CALL)): self.set('osp', osp0 - 1); self.call_end(tvv, 1)
+                with self.when(eq(tc, R.M_METH)): self.set('osp', osp0 - 1); self.meth_end(tvv, 1)
                 with self.when(eq(tc, R.M_PUTC)):
                     self.set('osp', osp0 - 1); o = self.src(self.v('nd') - 1); self.emit(OP['PUTC'], b=o)
                     self.set('nd', self.v('nd') - 1); self.push_od(R.K(0), 0); self.done()
                 with self.when(eq(tc, R.M_PRINT)): self.print_call(10); self.set('osp', osp0 - 1); self.print_end()
-                other = self.m(not_(anyeq(tc, (R.M_PAREN, R.M_CALL, R.M_PUTC, R.M_PRINT))), 'o41')
+                other = self.m(not_(anyeq(tc, (R.M_PAREN, R.M_CALL, R.M_METH, R.M_PUTC, R.M_PRINT))), 'o41')
                 with self.when(and_(other, gt(osp0, 0))): self.fail(46)
                 with self.when(and_(other, eq(osp0, 0))): self.set('f_expr', 1)
             with self.when(and_(live(), eq(binop, 0), semi)):
@@ -894,7 +1120,7 @@ class Prog(Base):
                 with self.when(eq(osp0, 0)):
                     self.set('f_expr', 1)
                     with self.when(PRB): self.set('f_asic', 1)
-            with self.when(and_(live(), eq(binop, 0), not_(or_(P(41), P(44), P(58), P(63), semi, PNL)))): self.fail(48)
+            with self.when(and_(live(), eq(binop, 0), not_(or_(P(41), P(44), P(58), P(63), P(93), okb, semi, PNL)))): self.fail(48)
         # deferred tails (each is the last thing its path does)
         with self.when(self.v('f_expr')): self.end_expr_stmt(P)
         with self.when(self.v('f_simple')): self.end_simple_stmt(P)
@@ -915,6 +1141,8 @@ class Prog(Base):
         c6 = self.m(eq(k, R.C_EXPR), 'e6')
         c7 = self.m(and_(eq(k, R.C_RETURN), or_(P(59), P(R.T_NL), self.v('f_asic'))), 'e7')
         c8 = self.m(and_(anyeq(k, (R.C_DOB, R.C_DOB1)), P(41)), 'e8')
+        c9 = self.m(eq(k, R.C_PSET), 'e9')
+        c10 = self.m(and_(eq(k, R.C_SWITCHC), P(41)), 'e10')
         with self.when(or_(c1, c2, c3, c8)):               # a branch takes the value: if / while (out when false), for / do (in when true)
             self.pop_cs()
             with self.when(or_(c1, c2)): l1 = self.newlab()     # if: else label; while: end label
@@ -929,17 +1157,23 @@ class Prog(Base):
             self.pop_cs()
             _, o, _, _ = self.symkind_addr(t[1]); nd = self.m(self.v('nd'), 'and'); i = self.m(nd - 1, 'ai')
             cmp_ = self.m(ne(t[2], 0), 'acmp')
-            with self.when(cmp_):
-                sbad = self.m(or_(eq(self.otype(i), 2), eq(self.otype(i - 1), 2)), 'asbad')
-                with self.when(sbad): self.fail(R.NOTSUB)
-                with self.when(not_(sbad)):
-                    l_ = self.opnd(i - 1); r_ = self.src(i)
-                    self.emit(sub(t[2], R.ADD), (o, 0), l_, r_); self.set_symbool(t[1], 3); self.set('nd', i - 1)
+            with self.when(cmp_):                              # (a snapshot replaced x below e if e changed it)
+                self.set_symbool(t[1], self.compound(t[2], i - 1, (o, 0), False)); self.set('nd', i - 1)
             with self.when(not_(cmp_)): self.put((o, 0), i); self.set_symbool(t[1], self.otype(i)); self.set('nd', i)
             vdecl = self.m(and_(P(44), ne(t[3], 0)), 'vdecl')
             with self.when(self.m(self.v('live'), 'live')):
                 with self.when(vdecl): self.set('pn1', sub(t[3], 1)); self.set('pn2', 0); self.set('mode', R.S_VAR); self.done()
                 with self.when(not_(vdecl)): self.set('f_simple', 1)
+        with self.when(c9):                                  # t: dynamic (x[k]), compound op, the key's offset (64 * c + d)
+            self.pop_cs(); i = self.m(self.v('nd') - 1, 'qi'); cm = self.m(ne(t[2], 0), 'qcm'); ti = self.tmp(i - 1)
+            with self.when(cm): self.compound(t[2], i - 1, ti, True); self.set('nd', i)
+            with self.when(not_(cm)): vs = self.src(i)
+            self.write_elem(t[1], add(self.db, mul(t[3], 64), t[4]), (ite(cm, ti[0], vs[0]), ite(cm, ti[1], vs[1])))
+            self.set('f_simple', 1)
+        with self.when(c10):                                 # the value into T(0), where the case tests read it
+            self.pop_cs(); self.to_temp(K(0)); ty = self.otype(K(0)); self.set('nd', 0)
+            l1 = self.newlab(); l2 = self.newlab()
+            self.push_cs(R.C_SWITCH, l1, l2, 0, mul(4, ty)); self.set('mode', R.S_LBRACE); self.done()
         with self.when(c6):
             self.pop_cs(); self.set('nd', self.v('nd') - 1); self.set('f_simple', 1)
         with self.when(c7):
@@ -951,7 +1185,7 @@ class Prog(Base):
                 self.fnw.append((self.x.g, cfn, add(*[mul(eq(cfn, n_), I(f'fh1_{n_}')) for n_ in range(NF)]),
                                  add(*[mul(eq(cfn, n_), I(f'fh2_{n_}')) for n_ in range(NF)]), add(mod(fl, 64), mul(rty, 64), mul(fdiv(fl, 256), 256))))
             o = self.src(i); self.emit(OP['RET'], b=o); self.set('nd', i); self.set('f_compl', 1); self.done()
-        with self.when(not_(or_(c1, c2, c3, c4, c6, c7, c8))): self.fail(50)
+        with self.when(not_(or_(c1, c2, c3, c4, c6, c7, c8, c9, c10))): self.fail(50)
 
     def end_simple_stmt(self, P):
         t = self.top()
@@ -1007,18 +1241,22 @@ class Prog(Base):
             t = self.pop_cs(); k = t[0]; self.set('nlet', t[5])
             with self.when(eq(k, R.C_BLOCK)): self.set(flag, 1); self.done()
             with self.when(eq(k, R.C_IFB)): self.set('pendLa', t[1]); self.set('mode', R.S_ELSE); self.done()
-            isfn, islp = self.m(eq(k, R.C_FUNCB), 'cfn'), self.m(eq(k, R.C_LOOPB), 'clp')
+            isfn, islp, issw = self.m(eq(k, R.C_FUNCB), 'cfn'), self.m(eq(k, R.C_LOOPB), 'clp'), self.m(eq(k, R.C_SWITCH), 'csw')
+            hasd = self.m(and_(issw, mod(fdiv(t[4], 2), 2)), 'cswd')    # a switch: the last test failed: to default if there is one
+            with self.when(hasd): self.emit(OP['JMP'], label=t[2])
+            with self.when(issw): self.deflab(t[1], self.here())
+            with self.when(hasd): self.emit(OP['JMP'], label=t[3])
             # the code (one instruction slot for both): loop JMP top; function RET #0 (and its frame label := its count of locals)
             with self.when(or_(islp, isfn)): self.emit(ite(islp, OP['JMP'], OP['RET']), b=(ite(islp, 512, 896), 0), label=ite(islp, t[1], -1))
             with self.when(isfn): self.deflab(t[2], self.v('nloc'))
             # the end label of whichever body closed (one kind per call, so one label port serves them all)
-            with self.when(anyeq(k, (R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB))):
-                self.deflab(ite(islp, t[2], t[1]), self.here())
-            with self.when(anyeq(k, (R.C_ELSEB, R.C_LOOPB))): self.set(flag, 1); self.done()
+            with self.when(anyeq(k, (R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB, R.C_SWITCH))):
+                self.deflab(ite(or_(islp, issw), t[2], t[1]), self.here())
+            with self.when(anyeq(k, (R.C_ELSEB, R.C_LOOPB, R.C_SWITCH))): self.set(flag, 1); self.done()
             with self.when(eq(k, R.C_DOB)): self.set('csp', self.v('csp') + 1); self.set('mode', R.S_DOWHILE); self.done()
             with self.when(isfn):
                 self.set('curf', 0); self.set('nsym', self.v('fsym')); self.set('mode', R.S_STMT); self.done()
-            with self.when(not_(anyeq(k, (R.C_BLOCK, R.C_IFB, R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB)))): self.fail(55)
+            with self.when(not_(anyeq(k, (R.C_BLOCK, R.C_IFB, R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB, R.C_SWITCH)))): self.fail(55)
 
     def end_params(self):
         cfn, npar = self.v('cfn'), self.v('npar'); fl = self.fn_sel(cfn, 'fl_'); exp = self.m(fdiv(fl, 256), 'pexp')
