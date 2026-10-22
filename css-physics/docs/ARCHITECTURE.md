@@ -193,6 +193,7 @@ Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and 
 | `PATCHB` | corners | box/box: corners (clipped) \| soft (experimental, jitters) |
 | `PATCHC` | 1.0 | patch weighting constant |
 | `SCENE`, `SCENE_LIST` | tower | first scene and the list (tower, rain, stack; also calm, pair, field) |
+| `BODIES_JSON` | — | a JSON file replacing the 8 hand-made bodies and, optionally, adding scenes (`experiments/widgets/bodies.json`) |
 | `BOOLQ` | 0 | gate 0/1 flags with `style(--flag)` (Chrome only) |
 | `HYPOT1`, `FFQ` | 1, 1 | Firefox: `1 * hypot(…)`; Firefox-only names and #LM re-match clock (§6) |
 | `OWNLEV` | 999 | owner-named rules only at levels ≤ this |

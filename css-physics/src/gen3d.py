@@ -20,7 +20,7 @@ sleeping neighbourhood are rejected before their style() query is evaluated.
 
 Usage: gen3d.py [engine.json]   (NBOX/NSPH bodies, SCENE=name picks the scene that loads first)
 """
-import math, sys, os, re
+import json, math, sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from simp import simplify as _simplify
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
@@ -81,6 +81,12 @@ BODIES = [
     dict(k='sph', r=18, col='#7bd389'),
     dict(k='sph', r=24, col='#ff9f43'),
 ]
+# BODIES_JSON=file replaces the 8 hand-made bodies (4 boxes, then 4 spheres) and, with "scenes", the hand-placed
+# scenes: {"bodies": [{"k": "box", "h": [hx, hy, hz], "col": "#rgb"}, {"k": "sph", "r": r, …}, …],
+# "scenes": {"name": [{"p": [x, y, z], "rot": […], "v": […], "w": […]}, …]}} (experiments/widgets)
+_BJ = json.load(open(os.environ['BODIES_JSON'])) if os.environ.get('BODIES_JSON') else {}
+if 'bodies' in _BJ:
+    BODIES = _BJ['bodies']
 # extra bodies (NBOX / NSPH environment knobs) for scaling tests and bigger scenes
 _XBOX = [((20, 20, 20), '#e9c46a'), ((30, 15, 15), '#2a9d8f'), ((22, 22, 22), '#f4a261'), ((40, 10, 20), '#8ecae6'),
          ((18, 18, 18), '#e76f51'), ((26, 13, 26), '#b5838d'), ((24, 24, 24), '#90be6d'), ((34, 12, 17), '#c3aed6')]
@@ -151,6 +157,8 @@ SCENES = {
     ],
     'field': [],    # every body at rest on the floor, shelf-packed (the sparse-regime benchmark scene)
 }
+for _k, _v in _BJ.get('scenes', {}).items():
+    SCENES[_k] = [S(*o['p'], o.get('rot', (0, 0, 0)), o.get('v', (0, 0, 0)), o.get('w', (0, 0, 0))) for o in _v]
 import random as _rnd
 
 
