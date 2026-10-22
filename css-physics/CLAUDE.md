@@ -4,14 +4,16 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 
 ## Hard rules
 - IMPORTANT: generated pages contain **no JavaScript**, ever, unless the user explicitly asks. JS is fine in `tools/` and `experiments/` (test harnesses only).
-- Chrome first, and Firefox 159+ (158 with `layout.css.scroll-driven-animations.enabled`) must keep working: run `BROWSER=firefox bash tools/smoke.sh 16` too after generator changes. Chrome's speed wins any trade-off; Firefox-only fixes go in `@supports (-moz-appearance: none)` blocks (ARCHITECTURE.md §6). Speed matters; CSS payload size does not (but load time does).
+- Chrome first, and Firefox 159+ (158 with `layout.css.scroll-driven-animations.enabled`) and Safari 26+ must keep working: after generator changes run `BROWSER=firefox bash tools/smoke.sh 16` and `BROWSER=webkit NOIF=1 bash tools/smoke.sh 16` too (Safari 27.0 has no `if()`; `NOIF=1` shows the page as it sees it; without it, as WebKit trunk does). Chrome's speed wins any trade-off; Firefox-only fixes go in `@supports (-moz-appearance: none)` blocks, fixes for a missing feature in a feature query (`@supports not (width: if(…))`) (ARCHITECTURE.md §6, §7). Speed matters; CSS payload size does not (but load time does).
 - Verify your own work in headless Chromium and report numbers or screenshots as evidence. Don't ask the user to test something you can test.
 - Don't open or `cat` generated pages: they're 1–30 MB. Use grep, Python or the tools.
 
 ## Setup
 - Python 3.10+ (stdlib only). `npm install` for the tools; run them from the repo root (they resolve page paths against the cwd).
 - Browser launch (`CHROME=`, the `physics` profile, the image's Chromium fallback) and the harness shared with js-minus-js: `../shared/README.md`. This project's own helpers are in `tools/lib/physics.js` (camera projection, BODYINFO, freezing). After changing either, run `make test-shared` at the repo root and `smoke.sh`.
-- Firefox: `BROWSER=firefox` (evaluate-based tools only: smoke, floatcheck, grabtest, perf3, …; tracing needs Chrome); `FIREFOX=/path` overrides. **Don't `npx playwright install` in the devcontainer:** it garbage-collects the image's other browsers, `/usr/local/bin/chromium`'s target included (restore with `npx playwright@1.63.0 install`).
+- Firefox: `BROWSER=firefox` (evaluate-based tools only: smoke, floatcheck, grabtest, perf3, …; tracing needs Chrome); `FIREFOX=/path` overrides.
+- WebKit: `BROWSER=webkit` (Playwright's WebKit; headless it's WPE; the image's `/ms-playwright/webkit-*` unless `WEBKIT=/path/pw_run.sh`), evaluate-based tools as for Firefox. Its screenshots flatten 3D (a software snapshot): look at a frame of a `recordVideo` recording instead.
+- **Don't `npx playwright install` in the devcontainer:** it garbage-collects the image's other browsers, `/usr/local/bin/chromium`'s target included (restore with `npx playwright@1.63.0 install`).
 - After a Chrome upgrade: `make engine-check` at the repo root (the behaviours this engine depends on; `../engine/README.md`).
 
 ## Commands (repo root)
@@ -23,6 +25,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Profile one step (freeze + ablate) and microbenchmarks: the `perf-profile` skill. Tool index: BENCHMARKS.md "How to measure".
 - Sparse regime: `SCENE=field TRAY=2 FIELD_GAP=30 COUNTS=64 PLAIN=1 python3 src/build3d.py out/g64.html`, then `node tools/sparse.js out/g64.html 64 c`; freeze mid-drag with `BODY=k node tools/freezegrab.js`.
 - Published site: `python3 src/build3d.py out/x.html` (one page per count, CSS over 14 MB split into linked files); CI deploys `../deploy/assemble.sh css-physics <dir>`
+- Other engines against Chrome: `node tools/xcheck.js out/p16.html [ms] webkit webkit:noif firefox` freezes a state and compares every value on every level (`XFROM=webkit` takes the state from WebKit; static, so load doesn't matter). `smoke.sh` runs it for `BROWSER=firefox|webkit`.
 - Motion checks: `node tools/filmstrip.js page.html out.png [delay] [dur]` (compositor frames as a contact sheet, plus a snap-back score); `node tools/transcheck.js page.html` (transform transitions must restart where the running one was).
 
 ## Working style for performance work
@@ -32,7 +35,8 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Record new measurements in `docs/BENCHMARKS.md` (replace the old number, don't append history) and every dead end, with its reason, in `docs/HISTORY.md`.
 
 ## Non-obvious gotchas
-- `var()` of a registered number keeps only **6 significant digits**; the wake digests rely on this (6 bodies per decimal word).
+- `var()` of a registered number keeps only **6 significant digits** in Chrome and Firefox, **6 decimal places** in WebKit (1e-8 is 0 there); the wake digests rely on this (6 bodies per decimal word, integers both keep).
+- Registers read back a hair off (46 as 45.999999): Chrome's rounding hides it, WebKit's doesn't. Compare a register that holds a whole number (`SC`, `GYP`) with a margin, never exactly; an exact test woke every sleeping body in WebKit. Registering it `<integer>` doesn't help: WebKit doesn't round an animated `<integer>` ([327925](https://bugs.webkit.org/show_bug.cgi?id=327925)).
 - `@container` rules with an **absent** container name are cheap only at shallow depth: the lookup walks every ancestor and scans its name list (about 0.2 µs + 0.6–0.9 ns × depth × names; about 0.2 + 0.01 × depth µs in the engine). A present name costs 0.2 µs, `style(--flag)` 0.5 µs, `style(--flag: 1)` 0.8 µs, a range query 1.7 µs (mini PC, 2026-10-17). Gate with owner names (`b{i}`), and put `container-name: var(--AN)` on **every** level, so each level finds its owner name at the parent (Chrome 141 also didn't re-match deeper named rules; not reproduced in 153, `../bugs/README.md`). Nested queries evaluate the innermost first.
 - `style(--x)` (no value) on a registered property is, in Chrome, true iff its value differs from the initial value (in Firefox: always); `BOOLQ=1` gates 0/1 flags with it (off by default, for Firefox). Never for a multi-valued flag: `style(--GIr)` as body 0's grab gate was true whenever any body was held, so every drag also pulled body 0 (the generator now skips flags tested against other values).
 - Scene start states cascade: the first scene's `#INI` rule is overridden by the selected scene's, so every scene rule must declare every body's `--isc` (start sleep counter), or a body keeps another scene's "asleep" and hangs in mid-air. Test scene switches with a real press (~150 ms): an instant click flips the radio without the reset.
@@ -47,6 +51,7 @@ A 3D rigid-body physics engine (boxes and spheres in a tray) that runs entirely 
 - Label the CSS you add (`lbl.section` / `lbl.group` in gen3d.py and build3d.py, `/* === … === */` in ui3d.css;
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py out/p16.html` prints a page's outline.
 - Touch (ARCHITECTURE.md "Touch") rests on three Chrome behaviours `make engine-check` probes: layout re-snaps wait while a scroll gesture is active (the "finger down" bit), `scroll-axis-lock: none`, touch deltas unprojected onto a 3D-transformed scroller. Anything inherited from `#TI` changes every frame of a drag: zero it where unused (`.view`, `.rz`), as `--sx` is.
+- WebKit (ARCHITECTURE.md §7): no `if()` before Safari 27.x; one step per frame (two-thirds speed at 60 Hz), as in Firefox; `atan2()` of a relative length (`cqw`, `em`) is wrong in Safari: divide lengths with typed division instead (`calc(100cqw / 900px)`), with the old form declared first for Firefox 157.
 - Firefox (ARCHITECTURE.md §6): `style(--flag)` is always true (hence `BOOLQ=0`); `x - hypot(…)` is `x + hypot(…)` (hence `1 * hypot`); no `if()`; style-query rules aren't re-matched after animation-driven changes (the `#LM` size-container clock forces it, so anything below #LM positioned in percentages or sized in `cq*` units follows #LM's box: register such a value, like `--u`).
 
 ## When compacting

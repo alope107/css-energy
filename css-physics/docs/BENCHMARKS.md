@@ -27,6 +27,7 @@ container), so compare them only with each other, interleaved. Unpinned runs lan
 | `sparse.js page N [k\|c]` | drag body k (`c`: nearest the centre) through a sleeping scene for 3 s |
 | `smoke.js`; `interact.js` | physics sanity, exits 1 on failure; mouse and touch grab on a PLAIN page (prints positions) |
 | `stylebench.js page…` | median style pass of microbenchmark pages (`experiments/costs/`) |
+| `xcheck.js page [ms] browser[:noif]…` | another engine against Chromium: every value on every level of one frozen state (`XFROM=` takes the state from that browser) |
 
 **Ablation:** freeze a PLAIN page, strip gate families with `ablate.py`, compare with `bench.sh`. Removing a family
 changes downstream gates, so deltas overlap. **Frozen bases are inflated:** with every gated block removed a frozen
@@ -155,6 +156,27 @@ everything 1.057 (IQR 1.035–1.093) against an A-vs-A control of 1.037 (1.002�
 Firefox 157 against Chrome, same machine, 32 bodies (`perf3.js`): chaos 28 28 34 57 62 62 vs 25 22 24 35 62 62 fps;
 idle / drag / hold 61 / 29 / 31 vs 61 / 31 / 26. Simulated seconds per second (free fall, rain 16): 0.44–0.59 vs
 0.91, because Firefox runs one step per frame.
+
+### WebKit
+
+Playwright's WebKit 27.2 (WPE, headless) against Chromium 153, one bench lease, 2026-10-21 (`perf3.js`; "noif" is the
+page with `if(` renamed, as Safari 27.0 sees it; its names never drop, so `perf3` can't see it settle):
+
+| Page | Chromium | WebKit | WebKit, no `if()` |
+|---|---|---|---|
+| 16, chaos fps | 36 31 36 36 52 62 | 36 39 37 38 47 42 | 38 39 38 39 49 41 |
+| 16, settled / idle / drag / hold | 6 s / 61 / 35 / 49 | 8 s / 63 / 38 / 37 | — / 63 / 38 / 38 |
+| 32, chaos fps | 18 18 17 19 25 62 | 17 17 14 17 16 16 | 19 17 15 16 17 17 |
+| 32, settled / idle / drag / hold | 6 s / 61 / 23 / 23 | 17 s / 63 / 15 / 16 | — / 63 / 16 / 18 |
+
+Steps per frame (free fall, rain 16): 1.97 against 0.97 in WebKit with or without `if()`, so WebKit simulates 0.38–0.43
+s per second at 31–34 fps against Chromium's 0.60–0.81 at 26–28. Settling takes longer in real time for that reason.
+Every body named (no `if()`) costs WebKit nothing measurable at 16 and 32. The Chrome-visible changes (the sleep tests'
+margins, a feature query in place of `-moz-appearance`) add no property or rule: not timed.
+
+`xcheck.js` (WebKit against Chromium on one frozen state): largest difference 1e-4 to 8e-3 on 16-body piles of each
+scene at 1–3.5 s and on a 48-body rain pile; a state where rounding flips a box corner's clip shows 1–7 of 168,000
+values beyond 1e-2, up to 0.17. Firefox: up to 2.7e-3.
 
 ## 2. Style engine cost model (microbenchmarks)
 

@@ -56,8 +56,10 @@ header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
 /* the scene is laid out in fixed px (1 world unit = 1px) and scaled once: per-element cqw
    units cost ~70us per element per pass when everything moves */
 .view{--sx:0;--sy:0;position:absolute;left:0;top:0;width:__VW__px;height:__VH__px;perspective:__PERSP__px;perspective-origin:50% 50%;
-  transform-origin:0 0;transform:scale(tan(atan2(100cqw, __VW__px)))}
-/* (tan(atan2(a, b)) is a / b as a number: Firefox before 158 has no typed division, calc(100cqw / 900px)) */
+  transform-origin:0 0;transform:scale(tan(atan2(100cqw, __VW__px)));transform:scale(calc(100cqw / __VW__px))}
+/* (the scale is the arena's width / VW as a number: typed division (Chrome 140, Safari 26, Firefox 158); a browser
+   without it drops that declaration and keeps tan(atan2(a, b)), which is a / b too. Safari got that one wrong:
+   experiments/safari/probe.html) */
 .cam{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;
   transform:translate3d(0,calc(__TY__ * 1px),calc(__NDIST__ * 1px)) rotateX(__TILT__deg) rotateY(calc(var(--yaw) * 1rad))}
 .cam > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}

@@ -20,7 +20,18 @@ async function launchFirefox(o={}){const {args,extraArgs,...rest}=o;
  const opts={...rest,executablePath:process.env.FIREFOX||undefined,firefoxUserPrefs:FF_PREFS};
  try{return await ff.launch(opts)}catch(e){const alt=imageFirefox();if(opts.executablePath||!/Executable doesn't exist/.test(e.message)||!alt)throw e;
   console.error(`physics.js: Playwright's own Firefox isn't installed; using ${alt} (set FIREFOX to choose)`);return ff.launch({...opts,executablePath:alt})}}
-const launch=process.env.BROWSER==='firefox'?launchFirefox:B.launch;
+// BROWSER=webkit: Playwright's WebKit (headless, the WPE MiniBrowser on Linux; the Chromium flags are dropped).
+// WEBKIT=/path picks the build (its pw_run.sh); without it, if Playwright's own isn't installed, the newest one in
+// /ms-playwright, as for Firefox. Evaluate-based tools only.
+const imageWebkit=()=>{const fs=require('fs');try{return fs.readdirSync('/ms-playwright').filter(d=>/^webkit-\d+$/.test(d))
+ .sort((a,b)=>b.split('-')[1]-a.split('-')[1]).map(d=>`/ms-playwright/${d}/pw_run.sh`).find(f=>fs.existsSync(f))}catch(e){return undefined}};
+async function launchWebkit(o={}){const {args,extraArgs,...rest}=o;
+ const wk=require(require.resolve('playwright',{paths:[require.main.path,__dirname]})).webkit;
+ const opts={...rest,executablePath:process.env.WEBKIT||undefined};
+ try{return await wk.launch(opts)}catch(e){const alt=imageWebkit();if(opts.executablePath||!/Executable doesn't exist/.test(e.message)||!alt)throw e;
+  console.error(`physics.js: Playwright's own WebKit isn't installed; using ${alt} (set WEBKIT to choose)`);return wk.launch({...opts,executablePath:alt})}}
+const launchers={chromium:B.launch,firefox:launchFirefox,webkit:launchWebkit};
+const launch=launchers[process.env.BROWSER]||B.launch;
 
 // world point -> page coordinates of its screen projection, for the arena's bounding box `ar` (yaw: the view's default)
 const projector=ar=>{const sc=ar.width/VW;
@@ -37,13 +48,14 @@ const registerNames=s=>[...s.matchAll(/@keyframes q\d+\{from\{--([A-Za-z0-9_]+):
 // page source s with the registers `names` baked in at `vals` (as read from #LS) on a static clock (../../../shared/js/freeze.js):
 // wobbling constants, except the sleep counters and grab state, which gate rules and stay exact, and with ONLYAWAKE=1
 // every register of a sleeping body; TP and DB (the clock's) are dropped. The register scrollers' timelines are removed.
-function bakeRegisters(s,names,vals){
+// exact: every register a constant (nothing recomputes after the first passes: xcheck.js compares engines on it).
+function bakeRegisters(s,names,vals,exact=false){
 s=s.replace(/#LS\{\s*animation-name:[^;]*;\s*animation-duration:[^;]*;\s*animation-iteration-count:[^;]*;\s*animation-timing-function:[^;]*;\s*animation-fill-mode:[^;]*;\s*animation-timeline:[^;]*;/,'#LS{'+CLOCK_ANIMATION+';');
 if(!s.includes('#LS{animation:clk2'))throw new Error('LS pattern');
 const asleep=new Set();names.forEach((n,i)=>{const m=n.match(/^SC(\d+)$/);if(m&&+vals[i]>45&&process.env.ONLYAWAKE)asleep.add(m[1])});
-const consts=names.map((n,i)=>{if(n==='TP'||n==='DB')return '';const bi=(n.match(/^[A-Z]+(\d+)$/)||[])[1];if(/^(SC\d+|GI|GT|GYP)$/.test(n)||(bi!==undefined&&asleep.has(bi)))return constant(n,vals[i]);return wobble(n,vals[i])}).join('');
+const consts=names.map((n,i)=>{if(n==='TP'||n==='DB')return '';const bi=(n.match(/^[A-Z]+(\d+)$/)||[])[1];if(exact||/^(SC\d+|GI|GT|GYP)$/.test(n)||(bi!==undefined&&asleep.has(bi)))return constant(n,vals[i]);return wobble(n,vals[i])}).join('');
 s=s.replace(/(#LS\{animation:clk2[^}]*)\}/,`$1;${consts}}`);
 s=s.replace('<style>','<style>'+CLOCK_CSS);
 return s.replace(/(#w\d+\{)animation-name:[^;]*;animation-timeline:[^;]*;/g,'$1')}
 
-module.exports={launch,open:B.open,profile:B,fileUrl,envArgs,countFrames,vars,pollUntil,...trace,CAM:{PERSP,TILT,TY,DIST,VW},projector,arena,bodyInfo,registerNames,bakeRegisters};
+module.exports={launch,launchers,open:B.open,profile:B,fileUrl,envArgs,countFrames,vars,pollUntil,...trace,CAM:{PERSP,TILT,TY,DIST,VW},projector,arena,bodyInfo,registerNames,bakeRegisters};

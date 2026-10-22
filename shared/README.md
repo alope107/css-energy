@@ -63,8 +63,8 @@ since it last passed:
 - **Prerequisites** are in each rule: the page or site, the harness, `shared/js/*.js` (whole directories), the suite
   programs. **`<config>`** hashes what lives outside the repo: `runid.js`'s output, Node/Python/Playwright versions, the
   browser executable and its `--version`, and every environment variable the check's scripts read by name. So a Chrome
-  upgrade or `BROWSER=firefox` is another target, and switching back finds the old pass. `<name>.<config>.id` says
-  what a hash stands for.
+  upgrade or `BROWSER=firefox` (or `webkit`) is another target, and switching back finds the old pass.
+  `<name>.<config>.id` says what a hash stands for.
 - `RERUN=1` runs every check asked for. Use it for the evidence before a merge, a suspected flake, and after changing
   `shared/make/`. `make -n l3` shows whether it would run; `make --debug=b l3` says which prerequisite is newer.
 - **Blind spots:** files a harness starts reading outside its listed directories; inputs that aren't files (machine

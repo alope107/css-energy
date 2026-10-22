@@ -99,7 +99,8 @@ next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds 
   `style(--flag)` instead (about 0.3 µs per rule cheaper, within noise in the engine; always true in Firefox).
 - **Owner names.** Every rule owned by body i, or by a pair whose lower index is i, is
   `@container b{i} style(--gate){…}` at every level from L1 down (`OWNLEV`). L0 computes
-  `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` and `--AN: q var(--A0) var(--A1) …`, and
+  `--A{i}: if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: )` (without `if()`, every body always named:
+  §6, §7) and `--AN: q var(--A0) var(--A1) …`, and
   **every** level has `container-name: var(--AN)`, so each level finds the name at its parent (Chrome 141 also didn't
   re-match deeper named rules; not reproduced in 153, `../../bugs/README.md`).
 - **Costs** (BENCHMARKS.md §2): a present name is found at the parent (0.2 µs, 0.8 µs with a false `style(--flag: 1)`).
@@ -113,7 +114,8 @@ next element aliases `K = J` (one `var()`, no fallback chain). `JP{i}{c}` holds 
 ### Sleeping and waking
 
 - A body moving less than `SLEEP_DX`/`SLEEP_DA` per step counts `SC` up to `SLEEP_K` (45), is "ready", and sleeps
-  (SC = SLEEP_K + 1) unless it touches a body that isn't. Stillness is displacement, not velocity (resting boxes carry
+  (SC = SLEEP_K + 1) unless it touches a body that isn't. `SC` is tested against half-integers (asleep: SC > 45.5):
+  it comes back from its register a hair off (§7). Stillness is displacement, not velocity (resting boxes carry
   phantom split-impulse velocity), and a step undoing the previous one counts as still (resting boxes rock by a hair).
 - Wakes on shake, reset, gravity change, grab, or a moving body coming near.
 - **Digests:** each awake body sums its near flags into decimal words, body i as digit `i % 6` of word `i // 6` (6
@@ -223,9 +225,9 @@ Chrome to float noise, after these changes (Chrome cost: BENCHMARKS.md §1 Firef
 |---|---|
 | `style(--x)` (no value) is always true on a registered property | `BOOLQ=0`: 0/1 gates are `style(--x: 1)` |
 | Negating `hypot()` negates its arguments, leaving it unchanged: `100 - hypot(3, 4)` is 105 (also in a subtracted `min`/`max`/`sign`/sum, through `var()`) | every `hypot(` becomes `1 * hypot(` after `simp.py` (`HYPOT1=0` off) |
-| No `if()` (the names `--A{i}`) | `@supports (-moz-appearance: none)`: every body always named on #L0 |
+| No `if()` (the names `--A{i}`) | `@supports not (width: if(…))`: every body always named on #L0 (also Safari, §7) |
 | Style-container rules aren't re-matched when the container's value changes through an animation (all state does): gates kept their first result | Firefox re-matches the subtree of a size container whose size changed: Firefox-only, #LM's box is sized from `--ffk = any × now` (two incommensurate periods), so it changes every frame while anything is awake (padding alone doesn't trigger it). #LW restores the arena's size (`VW × --u`); `--u` is registered so its `100cqw` resolves on `.arena`, not #LM (`tools/overlaycheck.js`). `FFQ=0` off. |
-| No typed division before 158 | `scale(tan(atan2(100cqw, 900px)))` |
+| No typed division before 158 | the view's scale is declared twice, `scale(tan(atan2(100cqw, 900px)))` then `scale(calc(100cqw / 900px))`: without typed division the second is dropped |
 | Intersecting 3D planes drawn in document order (a shadow over its body) | the shadow comes first in each body |
 
 Three are unreported Firefox bugs, with reproductions in `../../bugs/` (hypot, style-query re-match, boolean query).
@@ -234,3 +236,27 @@ Three are unreported Firefox bugs, with reproductions in `../../bugs/` (hypot, s
 `RATE` 90, about half speed under load; whole bodies composited in document order (a box resting on another can draw
 behind it; sphere rings draw over the disc); touch untested, and probably grabs nothing (it needs Chrome's deferred
 layout re-snap).
+
+## 7. Safari (WebKit)
+
+Runs in Safari 26+ (scroll-driven animations, `timeline-scope` and anchor positioning arrived in 26; style queries on
+custom properties in 18). Checked in Playwright's WebKit 27.2 (WPE, Linux, headless), 2026-10-21, with and without
+`if()`: Safari 27.0 has none (Technology Preview 249 added it), `NOIF=1` makes the checks see the page as it does.
+`smoke.sh` passes in both; `tools/xcheck.js` finds every value on every level within 1e-2 of Chrome's, mostly within
+2e-3, on 16- and 48-body piles (BENCHMARKS.md §1 WebKit).
+
+| WebKit behaviour | Workaround |
+|---|---|
+| No `if()` before Safari 27.x | Firefox's fallback (§6), on a feature query: every body always named on #L0 |
+| `atan2()` of a relative length (`100cqw`) comes out wrong in Safari (probably [248513](https://bugs.webkit.org/show_bug.cgi?id=248513)); the view was scaled by `tan(atan2(100cqw, 900px))` | typed division (Safari 26) is declared after it and wins; `experiments/safari/probe.html` B2 prints the values |
+| `var()` of a registered number keeps 6 decimal places, as CSSOM serializes a number (Chrome and Firefox keep 6 significant digits): `1e-8` is 0, `45.999999` stays | registers read back a hair off (46 as 45.999999, −1600 as −1599.999924) and Chrome's rounding hid it; WebKit's exact tests on them woke every sleeping body on every pass (a 16-body tower never slept; one box rocked in a two-step cycle). `SC` and `GYP` are compared with a margin of 0.5 |
+| An animated registered `<integer>` isn't rounded ([327925](https://bugs.webkit.org/show_bug.cgi?id=327925)) | why the margin and not `<integer>` registers |
+| One step per frame (timelines are sampled once per frame, as in Firefox): 60 steps/s at 60 Hz against `RATE` 90 | left as is: two-thirds speed |
+| Headless WPE screenshots flatten `preserve-3d` (Playwright paints a software snapshot) | harness only: frames of a `recordVideo` recording are composited and show the scene as Chrome draws it |
+
+Everything small loses relative precision through `var()` (a rotation increment of 1.5e-3 keeps 3 digits), which moves
+contact normals by about 1e-3 against Chrome, and where it flips a gate (a box corner just touching) a handful of
+values by up to 0.17: chaos, not a fault (smoke, sleep and grabbing behave as in Chrome). **Untested:** touch on iOS (the touch
+input rests on Chrome's deferred layout re-snap, "Touch" above) and drawing through Core Animation on macOS (only WPE's
+compositor on Linux was checked).
+
