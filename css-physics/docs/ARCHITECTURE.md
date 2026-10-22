@@ -175,7 +175,7 @@ gets neither. A scroll does follow the finger, and the scroller that scrolls say
 | Command | Output |
 |---|---|
 | `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine, readable names, a `<!--BODYINFO …-->` comment. **What the test tools expect.** |
-| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`). |
+| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`), and `widgets.html` beside it (`experiments/widgets/`, linked from the header). |
 | `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios. |
 
 Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and minified names. Stylesheets over
@@ -193,6 +193,7 @@ Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and 
 | `PATCHB` | corners | box/box: corners (clipped) \| soft (experimental, jitters) |
 | `PATCHC` | 1.0 | patch weighting constant |
 | `SCENE`, `SCENE_LIST` | tower | first scene and the list (tower, rain, stack; also calm, pair, field) |
+| `BODIES_JSON` | — | a JSON file replacing the 8 hand-made bodies and, optionally, adding scenes (`experiments/widgets/bodies.json`) |
 | `BOOLQ` | 0 | gate 0/1 flags with `style(--flag)` (Chrome only) |
 | `HYPOT1`, `FFQ` | 1, 1 | Firefox: `1 * hypot(…)`; Firefox-only names and #LM re-match clock (§6) |
 | `OWNLEV` | 999 | owner-named rules only at levels ≤ this |

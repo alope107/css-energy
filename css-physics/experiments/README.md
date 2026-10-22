@@ -18,6 +18,7 @@ node ~/repo/tools/stylebench.js r_const.html,r_var1.html 500 1500     # median s
 | `costs/mk_regs.py` | register readback floor, per-body readback elements | §2 Register readback |
 | `touch/handles.html`, `touch/android.js` | the touch input (handles, follower) without the engine, on the Android emulator (`../../shared/android/`) | ARCHITECTURE.md "Touch" |
 | `safari/probe.html`, `safari/static.py` | what the engine needs from a browser, pass/fail without script: the loop in miniature (steps per second, gates that follow animated values), single features; `static.py` makes a page with the solver off (drawing only) | ARCHITECTURE.md §7 |
+| `widgets/` | for fun: real HTML controls (buttons, checkboxes, a select, text fields, a video, a marquee) on the box faces of an 8-body engine, some wired back into it with `:has()` | `widgets/README.md` |
 
 The dead-end experiments (variable fonts as compute, compositor interpolation, iframe processes, `ident()`, inherited
 properties, paused-animation evaluators, feature probes) were removed on 2026-10-18; their results are in BENCHMARKS
