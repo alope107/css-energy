@@ -48,6 +48,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   can't read an arbitrary body. On the font CPU a word took 0.5–0.8 s; on the CSS CPU about 0.25 s. Then 4 modems with
   2 bytes each: half the time for a body (BENCHMARKS §14), not the quarter the probe promised; two bugs on the way, a
   hidden box restoring stale answers (ENGINE_NOTES 59) and the request flickering to idle on settling passes.
+- **14, held modem loads (2026-10-22, branch `net-modem`).** The modems stopped reloading all the time: the gateway
+  holds each one's next load until it has the answers (ENGINE_NOTES 62), the old document sends the next request as
+  soon as the page lays it out, and the answer is in the document, not a quirks-mode stylesheet. 1.6–2.0× per program
+  (BENCHMARKS §14). Traces then showed what a modem document costs the page: two forced style passes of the CPU page
+  each, at its parse's end and when `document.fonts` turns ready (ENGINE_NOTES 63), so each document now answers two
+  parts, on its slot's x and y. On the way: a harness's `requestAnimationFrame` loop had been running the page 1.5×
+  faster than a user sees it (64), and a server-wide cap on held loads starved `make l5-net`'s 6 browsers (the cap is
+  per browser now, by cookie).
 
 ## Dead ends and superseded approaches
 
@@ -100,6 +108,10 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 45 | Acting on a request seen in two consecutive loads | one more load per word | one clean load (each digit once) |
 | 46 | 4 modems' answers unpacked by the lib | ~250 steps per READ; its cells evicted the stack and code (sets 9, 10) | NET writes the bytes; cells in sets 11–14 |
 | 47 | The modems' boxes inside `#clk`, shown by a transition latch | Edit hid them, Run restored stale answers; the latch didn't hold | outside `#clk`, the register `rlive` |
+| 48 | Modems that reload all the time (0 s refresh), the request read at the next load | each word waited for a load to finish and another to start; the reloads cost the page a third of its frames | loads the gateway holds until there is an answer; the request read live (ENGINE_NOTES 62) |
+| 49 | The answer as a quirks-mode stylesheet (`rx`, `application/json`) per load | one more request per load; the gateway writes the documents anyway | the answer in the document (`#t`'s position) |
+| 50 | 4 modems, one answer each | each document costs the page two forced style passes (ENGINE_NOTES 63): 8 per word | 2 modems, two answers each (x and y) |
+| 51 | A render-blocking stylesheet arriving after the parse, to skip `FinishedParsing`'s forced update | still forced, at 0 and 15 ms | — |
 
 ## Open leads (untried)
 
@@ -120,9 +132,15 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
-- **Network, cheaper words**: with 4 modems the page loses a third of its frames to their reloads (ENGINE_NOTES 58).
-  Fewer request digits per load, a modem that reloads only while a word waits, or one modem per 2 parts; and the CPU's
-  ~60 steps per byte (`read()` and the program's loop).
+- **Network, cheaper words**: what a word still costs is the CPU's frames (the lib between words, ~60 steps per byte
+  in `read()` and the program's loop), one frame of register lag on the request (`rreq` follows `--req` a frame later;
+  the iframes' height could read the chain's end through `anchor-size()`, if a settling pass doesn't flicker it), and
+  two forced style passes per modem document (ENGINE_NOTES 63). A modem with no document per word: while a document is
+  loading, every layout re-scrolls to its fragment (`Document::ApplyScrollRestorationLogic` → `InvokeFragmentAnchor`;
+  `needs_invoke_` stays until the load completes), so a document kept loading could take its answers as CSS images
+  whose natural size moves `#t`. Untried; it needs a fresh URL per word for both the request and the answer (a
+  document fetches a URL once, ENGINE_NOTES 61) and a pending request per document, and Chrome's 6 connections per host
+  are few.
 - **Network, more**: POST, request headers and response headers (more words); a gateway on the deployed site (a Worker
   with state per page); a two-click path with no gateway at all, through a form GET to a `data:` document (ENGINE_NOTES
   57: it can read CORS-enabled JSON as CSS and report through responsive iframes).

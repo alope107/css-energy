@@ -326,43 +326,53 @@ over the word. `read()` takes the next byte from there (`RLEFT` counts what's le
 `cc_ref.run()`, `cssref.py` and `csssim.py` answer at once from `net/device.py`, which serves `tests/net/`; in csssim a
 `NET` ends its pass the first time and runs first in the next, as on the page.
 
-On the page the CPU can't make requests, so it talks to a gateway (`net/server.js`, which has the protocol) through four
-modem iframes:
+On the page the CPU can't make requests, so it talks to a gateway (`net/server.js`, which has the protocol) through two
+modem iframes, each answering two parts:
 
 - **The class `net`** reads the word at `sp - 1` and stalls without a miss until every part's answer to it has come
   (ENGINE_NOTES 56). While it waits it leaves `--req = 1 + word` at the chain's end, the register `rreq` (held on
   passes that don't run the chain). Then it runs 2 P + 1 times (`--pst`, as ENTER zeroes its locals): the 8 bytes into
   `RBUF0 …`, then part 0's answer over the word, which completes it; the word stays the request until then. `rnt0`
   holds the clock (`--t`, 600 a second) when this request began; 20 s without an answer give −1.
-- **The request**: the modems, `<iframe loading="lazy" src="/net/m0.html?part=j&n=4#t">`, are `1 + rreq` px tall
-  (a word is below 2^19). They show from the run's first waiting `NET` on (the register `rlive`); before that nothing
-  loads.
-- **The modems' documents** have no doctype (quirks mode) and reload alternating `m0.html#t` and `m1.html#t` (a refresh
-  to the same URL doesn't reload). Each load reads its height (`100vh`) and sends five hex digits of it plus a check
-  digit as `background-image: if(style(--x: …): url(d/<i>/<nonce>/<v>); …)`. A resize restyles the document, so a new
-  word goes out without a reload. Each load also loads `rx`, served as `application/json`, as a stylesheet
-  (ENGINE_NOTES 50): `--rx: R`, `R = valid + 2 seq + 4 (this part's answer)`, below 10^6 (the page reads it through
-  `var()`, which keeps 6 digits).
-- **The answer**: a document lays out a span `R` px wide, then `#t` (100 px), and the load scrolls to `#t`. The scroll
-  reaches `.nslot.np<j>`, the page's 100 px wide `overflow: hidden` box around the iframe (2^20 + 100 px wide), so its
-  `scrollLeft` is `R`; the scroll timeline `--nans<j>` reads it. An answer counts when it is valid and its seq is the
-  word's bit 0. Fragment scrolls cross only same-origin documents, so the modems are in the page's process.
+- **The request**: the modems, `<iframe loading="lazy" src="/net/m0.html?part=i&n=4#t">`, are `NW + rreq` px tall
+  (`NW` = 2^20 + 100; a word is below 2^19), each in an `NW × NW` box that clips it (`.nclip`), so the slot around it
+  scrolls 2^20 px on both axes whatever the request. The boxes show from the run's first waiting `NET` on (the register
+  `rlive`); before that nothing loads.
+- **The modems' documents**: the gateway serves one per word to each modem, alternating `m0.html#t` and `m1.html#t` (a
+  refresh to the same URL doesn't reload). A document refreshes as soon as it has loaded, and the gateway holds that
+  navigation until the modem has new answers; the old document stays and keeps working (ENGINE_NOTES 62). Modem 0's
+  documents send the request: they read `100vh − NW` and send five hex digits of it plus a check digit as
+  `background-image: if(style(--x: …): url(d/<doc>/<i>/<x>); …)`, `x = 16 tag + digit`. A document fetches a URL once
+  (ENGINE_NOTES 61), so `tag` is 1 + the word's seq bit, which every new word flips, and 0 (nothing sent) for an idle
+  request and for the word the document came with. A resize restyles the document in the frame that lays out the new
+  height, so the request is at the gateway a few ms later.
+- **The answer**: modem i's document puts `#t` (100 × 100 px) at x, y = the answers `R = valid + 2 seq + 4 (answer)` of
+  parts 2i and 2i + 1, below 10^6 (the page reads them through `var()`, which keeps 6 digits), and its load scrolls to
+  `#t`. The scroll reaches `.nslot.np<i>`, the page's 100 × 100 `overflow: hidden` box around the clip box, so its
+  `scrollLeft` and `scrollTop` are the two Rs; the scroll timelines `--nans<2i>` (x) and `--nans<2i+1>` (y) read them.
+  An answer counts when it is valid and its seq is the word's bit 0; a modem's later documents for the same word carry
+  none (R = 0), so an answer never comes back for a later word. Fragment scrolls cross only same-origin documents, so
+  the modems are in the page's process, and each of their documents costs the page two forced style updates
+  (ENGINE_NOTES 63): two answers per document halve them.
 - **Outside `#clk`**: the slots and the iframes sit before `#clkw`, since Edit hides `#clk`. A box that goes `display:
   none` keeps its scroll offset and gets it back when it shows (ENGINE_NOTES 59): the last run's answers came back
-  with it and could pass for the first word's. Out there the boxes always show and only the iframes hide; they read
-  `rreq` and `rlive` through animations of their own (their timelines and `--nans<j>` are scoped at `body`), which go
-  inactive on Edit: the request is idle, the gateway invalidates the answers, and the boxes scroll back to 0.
+  with it and could pass for the first word's. Out there the slots always show and only their clip boxes hide; they
+  read `rreq` and `rlive` through animations of their own (their timelines and `--nans<j>` are scoped at `body`), which
+  go inactive on Edit: the clip boxes hide, and the slots scroll back to 0.
 - **The gateway** gives the page's modems a group: as it serves a page it writes a group id into their URLs, each
   modem's first request is redirected to its own session `/net/s/<id>/m0.html` (the fragment carries over), and its
-  URLs are relative to that, so two pages can't mix their words. A session acts on a load's request if every digit came
-  in once with a matching check digit (a load that saw its height change sends a second value). The group computes the
-  answers once per word, when a part's request changes to it, and resolves relative URLs against the page (the first
-  request's referrer). The modems reload at once while words come, and once a second after 3 s without one.
+  URLs are relative to that, so two pages can't mix their words. It acts on a request once all six digits have come for
+  one tag with a matching check digit, computes the answers once per word, and resolves relative URLs against the page
+  (the first request's referrer). A held navigation holds a connection, and Chrome opens 6 per host: past 4 held in one
+  browser (a cookie tells browsers apart), the gateway answers the others at once and they poll, refreshing every
+  second; a navigation held 20 s is answered with no answers.
 - **The runtime cells** of the read path (`RLEFT`, `RBUF0 …`) sit at `rt_base + 32 … 47`, whose blocks fall in cache
   sets 11–14: at first they shared sets 9 and 10 with the stack's and the code's hot blocks, and every byte evicted one
   of the three (`layout.json` pads `rt_cells` to put them there).
 
-A word takes about 9 page frames (~0.35 s), and brings 2 URL bytes or 8 body bytes (BENCHMARKS §14).
+A word brings 2 URL bytes or 8 body bytes. A URL word takes about 4 page frames (0.2–0.5 s): the request leaves in the
+frame that lays it out, the new documents scroll in the next, where the CPU reads them; the rest are the lib's and the
+register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 bytes (BENCHMARKS §14).
 
 ---
 
