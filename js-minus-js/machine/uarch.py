@@ -18,7 +18,19 @@ PRINTOPS = ['PRINT', 'PRINTB', 'PRINTSP', 'PRINTBSP', 'PRINTLN', 'PRINTBLN']
 # allocates an 8-word chunk, ENDK ends its keys; OVER copies the word under the top, JNEG branches on the sign of that word
 # (array or object)
 OBJOPS = 'SCANI SCAN LDF PUTV NEW SETF ENDK OVER JNEG'.split()
-OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS + OBJOPS + ['PUSHS', 'IDXA', 'STOREX', 'DYN']
+# the runtime's primitives, for the ROM (compiler/lib_src.js, rtlib.py): KIND imm [x] -> [r] (imm 0: 0 number, 1 string, 2 array,
+# 3 object; 1..3: x is that kind; 4: a heap string; 5: a string that isn't the program's own (a heap string or SEED's); 6: the
+# length of x in decimal; 7: an array or object; 8: the address of the stack word x below x's own). ALLOC imm [n] -> [b]: a block of ceil8(n) words at HP, its first word the
+# header -2 - words - imm (an array's, imm 1, also its capacity n - 4, length 0 and element pointer); the heap full, the ROM's galloc collects and executes it again. MCPY imm [d, s, n] -> [d]: n words
+# from s to d (imm 1 / 2: letters to upper / lower case; d <= s if they overlap); MCPY 3 [p, v] -> [p]: v in decimal at p.
+# MCMP [p, q, n] -> [i]: the first i < n where p[i] != q[i] (imm 1: p[i] refers to a block in the from-space at q, as the
+# collector's roots are scanned; 2: p[i] == q), else n; MCMP 3 [p, e, n] -> [o]: walking [len][bytes][0] strings from p, the
+# first of length n is at p + o (p + o >= e: none). APUSH [x, v, ret] -> [x.push(v)], then to ret (the ROM's push entry is
+# this one instruction; an array that is full, or no array, goes on to lib_src.js push through the jump table). CAT [a, b] ->
+# [a + b], a new string (a and b: strings or numbers); the heap full, the ROM's gcat collects and executes it again.
+# The page runs them a cache line per execution (--pst: the progress).
+RTOPS = ['KIND', 'ALLOC', 'MCPY', 'MCMP', 'APUSH', 'CAT']
+OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS + OBJOPS + ['PUSHS', 'IDXA', 'STOREX', 'DYN'] + RTOPS
 # PUSHS a: push the string value of address a (a - STRTAG): a string literal. IDXA [x, k] -> [x[k]] and STOREX [x, k, v] -> []
 # index an array (0 past its length; a store inside it); anything else, or a store outside the length, traps into the ROM's
 # GETX / SETX: the return address is pushed (as CALL does) and pc goes to the routine. DYN op [a, b] -> [a op b] (op: the
@@ -39,7 +51,7 @@ RT = LAYOUT['rt_base']; CELL = {n: RT + i for i, n in enumerate(LAYOUT['rt_cells
 # for SCAN; RETCELL: the return address of a call into the ROM routines
 HEAP0 = LAYOUT['heap_lo']
 VEC = LAYOUT['vec_base']; VECS = {n: VEC + i for i, n in enumerate(LAYOUT['vectors'])}   # the ROM's jump table (compiler/rtlib.py)
-GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print'))
+GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC, GALLOCVEC, APUSHVEC, DCATVEC, GCATVEC, DCAT0VEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print', 'galloc', 'apush', 'dcat', 'gcat', 'dcat0'))
 ARRTAG = LAYOUT['arrtag']                   # an array value is its ptr word's address + ARRTAG (a multiple of 32768, like the tags)
 HEAP_HI = HEAP0 + 2 * LAYOUT['heap_size']
 STRP_HI = HEAP_HI                           # a value v is a string iff STR_LO <= v + STRTAG < STRP_HI (a literal or a heap string)

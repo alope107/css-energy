@@ -3,17 +3,20 @@
 its constants), then appends hand-written routines and the jump table at vec_base that the new instructions and the
 compiler call (machine/uarch.py documents the instructions, layout.json the representations).
 
-lib_src.js holds the collector, allocation, strings, arrays and the dynamic paths' logic. Here, the routines that must
-work on the machine directly:
+lib_src.js holds the collector, strings, arrays and the dynamic paths' logic, on the machine's primitives (machine/uarch.py
+RTOPS: KIND, ALLOC, MCPY, MCMP, APUSH, CAT). Here, the routines that must work on the machine directly:
 
   GC      (vec gc)      NEW found the heap full: call the collector (lib_src.js gc) with the stack up to GCSP as roots, then
-                        execute the NEW again.
+                        execute the NEW again. galloc / gcat (vecs galloc, gcat): the same for ALLOC and CAT.
   APPEND  (vec append)  PUTV found no key: claim the free pair at the cursor, or (the chunk is full) link a new chunk there.
   SETX    (vec setx)    STOREX's slow path: x[k] = v for an object (here), anything else (lib_src.js setx: an array grows).
   GETX    (vec getx)    IDXA's slow path: x[k] of an object (here), anything else (lib_src.js getx: a string's character).
-  DYN     (vec dyn)     DYN's slow path (a string operand): lib_src.js dynop with the instruction's immediate.
+  DYN     (vec dyn)     DYN's slow path (a string operand): lib_src.js dynop with the instruction's immediate. + goes to
+                        dcat0 (no boolean: CAT itself unless an operand is an array or object) or dcat (cat with the flags).
   PRINT   (vec print)   PRINT of an array or object: lib_src.js pval prints it (Node's one-line form) and the separator.
-  mkarr                 called by compiled code: [e1 .. en, n] -> [an array of those n elements]
+  push                  x.push(v): this entry is one APUSH instruction; a full array (or no array) goes on to lib_src.js
+                        push (vec apush)
+  mkarr                 called by compiled code: [e1 .. en, n] -> [an array of those n elements]; mkarrN for n <= 8
   pnK                   called by compiled code: [p1 .. pk, sep] -> [0], printing a + chain's pieces and sep (console.log)
 
 Routines keep their state in fixed cells (layout.json rt_cells), not in frames: GC and the append path may run inside one
@@ -42,6 +45,11 @@ def consts():
              INIT=INIT, SP0=SP0, DATA_BASE=DB, CODE_BASE=L['code_base'], STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0)
     k.update(CELL)
     k.update({f'OP_{n}': i for n, i in OP.items()}); k.update({f'W_{n}': i * 8192 for n, i in OP.items()})
+    # the primitives with their immediates (uarch.RTOPS): KIND's tests, ALLOC's kinds, MCPY's case modes
+    k.update({n: OP['KIND'] * 8192 + i for i, n in enumerate('KCODE KSTR KARR KOBJ KHEAP KOWN KNLEN KAO'.split())})
+    k.update({n: OP['ALLOC'] * 8192 + i for i, n in enumerate('ASTR AARR ARAW'.split())})
+    k.update({n: OP['MCPY'] * 8192 + i for i, n in enumerate('MCOPY MUPPER MLOWER NPUT'.split())})
+    k.update({n: OP['MCMP'] * 8192 + i for i, n in enumerate('MCMP MFREF MFEQ MWALK'.split())})
     return k
 
 class Asm:
@@ -67,6 +75,14 @@ class Asm:
 def routines(a):
     # ---------------- GC. Entry: SP = GCSP + 1 (NEW's extra word), RETCELL = the NEW to execute again
     a.lab('gc'); a('POP'); a('LOADG', GCSP); a('PUSHI', 8); a('CALL', 'js.gc'); a('POP'); a('LOADG', RETCELL); a('JMPI')
+    # ---------------- galloc: ALLOC found the heap full. SP = GCSP (its [n] on top), RETCELL = the ALLOC to execute again
+    a.lab('galloc'); a('LOADG', GCSP); a('CALL', 'js.gca'); a('POP'); a('LOADG', RETCELL); a('JMPI')
+    # ---------------- gcat: the same for CAT (its [a, b] on top)
+    a.lab('gcat'); a('LOADG', GCSP); a('CALL', 'js.gcat'); a('POP'); a('LOADG', RETCELL); a('JMPI')
+    # ---------------- push: the ROM's entry for x.push(v) is APUSH itself ([x, v, ret]); a full array or no array goes on to
+    # lib_src.js push (the jump table's apush), as if called
+    a.lab('push'); a('APUSH')
+    a.lab('apush'); a('JMP', 'js.push')
 
     # ---------------- APPEND, from PUTV: [c, v]; the word after c holds the PUTV's address (its immediate is the key)
     a.lab('append'); a('OVER'); a('LDF', 1); a('DUP'); a('PUSHI', 1); a('ADD'); a('STOREG', S_RET)
@@ -88,9 +104,9 @@ def routines(a):
     # ---------------- SETX: [x, k, v, ret]
     a.lab('setx'); a('STOREG', S_RET); a('STOREG', S_V); isobj(); a('JNZ', 'sx_obj')
     a('LOADG', S_V); a('CALL', 'js.setx'); a('POP'); a('PUSHI', 0); a('STOREG', S_V); a('LOADG', S_RET); a('JMPI')
-    def canon():                                      # [x, k] -> [x, k']: a heap string key as the program's or the object's (okey)
-        a('OVER'); a('OVER'); a('CALL', 'js.okey'); a('STOREG', S_T); a('POP'); a('LOADG', S_T)
-    a.lab('sx_obj'); canon(); a('LOADG', DB); a('ADD'); a('DUP'); a('STOREG', KEYCELL); a('STOREG', S_K)              # key + KBIAS
+    def canon(add):                                   # [x, k] -> [x, k']: a heap string key as the object's or the program's (okey)
+        a('OVER'); a('OVER'); a('PUSHI', add); a('CALL', 'js.okey'); a('STOREG', S_T); a('POP'); a('LOADG', S_T)
+    a.lab('sx_obj'); canon(1); a('LOADG', DB); a('ADD'); a('DUP'); a('STOREG', KEYCELL); a('STOREG', S_K)              # key + KBIAS
     a('SCAN'); a('DUP'); a('LDF', 0); a('LOADG', S_K); a('EQ'); a('JZ', 'sx_add')
     a('LOADG', S_V); a('SETF', 1); a('POP'); a('PUSHI', 0); a('STOREG', S_V); a('LOADG', S_RET); a('JMPI')
     a.lab('sx_add'); a('LOADG', S_V); a('PUSHI', 0); a('STOREG', S_V); a('JMP', 'add')
@@ -98,9 +114,17 @@ def routines(a):
     # ---------------- GETX: [x, k, ret]
     a.lab('getx'); a('STOREG', S_RET); isobj(); a('JNZ', 'gx_obj')
     a('CALL', 'js.getx'); a('LOADG', S_RET); a('JMPI')
-    a.lab('gx_obj'); canon(); a('LOADG', DB); a('ADD'); a('STOREG', KEYCELL); a('SCAN'); a('LDF', 1); a('LOADG', S_RET); a('JMPI')
+    a.lab('gx_obj'); canon(0); a('LOADG', DB); a('ADD'); a('STOREG', KEYCELL); a('SCAN'); a('LDF', 1); a('LOADG', S_RET); a('JMPI')
 
     # ---------------- DYN: [a, b, ret] -> dynop(a, b, the DYN's immediate)
+    # ---------------- dcat0: DYN + with a string and no boolean: [a, b, ret] -> [a + b], by CAT unless an array or object needs
+    # cat's conversion
+    a.lab('dcat0'); a('STOREG', S_DRET); a('OVER'); a('KIND', 7); a('OVER'); a('KIND', 7); a('OR'); a('JNZ', 'dcat0_slow')
+    a('CAT'); a('LOADG', S_DRET); a('JMPI')
+    a.lab('dcat0_slow'); a('PUSHI', 0); a('CALL', 'js.cat'); a('LOADG', S_DRET); a('JMPI')
+    # ---------------- dcat: DYN + with a string: [a, b, ret] -> cat(a, b, the immediate's boolean flags)
+    a.lab('dcat'); a('STOREG', S_DRET); a('LOADG', S_DRET); a('PUSHI', 1); a('SUB'); a('LOADI'); a.k(8192); a('MOD'); a('PUSHI', 64); a('DIV')
+    a('CALL', 'js.cat'); a('LOADG', S_DRET); a('JMPI')
     a.lab('dyn'); a('STOREG', S_DRET); a('LOADG', S_DRET); a('PUSHI', 1); a('SUB'); a('LOADI'); a.k(8192); a('MOD')
     a('CALL', 'js.dynop'); a('LOADG', S_DRET); a('JMPI')
 
@@ -117,24 +141,16 @@ def routines(a):
         for i in range(k): a('LOADL', (-2 - k + i) % 8192); a('PRINT')
         a('LOADL', (-2) % 8192); a('PUTC'); a('PUSHI', 0); a('RET', k + 1)
 
-    # ---------------- mkarrN (N <= 8): [e1 .. eN, ret] -> [an array of them]. Locals: 1 the array, 2 its elements' address. The
-    # block is taken from HP here if it fits (lib_src.js halloc otherwise, through newarr, which may collect: the elements are
-    # parameters, so roots)
+    # ---------------- mkarrN (N <= 8): [e1 .. eN, ret] -> [an array of them]. Local 1: the block. ALLOC may collect: the elements
+    # are parameters, so roots. ALLOC writes the capacity and the element pointer; MCPY copies the elements off the stack (KIND 8:
+    # e1 is N + 4 words below [.., ret, fp, local 1, the elements' address, N + 4])
     for N in range(9):
-        cap = max(N, 4); nw = cap + 4 + (8 - (cap + 4) % 8) % 8
-        a.lab(f'mkarr{N}'); a('ENTER', 2)
-        a('LOADG', HP); a('PUSHI', nw); a('ADD'); a('LOADG', GCLIM); a.k(H + 1); a('ADD'); a('LT'); a('JZ', f'mk{N}_slow')
-        a('LOADG', HP); a.k(HEAP0); a('ADD'); a('LOADG', HP); a('PUSHI', nw); a('ADD'); a('STOREG', HP)      # [b]
-        a('DUP'); a.k(-3 - nw); a('STOREI'); a('DUP'); a('PUSHI', 1); a('ADD'); a('PUSHI', cap); a('STOREI')
-        a('DUP'); a('PUSHI', 2); a('ADD'); a('PUSHI', N); a('STOREI'); a('DUP'); a('PUSHI', 3); a('ADD'); a('OVER'); a('PUSHI', 4); a('ADD'); a('STOREI')
-        a('PUSHI', 3); a('ADD'); a.k(U.ARRTAG); a('ADD'); a('JMP', f'mk{N}_fill')
-        a.lab(f'mk{N}_slow'); a('PUSHI', cap); a('PUSHI', N); a('CALL', 'js.newarr')
-        a.lab(f'mk{N}_fill'); a('DUP'); a('STOREL', 1); a('LOADI'); a('STOREL', 2)
-        for i in range(N):
-            a('LOADL', 2)
-            if i: a('PUSHI', i); a('ADD')
-            a('LOADL', (-1 - N + i) % 8192); a('STOREI')
-        a('LOADL', 1); a('RET', N)
+        cap = max(N, 4)
+        a.lab(f'mkarr{N}'); a('ENTER', 1); a('PUSHI', cap + 4); a('ALLOC', 1); a('STOREL', 1)
+        if N:
+            a('LOADL', 1); a('PUSHI', 2); a('ADD'); a('PUSHI', N); a('STOREI')
+            a('LOADL', 1); a('PUSHI', 4); a('ADD'); a('PUSHI', N + 4); a('KIND', 8); a('PUSHI', N); a('MCPY', 0); a('POP')
+        a('LOADL', 1); a('PUSHI', 3); a('ADD'); a.k(U.ARRTAG); a('ADD'); a('RET', N)
 
     # ---------------- mkarr: [e1 .. en, n, ret] -> [array]; the elements stay on the stack (roots) while newarr allocates
     a.lab('mkarr'); a('STOREG', S_XRET); a('DUP'); a('DUP'); a('CALL', 'js.newarr'); a('STOREG', S_A); a('STOREG', S_N)
@@ -158,6 +174,7 @@ def build(out):
     assert len(rom) <= L['rom_size']
     entries = {n: lib['fns'][n] for n in lib['fns']}
     entries.update({n: a.labels[n] for n in ['mkarr', 'b2s'] + [f'pn{k}' for k in range(2, 9)] + [f'mkarr{k}' for k in range(9)]})
+    entries['push'] = a.labels['push']                         # x.push(v): the APUSH instruction
     lib = dict(lib, rom=rom, rt=dict(words=len(code), at=a.base, labels=a.labels), getx=U.GETXVEC, setx=U.SETXVEC, entries=entries)
     json.dump(lib, open(out, 'w'))
     print('runtime: lib', a.base, 'words + ROM routines', len(code), '; ROM', len(rom), 'words with the jump table')

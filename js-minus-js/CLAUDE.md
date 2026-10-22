@@ -32,6 +32,8 @@ make l5-input        # the editor under user input: edits, pastes, selection (~3
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
 make dist            # copy the built page to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
+python3 tools/romprof.py tests/suite/x.js          # where the passes go: user code, the ROM routine it called, the innermost
+python3 tools/simall.py a.json; python3 tools/simall.py cmp a.json b.json   # csssim on every program; compare two runs
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
 SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 ```
@@ -61,7 +63,7 @@ machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compile
            ui_seq.js halttime.js trace.js (browser harnesses)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
-tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
+tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof.py simall.py (where passes go, csssim on every program)
 ```
 
 ## How to make changes
@@ -101,7 +103,8 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
   is the length of a string or an array.
 - Compare `python3 machine/csssim.py tests/suite/fizzbuzz.js` (and the `tests/programs/t*.js`) before and after:
   passes track wall time, steps don't. Data sits in RAM behind a 32-line cache of 4-word lines (2-way); instructions
-  in ROM never miss.
+  in ROM never miss. Work on memory belongs in the primitives (ARCHITECTURE §3.5: KIND, ALLOC, MCPY, MCMP, APUSH,
+  CAT), which take a cache line per execution; a jsc loop takes a chain level per instruction.
 
 ### Machine or page change (`machine/`, `readback/`)
 

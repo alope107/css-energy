@@ -330,3 +330,79 @@ String building and the methods run in ROM (jsc's code, ~1.5 ms a step).
 
 **Compiler size** (`tools/vsz.py`): 338 variants, 70,478 temps (main: 355, 71,815); on the page 317 variants in 185
 rules. `popops` emitting one word per operator (not one per case) took it from 104,872 temps.
+
+
+## 14. The runtime's primitives (2026-10-21)
+
+The ROM's work on memory as machine instructions, a cache line per execution (ARCHITECTURE §3.5: KIND, ALLOC, MCPY,
+MCMP, APUSH, CAT, ENTER zeroing a line of the frame), and `lib_src.js` rewritten around them. Base = `main` at `212175a`,
+built in its own worktree; headless Chromium 153.0.8010.12, mini PC.
+
+**Where the time went** (`tools/romprof.py`, csssim K = 32). String and array programs spent 88–98% of their passes in
+ROM, ~20–24 instructions a pass: jsc's glue (LOADL, PUSHI, ADD, STOREL, ENTER ≈ 65% of ROM instructions; `isstr` alone
+9–11% through call overhead), a word moved per ~13 instructions, `join` quadratic through `cat`, run-time keys walking
+the program's strings on every lookup.
+
+**Model** (`tools/simall.py`: csssim on the 139 suite and demo programs; its estimate, 6 ms a pass + 0.34 ms a level, is
+for comparisons, not absolute times):
+
+| Program | Steps main / now | Passes main / now |
+|---|---|---|
+| `fizzbuzz.js` | 415 / 415 | 31 / 31 |
+| `str_build.js` | 7,586 / 591 | 382 / 157 |
+| `str_cmp.js` | 6,542 / 2,068 | 274 / 122 |
+| `str_methods.js` | 13,633 / 4,543 | 577 / 287 |
+| `str_index.js` | 12,322 / 3,349 | 580 / 273 |
+| `arr_grow.js` | 9,258 / 2,928 | 417 / 202 |
+| `arr_print.js` | 11,196 / 6,442 | 574 / 401 |
+| `arr_nested.js` | 15,937 / 2,648 | 764 / 299 |
+| `arr_methods.js` | 38,653 / 5,951 | 1,609 / 323 |
+| `obj_count.js` | 4,210 / 2,891 | 193 / 121 |
+| `str_keys.js` | 82,698 / 17,870 | 4,362 / 1,351 |
+| `arr_gc.js` | 149,716 / 21,021 | 6,867 / 2,403 |
+| `str_keys_gc.js` | 363,845 / 53,130 | 17,225 / 5,399 |
+| `obj_gc.js` | 50,814 / 46,194 | 5,026 / 4,876 |
+
+- All programs: passes 44,863 → 21,990, estimate 564 → 215 s. Programs on numbers alone are unchanged.
+- ROM passes by how they end: 17,377 at K (instruction-bound) and 13,528 on a miss → 1,978 and 7,161. The runtime is
+  now miss-bound, like user code: fresh heap lines (every allocation's) and their dirty victims, one write-back a pass.
+  What is left in ROM by time: run-time keys (`okey`) 7%, CAT 6%, array literals 5% (miss-bound), the collector 10%
+  (`str_keys_gc` 23%, `arr_gc` 17%, `obj_gc` 12%; 58% of its passes end on a miss).
+
+**Chrome**, CPU-only pages, load → HALT, `../shared/js/ab.js -r 3` with `machine/halttime.js` (4 interleaved runs
+each). Another session's browser jobs ran at the same time (load average 4–19), so the times are up to ~2× a quiet
+machine's and the ratios are what to read; `str_methods`, `str_index`, `arr_print` and `arr_grow` are from a second,
+quieter run (the first had IQRs of 0.3–0.5):
+
+| Program | main (median) | now (median) | Ratio (median, IQR) |
+|---|---|---|---|
+| FizzBuzz | 2,469 ms | 2,154 ms | 0.998 (0.872–1.102) |
+| `str_build.js` | 26.1 s | 9.6 s | 0.371 (0.369–0.374) |
+| `str_cmp.js` | 18.7 s | 8.2 s | 0.439 (0.436–0.440) |
+| `str_methods.js` | 47.5 s | 19.1 s | 0.445 (0.410–0.474) |
+| `str_index.js` | 33.8 s | 19.7 s | 0.502 (0.455–0.587) |
+| `str_keys.js` | 168.3 s | 52.8 s | 0.342 (0.302–0.349) |
+| `arr_grow.js` | 27.3 s | 14.4 s | 0.529 (0.506–0.812) |
+| `arr_nested.js` | 35.6 s | 16.6 s | 0.337 (0.317–0.466) |
+| `arr_methods.js` | 104.5 s | 22.7 s | 0.205 (0.200–0.217) |
+| `arr_print.js` | 23.3 s | 17.4 s | 0.713 (0.703–0.767) |
+| `obj_count.js` | 14.0 s | 8.5 s | 0.616 (0.583–0.631) |
+| `arr_gc.js` | 340.9 s | 115.5 s | 0.353 (0.326–0.360) |
+
+On a quiet machine, one run each of an earlier build (first step → HALT; the primitives without CAT, the walk and the
+array header line): `str_build` 13.9 → 7.8 s, `str_methods` 21.0 → 10.8 s, `str_index` 23.0 → 12.9 s, `str_cmp` 8.9 →
+4.0 s, `arr_grow` 13.9 → 6.8 s, `arr_print` 20.2 → 14.4 s, `arr_nested` 30.4 → 9.3 s, `arr_methods` 64.7 → 13.2 s,
+`obj_count` 6.5 → 3.3 s, FizzBuzz 584 → 614 ms.
+
+- `arr_print` gains least: printing an array or object is output-bound. The machine takes one output instruction a
+  pass, and `ins` / `insobj` / `qstr` print a character at a time (PUTC); PRINT writes four.
+- Costs: the CPU-only page 4.07 → 4.40 MB, the editor page 14.40 → 14.72 MB; 586 → 684 registered properties (the
+  new classes' temps; FizzBuzz shows no difference). A chain level of ROM code costs ~470 µs against ~378 µs for user
+  code (`exp/csscpu/chainbench.js`; the ROM fetch table); a pass of ROM code ~25 ms of style (trace of `str_build`: 65 ms
+  frames, 54 ms style, 19 ms layout, 2.2–2.7 passes a frame).
+- Correctness: L1 135/135, C1 135/135, L2 ALL OK, fuzz FAILED 0, L3 182/182, L5 smoke 10/10, and every suite program
+  (135, the long ones included) as a CPU-only page to HALT with cc_ref's steps and Node's console.
+- A bug the model couldn't see: MCMP wrote its result through its stack read's lookup. A stall on its line read left
+  that read latched while the fill evicted its line, and a latched read counts as a hit, so the write went into a line
+  that wasn't there (`str_keys_gc`, 60 steps short). Its write has a lookup of its own now; reusing a read's lookup is
+  only safe where nothing else can stall the instruction (`gen_css.py`'s class comment).

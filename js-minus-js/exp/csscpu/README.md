@@ -100,7 +100,8 @@ Per element, every chain level distinct (identical levels hit the matched-proper
 - Not in Chromium 153: `ident()` (an anchor name from a number would replace the muxes) and `inherit()`.
 
 `chainbench.js` (with `machine/gen_css.py BENCH=1`, `STALL=1`, `DUP=name`) times the chain alone from a real pass's start
-state; `DUP` copies a declaration under a new name to price it without changing results. `passcost.js` and
+state; `DUP` copies a declaration under a new name to price it without changing results. (A pass in ROM needs `--rom`
+on the bench root, which `BENCH=1` sets since 2026-10-21: ROM code costs ~470 µs a level against ~378 µs for FizzBuzz.) `passcost.js` and
 `stylecount.js` (`PER=1`) give per-pass costs and what restyled, `dbg.js` the registers each frame.
 
 ## The toy (`mkcpu.py`)

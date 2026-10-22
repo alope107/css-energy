@@ -21,7 +21,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cssref as ref
 from cssref import OPN, AMASK, s20, BIN, BINF, LA, STRTAG, SDATA, COLS, ROWS, OUT_BASE
-from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC, GETXVEC, SETXVEC, DYNVEC, PRINTVEC, ARRTAG, HEAP_HI, STRP_HI
+from uarch import HP, GCLIM, GCSP, KEYCELL, RETCELL, HEAP0, OBJTAG, GCVEC, PUTVEC, GETXVEC, SETXVEC, DYNVEC, PRINTVEC, ARRTAG, HEAP_HI, STRP_HI, GALLOCVEC, APUSHVEC, DCATVEC, GCATVEC, DCAT0VEC
 import cc_ref as R
 
 NSET, NWAY = 16, 2
@@ -114,11 +114,12 @@ class Sim:
             sp -= 1; v = rd(sp); z = v == 0 or (R.isstr(v) and rd((v - 1) & AMASK) == 0)
             pc = imm if z == (op == 'JZ') else pc
         elif op == 'CALL': wr(sp, pc); sp += 1; pc = imm
-        elif op == 'ENTER':                       # the frame, then one execution per local zeroing it (--pst: which)
+        elif op == 'ENTER':                       # the frame's words fp .. fp + imm (fp, then the locals zeroed), a line per execution
             p_ = st['pst']
-            if p_ == 0: wr(sp, fp); fp = sp; sp = sp + 1 + imm
-            else: wr(fp + p_, 0)
-            if p_ < imm: pc -= 1; partial = True
+            if p_ == 0: fp = sp; sp = sp + 1 + imm
+            k = min(4 - (fp + p_) % 4, imm + 1 - p_)
+            for j in range(k): wr(fp + p_ + j, st['fp'] if p_ + j == 0 else 0)
+            if p_ + k <= imm: pc -= 1; partial = True; npst = p_ + k
         elif op == 'RET': v = rd(sp - 1); ofp = rd(fp); ret = rd(fp - 1); nsp = fp - 1 - imm; wr(nsp, v); sp = nsp + 1; fp = ofp; pc = ret
         elif op == 'POP': sp -= 1
         elif op == 'DUP': wr(sp, rd(sp - 1)); sp += 1
@@ -127,7 +128,7 @@ class Sim:
         elif op == 'JNEG': pc = imm if rd(sp - 2) < 0 else pc
         elif op == 'DYN':                         # a string operand: the ROM's dyn (a trap pushes the return address)
             b = rd(sp - 1); a = rd(sp - 2)
-            if R.dyntrap(imm, a, b): wr(sp, pc); sp += 1; pc = DYNVEC
+            if R.dyntrap(imm, a, b): wr(sp, pc); sp += 1; pc = (DCAT0VEC if imm == OPN.index('ADD') else DCATVEC) if OPN[imm % 64] == 'ADD' else DYNVEC
             else: sp -= 1; wr(sp - 1, {'ADD': s20(a + b), 'EQ': int(a == b), 'NE': int(a != b), 'LT': int(a < b), 'GT': int(a > b), 'LE': int(a <= b)}.get(OPN[imm % 64], int(a >= b)))
         elif op in ('IDXA', 'STOREX'):            # an array inside its length here; anything else: the ROM's GETX / SETX
             v1 = rd(sp - 1); v2 = rd(sp - 2)
@@ -165,6 +166,76 @@ class Sim:
                     if lt: wr(HP, t2 + 8)
                     else: wr(RETCELL, pc - 1); pc = GCVEC
                     sp += 1
+        # the runtime's primitives (uarch.RTOPS; cc_ref.run does each in one step): a cache line per execution, --pst the progress
+        elif op == 'KIND': wr(sp - 1, sp - 1 - rd(sp - 1) if imm == 8 else R.kind(imm, rd(sp - 1)))
+        elif op == 'ALLOC':                       # pst 0: the header (or GCSP), 1: HP (or the trap), 2: the result
+            n = rd(sp - 1); nw = -(-n // 8) * 8; hp = rd(HP); p_ = st['pst']
+            full = p_ < 2 and hp + nw > rd(GCLIM) + LA['heap_size']
+            if p_ == 0 and full: wr(GCSP, sp)
+            if p_ == 0 and not full:
+                for j, w in enumerate(R.allochdr(imm, nw, n, HEAP0 + hp)): wr(HEAP0 + hp + j, w)
+            if p_ == 0: npst = 1
+            elif p_ == 1 and full: wr(RETCELL, pc - 1); pc = GALLOCVEC; npst = 0
+            elif p_ == 1: wr(HP, hp + nw); npst = 2
+            else: wr(sp - 1, HEAP0 + hp - nw); npst = 0
+            if npst: pc -= 1; partial = True
+        elif op == 'MCMP' and imm == 3:           # a hop per execution (and the next string's start may already end the walk)
+            p_, e, n = rd(sp - 3), rd(sp - 2), rd(sp - 1); o = st['pst']; res = None
+            if p_ + o >= e: res = o
+            else:
+                L_ = rd((p_ + o) & AMASK)
+                if L_ == n: res = o
+                elif p_ + o + L_ + 2 >= e: res = o + L_ + 2
+                else: pc -= 1; partial = True; npst = o + L_ + 2
+            if res is not None: wr(sp - 3, res); sp -= 2
+        elif op in ('MCPY', 'MCMP'):              # k words: to the end of the line of either address, or of the run
+            o = st['pst']; nput = op == 'MCPY' and imm == 3; two = op == 'MCPY' or imm == 0     # (two: a second address)
+            if nput: dg = R.ndigits(rd(sp - 1)); d_, s_, n = rd(sp - 2), None, len(dg)
+            else: d_, s_, n = rd(sp - 3), rd(sp - 2), rd(sp - 1)
+            ad = (d_ + o) & AMASK; as_ = (s_ + o) & AMASK if two and not nput else 0
+            k = max(0, min(n - o, 4 - ad % 4, 4 - as_ % 4))
+            res = None
+            if nput:
+                for j in range(k): wr(ad + j, dg[o + j])
+            elif op == 'MCPY':
+                for j, c in enumerate([rd(as_ + j) for j in range(k)]): wr(ad + j, R.mcase(imm, c))
+            else:
+                for j in range(k):
+                    if R.mtest(imm, rd(ad + j), rd(as_ + j) if two else s_): res = o + j; break
+                if res is None and o + k >= n: res = max(0, n)
+            done = o + k >= n or res is not None
+            if not done: pc -= 1; partial = True; npst = o + k
+            elif op == 'MCMP': wr(sp - 3, res); sp -= 2
+            else: sp -= 1 if nput else 2
+        elif op == 'CAT':                         # pst 0: header and length (or GCSP), 1: HP (or the trap), 2 + o: characters o .. (a line,
+            a_, b_ = rd(sp - 2), rd(sp - 1); p_ = st['pst']             # from a or from b; the NUL with the last if it fits), n + 3: the result
+            la = rd((a_ - 1) & AMASK) if R.isstr(a_) else len(str(a_)); lb = rd((b_ - 1) & AMASK) if R.isstr(b_) else len(str(b_))
+            n = la + lb; nw = -(-(n + 3) // 8) * 8; hp = rd(HP)
+            full = p_ < 2 and hp + nw > rd(GCLIM) + LA['heap_size']
+            base = HEAP0 + hp - (nw if p_ >= 2 else 0); o = p_ - 2; npst = p_ + 1
+            if p_ == 0 and full: wr(GCSP, sp)
+            elif p_ == 0: wr(base, -2 - nw); wr(base + 1, n)
+            elif p_ == 1 and full: wr(RETCELL, pc - 1); pc = GCATVEC; npst = 0
+            elif p_ == 1: wr(HP, hp + nw)
+            elif o < n:
+                x, ox, lx = (a_, o, la) if o < la else (b_, o - la, lb); d_ = base + 2 + o
+                if R.isstr(x): k = min(lx - ox, 4 - d_ % 4, 4 - ((x + ox) & AMASK) % 4); t = [rd((x + ox + j) & AMASK) for j in range(k)]
+                else: k = min(lx - ox, 4 - d_ % 4); t = R.ndigits(x)[ox:ox + k]
+                if o + k == n and (d_ + k) % 4: t.append(0)                 # the NUL, in the same line
+                for j, w in enumerate(t): wr(d_ + j, w)
+                npst = p_ + len(t)
+            elif o == n: wr(base + 2 + n, 0)
+            else: wr(sp - 2, base + 2 - STRTAG); sp -= 1; npst = 0
+            if npst: pc -= 1; partial = True
+        elif op == 'APUSH':                       # pst 0: the element (or the trap), 1: the length, 2: the result, to ret
+            x = rd(sp - 3); p_ = st['pst']; a = (x - ARRTAG) & AMASK
+            if p_ == 0 and not R.isarr(x): pc = APUSHVEC
+            else:
+                n = rd(a - 1)
+                if p_ == 0 and n >= rd(a - 2): pc = APUSHVEC
+                elif p_ == 0: wr(rd(a) + n, rd(sp - 2)); npst = 1; pc -= 1; partial = True
+                elif p_ == 1: wr(a - 1, n + 1); npst = 2; pc -= 1; partial = True
+                else: ret = rd(sp - 1); wr(sp - 3, n); sp -= 2; pc = ret
         elif op == 'SHL13': wr(sp - 1, rd(sp - 1) * 8192)
         elif op == 'INCG': wr(imm, rd(imm) + 1)
         elif op == 'INCL': wr(fp + simm, rd(fp + simm) + 1)
@@ -192,7 +263,7 @@ class Sim:
             if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
             if cells: cw = 1
         if op in ('ENDK', 'NEW'): st['pst'] = 1 if partial else 0
-        if op == 'ENTER': st['pst'] = st['pst'] + 1 if partial else 0
+        if op in ('ENTER', 'ALLOC', 'MCPY', 'MCMP', 'APUSH', 'CAT'): st['pst'] = npst if partial else 0
         st['pc'], st['sp'], st['fp'] = pc, sp, fp; st['steps'] += 0 if (out and not done) or partial else 1
         return cw
     def run_pass(self, K):

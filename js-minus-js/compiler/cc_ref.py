@@ -38,7 +38,8 @@ AMASK = 32767                           # addresses are 15-bit (the font's addre
 # opcodes (jsc.js)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
     JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL, \
-    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, PUSHS, IDXA, STOREX, DYN = range(58)
+    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, PUSHS, IDXA, STOREX, DYN, \
+    KIND, ALLOC, MCPY, MCMP, APUSH, CAT = range(64)
 # PRINT family (serviced by CSS on the page, machine/uarch.py in the model): pop a value and print it. A tagged string pointer
 # prints its bytes, anything else prints in decimal; the B forms print 0 / 1 as false / true (the static type says
 # boolean). SP / LN add a space / newline. PRINT_OP[sep] + (type == boolean) is the opcode.
@@ -71,7 +72,7 @@ OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)       # = machine/uarch.py
 VECS = {n: LAYOUT['vec_base'] + i for i, n in enumerate(LAYOUT['vectors'])}
-GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print'))
+GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC, GALLOCVEC, APUSHVEC, DCATVEC, GCATVEC, DCAT0VEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print', 'galloc', 'apush', 'dcat', 'gcat', 'dcat0'))
 ARRTAG = LAYOUT['arrtag']
 HEAP_HI = HEAP0 + 2 * LAYOUT['heap_size']
 STRV_LO, STRV_HI = LAYOUT['data_base'] + SDATA - STRTAG, HEAP_HI - STRTAG     # a value in [STRV_LO, STRV_HI) is a string
@@ -79,6 +80,30 @@ def isstr(v): return STRV_LO <= v < STRV_HI
 def isarr(v): return HEAP0 <= v - ARRTAG < HEAP_HI
 def isobj(v): return HEAP0 <= v + OBJTAG < HEAP_HI
 def isref(v): return isstr(v) or isarr(v) or isobj(v)
+def nlen(v): return len(str(v))
+# the runtime's primitives (machine/uarch.py): KIND imm's result for x
+def kind(imm, x):
+    a = x + STRTAG
+    return [isstr(x) + 2 * isarr(x) + 3 * isobj(x), int(isstr(x)), int(isarr(x)), int(isobj(x)), int(isstr(x) and a >= HEAP0),
+            int(isstr(x) and (a < STRP0 or a >= HEAP0)), nlen(x), int(isarr(x) or isobj(x))][imm]
+def mcase(imm, c):
+    """MCPY's modes: 0 a copy, 1 to upper case, 2 to lower case (3: NPUT, a number's digits)"""
+    lo = 97 if imm == 1 else 65
+    return c + (-32 if imm == 1 else 32) if imm and lo <= c < lo + 26 else c
+def ndigits(v): return [ord(ch) for ch in str(v)]
+def allochdr(imm, nw, n, b):
+    """ALLOC's first line: the header; an array's (imm 1) also its capacity n - 4, length 0 and element pointer"""
+    return [-2 - nw - imm] + ([n - 4, 0, b + 4] if imm == 1 else [])
+def catsrc(mem, x):
+    """CAT's operand x (a string or a number) as its characters"""
+    return [mem[(x + i) & AMASK] for i in range(mem[(x - 1) & AMASK])] if isstr(x) else ndigits(x)
+def isfref(w, flo):
+    """w refers to a block in the from-space at flo (MCMP 1's test; the collector's fwd checks the rest)"""
+    H = LAYOUT['heap_size']
+    return flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
+def mtest(imm, a, b):
+    """MCMP's tests, word a of the run against b (imm 0: q's word; 1, 2: the operand): where the search stops"""
+    return a != b if imm == 0 else isfref(a, b) if imm == 1 else a == b
 def truthy(mem, v):
     """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address)"""
     return v != 0 and not (isstr(v) and mem[(v - 1) & AMASK] == 0)
@@ -1004,6 +1029,41 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) & AMASK]
         elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) & AMASK]
         elif op == PUSHS: mem[sp] = imm - STRTAG; sp += 1
+        # the runtime's primitives (machine/uarch.py): one step here, micro-steps on the page
+        elif op == KIND: mem[sp - 1] = sp - 1 - mem[sp - 1] if imm == 8 else kind(imm, mem[sp - 1])
+        elif op == ALLOC:                                  # [n] -> [b]: ceil8(n) words at HP, header -2 - words - imm
+            nw = -(-mem[sp - 1] // 8) * 8; hp = mem[HP]
+            if hp + nw <= mem[GCLIM] + LAYOUT['heap_size']:
+                for i, w in enumerate(allochdr(imm, nw, mem[sp - 1], HEAP0 + hp)): wr(HEAP0 + hp + i, w)
+                mem[HP] = hp + nw; mem[sp - 1] = HEAP0 + hp
+            else: mem[GCSP] = sp; mem[RETCELL] = pc - 1; pc = GALLOCVEC
+        elif op == MCPY and imm == 3:                      # [p, v] -> [p]: v's decimal digits at p
+            for i, ch in enumerate(ndigits(mem[sp - 1])): wr(mem[sp - 2] + i, ch)
+            sp -= 1
+        elif op == MCPY:                                   # [d, s, n] -> [d]: n words from s to d (d <= s if they overlap)
+            d, s_, n = mem[sp - 3], mem[sp - 2], mem[sp - 1]
+            for i in range(n): wr(d + i, mcase(imm, rd(s_ + i)))
+            sp -= 2
+        elif op == MCMP and imm == 3:                      # [p, e, n] -> [o]: from p, [len][bytes][0] strings, the first of length n
+            p_, e, n = mem[sp - 3], mem[sp - 2], mem[sp - 1]; i = 0     # at p + o (or p + o >= e)
+            while p_ + i < e and rd(p_ + i) != n: i += rd(p_ + i) + 2
+            sp -= 2; mem[sp - 1] = i
+        elif op == MCMP:                                   # [p, q, n] -> [the first i < n where p[i] != q[i] (imm 1: p[i] is a ref
+            p_, q, n = mem[sp - 3], mem[sp - 2], mem[sp - 1]; i = 0     # into the from-space at q; 2: p[i] == q), else n]
+            while i < n and not mtest(imm, rd(p_ + i), rd(q + i) if imm == 0 else q): i += 1
+            sp -= 2; mem[sp - 1] = i
+        elif op == CAT:                                    # [a, b] -> [a + b]: strings or numbers (the ROM's cat converts the rest)
+            t = catsrc(mem, mem[sp - 2]) + catsrc(mem, mem[sp - 1]); n = len(t); nw = -(-(n + 3) // 8) * 8; hp = mem[HP]
+            if hp + nw <= mem[GCLIM] + LAYOUT['heap_size']:
+                b = HEAP0 + hp
+                for i, w in enumerate([-2 - nw, n] + t + [0]): wr(b + i, w)
+                mem[HP] = hp + nw; sp -= 1; mem[sp - 1] = b + 2 - STRTAG
+            else: mem[GCSP] = sp; mem[RETCELL] = pc - 1; pc = GCATVEC
+        elif op == APUSH:                                  # [x, v, ret] -> [x.push(v)], to ret; the ROM's push when x is full or no array
+            x, v, ret = mem[sp - 3], mem[sp - 2], mem[sp - 1]; a = (x - ARRTAG) & AMASK
+            if isarr(x) and mem[a - 1] < mem[a - 2]:
+                n = mem[a - 1]; mem[(mem[a] + n) & AMASK] = v; mem[a - 1] = n + 1; sp -= 2; mem[sp - 1] = n + 1; pc = ret
+            else: pc = APUSHVEC
         # arrays and dynamic operators: the fast case here, the rest in ROM (a trap: the return address pushed, as by CALL)
         elif op in (IDXA, STOREX):
             x, k = (mem[sp - 2], mem[sp - 1]) if op == IDXA else (mem[sp - 3], mem[sp - 2])
@@ -1013,7 +1073,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             else: mem[sp] = pc; sp += 1; pc = GETXVEC if op == IDXA else SETXVEC
         elif op == DYN:
             b = mem[sp - 1]; a = mem[sp - 2]
-            if dyntrap(imm, a, b): mem[sp] = pc; sp += 1; pc = DYNVEC
+            if dyntrap(imm, a, b): mem[sp] = pc; sp += 1; pc = (DCAT0VEC if imm == ADD else DCATVEC) if imm % 64 == ADD else DYNVEC
             else: sp -= 1; mem[sp - 1] = {ADD: s20(a + b), EQ: int(a == b), NE: int(a != b), LT: int(a < b), GT: int(a > b), LE: int(a <= b)}.get(imm % 64, int(a >= b))
         # objects (machine/uarch.py's microcode, instruction by instruction). Data reads below RAM give 0, writes there are lost.
         elif op in (SCANI, SCAN):                          # probe one key; execute again unless it stopped

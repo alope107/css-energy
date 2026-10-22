@@ -40,6 +40,16 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   idle levels 269 µs), an `if()` ~70 ns per entry it contains, size containers above a subtree restyling it once per
   container (7 times per fill). FizzBuzz on the page 10.5 → 3.9 s after Run; CPU-only pages 2.8–7.3× faster
   (BENCHMARKS §12). The font CPU's code was removed; it last exists at commit `181cbb7`.
+- **13, the runtime's primitives in the machine (2026-10-21).** With strings and arrays the ROM's jsc code was most of
+  the run time of any program that used them (88–98% of the passes; ~20 instructions a pass, mostly call overhead and
+  address arithmetic, a word moved per ~13 instructions, `join` quadratic through `cat`). Branch `css-gc` had made the
+  collector one instruction (Cheney, a micro-step per chain level); here the ROM got general primitives instead, a cache
+  line per execution: KIND (type tests), ALLOC (allocation and header), MCPY (copies, case mapping, a number's digits),
+  MCMP (compare, find a value, find a from-space reference, walk the string area), APUSH (`push` whole), CAT (`+` on
+  strings and numbers), ENTER zeroing a line of the frame; `join`, `repeat` and `okey` rewritten around them. Suite
+  model time 564 → 215 s; in Chrome string and array programs 1.6–4.9× faster (`str_build` 2.7×, `arr_methods` 4.9×;
+  printing arrays and objects, output-bound, 1.4×), FizzBuzz unchanged (BENCHMARKS §14). The ROM is now miss-bound like
+  user code (76% of its passes end on a miss, from 44%).
 
 ## Dead ends and superseded approaches
 
@@ -87,6 +97,19 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 40 | Every identifier writing its bytes to the string area | FizzBuzz compiled ~7% slower | only after `.`, `{` or `,` |
 
 ## Open leads (untried)
+
+- **Allocation is bound by misses and write-backs, not instructions** (BENCHMARKS §14). An array literal touches two
+  fresh heap lines (two fills, and their dirty victims leave one per pass). Every word of a new block is written before
+  it is read, so a write miss on a line of one could install it without a fill. Model (a scratch `csssim.py`, blocks
+  from ALLOC, CAT and NEW until first written): only into clean victims, suite 214.7 → 209.4 s (`obj_gc` −7%); with
+  the dirty victim written back as well (a second write set per pass; the model doesn't cap it at one), 189.6 s,
+  `obj_gc` −28%, `obj_gc_small` −18%, `arr_gc` and `str_keys_gc` −12%.
+- **The collector as an instruction** (branch `css-gc`, on the objects-only heap: 7.2 → 3.2 passes per live chunk). On
+  the primitives the jsc collector takes ~4 passes per copied block (`str_keys_gc`), 58% of them ending on misses, so
+  the same state machine extended to strings, arrays and key forwarding would save ~25–40% of collection time, ~4–8%
+  of the GC tests' run time.
+- **Run-time keys by hash**: a key the object doesn't have still walks the program's strings (a string per execution,
+  mostly a miss each); a hash table of the literals, written by the compiler, would make it one probe.
 
 - **Fewer traps.** Suite traps are mostly misses (1,309) and arithmetic EXT (1,104; 160 in `primes.js`): MOD / DIV,
   SHL13 and small-constant multiply in the font; dirty lines above SP treated as clean; an eviction buffer; next-line

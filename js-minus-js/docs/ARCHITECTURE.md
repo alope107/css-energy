@@ -36,7 +36,7 @@ The map is `compiler/layout.json`, read by `cc_ref.LAYOUT`, `libbuild.js`, `uarc
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by jsc, ~4,000 words; its first words jump to `code_base`), hand-written routines (`rtlib.py`, ~940 words), the jump table at 6128 … (`vec_base`) | the page's static ROM table |
+| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by jsc, ~3,650 words; its first words jump to `code_base`), hand-written routines (`rtlib.py`, ~520 words), the jump table at 6128 … (`vec_base`) | the page's static ROM table |
 | 6144 | `data_base`: `STRTAG` = 262144, the untag constant (and the object key bias) | compiler `.fin` (an overlay) |
 | 6145 … 6399 | globals (255 words) | the program |
 | 6400 | `STR0`: the empty marker; then `"true"` and `"false"` (`SEED`) | compiler `.fin` |
@@ -180,7 +180,8 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
   - `.f` fetches: ROM from a static table (its own container-query rule, since an `if()` costs its whole text wherever
     it is evaluated), RAM through the cache; decodes the opcode and its class.
   - `.x` executes: one `@container style(--cls: c)` rule per class (push, load, bin, jump, test, store, index, arr,
-    dyn, out), `if()` on `--op` inside it for addresses, results and next registers. A container-query test costs ~2 µs per element,
+    dyn, the runtime's kind, alloc, apush, mcpy, mcmp, cat, enter (§3.5), out), `if()` on `--op` inside it for
+    addresses, results and next registers. A container-query test costs ~2 µs per element,
     matched or not, an `if()` branch ~0.3 µs: a rule per opcode made even idle levels cost 269 µs, classes 47 µs.
   - `.c` commits: registers on success; on a stall, `--stop` and the missing block; output; a write as its whole
     cache set (16 rules on the set; 128 rules on the word cost too much to test).
@@ -236,10 +237,33 @@ address, for the compiler). It is a static table in the page (in tiers of 1,024 
   caller's frame pointer, for the collector's roots), `__op(word, args…)` (one raw instruction). No globals or string
   literals: jsc would put them in the data area, which is the program's. A routine's frame holds tagged values, which
   the collector updates; a raw address must not be kept across an allocation.
-- `lib_src.js`: the collector and `halloc`, strings (`newstr`, `tostr`, `cat`, `scmp`, `dynop`), arrays (`newarr`,
-  `grow`, `aset`, `push`, `pop`), the methods, printing arrays and objects (`pval`), run-time string keys (`okey`).
-- `rtlib.py`: the GC stub (called by NEW), APPEND, GETX / SETX (the object paths; the rest goes to `lib_src.js`), the
-  DYN and PRINT trap stubs, `pnK`, `b2s`, `mkarrN`.
+- `lib_src.js`: the collector, strings (`newstr`, `tostr`, `cat`, `scmp`, `dynop`), arrays (`newarr`, `grow`, `aset`,
+  `push`'s slow path, `pop`), the methods, printing arrays and objects (`pval`), run-time string keys (`okey`).
+- `rtlib.py`: the GC stubs (`gc` for NEW, `galloc` for ALLOC, `gcat` for CAT), APPEND, GETX / SETX (the object paths;
+  the rest goes to `lib_src.js`), the DYN stubs (`dcat0`: `+` without a boolean, straight to CAT; `dcat`; `dyn`), the
+  PRINT trap stub, `push` (one APUSH word), `pnK`, `b2s`, `mkarrN`.
+
+**The runtime's primitives** (opcodes 58 … 63, `uarch.RTOPS`). The ROM's work on memory is instructions that take a cache
+line per execution, `--pst` holding their progress, rather than jsc loops that take a word per ~10 instructions (each
+jsc instruction is a chain level, ~0.45 ms in Chrome; ENTER zeroing a local was one execution per local). One step in
+`cc_ref.run()`; in `csssim.py` and `gen_css.py` a class each (`kind`, `alloc`, `mcpy`, `mcmp`, `apush`, `cat`, and
+`enter`, which left `push`). jsc reaches them as `__op(__NAME__, operands…)` (`rtlib.consts()` names the immediates).
+
+| Op | Stack | What it does | Executions |
+|---|---|---|---|
+| `KIND k` | [x] → [r] | k = 0: 0 number, 1 string, 2 array, 3 object; 1 … 3: x is that kind; 4 a heap string; 5 a string that isn't the program's own; 6 x's length in decimal; 7 an array or object; 8 the address of the stack word x below this one | 1 |
+| `ALLOC k` | [n] → [b] | a block of ceil8(n) words at HP, its header −2 − words − k (an array, k = 1: its whole first line, capacity n − 4, length 0, the element pointer); full: GCSP, RETCELL, to `galloc` | 3: the header line, HP, the result |
+| `MCPY k` | [d, s, n] → [d] | n words from s to d (d ≤ s if they overlap); k = 1 / 2 letters to upper / lower case; k = 3 [p, v] → [p]: v's decimal digits at p | a line of d per execution (to the end of d's line, of s's line, of the run) |
+| `MCMP k` | [p, q, n] → [i] | the first i < n where p[i] ≠ q[i]; k = 1 where p[i] refers into the from-space at q, k = 2 where p[i] = q; else n. k = 3 [p, e, n] → [o]: through `[len][bytes][0]` strings from p, the first of length n is at p + o | a line of each per execution; k = 3 a string per execution |
+| `APUSH` | [x, v, ret] → [n] | `x.push(v)`, then to ret: the ROM's `push` entry is this one word; no array, or a full one, goes on to `lib_src.js` `push` through the jump table | 3: the element, the length, the result |
+| `CAT` | [a, b] → [s] | a new string, a's characters then b's (strings or numbers: a number's digits are written in place); full: to `gcat` | the header and length, HP, a line of characters per execution (the NUL with the last if it fits), the result |
+| `ENTER n` | | the frame: the saved fp, the locals zeroed | a line of the frame per execution |
+
+- Words to and from memory: `write_line` (`gen_css.py`) writes words u … u + k − 1 of one block, so the commit is still
+  one cache set; `line_read` reads a block's four words (`p`, latched as PRINT's is, and `y`, which MCMP alone reads and
+  which is not latched: it is the one read that can miss last, and the last fill is always resident).
+- Every instruction counts one step when it completes, as in `cc_ref`. The miss rules are the other instructions':
+  every word an execution touches must be cached, and the latches keep its operands across a stall.
 
 ### 3.6 Strings, arrays and objects, and the garbage collector
 
@@ -293,18 +317,21 @@ address and jumps to a ROM routine, as CALL does:
 - Restart safety: a first execution's write must leave the second's inputs unchanged (NEW writes HP last).
 - ROM calls go through the jump table (`layout.json` `vectors`: gc, append, setx, getx, dyn, print). The assembly
   routines keep state in the `rt_base` cells, not frames (they nest: APPEND allocates, NEW collects).
-- `o[k]` is IDXA / STOREX trapping to GETX / SETX; a key that is a heap string is first replaced by the program's
-  string with its characters (a walk of the string area up to `strend`), or by one of the object's keys with them
-  (`okey`), so it finds the same property as a literal key.
+- `o[k]` is IDXA / STOREX trapping to GETX / SETX; a key that is a heap string is first replaced by the object's key
+  with its characters, if it has one (`okey`); a key the object doesn't have, stored, becomes the program's string with
+  those characters if there is one (a walk of the string area up to `strend`, MCMP 3), so a key is the literal whenever
+  one exists and it finds the same property as a literal key.
 
 **The collector** (`lib_src.js` `gc`): Cheney copying between the semi-spaces. The roots: the globals (up to the count
-at `init − 1`), the routines' value cells (S_V, S_K), and the stack from `sp0` to GCSP (NEW's SP, or `halloc`'s frame,
-`getfp()`). A value is forwarded by its tag range: an object (a root may point *into* its chunk: a SCANI cursor), a
-string, an array (copied with its elements inline, whatever its data block was); anything else that only looks like one
-(a number in a tag range, a stale frame word) is left alone (alignment and the header are checked). The scan follows an
-object's keys (a heap string key moves too) and values up to its first free pair, and its link if all three are used,
-and an array's elements up to its length. HP and GCLIM are offsets from `heap_lo`; GCLIM is the current space's
-offset, so zeroed RAM is space A and needs no setup. Cost is per live block, nothing per dead one.
+at `init − 1`), the routines' value cells (S_V, S_K), and the stack from `sp0` to GCSP (the SP of the NEW, ALLOC or CAT
+that found the heap full). A value is forwarded by its tag range: an object (a root may point *into* its chunk: a SCANI
+cursor), a string, an array (copied with its elements inline, whatever its data block was); anything else that only
+looks like one (a number in a tag range, a stale frame word) is left alone (alignment and the header are checked).
+`fwdrange` finds the words that refer into from-space a line at a time (MCMP 1), so a root or an element that is a
+number costs nothing; copies are MCPY. The scan follows an object's keys (a heap string key moves too) and values up
+to its first free pair, and its link if all three are used, and an array's elements up to its length. HP and GCLIM
+are offsets from `heap_lo`; GCLIM is the current space's offset, so zeroed RAM is space A and needs no setup. Cost is
+per live block, nothing per dead one.
 
 ### 3.7 The font CPU (removed; last at commit `181cbb7`)
 

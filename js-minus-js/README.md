@@ -112,6 +112,9 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
   arithmetic, a variable's last assignment, a function's returns, a method's result) so that booleans print as
   `true` / `false`: `console.log(1 < 2)` prints `true`. Only 0 / 1 depend on the static type; strings, arrays,
   objects and numbers are told apart at run time.
+- The runtime's work on memory is instructions too: allocation, `+` on strings, copies (slices, joins, case mapping,
+  a number's digits), comparisons and searches go a cache line per execution rather than a word per dozen
+  instructions of ROM code (ARCHITECTURE §3.5).
 - Each `console.log` argument is one PRINT instruction, which writes up to 4 console cells per execution and repeats
   until it is done. A `+` chain with a string in it isn't built: its pieces stay on the stack and a ROM routine prints
   them in turn (or, if a comparison, `&&` / `||` or `?:` follows, joins them into one string first).
@@ -120,8 +123,9 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
 
 An object is an 8-word heap chunk (three key/value pairs and an overflow link). `o.x` is two instructions whose key is
 the string's interned address; allocation is a pointer bump; a copying collector in ROM runs when the heap is full and
-costs time per live object. A key built at run time is first matched by its characters against the program's strings
-(then the object's own keys), so it finds the same property as the literal. Details:
+costs time per live object. A key built at run time is matched by its characters against the object's own keys; a new
+one is stored as the program's string with those characters if there is one, so it finds the same property as the
+literal. Details:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.6.
 
 ### Limits

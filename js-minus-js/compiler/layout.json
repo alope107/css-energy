@@ -36,7 +36,12 @@
   "setx",
   "getx",
   "dyn",
-  "print"
+  "print",
+  "galloc",
+  "apush",
+  "dcat",
+  "gcat",
+  "dcat0"
  ],
  "str_size": 768,
  "strend": 7935,
