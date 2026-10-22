@@ -1,6 +1,7 @@
 """suite_ui.py [maxsteps [limit]] — level 5 setup: for every suite test the machine can finish quickly, write the expected
 console (Node's output laid out on the page's 8 x 16 console grid, as the PUTC service does) to build/ui_exp, and
-print the ui_seq.js argument list. The user's program from the bug report is first."""
+print the ui_seq.js argument list. The user's program from the bug report is first.
+The net_* programs need the network gateway: NET=1 lists only them (make l5-net), otherwise they are left out."""
 import sys, os, json, glob
 import os, sys; ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path[:0] = [os.path.join(ROOT, d) for d in ('compiler', 'machine', 'readback')]  # repo root
 import cc_ref as R
@@ -21,12 +22,16 @@ open(f'{EXP}/user_report.js', 'w').write('var a = "hi"; console.log(a);\n'); ope
 args = []
 # the page's initial program is tests/fizz.js (= suite/fizzbuzz.js): its grid is always written, for ui_seq's EXP1
 open(f'{EXP}/fizzbuzz.grid', 'w').write(grid(open(os.path.join(HERE, 'suite', 'fizzbuzz.out')).read()) + '\n')
-for f in [f'{EXP}/user_report.js'] + sorted(glob.glob(os.path.join(HERE, 'suite', '*.js'))):
+NET = os.environ.get('NET') == '1'
+progs = sorted(glob.glob(os.path.join(HERE, 'suite', '*.js')))
+progs = [f for f in progs if os.path.basename(f).startswith('net_') == NET]
+for f in ([] if NET else [f'{EXP}/user_report.js']) + progs:
     if len(args) >= 2 * limit: break
     c, r = R.compile_and_run(open(f).read(), lib)
-    if r[0] > maxsteps: continue
+    if r[0] > maxsteps and not NET: continue      # (a network program's time is its round trips, not its steps)
     name = os.path.basename(f)[:-3]
     open(f'{EXP}/{name}.grid', 'w').write(grid(open(f[:-3] + '.out').read()) + '\n')
     args += [f, f'{EXP}/{name}.grid']
-for f in sorted(glob.glob(os.path.join(HERE, 'suite_err', '*.js')))[:2 if limit < 10 ** 6 else None]: args += [f, 'ERR:error']
+errs = [f for f in sorted(glob.glob(os.path.join(HERE, 'suite_err', '*.js'))) if os.path.basename(f).startswith('net_') == NET]
+for f in errs[:2 if limit < 10 ** 6 else None]: args += [f, 'ERR:error']
 print(' '.join(args))

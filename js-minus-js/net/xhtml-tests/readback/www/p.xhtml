@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>xhtml parent</title><style>/*<![CDATA[*/
+@property --r { syntax: "<integer>"; inherits: true; initial-value: 0; }
+@keyframes rd { from { --r: 0; } to { --r: 3100; } }
+body { margin: 16px; font: 16px system-ui, sans-serif; timeline-scope: --s; }
+.slot { width: 100px; height: 4px; overflow: hidden; scroll-timeline: --s x; outline: 1px solid #888; }
+.slot object { display: block; width: 3200px; height: 4px; border: 0; }
+.out { animation: rd 1s linear both; animation-timeline: --s; }
+.out::after { counter-reset: v calc(var(--r) - 100); content: "read " counter(v); }
+/*]]>*/</style></head><body><div class="slot"><object data="c_a.html#t"></object></div><p class="out"></p></body></html>

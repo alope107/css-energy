@@ -100,6 +100,14 @@ class Sim:
         if op == 'NOP': pass
         elif op == 'PUSHI': wr(sp, imm); sp += 1
         elif op == 'PUSHS': wr(sp, imm - STRTAG); sp += 1
+        elif op == 'NET':                         # the answers come later on the page: it ends the pass, then runs first,
+            x = rd(sp - 1); p_ = st['pst']; P = 2 * R.LAYOUT['net_parts'] + 1   # once per write: the bytes, then part 0's answer
+            if p_ == 0 and not self.first: raise Stall()
+            a_ = sp - 1 if p_ == P - 1 else R.RBUF0 + p_
+            self.way((a_ & AMASK) // 4)            # (its line before the gateway: a stall after it would ask twice)
+            if p_ == 0: st['netans'] = R.netw(st.setdefault('net', R.Device())(x))
+            wr(a_, st['netans'][p_][1])
+            if p_ < P - 1: pc -= 1; partial = True
         elif op == 'LOADG': wr(sp, rd(imm)); sp += 1
         elif op == 'STOREG': sp -= 1; wr(imm, rd(sp))
         elif op == 'LOADL': wr(sp, rd(fp + simm)); sp += 1
@@ -192,7 +200,7 @@ class Sim:
             if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
             if cells: cw = 1
         if op in ('ENDK', 'NEW'): st['pst'] = 1 if partial else 0
-        if op == 'ENTER': st['pst'] = st['pst'] + 1 if partial else 0
+        if op in ('ENTER', 'NET'): st['pst'] = st['pst'] + 1 if partial else 0
         st['pc'], st['sp'], st['fp'] = pc, sp, fp; st['steps'] += 0 if (out and not done) or partial else 1
         return cw
     def run_pass(self, K):

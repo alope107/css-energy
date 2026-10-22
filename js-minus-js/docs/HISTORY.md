@@ -40,6 +40,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   idle levels 269 µs), an `if()` ~70 ns per entry it contains, size containers above a subtree restyling it once per
   container (7 times per fill). FizzBuzz on the page 10.5 → 3.9 s after Run; CPU-only pages 2.8–7.3× faster
   (BENCHMARKS §12). The font CPU's code was removed; it last exists at commit `181cbb7`.
+- **13, the network (2026-10-19 … 21, branch `css-fetch`).** `fetch(url)` / `read()` through one `NET` instruction and
+  a modem iframe that reloads itself (ARCHITECTURE §3.8). `<object>`s fire their request once only (ENGINE_NOTES 53); a
+  quirks-mode child reads any same-origin body as CSS (50). The first return channel was responsive iframes (51): it
+  needed a flag in 153 and its height never shrank (52). The user's fragment-scroll readback (56,
+  `net/xhtml-tests/`) replaced it: no flag, 20 bits per answer. The gateway is a proxy: CSS can't build a URL, and CSS
+  can't read an arbitrary body. On the font CPU a word took 0.5–0.8 s; on the CSS CPU about 0.25 s. Then 4 modems with
+  2 bytes each: half the time for a body (BENCHMARKS §14), not the quarter the probe promised; two bugs on the way, a
+  hidden box restoring stale answers (ENGINE_NOTES 59) and the request flickering to idle on settling passes.
 
 ## Dead ends and superseded approaches
 
@@ -85,6 +93,13 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
 | 39 | NEW zero-filling its chunk | 12 micro-cycles, two lines per object | NEW zeroes nothing; ENDK |
 | 40 | Every identifier writing its bytes to the string area | FizzBuzz compiled ~7% slower | only after `.`, `{` or `,` |
+| 41 | `<object>`s as the request primitive, toggled by `display` | each fetches once; showing it again reuses its frame (ENGINE_NOTES 53) | a self-reloading modem iframe |
+| 42 | An SVG `<object>`'s natural size as the return channel | set by the `width` / `height` attributes, not CSS; SVG is XML (no quirks) | responsive iframes, then fragment scroll |
+| 43 | Responsive iframes as the return channel | a flag in 153; the height never shrinks (mod-4096 answers, 12 bits); every load relays the page out | fragment scroll (ENGINE_NOTES 56) |
+| 44 | The modem cross-site, in its own process (font CPU) | ~40 loads/s but the page dropped to 5–6 frames/s | in process (fragment scroll needs it anyway) |
+| 45 | Acting on a request seen in two consecutive loads | one more load per word | one clean load (each digit once) |
+| 46 | 4 modems' answers unpacked by the lib | ~250 steps per READ; its cells evicted the stack and code (sets 9, 10) | NET writes the bytes; cells in sets 11–14 |
+| 47 | The modems' boxes inside `#clk`, shown by a transition latch | Edit hid them, Run restored stale answers; the latch didn't hold | outside `#clk`, the register `rlive` |
 
 ## Open leads (untried)
 
@@ -105,5 +120,11 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
+- **Network, cheaper words**: with 4 modems the page loses a third of its frames to their reloads (ENGINE_NOTES 58).
+  Fewer request digits per load, a modem that reloads only while a word waits, or one modem per 2 parts; and the CPU's
+  ~60 steps per byte (`read()` and the program's loop).
+- **Network, more**: POST, request headers and response headers (more words); a gateway on the deployed site (a Worker
+  with state per page); a two-click path with no gateway at all, through a form GET to a `data:` document (ENGINE_NOTES
+  57: it can read CORS-enabled JSON as CSS and report through responsive iframes).
 - **Language**: a wider console; built strings; printing objects, `undefined`, `in` / `delete`, prototypes; booleans
   as parameters; specific error codes on the page.

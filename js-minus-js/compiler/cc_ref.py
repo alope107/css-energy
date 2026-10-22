@@ -28,6 +28,8 @@ wrong guess costs nothing for non-negative numbers and still prints correctly). 
 are followed by PUSHI 32 PUTC.
 """
 import sys, json, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'net'))
+from device import Device
 
 # the memory map (compiler/layout.json): ROM 0..rom_size-1 (the lib); RAM from rom_size = data_base; see layout.json's _doc
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
@@ -38,7 +40,8 @@ AMASK = 32767                           # addresses are 15-bit (the font's addre
 # opcodes (jsc.js)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
     JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL, \
-    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, PUSHS, IDXA, STOREX, DYN = range(58)
+    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, PUSHS, IDXA, STOREX, DYN, NET = range(59)
+# NET: pop a word, push the network gateway's answer (net/device.py); the lib's fetch(url) / read() are made of it
 # PRINT family (serviced by CSS on the page, machine/uarch.py in the model): pop a value and print it. A tagged string pointer
 # prints its bytes, anything else prints in decimal; the B forms print 0 / 1 as false / true (the static type says
 # boolean). SP / LN add a space / newline. PRINT_OP[sep] + (type == boolean) is the opcode.
@@ -70,6 +73,11 @@ PARAM0 = 6144                           # parameter i's symbol address until its
 OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)       # = machine/uarch.py
+RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
+def netw(ans):
+    """NET's writes for the parts' answers: [(address, value)], part 0's whole answer last (at sp - 1: address None)"""
+    out = [(RBUF0 + 2 * j + k, (d >> 8 * k) & 255 if d >> 16 > k else -1) for j, d in enumerate(ans) for k in (0, 1)]
+    return out + [(None, ans[0])]
 VECS = {n: LAYOUT['vec_base'] + i for i, n in enumerate(LAYOUT['vectors'])}
 GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print'))
 ARRTAG = LAYOUT['arrtag']
@@ -102,7 +110,8 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
            ('toString', {0: 'tostring0'}, 2)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(s), String(x); their names are reserved
-GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'parseint'}, 3), ('String', {1: 'tostring'}, 2)]
+GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'parseint'}, 3), ('String', {1: 'tostring'}, 2),
+           ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
 ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
@@ -939,9 +948,11 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator (= build.js run())
-def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False):
+def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, net=None):
     """strict: check the stack discipline the compiler promises: statements leave the stack as they found it, so sp
-    never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced')"""
+    never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced').
+    net: the NET instruction's gateway (default: net/device.py's, which serves tests/net/)"""
+    if net is None: net = Device()
     if out_base is None: out_base = LAYOUT['out_base']
     mem = [0] * (AMASK + 1)
     romw = [w or 0 for w in rom]       # instructions only: a data read below RAM gives 0 (the page has no ROM leaves)
@@ -1004,6 +1015,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) & AMASK]
         elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) & AMASK]
         elif op == PUSHS: mem[sp] = imm - STRTAG; sp += 1
+        elif op == NET:                                    # the answers' bytes into RBUF0 …, part 0's answer on the stack
+            for a, v in netw(net(mem[sp - 1])): mem[sp - 1 if a is None else a] = s20(v)
         # arrays and dynamic operators: the fast case here, the rest in ROM (a trap: the return address pushed, as by CALL)
         elif op in (IDXA, STOREX):
             x, k = (mem[sp - 2], mem[sp - 1]) if op == IDXA else (mem[sp - 3], mem[sp - 2])

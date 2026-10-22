@@ -18,7 +18,7 @@ PRINTOPS = ['PRINT', 'PRINTB', 'PRINTSP', 'PRINTBSP', 'PRINTLN', 'PRINTBLN']
 # allocates an 8-word chunk, ENDK ends its keys; OVER copies the word under the top, JNEG branches on the sign of that word
 # (array or object)
 OBJOPS = 'SCANI SCAN LDF PUTV NEW SETF ENDK OVER JNEG'.split()
-OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS + OBJOPS + ['PUSHS', 'IDXA', 'STOREX', 'DYN']
+OPN = 'NOP PUSHI LOADG STOREG LOADL STOREL LOADI STOREI ADD SUB MUL DIV MOD LT GT LE GE EQ NE AND OR NOT NEG JMP JZ JNZ CALL ENTER RET POP DUP PUTC HALT JMPI SHL13 INCG INCL IDX IDXL'.split() + PRINTOPS + OBJOPS + ['PUSHS', 'IDXA', 'STOREX', 'DYN', 'NET']
 # PUSHS a: push the string value of address a (a - STRTAG): a string literal. IDXA [x, k] -> [x[k]] and STOREX [x, k, v] -> []
 # index an array (0 past its length; a store inside it); anything else, or a store outside the length, traps into the ROM's
 # GETX / SETX: the return address is pushed (as CALL does) and pc goes to the routine. DYN op [a, b] -> [a op b] (op: the

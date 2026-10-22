@@ -30,6 +30,8 @@ make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
+make l5-net          # the network programs (tests/suite/net_*) on the page, served with the gateway (~1 min)
+node net/server.js .. 8767   # serve the repo root with the network gateway (fetch / read need it; README Network)
 make dist            # copy the built page to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
@@ -62,6 +64,8 @@ machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compile
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
 tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
+net/       server.js (web server + network gateway: the modem's documents and protocol)  device.py shim.js (the same
+           protocol for the models and Node)  probe/ (what CSS can request and read back)  xhtml-tests/ (the user's tests)
 ```
 
 ## How to make changes
@@ -119,7 +123,7 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 ## Done means
 
 - `make test` passes; `make l3` and `make fuzz` for any compiler change; `make l5-smoke` for any change that reaches
-  the page.
+  the page; `make l5-net` for any change to `NET`, the modem (`gen_css.py`'s net class and slot) or `net/`.
 - `dist/` is rebuilt if the page changed.
 - Measured effects are in `docs/BENCHMARKS.md`; new Chrome behaviour is in `docs/ENGINE_NOTES.md`.
 - Paste the tests' summary lines as evidence; don't just say they pass.
@@ -151,3 +155,10 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 - Code that HISTORY names (`gen_vm.py`, `ccpage.py`, `cpu.py`, …) was removed: `git checkout 91d73bc -- js-minus-js/archive`.
   The font CPU (`gen_fvm4.py`, `cpu4.py`, `cpugen.py`, `otl.py`, `fvm_build.py`, `uarch4.py`, `hbtest.py`, `traps.py`, L4)
   last exists at `181cbb7`.
+- The network (`NET`, ARCHITECTURE §3.8): the gateway's words exist four times, `net/server.js` (the page),
+  `net/device.py` (cc_ref, cssref, csssim, the fuzzer), `net/shim.js` (Node) and `lib_src.js`; change them together.
+  The modem's answer is a fragment scroll, which crosses same-origin documents only: keep the modem on the page's
+  origin. The repo-root `http.server` has no gateway: there `fetch` waits ~20 s and returns -1. A network program's
+  time is its round trips, not its steps: `suite_ui.py` lists every `net_*` program for `make l5-net`. The modems'
+  boxes stay outside `#clk` (a hidden box restores its scroll offset: stale answers, ENGINE_NOTES 59), and the read
+  path's runtime cells sit in cache sets the stack and code don't use (`layout.json` pads `rt_cells`).

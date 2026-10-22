@@ -21,6 +21,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
   their common methods, and `console.log` prints arrays and objects as Node does.
 - On the page, FizzBuzz 1–15 compiles in about 2.45 s from Run (including the 1.2 s readback sweep), runs in about
   1.2 s, and halts about 3.6 s after Run. On CPU-only pages FizzBuzz halts ~0.95 s after load.
+- `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)): 62 bytes
+  take about 11 s on the page, and nothing else runs any slower within the noise.
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -92,6 +94,9 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
   inside expressions (`a[i++]`, `while (n--)`).
 - **Output**: `console.log(a, b, ...)` and `putc(code)`. An array or object prints as Node prints it on one line:
   `[ 1, 'a', [ 2 ] ]`, `{ k: 1, 'a b': [] }`, `[Array]` / `[Object]` below depth 2.
+- **Network**: `fetch(url)` GETs a URL and returns the HTTP status (`-1` if the request failed); `read()` then returns
+  the body's next byte, `-1` past its end. They work only when the page is served by its gateway, which makes the
+  requests (see [Network](#network)).
 - **Comments**: `//` and `/* */`.
 - **Semicolons**: optional where JavaScript inserts them. A newline after a complete statement ends it unless it is
   inside `( [`, a call or a `for (…)` header, or the next line continues it (starts with `.` `[` `(` `?` `:` `,` or a
@@ -163,6 +168,9 @@ costs time per live object. A key built at run time is first matched by its char
 - **Not supported**: `undefined`, `typeof`, nested functions or closures, template literals, expression statements
   starting with a literal or `(`.
 - **Console**: 8 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
+- **Network**: one request at a time, GET only, no headers; a status above 511 reads as 511. A round trip takes about
+  a third of a second on the page and carries 2 URL bytes or 8 body bytes. Without the gateway (`file:`, a static server)
+  `fetch` returns `-1` after about 20 s. `fetch` and `read` are reserved names.
 
 ### Error codes
 
@@ -194,3 +202,29 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.
+
+## Network
+
+The page can't make requests by itself, so the server it comes from does: `net/server.js` serves the page and is a
+**gateway**. It performs the GET (any URL: relative ones resolve against the page, absolute `http(s)` ones go out from
+the server, so CORS doesn't apply) and hands the body back a byte at a time. What CSS does is talk to the gateway,
+with no script:
+
+- `fetch` and `read` are made of one instruction, `NET`, which sends a word and waits for the answers of four
+  "modems" at once: a READ brings 2 bytes from each.
+- The request: the page sets the height of the modem iframes to the word. The modem's document reloads itself all the
+  time; each load reads its height (`100vh`) and sends it as a few `background-image` URLs that CSS chooses.
+- The answer: each load loads the gateway's answer as a stylesheet, served as `application/json`. Only a quirks-mode
+  document may use that as a stylesheet, and the modem has no doctype (the page is XHTML, which has no quirks mode).
+  It lays out a span as wide as the answer, then the element `#t`, and the load scrolls to `#t`. The scroll reaches
+  the page's narrow `overflow: hidden` box around the iframe, and a scroll timeline reads its `scrollLeft`.
+
+```
+node net/server.js .. 8767        # serve the repo root with the gateway (from js-minus-js/)
+# then open http://localhost:8767/js-minus-js/dist/js_in_css.xhtml in Chrome
+```
+
+The gateway is a local tool: it fetches whatever the page asks for, from wherever it runs. The site the repo deploys
+to is static, so it has no gateway, and `fetch` there returns `-1`. The modem starts at the program's first network
+word, reloads about 4 times a second each while words come, and once a second after 3 s without one. How it works:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.8.

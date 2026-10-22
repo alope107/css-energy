@@ -40,7 +40,7 @@ def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=256, STR_LO=U.STR_LO, HEAP0=HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=STRTAG, OBJTAG=OBJTAG, ARRTAG=U.ARRTAG,
              INIT=INIT, SP0=SP0, DATA_BASE=DB, CODE_BASE=L['code_base'], STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0)
-    k.update(CELL)
+    k.update(CELL); k['NETPARTS'] = L['net_parts']; k['NBUF'] = 2 * L['net_parts']
     k.update({f'OP_{n}': i for n, i in OP.items()}); k.update({f'W_{n}': i * 8192 for n, i in OP.items()})
     return k
 

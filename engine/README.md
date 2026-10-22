@@ -33,6 +33,9 @@ fact, so a change in Chrome flips a reading.
 | `touch-snap-defer` | a scroll-snap container re-snaps after a layout change at once, except while a scroll gesture is active anywhere on the page: then when it ends (`LocalFrameView::ShouldDeferLayoutSnap`) | css-physics touch: the follower `#FO` (ARCHITECTURE.md "Touch") |
 | `scroll-axis-lock` | `scroll-axis-lock: none` stops a touch drag that starts nearly horizontal from locking to that axis | css-physics touch handles |
 | `touch-3d-scroll` | a touch drag scrolls a 3D-transformed scroller by the finger's movement unprojected onto its plane (offset = screen movement / on-screen scale) | css-physics touch handles: the drag in world units |
+| `quirks-lax-css` | a quirks-mode page applies a same-origin stylesheet whatever its Content-Type; a standards-mode one only `text/css` or none | js-minus-js NET modem (ENGINE_NOTES 50) |
+| `responsive-iframe` | `frame-sizing: content-height` sizes an iframe to an opted-in child's content height, no lower than its height at the child's load (a flag in 153) | js-minus-js: a `data:` child's return channel (51, 57) |
+| `fragment-scroll` | a same-origin child navigated to `#t` scrolls the page's `overflow: hidden` box around it to `#t` | js-minus-js NET modem's answers (56) |
 | `var-ident` (watch) | `var(ident("--m" var(--k)))` is unsupported; if it ships, both projects gain dynamic indexing | — |
 
 Chromium 153.0.8010.12 (2026-10-14, and on the mini PC 2026-10-17): every fact holds under both profiles; `var-ident`

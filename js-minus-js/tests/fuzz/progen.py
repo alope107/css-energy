@@ -34,6 +34,7 @@ STRS = ['"a"', '"hi"', "'x y'", '""', '"Fizz"', '"it\'s"', "'q\\\"t'", '"t\\tx"'
 NAMES = ['a', 'b', 'c', 'd', 'e', 'g', 'h', 'x', 'y', 'z', 'u', 'v', 'w', 'p', 'q', 'r', 's', 't', 'k', 'm', 'n2', 'val',
          'sum', 'tmp', 'acc', 'lo', 'hi2', 'abc', 'x_1', '$v', '_q']
 KEYS = ['a', 'b', 'k', 'len', 'next', 'v2']
+URLS = ['"hello.txt"', '"n.txt"', '"nope.txt"', '"/data/lines.txt"', '"http://x/"']     # fetch's (tests/net/)
 SKEYS = ['"c d"', '"x"', "'k'"]          # string keys ('k' is the same property as the identifier key k)
 PREC = {'||': 2, '&&': 3, '==': 4, '!=': 4, '===': 4, '!==': 4, '<': 5, '>': 5, '<=': 5, '>=': 5, '+': 6, '-': 6,
         '*': 7, '/': 7, '%': 7}
@@ -318,7 +319,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -434,6 +435,12 @@ class Gen:
                 for _ in range(r.randint(1, 3)): pieces += [('str', self.strx(2)), ('num', self.num(1))]
                 args.append(('cat', pieces))
         return [('LOG', args)]
+    def s_net(self):
+        """fetch / read: the tests' gateway (net/device.py) and the oracle's (net/shim.js) serve tests/net/ alike"""
+        if self.cur is not None: self.cur.prints = True
+        r = self.r
+        if r.random() < 0.4: return self.simple(f'console.log(fetch({r.choice(URLS)}))')
+        return self.simple('console.log(read())')
     def s_putc(self):
         if self.cur is not None: self.cur.prints = True
         return self.simple(f'putc({self.r.randint(33, 126)})')

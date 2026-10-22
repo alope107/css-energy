@@ -314,6 +314,56 @@ its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output): `uarch.py` / `
 `machine/hbtest.py` the font in uharfbuzz. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12); ENGINE_NOTES
 25–33 are what it relied on.
 
+### 3.8 The network: `NET` and the modems
+
+`fetch(url)` and `read()` are ROM routines (`lib_src.js`, called like `parseInt`: cc_ref `GLOBALS`) made of one
+instruction, `NET` (opcode 58). Its word is `2 p + s`: `s` a sequence bit the lib alternates (the runtime cell
+`NETSEQ`), so consecutive words always differ; `p = 4 arg + op` (`net/device.py`): op 0, two URL bytes (`arg = b0 + 256
+b1`); op 1, GET (the status + 1, 0 if it failed); op 2, READ. P = 4 modem parts (`layout.json` `net_parts`) answer
+each word at once: part j's answer to a READ is the body's bytes 2j and 2j + 1, packed as `b0 + 256 b1 + 65536 n`. `NET`
+unpacks the answers into the bytes `RBUF0 … RBUF7` (−1 where there is none: `cc_ref.netw`) and puts part 0's answer
+over the word. `read()` takes the next byte from there (`RLEFT` counts what's left), so a READ brings 8 bytes.
+`cc_ref.run()`, `cssref.py` and `csssim.py` answer at once from `net/device.py`, which serves `tests/net/`; in csssim a
+`NET` ends its pass the first time and runs first in the next, as on the page.
+
+On the page the CPU can't make requests, so it talks to a gateway (`net/server.js`, which has the protocol) through four
+modem iframes:
+
+- **The class `net`** reads the word at `sp - 1` and stalls without a miss until every part's answer to it has come
+  (ENGINE_NOTES 56). While it waits it leaves `--req = 1 + word` at the chain's end, the register `rreq` (held on
+  passes that don't run the chain). Then it runs 2 P + 1 times (`--pst`, as ENTER zeroes its locals): the 8 bytes into
+  `RBUF0 …`, then part 0's answer over the word, which completes it; the word stays the request until then. `rnt0`
+  holds the clock (`--t`, 600 a second) when this request began; 20 s without an answer give −1.
+- **The request**: the modems, `<iframe loading="lazy" src="/net/m0.html?part=j&n=4#t">`, are `1 + rreq` px tall
+  (a word is below 2^19). They show from the run's first waiting `NET` on (the register `rlive`); before that nothing
+  loads.
+- **The modems' documents** have no doctype (quirks mode) and reload alternating `m0.html#t` and `m1.html#t` (a refresh
+  to the same URL doesn't reload). Each load reads its height (`100vh`) and sends five hex digits of it plus a check
+  digit as `background-image: if(style(--x: …): url(d/<i>/<nonce>/<v>); …)`. A resize restyles the document, so a new
+  word goes out without a reload. Each load also loads `rx`, served as `application/json`, as a stylesheet
+  (ENGINE_NOTES 50): `--rx: R`, `R = valid + 2 seq + 4 (this part's answer)`, below 10^6 (the page reads it through
+  `var()`, which keeps 6 digits).
+- **The answer**: a document lays out a span `R` px wide, then `#t` (100 px), and the load scrolls to `#t`. The scroll
+  reaches `.nslot.np<j>`, the page's 100 px wide `overflow: hidden` box around the iframe (2^20 + 100 px wide), so its
+  `scrollLeft` is `R`; the scroll timeline `--nans<j>` reads it. An answer counts when it is valid and its seq is the
+  word's bit 0. Fragment scrolls cross only same-origin documents, so the modems are in the page's process.
+- **Outside `#clk`**: the slots and the iframes sit before `#clkw`, since Edit hides `#clk`. A box that goes `display:
+  none` keeps its scroll offset and gets it back when it shows (ENGINE_NOTES 59): the last run's answers came back
+  with it and could pass for the first word's. Out there the boxes always show and only the iframes hide; they read
+  `rreq` and `rlive` through animations of their own (their timelines and `--nans<j>` are scoped at `body`), which go
+  inactive on Edit: the request is idle, the gateway invalidates the answers, and the boxes scroll back to 0.
+- **The gateway** gives the page's modems a group: as it serves a page it writes a group id into their URLs, each
+  modem's first request is redirected to its own session `/net/s/<id>/m0.html` (the fragment carries over), and its
+  URLs are relative to that, so two pages can't mix their words. A session acts on a load's request if every digit came
+  in once with a matching check digit (a load that saw its height change sends a second value). The group computes the
+  answers once per word, when a part's request changes to it, and resolves relative URLs against the page (the first
+  request's referrer). The modems reload at once while words come, and once a second after 3 s without one.
+- **The runtime cells** of the read path (`RLEFT`, `RBUF0 …`) sit at `rt_base + 32 … 47`, whose blocks fall in cache
+  sets 11–14: at first they shared sets 9 and 10 with the stack's and the code's hot blocks, and every byte evicted one
+  of the three (`layout.json` pads `rt_cells` to put them there).
+
+A word takes about 9 page frames (~0.35 s), and brings 2 URL bytes or 8 body bytes (BENCHMARKS §14).
+
 ---
 
 ## 4. Editor readback (`readback/ui_rb.py`)
@@ -344,6 +394,7 @@ its traps (misses, write-backs, MUL / DIV / MOD / SHL13, output): `uarch.py` / `
 | C1 | `make c1` | `csssim.py`, the CSS CPU pass by pass, runs every compiled image | Node output, cc_ref's steps |
 | C2 | `make c2` | a CPU-only page per program under 1,500 steps (`tests/csscpu_pages.py`) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 8 × 16 grid |
+| L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
 - `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 120 programs (each must fit the editor, or
   `suite_ref.py` fails it), `tests/suite_err/` 46; `tests/programs/` has the demos t1–t4.

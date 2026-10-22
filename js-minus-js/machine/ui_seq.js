@@ -3,6 +3,8 @@
 // SHARDS=N runs the programs in N browsers at once (make l5 does), each starting as above and then taking the next
 // program as it finishes one; their lines print in the arguments' order. The verdicts don't depend on it; compiledMs
 // and haltMs do (the default, 1, for timing).
+// NETROOT=dir: serve dir with the network gateway (net/server.js) and open the page there over http, not file: (the NET
+// instruction's modem needs both; each page gets its own gateway session).
 const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
 const { consoleCodes, gridText, typeLines } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs'), path = require('path');
@@ -12,10 +14,13 @@ const fs = require('fs'), path = require('path');
   const shards = Math.max(1, Math.min(+(process.env.SHARDS || 1), progs.length));
   const blocks = []; let printed = 0, next = 0;
   const flush = () => { while (printed < progs.length && blocks[printed] !== undefined) { if (blocks[printed]) console.log(blocks[printed]); printed++; } };
+  const NR = process.env.NETROOT;
+  const srv = NR && await require(path.join(__dirname, '..', 'net', 'server.js')).serve(path.resolve(NR), 0, {}, { log: process.env.NETLOG ? (...a) => console.log('net', ...a) : undefined });
+  const at = NR ? `http://127.0.0.1:${srv.address().port}/${path.relative(NR, pg)}` : fileUrl(pg);
   async function session() {
     const b = await launch({ extraArgs: envArgs('FLAGS') });
     const p = await b.newPage(process.env.FLAGS ? { viewport: null } : { viewport: { width: 1300, height: 950 } });
-    const t0 = Date.now(); await p.goto(fileUrl(pg), { timeout: 600000 }); console.log('load ms', Date.now() - t0);
+    const t0 = Date.now(); await p.goto(at, { timeout: 600000 }); console.log('load ms', Date.now() - t0);
     const st = () => p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'),
       halted: +c.getPropertyValue('--isHALT') === 1,
       status: getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''), n: getComputedStyle(document.querySelector('.cstv')).getPropertyValue('--csn') }; });
@@ -45,4 +50,5 @@ const fs = require('fs'), path = require('path');
     await b.close();
   }
   await Promise.all(Array.from({ length: shards }, session));
+  if (srv) srv.close();
 })();
