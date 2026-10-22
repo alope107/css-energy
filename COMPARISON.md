@@ -48,4 +48,9 @@ paint's state lives in the network stack and on disk: it survives reloads, arriv
 requests, not passes. It shares the layout-size-to-number read (`anchor-size()` → `calc(100cqw / 1px)` → registered
 `<integer>`), the transition latch, and `if()` selection. Facts it found that matter to the others: Chrome allows about
 1,000 frames per page and every `<iframe>` takes one even hidden and lazy (a hidden `<object>` takes none); one fetch
-per URL per document; history traversal serves CSS-initiated fetches from cache.
+per URL per document; history traversal serves CSS-initiated fetches from cache; a press is captured by the frame it
+starts in, so a drag never crosses frames; hiding a loaded `<object>` keeps its document. It draws with css-physics's
+touch handles and follower (one handle per cell, 480), but can't sum them as css-physics does: each animation on a
+`timeline-scope`d timeline costs ~0.1 ms per layout (960 made every layout ~94 ms; css-physics's 128 at 64 bodies
+would be ~12 ms *(derived)*), so the dragged handle publishes its drag as an anchor's size. It gives each write a fresh URL from a
+per-cell clock that runs only while a latch settles.

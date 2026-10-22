@@ -1,8 +1,8 @@
 # Dictionary Paint
 
 A 24×20, 16-colour canvas in **HTML and CSS**, with no JavaScript in the page, whose pixels are stored in Chrome's
-compression-dictionary store. Paint as much as you like; Back and Forward are undo and redo; the picture survives
-reloads and browser restarts. Chrome only. Hosting is static files plus Cloudflare-style `_headers` and
+compression-dictionary store. Click or drag to paint, with a mouse or a finger; a cell shows its colour at once and a
+spinner until it is stored; unpainted cells are checkered. The picture survives reloads and browser restarts. Chrome only. Hosting is static files plus Cloudflare-style `_headers` and
 `_redirects`; nothing on the server looks at a request.
 
 Every cell is one shared-dictionary entry, and its colour is which of 16 dictionary files it holds. Writing is
@@ -47,18 +47,23 @@ test D's four-page chain:
 
 | Path | What |
 |---|---|
-| `build.py` | site generator: dictionaries, probes, cell pages, the page, `_headers`, `_redirects` |
+| `build.py` | site generator: dictionaries, probes, the writer page, the page, `_headers`, `_redirects` |
 | `site/` | the deployable site (prebuilt) |
 | `serve.js` | local static server applying `_headers` and 200 `_redirects`; `--fault`, `--goaway` simulate host behaviour |
 | `selftest/` | the host self-test page (`selftest/build.py` builds `selftest/site/`) |
-| `tools/` | headless-Chromium harnesses: `e2e.js` (the canvas), `selftest.js`, `goaway.js` |
+| `tools/` | headless-Chromium harnesses: `e2e.js` (the canvas, mouse), `touch.js` (finger strokes), `selftest.js`, `goaway.js` |
 | `docs/` | ARCHITECTURE, HISTORY (what failed), BENCHMARKS |
 
 ## Status (Oct 2026)
 
-- `tools/e2e.js` passes in headless Chromium 153: 65 paints, palette change, reload, undo and redo (live and after
-  reload), page-to-page undo, a fast repaint with an immediate reload, browser restart.
-- Works on Cloudflare Workers. The console shows `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` 15 times per painted cell:
+- `make test` passes in headless Chromium 153: `tools/e2e.js` (clicks, drags, strokes that jump 6 cells a frame
+  drawn as whole lines, 40 changes of one cell, palette change, reload, repaints, browser restart) and
+  `tools/touch.js` (finger strokes on a phone viewport: slow, quick, back and forth, fast diagonal, tap).
+- No undo: Back/Forward undo went with the cell documents (docs/HISTORY.md, 8). A cell can change about 110 times
+  per page load before its writes stop (its spinner then stays); a reload resets that.
+- A touch stroke trails the finger by the touch slop, about a cell on a phone.
+- The click-only canvas worked on Cloudflare Workers; this version (writers at `/c/<k>/w`, write URLs with a
+  `?<slot>` query) hasn't been deployed yet. The console shows `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` 15 times per painted cell:
   the probes answering "no". Cloudflare ends connections after ~10,000 requests and Chrome drops some queued probes;
   a retry pass re-reads those cells (docs/ARCHITECTURE.md, "Retry").
 - First load reads 480 cells with 7,680 probes: about 25–45 s in a slow headless sandbox.

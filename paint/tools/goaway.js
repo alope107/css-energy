@@ -40,7 +40,7 @@ async function serveH2() {
     const pg = ctx.pages()[0] || await ctx.newPage();
 
     // Write every cell from one document: a mask-image per cell registers its dictionary.
-    await pg.goto(srv.base + '/c/0/x');
+    await pg.goto(srv.base + '/c/0/w');
     let pending = N;
     const settle = r => { if (/\/d\//.test(r.url())) pending--; };
     pg.on('requestfinished', settle); pg.on('requestfailed', settle);
