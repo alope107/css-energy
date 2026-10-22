@@ -43,6 +43,7 @@ html,body{margin:0;background:var(--bg);color:var(--ink);
 header h1{font-size:28px;margin:0 0 4px;letter-spacing:-.02em}
 header h1 span{color:var(--acc)}
 header p{margin:0 0 16px;color:var(--dim);max-width:64ch}
+header a{color:var(--acc)}
 
 .stage{container-type:inline-size;width:100%}
 .arena{

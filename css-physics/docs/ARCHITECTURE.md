@@ -175,7 +175,7 @@ gets neither. A scroll does follow the finger, and the scroller that scrolls say
 | Command | Output |
 |---|---|
 | `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine, readable names, a `<!--BODYINFO …-->` comment. **What the test tools expect.** |
-| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`). |
+| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`), and `widgets.html` beside it (`experiments/widgets/`, linked from the header). |
 | `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios. |
 
 Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and minified names. Stylesheets over

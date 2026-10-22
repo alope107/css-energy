@@ -166,7 +166,8 @@ html = html.replace('<title>rigid3d.css</title>', '<title>rigid3d.css: face widg
 html = html.replace('<h1>rigid3d<span>.css</span></h1>', '<h1>rigid3d<span>.css</span>: face widgets</h1>')
 html = re.sub(r'<header>(.*?)<p>.*?</p>', r'<header>\1<p>The same CSS physics engine, with real HTML on the faces of its boxes: buttons, '
               'checkboxes, a select, text fields, a textarea, a video, a marquee, an editable book. Some of them push the '
-              'engine back (shake, reset, gravity, camera, the magic word). Still no script.</p>', html, count=1, flags=re.S)
+              'engine back (shake, reset, gravity, camera, the magic word). Still no script. '
+              '<a href="./">&larr; the plain engine</a></p>', html, count=1, flags=re.S)
 html = re.sub(r'<div class="grp counts">.*?</div>', '', html, count=1, flags=re.S)
 html = html.replace('<span class="m">Drag any body with the mouse.', '<span class="m">Drag a body by its edges or an empty spot; the widgets '
                     'take clicks. Find the controls on every side of the cube.')
