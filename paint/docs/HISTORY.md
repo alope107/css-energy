@@ -151,7 +151,11 @@ dragging, with a mouse and a finger. Headless Chromium 153.
   sent through CDP unacknowledged (one per 4 ms, coalesced per frame as a real mouse's are) then showed most of a
   fast stroke missing, intermittently: each cell decided `--on` and used it in its own `transition-delay`, which was
   sometimes stale; the latch moved to a child, `.l`. The first frames of a stroke, before a latch has held a point
-  of it, start from the pressed cell (`:active`).
+  of it, start from the pressed cell (`:active`). Spinners turned for 28 s: a hundred of them, after a big paint,
+  slowed the next stroke enough to cut its corners, so they turn for 2 s and then stay still until covered.
+- **Open flakes** (2026-10-23, a machine shared with other sessions' benchmarks, load 6–28): a write that never
+  reports done (1 run in ~20; `tools/e2e.js` prints the cell's latch and its writers' loads when it happens); a fast
+  touch diagonal with gaps (once, at load 11; 6 of 6 clean at load 6, leased or not).
 - **Touch was never smooth.** The ~3 ms reported above was a forced layout; a real drag, timed later, ran at 8–12 fps:
   a full re-layerization of 966 composited layers (480 handles) every frame (`ARCHITECTURE.md`, Touch). Not fixed.
 - **Load got lighter:** no cell documents at load (they were 480 documents, 480 mask-image writes and 480
