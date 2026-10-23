@@ -119,8 +119,12 @@ cpu = ["--first: calc(1 - var(--init));",
        "--fv: " + sel("fs", NSET, lambda s: f"var(--F{s})") + ";", "--fk: calc(2 * var(--fs) + var(--fv));",
        "--fT: " + sel("fk", NL, lambda k: f"var(--T{k})") + ";",
        "--dfon: calc(var(--fon) * (1 - var(--pic)));", "--ifon: calc(var(--fon) * var(--pic));",
-       "--fd: calc(var(--dfon) * mod(var(--fT), 2));", "--fvb: calc(round(down, var(--fT) / 2) - 1);",
-       "--fk1: calc(var(--dfon) * (var(--fk) + 1));", "--pend0: calc((1 - var(--fon)) * var(--pend));",
+       # (no fill when the block is already in its set: a pending miss seen again after its fill, as a register can land a
+       # frame late under load, would put it in the other way too, and a lookup that matches both ways neither hits nor
+       # misses: the CPU stalls with nothing pending. csssim's passes are atomic, so it never sees one)
+       "--fabs: " + sel("fs", NSET, lambda s: f"calc(1 - {eq(f'round(down, var(--T{2 * s}) / 2)', 'var(--fb) + 1')} - {eq(f'round(down, var(--T{2 * s + 1}) / 2)', 'var(--fb) + 1')})") + ";",
+       "--fd: calc(var(--dfon) * var(--fabs) * mod(var(--fT), 2));", "--fvb: calc(round(down, var(--fT) / 2) - 1);",
+       "--fk1: calc(var(--dfon) * var(--fabs) * (var(--fk) + 1));", "--pend0: calc((1 - var(--fon)) * var(--pend));",
        # a fetch's miss: its line in the code cache, and the next (if absent there, and code)
        f"--ik1: calc(var(--ifon) * (mod(var(--fb), {ISET}) + 1));", "--igb: calc(var(--fb) + 1);",
        "--igblo: mod(var(--igb), 8);", f"--igbhi: mod(round(down, var(--igb) / 8), {ISET // 8});",
@@ -949,7 +953,7 @@ def rom_of(x): return f"calc(clamp(0, {ROM} - {x}, 1) * (1 + round(down, {x} / {
 
 # ---------------- the page's CSS
 P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
-     "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
+     "fon", "fb", "fs", "fv", "fk", "fT", "fabs", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "A", "B", "C", "cls", "rom", "rh", "rl", "vf", "vg", "mf", "ok", "mb", "npc", "nfp", "nsteps", "nstop", "nhalt",
      "kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "pp", "isStr", "isNum", "pq", "pdone", "pj0",
@@ -1263,7 +1267,10 @@ if not UI:
     </html>
     """
 else:
-    ui_props = uipage.props(WOFF) + [f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
+    ui_props = uipage.props(WOFF) + [
+        # (Edit: the globals back to undefined, as the CPU-only image starts them, cc_ref GINIT: hoisting, FCACHE's sentinel)
+        f'#run:not(:checked) ~ .mem :is({", ".join(f".c{a - ROM}" for a in sorted(R.GINIT))}) {{ width: {R.UNDEF + WOFF}px; }}',
+        f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
                                      '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }']
     notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back (a variable axis makes HarfBuzz "
              f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "

@@ -1401,7 +1401,7 @@ class Compiler:
         if m == S_NAMEE:
             h = self.pn
             if isP(T_ARROW):                                   # x => / (x) =>
-                self.arrow_start(h)
+                self.arrow_start(h, 2)
                 if not self.err: self.end_params()
                 return self.err or self.arrow_body()
             if (isP(41) or isP(44)) and self.top_op()[0] == M_PAREN:     # (x): x, still pending (x => ?); (x, : an arrow's parameters
@@ -1633,7 +1633,7 @@ class Compiler:
         if m in (S_AARROW0, S_AARROW):                         # () => / (a, b) =>
             if not isP(T_ARROW): return self.fail(35)
             if m == S_AARROW0:
-                self.arrow_start(None)
+                self.arrow_start(None, 1)
                 if not self.err: self.end_params()
             return self.err or self.arrow_body()
         if m == S_CONLOG:
@@ -1962,16 +1962,19 @@ class Compiler:
             self.osp -= 1; i = self.nd; self.push_od(TMP, 0); self.emit('NUMLIT', self.tmp(i), w1=w1); self.mode = S_OPER; return
         return self.mode_stmt()
 
-    def arrow_start(self, h):
+    def arrow_start(self, h, argc=0):
         """an arrow function's head is known ('(a,' '(a) =>' 'a =>' '() =>'): as 'function (' (S_OPND, S_FNAME; C_FUNCE's d 1),
-        h its first parameter (None: none)"""
+        h its first parameter (None: none). argc: its call count when the head is complete (end_params' f[4], set here as
+        cc_dsl's fnnew does: before fn_enter, which can run out of labels)"""
         if self.curf >= 2: return self.fail(41)
         if h in RESERVED: return self.fail(36)            # ((break, x) =>: the first name came as a pending name)
         t, tv = self.top_op()
         if 0 < t < 100: return self.fail(48)              # (an operator's operand: 1 + x => x)
         nm = tv if t == M_OKEY else 0
         self.push_op(M_FN, nm); lo = self.newlab(); self.emit('JMP', label=lo); self.push_cs(C_FUNCE, lo, 0, 0, 1)
-        self.emit('MOV', w1=self.db + nm - STRTAG if nm else 0); self.fn_enter(self.fnnew())
+        self.emit('MOV', w1=self.db + nm - STRTAG if nm else 0); k = self.fnnew()
+        if argc and not self.err: self.fn[k][4] = argc
+        self.fn_enter(k)
         if h is not None and not self.err: self.declare(h, 2, PARAM0 + self.npar); self.npar += 1
 
     def arrow_body(self):

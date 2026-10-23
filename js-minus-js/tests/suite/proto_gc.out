@@ -1,12 +1,9 @@
-hi n0 base
-hi n50 base
-hi n100 base
-hi n150 base
-0 true
+base hi undefined hi n1
+base 14 true
 false
-80 true
 false
-160 true
-false
-240 true
-false
+true
+6 base 16
+name
+kind
+hello

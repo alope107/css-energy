@@ -84,7 +84,15 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   most of it: a library call can find its operands in the instruction that trapped (as `jcmp` already did), and keys
   no probe takes (`x[hidden]`) send rare properties (`__proto__`, `prototype`, `Math.PI`) to the library without new
   instructions. Compile time +3–4% (arrows' rules and ports), run time +2.4% passes over the suite (the `this` slot,
-  `callv`'s new cases) (BENCHMARKS §17).
+  `callv`'s new cases), then −2.6% with CALLV entering closures itself (BENCHMARKS §17).
+  Two page bugs surfaced on the way. The editor page started every program with its globals at 0 (Edit zeroes RAM),
+  where hoisting and the function cache need `undefined`: a declared function used as a value (`new F`, `var g = f`)
+  was a number there, and only the editor page showed it (C2 builds its pages from images); Edit now sets the global
+  cells to `undefined`. And C2 pages stalled under load (arrows at step 786, once at `a02921a`; three pages per run once
+  closures made `mkfn`, which reads code words through the data cache, common): six browsers on one page stalled half of
+  them, always at the same LDI, with nothing pending and the same block in both ways of its set. The data fill had no
+  check that its block was absent (the prefetch has one); a pending miss seen again after its fill, as when a register
+  lands a frame late under load, filled the other way too. With the check, 30 of 30 such runs halt.
 
 ## Dead ends and superseded approaches
 
@@ -171,9 +179,19 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 
 ## Open leads (untried)
 
-- **CALLV for closures.** An inner function's call always traps to `callv` (its env goes into local 1): two CALLV
-  executions (the env word from the block's first line, which the class already reads, then the return word) would
-  skip the library for exact-arity calls.
+- **Per-iteration `let`.** `for (let i ...)` has one `i`: closures made in the loop see its last value (README
+  Limits). An env cell is per frame, and a top-level function's variables are globals, so a binding per iteration
+  needs a block's own env chained to the frame's; the one-pass compiler doesn't know at the loop's head whether the
+  body will capture `i`. Copying the frame into a fresh cell at each iteration's end would be wrong for the other
+  variables the closures share.
+- **Smaller frames.** A user function's frame is `[ret][this][params][env][locals][temps]`, two words more than
+  before `this` and closures (`deep_recursion` 560 → 963 passes against main, its stack misses). The env slot could
+  exist only in a function that makes a closure, as the last local (its RETC operand and `mkclo`'s word1 relative to
+  the frame label): in the model `deep_recursion` 963 → 760, `fib` −4%, the rest under 1%; it needs a parser state
+  bit (does this function make closures). The `this` slot can't go without every caller knowing the callee.
+- **Making a function value** costs ~87 steps (`mkfn`: an ALLOC, 8 pokes, `mark`) and a closure ~230 (`newenv`, `mkfn`,
+  two `mark`s): an ALLOC kind for function and env blocks (the header and the map bit written by the machine, as for
+  object chunks) would make most of it one instruction.
 - **Labels.** 64 per program (6-bit fields, and each level's label multiplexers grow with the count); a function takes
   3–4 (the close label for RETC whether or not it makes a closure). The generator's programs hit error 20 a third of
   the time.
@@ -182,14 +200,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 - **Callbacks from the library.** `map`, `forEach`, `sort` with a function: the library can't call user code except by
   returning into it (as `callv` does); the timers' loop is user code that asks the library for the next callback, a
   pattern that would also do for these.
-- **A stalled C2 page** (arrows, step 786 of 1,363, no HALT for 60 s; 2026-10-23 at `a02921a`), once; the rerun passed.
 
 - **What a register costs.** ~20 µs a pass each, changing or not (BENCHMARKS §15: 80 unused registers +2.3% on FizzBuzz),
   about four times the style cost measured for a subject alone: the 358 registers are ~2 ms of a light pass, and a
   cheaper register would pay for a 32-line code cache (caesar 24% faster) on everything else.
 - **An intermittent early HALT** (the register machine's tree, 110 of 2,273 steps, on 2026-10-21; the hybrid's
-  obj_keys, 218 of 313, once in ~370 runs): with a fresh browser per run, never twice. A harness that dumps pc, fp and
-  the cache when HALT comes early would tell a HALT executed from one read wrongly.
+  obj_keys, 218 of 313, once in ~370 runs): with a fresh browser per run, never twice. Likely the duplicate cache line
+  that stalled C2 pages (timeline 17): a lookup that matches both ways of a set reads a wrong word. Not seen since that
+  fix, but it was rare before it too.
 
 - **Fewer traps.** Suite traps are mostly misses (1,309) and arithmetic EXT (1,104; 160 in `primes.js`): MOD / DIV,
   SHL13 and small-constant multiply in the font; dirty lines above SP treated as clean; an eviction buffer; next-line
@@ -208,8 +226,8 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
-- **Language**: a wider console; printing objects, `undefined`, `in` / `delete`, prototypes; booleans as parameters;
-  specific error codes on the page.
+- **Language**: a wider console; `in` / `delete`, `instanceof`, classes, template literals, `try` / `catch`, default
+  and rest parameters, destructuring; specific error codes on the page.
 - **More in CSS**: string comparison (`DEQ` / `DLT` on two strings go to `scmp` in ROM, which compares with MCMP); a
   console write set of two cells per bank (output-bound programs fill the four cells of every pass).
 - **Compile time**: the register compiler writes 53K characters of CSS per token level against the stack machine's

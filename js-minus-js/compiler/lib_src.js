@@ -723,6 +723,7 @@ function dne(a, b) { return jsb(deqr(a, b) == 0); }
 // a == b, raw: null and undefined equal each other only; two objects by identity; otherwise primitives (an object's
 // string), two strings by their characters, anything else as numbers
 function leqr(a, b) {
+  if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return deqr(a, b); }     // (two strings, the common case: no prim)
   if ((a == __NULL__) + (a == __UNDEF__)) { return (b == __NULL__) + (b == __UNDEF__); }
   if ((b == __NULL__) + (b == __UNDEF__)) { return 0; }
   if (__kind(a, __K_AO__) * __kind(b, __K_AO__)) { return a == b; }

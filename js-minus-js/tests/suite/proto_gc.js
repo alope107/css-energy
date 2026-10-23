@@ -1,24 +1,22 @@
-// prototype links (and chunks starting with one) survive the GC
+// prototype links (and a chunk that starts with one) survive
+// the GC
+// collections: gcnew
 var base = {kind: "base",
   hello: function () { return "hi " + this.name; }};
-var keep = [];
-for (var i = 0; i < 200; i++) {
-  var o = Object.create(base);
-  o.name = "n" + i;
-  if (i % 50 === 0) keep.push(o);
-}
-for (var j = 0; j < keep.length; j++) {
-  console.log(keep[j].hello(), keep[j].kind);
-}
+var bare = Object.create(base);
+var named = Object.create(base);
+named.name = "n1";
 function P(x) { this.x = x; }
 P.prototype.get = function () { return this.x * 2; };
-var ps = [];
-for (var k = 0; k < 150; k++) {
-  var p = new P(k);
-  if (k % 40 === 0) ps.push(p);
-}
-for (var m = 0; m < ps.length; m++) {
-  var q = ps[m];
-  console.log(q.get(), q.hasOwnProperty("x"));
-  console.log(q.hasOwnProperty("get"));
-}
+var p = new P(7), lost = new P(8);
+lost = Object.create(lost);
+var e = 0;
+for (var j = 0; j < 94; j++) { e = {}; e = {}; e = {}; e = {}; }
+console.log(bare.kind, bare.hello(), named.hello());
+console.log(named.kind, p.get(), p.hasOwnProperty("x"));
+console.log(p.hasOwnProperty("get"));
+console.log(bare.hasOwnProperty("kind"));
+console.log(bare.__proto__ === base);
+var q = new P(3);
+console.log(q.get(), Object.create(bare).kind, lost.get());
+for (var k in named) console.log(k);

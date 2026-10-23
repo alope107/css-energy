@@ -26,7 +26,8 @@ until 2026-10-19 the CPU was a GSUB font, §3.8.)
 ```
 
 Run and Edit are one checkbox (`#run`, first in `body`), read through sibling selectors (`#run:checked ~ …`). Edit
-clears the CPU's registers and zeroes RAM. The picker's radio buttons (`#pk<i>`) follow it.
+clears the CPU's registers and zeroes RAM, but for the globals, which it sets to `undefined` (cc_ref `GINIT`, as the
+CPU-only images start them: hoisting and the function cache's sentinel). The picker's radio buttons (`#pk<i>`) follow it.
 
 ---
 
@@ -269,8 +270,9 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
   `--pst`, steps, halt, the pending miss, the data cache (32 tags with dirty bits, 16 victim bits, 128 words), the code
   cache (16 tags, 64 words), the read ports' eight words, the latches, the RAM and console write channels. Two passes
   per frame.
-- **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers; a dirty
-  victim's words go out through the RAM write channels. The next block is prefetched into its own set if it is absent
+- **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers, unless it is
+  already in the set (a pending miss seen again after its fill under load; two ways holding one block stall the CPU:
+  HISTORY 17); a dirty victim's words go out through the RAM write channels. The next block is prefetched into its own set if it is absent
   there and the victim is clean. A miss of the fetch (`--pic`) fills the code cache instead, and prefetches the next line
   there if it is absent and code.
 - **Chain**: 32 levels of three nested `display: contents` elements, styled once per pass:
