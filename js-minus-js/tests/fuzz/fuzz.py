@@ -54,12 +54,13 @@ def fits(src):
     return len(ls) <= 24 and max(map(len, ls)) <= 64 and all(32 <= ord(ch) < 127 for ch in src.replace('\n', ''))
 
 NUM = re.compile(r'-?\d+')
-NUMTOK = re.compile(r'(?<![\d.])-?\d(?:\.(\d+))?e([+-]\d+)')
+NUMTOK = re.compile(r'(\d+)(?:\.(\d+))?e([+-]\d+)')
 def outside(out):
     """Node printed something our machine cannot (README Limits): a number whose shortest digits need a decimal scale past 22
-    (a fraction below 1e-6 with many digits) or one from 1e39, which the machine prints with 17 digits, not always the shortest"""
+    (a fraction below 1e-6 with many digits) or one from 1e39, which the machine prints with 17 digits, not always the shortest
+    (digits joined to it by a string's + count as its own: that errs on the side of skipping)"""
     for m in NUMTOK.finditer(out):
-        p, e = 1 + len(m.group(1) or ''), int(m.group(2))
+        p, e = len(m.group(1)) + len(m.group(2) or ''), int(m.group(3))
         if p - 1 - e > 22 or e > 38: return True
     return False
 # values that are strings, objects or arrays on our machine (cc_ref): numbers there print as those

@@ -367,6 +367,9 @@ def catok(x, y):
 def notown(v):
     """a string that isn't the program's own (a heap string, or a built-in one): run-time keys look these up by their characters"""
     return isstr(v) and not (STRP0 <= v + STRTAG < SEND)
+def ownkey(k):
+    """a key the machine probes an object for (GETX / SETX): an integer or one of the program's strings"""
+    return issmi(k) or (isstr(k) and not notown(k))
 def typecode(v):
     """typeof's type code (TYPENAMES)"""
     if isstr(v): return 4
@@ -453,7 +456,7 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('toUpperCase', {0: 'upper'}, 2), ('toLowerCase', {0: 'lower'}, 2), ('split', {1: 'split'}, 0), ('trim', {0: 'trim'}, 2),
            ('startsWith', {1: 'startswith'}, 1), ('endsWith', {1: 'endswith'}, 1), ('repeat', {1: 'repeat'}, 2),
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
-           ('toString', {0: 'tostring0'}, 2)]
+           ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
 GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
            ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
@@ -461,7 +464,7 @@ ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
-                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis']
+                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in']
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
@@ -539,13 +542,19 @@ M_INTR = 112
 C_BLOCK, C_IFB, C_ELSEB, C_DOB, C_LOOPB, C_FUNCB = 1, 2, 3, 4, 5, 6
 C_IFC, C_WHILEC, C_FORINIT, C_FORCOND, C_FORSTEP, C_ASSIGN, C_EXPR, C_RETURN = 10, 11, 12, 13, 14, 15, 16, 17
 C_PSET = 19
+# for (x of e) / for (x in e): C_FOROF (a l1, b lb, c x's symbol, d 1 for in) while e is parsed. Two temps below the operand stack
+# (tb moves past them, back at the loop's end: C_LOOPB's d) hold the array and the index; e's ')' emits
+#   for of ('of': MOV i, #0)  MOV a, e  l1: LDI n, a, #-1  JGE i, n -> lb  GETX n, a, i  MOV x, n  i++
+#   for in  MOV i, e  CALL keys at a (a := keys(e), i := 0)  l1: GETX n, a, i  JEQ n, #undefined -> lb  MOV x, n  i++
+# (a key is never undefined); 6 instructions, so that e's last one (a property's read) fits beside them (EMAX)
+C_FOROF = 18
 C_SWITCHC, C_SWITCH, C_CASE = 30, 31, 32
 BRACELESS = 20
 C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_DOB + BRACELESS, C_LOOPB + BRACELESS
 # parser modes
 (S_STMT, S_OPND, S_OPER, S_NAMES, S_NAMEE, S_VAR, S_VARAFTER, S_LPAREN, S_LBRACE, S_ELSE, S_FNAME, S_FPAREN, S_FPARAM,
  S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_INC, S_AFTERELSE, S_PREINC,
- S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_WDOT, S_ERR) = range(28)
+ S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_WDOT, S_BRK, S_ERR) = range(29)
 # pm = 3 after x++ / ++x in an expression, which no '.' or '[' may follow.
 
 def tmerge(a, b):
@@ -808,6 +817,23 @@ class Compiler:
         elif dest is None: self.dynop(code, self.tmp(i), b, c); self.set_od(i, TMP, t)
         else: self.dynop(code, (dest, 0), b, c); self.set_od(i, dest, t)
 
+    def forof(self, j, isin):
+        """for (x of / in: two temps for the loop (the array and the index: tb moves past them), then e (C_FOROF)"""
+        if self.tb + 2 > TBMAX: return self.fail(22)
+        t = self.pop_cs(); self.tb += 2; self.push_cs(C_FOROF, t[1], t[3], j, int(isin), e=t[5]); self.mode = S_OPND
+        if not isin: self.emit('MOV', self.tmp(-1), (K(0), 0))
+    def forof_end(self):
+        """for (x of / in e)'s ')': the loop's head (C_FOROF's comment), then its body (C_LOOPB, d 2: the temps to free)"""
+        t = self.pop_cs(); i = self.nd - 1; a, ix = self.tmp(-2), self.tmp(-1)
+        self.put(ix if t[4] else a, i)                         # for in: keys(e) into a: its frame at a, e its argument (ix, which it zeroes)
+        if t[4]: self.emit('CALL', (self.ent.get('keys', 0) // 2, 0), w1=(a[0] - 256, a[1]))
+        self.nd = i; self.deflab(t[1], self.here())
+        n, x = self.tmp(0), (self.var(t[3]), 0)                # (GETX's trap needs a temp: n)
+        if t[4]: self.emit('GETX', n, a, ix); self.emit('JEQ', b=n, c=(K(UNDEF), 0), label=t[2]); self.emit('MOV', x, n); self.step1(True)(ix, ix)
+        else:
+            self.emit('LDI', n, a, (K(-1), 0)); self.emit('JGE', b=ix, c=n, label=t[2]); self.emit('GETX', n, a, ix)
+            self.emit('MOV', x, n); self.step1(True)(ix, ix)
+        self.push_cs(C_LOOPB, t[1], t[2], 0, 2, e=t[5]); self.mode = S_LBRACE
     def compound(self, code, i, o):
         """x op= e with the old value at i, e above: into o; its static type"""
         self.dynop(code, o, self.src(i), self.src(i + 1)); return self.btype(code, self.otype(i), self.otype(i + 1))
@@ -1115,10 +1141,19 @@ class Compiler:
         self.symstep = 0                                   # (this token wrote an implicit global's entry: settype)
         m = self.mode
         fallin = m in (S_AFTERELSE, S_LBRACE)              # (a braceless body's statement: no expression statement there)
-        if isP(T_NL) and m not in (S_NAMES, S_NAMEE, S_OPER, S_VARAFTER, S_INC, S_OPND): return
+        if isP(T_NL) and m not in (S_NAMES, S_NAMEE, S_OPER, S_VARAFTER, S_INC, S_OPND, S_BRK): return
         if m == S_NAMES:
             h = self.pn
             if h in WGLOB and isP(46): self.pn = (1, 0); self.mode = S_WDOT; return      # window.x: x
+            if (isK_('of') or isK_('in')) and self.top_cs()[0] == C_FORINIT:       # for (x of e) / for (x in e)
+                j = self.lookup(h)
+                if j < 0: j = self.implicit(h, True)
+                if self.err: return
+                if self.sym[j][2] == 3: self.sym[j][2] = 1
+                return self.forof(j, isK_('in'))
+            if isP(58):                                        # a label (outer:): a name of its own (h2 + H2M: no variable's) in the
+                if self.nsym + self.nlet >= NS: return self.fail(24)    # block-scoped region, the next statement's control entry
+                self.nlet += 1; self.sym[NS - self.nlet] = [h[0], h[1] + H2M, 0, self.csp, 0, 0]; self.mode = S_STMT; return
             if isP(61) or (kind == 'P' and v in COMPOUND):
                 j = self.lookup(h)
                 if j < 0 and (self.rom or not isP(61)): return self.fail(5)
@@ -1232,10 +1267,7 @@ class Compiler:
             if isK_('return'):
                 if not self.curf: return self.fail(57)
                 self.push_cs(C_RETURN); self.mode = S_OPND; return
-            if isK_('break') or isK_('continue'):
-                e = self.loop_entry(isK_('break'))
-                if e is None: return self.fail(56)
-                self.emit('JMP', label=e[2] if isK_('break') else e[1]); self.mode = S_INC; return
+            if isK_('break') or isK_('continue'): self.pn = (int(isK_('break')), 0); self.mode = S_BRK; return
             if isK_('function'):
                 if self.curf or self.csp: return self.fail(41)
                 lo = self.newlab(); self.emit('JMP', label=lo); self.mode = S_FNAME
@@ -1259,6 +1291,7 @@ class Compiler:
             self.pn = (self.pn[0], 0); self.mode = S_VARAFTER; return
         if m == S_VARAFTER:
             j = self.pn[1] - 1 if self.pn[1] else NS - self.nlet if self.decl_blk() else self.nsym - 1     # (pn[1]: a reused global + 1)
+            if (isK_('of') or isK_('in')) and self.top_cs()[0] == C_FORINIT: return self.forof(j, isK_('in'))
             if isP(61):
                 self.push_cs(C_ASSIGN, j, 0, 1 + self.pn[0]); self.mode = S_OPND; return
             if self.pn[0] == 2: return self.fail(65)
@@ -1267,6 +1300,16 @@ class Compiler:
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
             return self.end_simple_stmt(kind, v)
+        if m == S_BRK:                                         # break / continue (pn[0]: break): a label on its line, or its end
+            brk = self.pn[0]
+            if kind != 'ID' and not (isP(59) or isP(T_NL) or isP(125)): return self.fail(53)
+            if kind == 'ID':                                   # the labeled loop's entry (a label is a loop's: cc_ref S_NAMES)
+                j = self.lookup((v[0], v[1] + H2M)); c = self.sym[j][3] if j >= 0 else CD
+                if c >= self.csp or self.cs[c][0] not in (C_LOOPB, C_LOOPB1, C_DOB, C_DOB1): return self.fail(56)
+                self.emit('JMP', label=self.cs[c][2] if brk else self.cs[c][1]); self.mode = S_INC; return
+            e = self.loop_entry(brk)
+            if e is None: return self.fail(56)
+            self.emit('JMP', label=e[2] if brk else e[1]); m = self.mode = S_INC        # (this token ends the statement)
         if m == S_INC:
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
@@ -1488,6 +1531,7 @@ class Compiler:
             # the statement ends at ')': JavaScript inserts a ';' here even without a newline, and a ';' that follows
             # is an empty statement (so `if (a) do s; while (c); else ...` is rejected)
             self.pop_cs(); self.branch(t[3], True); self.deflab(t[2], self.here()); return self.complete_stmt(0)
+        if k == C_FOROF and isP(41): return self.forof_end()
         if k == C_SWITCHC and isP(41):                         # the value into T(0), where the case tests read it. C_SWITCH: the
             self.pop_cs(); self.to_temp(0); ty = self.otype(0); self.nd = 0     # next test's label, the end, default's label,
             self.push_cs(C_SWITCH, self.newlab(), self.newlab(), 0, 4 * ty); self.mode = S_LBRACE; return    # 4 * type + seen + 2 default
@@ -1543,7 +1587,7 @@ class Compiler:
             t = self.pop_cs(); self.nlet = t[5]                # the body's block scope ends
             if k == C_DOB1: return self.do_cond(t)
             if k == C_ELSEB1: self.deflab(t[1], self.here())
-            elif k == C_LOOPB1: self.emit('JMP', label=t[1]); self.deflab(t[2], self.here())
+            elif k == C_LOOPB1: self.emit('JMP', label=t[1]); self.deflab(t[2], self.here()); self.tb -= t[4]     # (d: a for of's temps)
             elif nonelse or self.asic: self.deflab(t[1], self.here())
             else: self.pendLa = t[1]; self.mode = S_ELSE; return
 
@@ -1554,7 +1598,7 @@ class Compiler:
         if k == C_IFB: self.pendLa = t[1]; self.mode = S_ELSE; return
         if k == C_ELSEB: self.deflab(t[1], self.here()); return self.complete_stmt(0)
         if k == C_DOB: return self.do_cond(t)
-        if k == C_LOOPB: self.emit('JMP', label=t[1]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
+        if k == C_LOOPB: self.emit('JMP', label=t[1]); self.deflab(t[2], self.here()); self.tb -= t[4]; return self.complete_stmt(0)
         if k == C_SWITCH:                                  # the last test failed: to default if there is one
             if t[4] & 2: self.emit('JMP', label=t[2])
             self.deflab(t[1], self.here())
@@ -1689,7 +1733,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'JNZ': pc = 2 * a if truthy(mem, val(b), user) else pc
         elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
             if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
-            return steps, ''.join(map(chr, out))
+            return steps, ''.join(chr(ch % 0x10000) for ch in out)     # (putc's code mod 2^16, as String.fromCharCode)
         elif op[0] == 'J':
             x, y = val(b), val(c); ng = op[1] == 'N' and op != 'JNE'
             if not user: pc = 2 * a if ALU[op[1:]](x, y) else pc
@@ -1729,16 +1773,16 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             elif op == 'DADD' and catok(x, y):
                 if not cat(a, x, y): trap(CATTRAPS[op], TRAPDEF, [x, y], pc - 2)
             else: trap(TRAPS[op], TRAPDEF, [x, y], pc - 2)
-        elif op == 'GETX':                              # an array: its element (0 past its length); anything else: the library
-            x, k = val(b), val(c)
-            if isarr(x):
+        elif op == 'GETX':                              # an array and an integer: its element (undefined past its length); an object and
+            x, k = val(b), val(c)                       # an integer or the program's string: probed; anything else: the library
+            if isarr(x) and issmi(k):
                 q = (x - ARRTAG) & AMASK; wr(addr(a), rd(rd(q) + k) if 0 <= k < rd(q - 1) else UNDEF)
-            elif isobj(x) and not notown(k): q = probe(x, s20(k + STRTAG)); wr(addr(a), rd(q + 1) if rd(q) else UNDEF)
+            elif isobj(x) and ownkey(k): q = probe(x, s20(k + STRTAG)); wr(addr(a), rd(q + 1) if rd(q) else UNDEF)
             else: trap('getx', a - 256, [x, k], pc)
         elif op == 'SETX':                              # an array, k inside its length: the store; anything else: the library
             x, k, v = val(a), val(b), val(c); q = (x - ARRTAG) & AMASK
             if isarr(x) and 0 <= k < rd(q - 1): wr(rd(q) + k, v)
-            elif isobj(x) and not notown(k): setp(x, s20(k + STRTAG), v, ('setx', [x, k, v]))
+            elif isobj(x) and ownkey(k): setp(x, s20(k + STRTAG), v, ('setx', [x, k, v]))
             else: trap('setx', TRAPOFF, [x, k, v], pc)
         elif op == 'NEW':                               # a chunk with no keys (the heap full: the collector, then NEW again)
             hp = rd(HP)

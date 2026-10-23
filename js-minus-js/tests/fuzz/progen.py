@@ -101,6 +101,7 @@ class Gen:
         self.scopes = [{}]; self.fns = []; self.cur = None; self.loops = 0; self.inswitch = 0; self.nctr = 0
         self.budget = int(self.r.randint(8, 40) * size); self.strs = self.r.sample(STRS, self.r.randint(2, 6))
         self.hide = None; self.selfcalls = 0; self.contok = False; self.inlog = False; self.nst = {}      # nst: statements so far per scope (by id)
+        self.labels = []; self.nlabs = 0                  # the labeled loops around (break / continue name them)
 
     # ---- scope
     def vars(self, pred=lambda v: True):
@@ -402,6 +403,9 @@ class Gen:
         cs = self.vars(lambda v: v.ty in ('arr', 'sarr') and not v.counter)
         if not cs: return None
         v = r.choice(cs); e = self.num() if v.ty == 'arr' else self.strx()
+        if r.random() < 0.15 and v.ln:                    # splice that keeps the length: n elements from i replaced
+            i = r.randint(0, v.ln - 1); n = r.randint(0, min(3, v.ln - i))
+            return [('EXPR', ('meth', ('raw', v.name), 'splice', [lit(i), lit(n)] + [self.num() if v.ty == 'arr' else self.strx() for _ in range(n)]), self.semi())]
         if r.random() < 0.7: return [('EXPR', ('meth', ('raw', v.name), 'push', [e]), self.semi())]
         return [('ASET', v.name, ('dot', ('raw', v.name), 'length'), '=', e)]
     def s_pset(self):
@@ -460,10 +464,12 @@ class Gen:
     def s_ret(self):
         e = self.num() if self.cur.ret == 'num' else self.strx()
         return [('RET', e)]
-    def s_break(self): return [('IFJ', self.cond(), 'break')] if self.r.random() < 0.8 else self.simple('break')
+    def s_break(self):
+        w = 'break' + (' ' + self.r.choice(self.labels) if self.labels and self.r.random() < 0.3 else '')
+        return [('IFJ', self.cond(), w)] if self.r.random() < 0.8 else self.simple(w)
     def s_cont(self):
         if not self.contok: return None
-        return [('IFJ', self.cond(), 'continue')]
+        return [('IFJ', self.cond(), 'continue' + (' ' + self.r.choice(self.labels) if self.labels and self.r.random() < 0.3 else ''))]
     def s_if(self):
         x = self.r.random(); c = self.cond() if x < 0.8 else self.num() if x < 0.9 else self.strx()      # (a string: its truth)
         th = self.body(); els = []
@@ -477,9 +483,21 @@ class Gen:
         r = self.r
         if self.nctr >= 8: return None
         ctr = f'i{self.nctr}'; self.nctr += 1; K = r.randint(0, 5)
-        kind = r.choice(['for', 'for', 'forv', 'fordown', 'while', 'do'])
+        kind = r.choice(['for', 'for', 'forv', 'fordown', 'while', 'do', 'forof', 'forin'])
+        lab = f'L{self.nlabs}' if r.random() < 0.2 else None
+        if lab: self.nlabs += 1; self.labels.append(lab)
         self.loops += 1; savec = getattr(self, 'contok', False)
-        if kind in ('for', 'forv', 'fordown'):
+        objs = self.vars(lambda v: v.ty == 'obj')
+        if kind == 'forin' and not objs: kind = 'forof'
+        if kind in ('forof', 'forin'):                    # the elements of a number array / an object's keys
+            self.contok = True
+            if kind == 'forof':
+                a = self.arrexpr(need=0); src = R(a[0]) if a else '[1, 2]'; ty = 'num'
+            else: src = r.choice(objs).name; ty = 'str'
+            dk = r.choice(["let", "const", "var"])
+            self.scopes.append({ctr: Var(ctr, ty, const=dk == 'const')}); b = self.body(); self.scopes.pop()
+            out = [('LOOP', f'for ({dk} {ctr} {"of" if kind == "forof" else "in"} {src})', b, None)]
+        elif kind in ('for', 'forv', 'fordown'):
             self.contok = True
             if kind == 'forv' and (self.cur is not None or len(self.scopes) > 1): kind = 'for'
             sc = {ctr: Var(ctr, 'num', counter=True)}
@@ -495,6 +513,8 @@ class Gen:
             if kind == 'while': out = [('RAWL', decl), ('LOOP', f'while ({ctr} < {K})', b, None)]
             else: out = [('RAWL', decl), ('LOOP', 'do', b, f'while ({ctr} < {K})')]
         self.loops -= 1; self.contok = savec
+        if lab:
+            self.labels.pop(); _, hdr, b, tail = out[-1]; out[-1] = ('LOOP', f'{lab}: {hdr}', b, tail)
         return out
     def s_alloc(self):
         """a loop that allocates an object per iteration and keeps a few: enough to run the garbage collector"""

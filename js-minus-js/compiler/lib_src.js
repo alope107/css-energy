@@ -624,15 +624,88 @@ function join(x, sep) {
 // number or the program's own string as the key, which the machine probes) and properties
 // a key: a value + KBIAS (a string key becomes its address); a string built at run time (or SEED's) is first replaced by
 // one of the object's keys with those characters, or (stored) by the program's string with them (okey)
+// (a key other than a string or an integer is its string: o[[1]] is o["1"], o[true] o["true"]; an array's or a string's
+// index given as a string is that number: a["0"] is a[0])
+function xkey(x, k) {
+  if (__kind(k, __K_AO__) + __kind(k, __K_SPECIAL__) + __kind(k, __K_DBL__)) { k = tostr(k); }
+  if (__kind(k, __K_STR__)) {
+    if (__kind(x, __K_STR__) + __kind(x, __K_ARR__)) { k = strnum(k); }
+    else if (__kind(x, __K_OBJ__)) { k = canint(k); }
+  }
+  return k;
+}
+// a string that is an integer's canonical form ("7", "-3"; not "07", "+3" or "-0") of the machine's range: that integer
+// (an object's key "1" is its key 1); anything else as it is
+function canint(s) {
+  var n = peek(s - 1); var i = 0; var c = 0; var neg = 0; var v = 0;
+  if (n == 0) { return s; }
+  if (peek(s) == 45) { neg = 1; i = 1; }
+  if ((i == n) + (n - i > 6)) { return s; }
+  if ((peek(s + i) == 48) * ((n - i > 1) + neg)) { return s; }
+  while (i < n) {
+    c = peek(s + i);
+    if ((c < 48) + (c > 57) + (v > 26214)) { return s; }
+    v = v * 10 + c - 48; i++;
+  }
+  if (neg) { v = 0 - v; }
+  if (__kind(v, __K_SMI__)) { return v; }
+  return s;
+}
 function getx(x, k) {
+  k = xkey(x, k);
   if (__kind(x, __K_STR__)) { return charat(x, k); }
+  if (__kind(x, __K_ARR__)) {
+    if (__kind(k, __K_SMI__)) { if ((k >= 0) * (k < peek(x - 1))) { return peek(peek(x) + k); } }
+    return __UNDEF__;
+  }
   if (__kind(x, __K_OBJ__)) { return pget(x, okey(x, k, 0) + __STRTAG__); }
   return __UNDEF__;
 }
 function setx(x, k, v) {
-  if (__kind(x, __K_ARR__)) { aset(x, k, v); return 0; }
+  k = xkey(x, k);
+  if (__kind(x, __K_ARR__)) { if (__kind(k, __K_SMI__)) { aset(x, k, v); } return 0; }
   if (__kind(x, __K_OBJ__)) { pset(x, okey(x, k, 1) + __STRTAG__, v); }
   return 0;
+}
+// for (k in o): an array of o's keys as strings, an object's (its integer keys ascending, then its names in insertion order),
+// an array's or a string's indexes. The keys are counted first, so the array is made before anything can move the chunks.
+// (The loop's index is this frame's argument, o: keys leaves it 0, cc_ref.forof_end)
+function keys(o) { var r = keyarr(o); o = 0; return r; }
+function keyarr(o) {
+  var r = 0; var n = 0; var m = 0; var i = 0; var j = 0; var t = 0; var p = 0; var go = 0;
+  if (__kind(o, __K_OBJ__)) {
+    n = okeyn(o, 0, 0); m = okeyn(o, 1, 0);
+    r = newarr(n + m, n + m);
+    okeyn(o, 0, peek(r)); okeyn(o, 1, peek(r) + n);
+    p = peek(r); i = 1;
+    while (i < n) {                                     // the integer keys ascending (insertion sort; nothing allocates)
+      t = p[i]; j = i - 1; go = 1;
+      while (go) { go = 0; if (j >= 0) { if (p[j] > t) { p[j + 1] = p[j]; j = j - 1; go = 1; } } }
+      p[j + 1] = t; i++;
+    }
+    i = 0;
+    while (i < n) { t = tostr(peek(peek(r) + i)); p = peek(r); p[i] = t; i++; }
+    return r;
+  }
+  n = 0;
+  if (__kind(o, __K_ARR__) + __kind(o, __K_STR__)) { n = peek(o - 1); }
+  r = newarr(n, n); __mfill(peek(r), 0, n);
+  while (i < n) { t = tostr(i); p = peek(r); p[i] = t; i++; }
+  return r;
+}
+// o's keys of kind pass (0 integers, 1 names) -> their count; d: where to write them (0: count only)
+function okeyn(o, pass, d) {
+  var c = o + __OBJTAG__; var k = 0; var n = 0; var go = 1;
+  while (go) {
+    k = peek(c);
+    if (k == 0) { go = 0; }
+    else if (k < 0) { c = k + __OBJTAG__; }
+    else {
+      if (__kind(k - __STRTAG__, __K_STR__) == pass) { if (d) { poke(d + n, k - __STRTAG__); } n++; }
+      c = c + 2;
+    }
+  }
+  return n;
 }
 // o's value for key (undefined if it has none)
 function pget(o, key) {
@@ -682,13 +755,14 @@ function apush(x, v) { push(x, v); return x; }
 // ---------------- methods: (receiver, arguments) -> the result. A string's and an array's length both sit in the word
 // before the value's address: peek(x - 1)
 function eqv(a, b) { return deqr(a, b); }    // a === b (strings by their characters)
-// the first index i >= from (step 1) or <= from (step -1) where t occurs in s (a string) or equals an element; -1. Forwards,
-// MFEQ finds the next element equal to t (not a string) or the next place t's first character occurs, a line per execution
+// the first index i >= from (step 1) or <= from (step -1) where t occurs in s (a string) or equals an element (===); -1.
+// Forwards, MFEQ finds the next element that is the same word as t, a line per execution: t's equal elements are the ones
+// that are the same word unless t is a string or a number compared by value (a double, 0 and -0, NaN)
 function find(x, t, from, step) {
   var n = peek(x - 1); var m = 0; var p = 0;
   if (__kind(x, __K_ARR__)) {
     p = peek(x);
-    if (__kind(t, __K_STR__) == 0) {
+    if ((__kind(t, __K_STR__) + __kind(t, __K_DBL__) + (t == 0) + (t == __MZERO__) + (t == __NAN__)) == 0) {
       if (step > 0) {
         if (from >= 0) { if (from < n) { from = from + __mfeq(p + from, t, n - from); } if (from < n) { return from; } }
         return 0 - 1;
@@ -710,7 +784,10 @@ function find(x, t, from, step) {
 }
 function indexof(x, t) { return find(x, t, 0, 1); }
 function lastindexof(x, t) { return find(x, t, peek(x - 1) - 1, 0 - 1); }
-function includes(x, t) { return jsb(find(x, t, 0, 1) >= 0); }
+function includes(x, t) {
+  if (t == __NAN__) { if (__kind(x, __K_ARR__)) { return jsb(__mfeq(peek(x), t, peek(x - 1)) < peek(x - 1)); } }   // (SameValueZero)
+  return jsb(find(x, t, 0, 1) >= 0);
+}
 function join0(x) { return join(x, 0); }
 // a JavaScript index argument: negative counts from the end; clamped to [0, n]
 function cidx(i, n) { if (i < 0) { i = i + n; } if (i < 0) { i = 0; } if (i > n) { i = n; } return i; }
@@ -725,6 +802,35 @@ function slice(x, a, b) {
   return r;
 }
 function slice0(x) { return slice(x, 0, peek(x - 1)); }
+// x.splice(s, d, items...): the d elements from s (s < 0 counts from the end) removed and returned in a new array, the n
+// items (at p, in the frame of splice0 ... splice8, one per argument count) put in their place
+function splicen(x, s, d, p, n) {
+  var len = 0; var r = 0; var q = 0; var i = 0;
+  if (__kind(x, __K_ARR__) == 0) { return __UNDEF__; }
+  len = peek(x - 1);
+  if (__kind(s, __K_SMI__) == 0) { s = 0; }
+  if (__kind(d, __K_SMI__) == 0) { d = 0; }
+  s = cidx(s, len); if (d < 0) { d = 0; } if (d > len - s) { d = len - s; }
+  r = newarr(d, d); __mcpy(peek(r), peek(x) + s, d);
+  if (len - d + n > peek(x - 2)) { grow(x, len - d + n); }
+  q = peek(x);
+  if (n < d) { __mcpy(q + s + n, q + s + d, len - s - d); }
+  i = len - 1;
+  if (n > d) { while (i >= s + d) { q[i + n - d] = q[i]; i = i - 1; } }
+  i = 0;
+  while (i < n) { q[s + i] = peek(p + i); i++; }
+  poke(x - 1, len - d + n);
+  return r;
+}
+function splice0(x) { return splicen(x, 0, 0, 0, 0); }
+function splice1(x, s) { return splicen(x, s, peek(x - 1), 0, 0); }
+function splice2(x, s, d) { return splicen(x, s, d, 0, 0); }
+function splice3(x, s, d, a) { return splicen(x, s, d, __fp() + 4, 1); }
+function splice4(x, s, d, a, b) { return splicen(x, s, d, __fp() + 4, 2); }
+function splice5(x, s, d, a, b, c) { return splicen(x, s, d, __fp() + 4, 3); }
+function splice6(x, s, d, a, b, c, e) { return splicen(x, s, d, __fp() + 4, 4); }
+function splice7(x, s, d, a, b, c, e, f) { return splicen(x, s, d, __fp() + 4, 5); }
+function splice8(x, s, d, a, b, c, e, f, g) { return splicen(x, s, d, __fp() + 4, 6); }
 function slice1(x, a) { return slice(x, a, peek(x - 1)); }
 function substring(x, a, b) {
   var n = peek(x - 1); var t = 0;

@@ -259,10 +259,10 @@ class Sim:
             arr = not ps and R.isarr(x); q = (x - ARRTAG) & AMASK
             ln, ptr = (rd(q - 1), rd(q)) if arr else (0, 0)
             inb = arr and 0 <= y < ln
-            hand = not ps and R.isobj(x) and not R.notown(y)       # (an object: its probe, from the next execution)
+            hand = not ps and R.isobj(x) and R.ownkey(y)           # (an object: its probe, from the next execution)
             if g:
                 e = rd(ptr + y) if inb else R.UNDEF
-                if arr: wr(addr(a), e)
+                if arr and R.issmi(y): wr(addr(a), e)
                 elif hand: npst = (x + OBJTAG) & AMASK; done = False; pc -= 2
                 else: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc // 2, 'getx', ps)
             else:

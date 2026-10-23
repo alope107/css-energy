@@ -91,7 +91,8 @@ def check(text):
     lab = {j: v for j, v in lab.items() if j < R.NL}   # (labels past NL exist only after error 20)
     ok = not diff and code == rcode and data == ref.data and lab == rlab
     cd = next((f' first code difference at {a}: DSL {code.get(a)} ref {rcode.get(a)}' for a in sorted(set(code) | set(rcode)) if code.get(a) != rcode.get(a)), '')
-    return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}{cd}')
+    vals = ' ' + str({k: (st.get(k), rs[k]) for k in diff[:8]}) if os.environ.get('VALS') else ''     # VALS=1: (DSL, ref) of each
+    return ok, ('OK' if ok else f'MISMATCH {diff[:5]} code-eq {code == rcode} data-eq {data == ref.data} lab-eq {lab == rlab}{cd}{vals}')
 if __name__ == '__main__':                       # (tests/fuzz/fuzz.py imports check())
     from par import pmap                         # one program per worker process; the counts come back with it
     def one(f):

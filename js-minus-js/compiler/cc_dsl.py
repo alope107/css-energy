@@ -645,6 +645,29 @@ class Prog(Base):
         self.emit(ite(dyn, OP['SETX'], OP['SETP']), xo, (ite(dyn, ko[0], val[0]), ite(dyn, ko[1], val[1])),
                   (ite(dyn, val[0], sub(key, self.db)), mul(dyn, val[1])))
         self.set('nd', b)
+    def forof(self, j, isin):
+        """cc_ref.forof: for (x of / in: two temps for the loop, then e"""
+        full = self.m(gt(self.v('tb') + 2, R.TBMAX), 'fofull')
+        with self.when(full): self.fail(22)
+        with self.when(not_(full)):
+            t = self.pop_cs(); self.set('tb', self.v('tb') + 2)
+            self.push_cs(R.C_FOROF, t[1], t[3], j, isin, t[5]); self.set('mode', R.S_OPND)
+            with self.when(not_(isin)): self.emit(OP['MOV'], self.tmp(-1), (R.K(0), 0))
+            self.done()
+    def forof_end(self, t):
+        """cc_ref.forof_end: the loop's head (C_FOROF), then its body"""
+        self.pop_cs(); i = self.m(self.v('nd') - 1, 'foi'); a, ix = self.tmp(-2), self.tmp(-1); isin = self.m(ne(t[4], 0), 'foin')
+        self.put((ite(isin, ix[0], a[0]), a[1]), i)
+        with self.when(isin): self.emit(OP['CALL'], (self.ent.get('keys', 0) // 2, K(0)), w1=(sub(a[0], 256), a[1]))
+        self.set('nd', i); self.deflab(t[1], self.here())
+        n = self.tmp(0); _, xo, _, _ = self.symkind_addr(t[3]); x = (xo, K(0))
+        # (one record per instruction slot: for of LDI JGE GETX MOV DSUB, for in GETX JEQ MOV DSUB)
+        self.emit(ite(isin, OP['GETX'], OP['LDI']), n, a, (ite(isin, ix[0], R.K(-1)), mul(isin, ix[1])))
+        self.emit(ite(isin, OP['JEQ'], OP['JGE']), b=(ite(isin, n[0], ix[0]), n[1]), c=(ite(isin, R.K(R.UNDEF), n[0]), mul(not_(isin), n[1])), label=t[2])
+        self.emit(ite(isin, OP['MOV'], OP['GETX']), (ite(isin, xo, n[0]), mul(not_(isin), n[1])), (ite(isin, n[0], a[0]), a[1]), (ite(isin, 0, ix[0]), mul(not_(isin), ix[1])))
+        self.emit(ite(isin, OP['DSUB'], OP['MOV']), (ite(isin, ix[0], xo), mul(isin, ix[1])), (ite(isin, ix[0], n[0]), n[1]), (ite(isin, R.K(-1), 0), 0))
+        with self.when(not_(isin)): self.emit(OP['DSUB'], ix, ix, (R.K(-1), 0))
+        self.push_cs(R.C_LOOPB, t[1], t[2], 0, 2, t[5]); self.set('mode', R.S_LBRACE); self.done()
     def compound(self, code, i, o, otemp):
         """cc_ref.compound: x op= e, the old value at i, e above it, into o -> the static type"""
         tl, tr = self.otype(i), self.otype(i + 1)
@@ -655,11 +678,11 @@ class Prog(Base):
         """cc_ref.meth_end: a method call's ')' (tv: the method + 64 * its commas; last: an argument just ended)"""
         mi = self.m(mod(tv, 64), 'mmi'); argc = self.m(add(fdiv(tv, 64), last), 'margc')
         pairs = [(i, a, e) for i, m in enumerate(R.ALLM) for a, e in m[1].items()]
-        mk = self.m(add(mul(mi, 4), mn(argc, 3)), 'mkey')                # (one key per method and argument count)
-        ok = self.m(or_(*[eq(mk, 4 * i + a) for i, a, e in pairs]), 'mok')
+        mk = self.m(add(mul(mi, 16), mn(argc, 15)), 'mkey')              # (one key per method and argument count)
+        ok = self.m(or_(*[eq(mk, 16 * i + a) for i, a, e in pairs]), 'mok')
         with self.when(not_(ok)): self.fail(77)
         with self.when(ok):
-            e = self.m(add(*[mul(eq(mk, 4 * i + a), self.ent.get(e, 0) // 2) for i, a, e in pairs]), 'ment')
+            e = self.m(add(*[mul(eq(mk, 16 * i + a), self.ent.get(e, 0) // 2) for i, a, e in pairs]), 'ment')
             ty = self.m(add(*[mul(eq(mi, i), m[2]) for i, m in enumerate(R.ALLM)]), 'mty')
             if last: self.arg_end()
             self.set('tb', sub(self.v('tb'), argc + 1)); d0 = self.m(self.v('nd') - 1, 'md0'); f = self.tmp(d0)
@@ -735,15 +758,22 @@ class Prog(Base):
             with self.when(eq(x, 0)): self.set('mode', R.S_INC)
             self.done()
 
-    def jump_loop(self, isbreak):
-        """break / continue: JMP to the innermost loop's break (b) or continue (a) label"""
+    def jump_loop(self, isbreak, isID, th1, th2):
+        """cc_ref S_BRK: break / continue: JMP to a loop's break (b) or continue (a) label: the labeled one (an identifier: its
+        label's symbol holds the entry's index), else the innermost (break: or switch), and on into S_INC"""
         csp = self.m(self.v('csp'), 'csp')
-        def target(kind): return or_(anyeq(kind, (R.C_LOOPB, R.C_LOOPB1, R.C_DOB, R.C_DOB1)), and_(isbreak, eq(kind, R.C_SWITCH)))
-        best = self.m(mx(*[mul(and_(lt(k, csp), target(fdiv(self.v(f'csA{k}'), 4096))), k + 1) for k in range(CD)]), 'lpk')
-        A = self.m(add(*[mul(eq(best, k + 1), self.v(f'csA{k}')) for k in range(CD)]), 'lpA')
-        with self.when(eq(best, 0)): self.fail(56)
-        with self.when(ne(best, 0)):
-            self.emit(OP['JMP'], label=ite(isbreak, mod(A, 64), mod(fdiv(A, 64), 64))); self.set('mode', R.S_INC); self.done()
+        def loop(kind): return anyeq(kind, (R.C_LOOPB, R.C_LOOPB1, R.C_DOB, R.C_DOB1))
+        best = self.m(mx(*[mul(and_(lt(k, csp), or_(loop(fdiv(self.v(f'csA{k}'), 4096)), and_(isbreak, eq(fdiv(self.v(f'csA{k}'), 4096), R.C_SWITCH)))), k + 1)
+                           for k in range(CD)]), 'lpk')
+        jl = self.lookup(th1, add(th2, R.H2M)); _, lc, _, _ = self.symkind_addr(jl)
+        lab = self.m(mul(isID, ite(ge(jl, 0), add(lc, 1), 0)), 'lpl')          # (the labeled entry + 1, 0 for none)
+        idx = self.m(ite(isID, lab, best), 'lpx')
+        A = self.m(add(*[mul(eq(idx, k + 1), self.v(f'csA{k}')) for k in range(CD)]), 'lpA')
+        bad = self.m(or_(eq(idx, 0), gt(idx, csp), and_(isID, not_(loop(fdiv(A, 4096))))), 'lpbad')
+        with self.when(bad): self.fail(56)
+        with self.when(not_(bad)):
+            self.emit(OP['JMP'], label=ite(isbreak, mod(A, 64), mod(fdiv(A, 64), 64))); self.set('mode', R.S_INC)
+            with self.when(isID): self.done()
 
     # ---------------- parser
     def parser(self):
@@ -763,7 +793,7 @@ class Prog(Base):
         # with a known starting mode, only the fallthrough chains below can run: other blocks are folded away
         # (after a dynamic mode change the analysis could not prove them unreachable)
         FALL = {R.S_NAMES: (R.S_NAMEE, R.S_OPER), R.S_NAMEE: (R.S_OPER,), R.S_ELSE: (R.S_DOWHILE, R.S_STMT), R.S_AFTERELSE: (R.S_STMT,),
-                R.S_LBRACE: (R.S_STMT,), R.S_CONFIRST: (R.S_OPND,), R.S_SWCASE: (R.S_STMT,)}
+                R.S_LBRACE: (R.S_STMT,), R.S_CONFIRST: (R.S_OPND,), R.S_SWCASE: (R.S_STMT,), R.S_BRK: (R.S_INC,)}
         if self.spec_tk in (None, 1, 3) or (self.spec_tk == 4 and self.spec_tv is None):     # an expression statement's first token
             FALL[R.S_STMT] = (R.S_OPND,); FALL[R.S_ELSE] += (R.S_OPND,)
         reach = None if self.spec_mode is None else {self.spec_mode, *FALL.get(self.spec_mode, ())}
@@ -776,16 +806,25 @@ class Prog(Base):
         def push_lit(ls):
             self.push_od(add(*[mul(c, k) for c, k, _ in ls]), add(*[mul(c, t) for c, _, t in ls if t])); self.set('mode', R.S_OPER); self.done()
         # a newline token means nothing outside the modes where it can end a statement
-        with self.when(and_(PNL, not_(anyeq(mode(), (R.S_NAMES, R.S_NAMEE, R.S_OPER, R.S_VARAFTER, R.S_INC, R.S_OPND))))): self.done()
+        with self.when(and_(PNL, not_(anyeq(mode(), (R.S_NAMES, R.S_NAMEE, R.S_OPER, R.S_VARAFTER, R.S_INC, R.S_OPND, R.S_BRK))))): self.done()
         # ---- S_NAMES
         isw = lambda p1, p2: self.m(and_(or_(*[and_(eq(p1, KW[w][0]), eq(p2, KW[w][1])) for w in ('window', 'globalThis')]), P(46)), 'isw')
         with block(R.S_NAMES):
             pn1, pn2 = self.v('pn1'), self.v('pn2')
             wd = isw(pn1, pn2)
             with self.when(wd): self.set('pn1', 1); self.set('pn2', 0); self.set('mode', R.S_WDOT); self.done()     # window.x: x
+            fo = self.m(and_(not_(wd), or_(KWc('of'), KWc('in')), eq(self.top()[0], R.C_FORINIT)), 'nfo')
+            with self.when(fo):                                # for (x of / in (cc_ref)
+                fu = self.m(lt(self.lookup(pn1, pn2), 0), 'nfou')
+                with self.when(fu): jf = self.implicit(pn1, pn2, K(1))
+                jl = self.lookup(pn1, pn2); kl, _, _, cl = self.symkind_addr(jl)
+                with self.when(and_(not_(fu), eq(kl, 3))): self.sym_kind(jl, 1, cl)
+                with self.when(eq(self.v('err'), 0)): self.forof(ite(fu, jf, jl), KWc('in'))
+            with self.when(P(58)):                             # a label (cc_ref): the next statement's control entry
+                self.declare(pn1, add(pn2, R.H2M), 0, self.v('csp'), 0, K(1)); self.set('mode', R.S_STMT); self.done()
             j = self.lookup(pn1, pn2)
             k, o, b, cst = self.symkind_addr(j)
-            asg = self.m(and_(not_(wd), or_(P(61), ne(compound, 0))), 'asg')
+            asg = self.m(and_(not_(wd), not_(fo), not_(P(58)), or_(P(61), ne(compound, 0))), 'asg')
             with self.when(asg):
                 undef = self.m(lt(j, 0), 'aund')
                 with self.when(and_(undef, not_(P(61)))): self.fail(5)
@@ -798,7 +837,7 @@ class Prog(Base):
                     self.push_cs(R.C_ASSIGN, ite(undef, ja, j), compound); self.set('mode', R.S_OPND); self.done()
             with self.when(and_(not_(wd), or_(P(7), P(8)))): self.incdec(pn1, pn2, tv)
             with self.when(and_(not_(wd), P(91), lt(j, 0))): self.fail(7)      # NAME[e] = e: an expression statement (x[k])
-            with self.when(not_(or_(wd, asg, P(7), P(8), and_(P(91), lt(j, 0))))):
+            with self.when(not_(or_(wd, fo, P(58), asg, P(7), P(8), and_(P(91), lt(j, 0))))):
                 self.push_cs(R.C_EXPR); self.set('mode', R.S_NAMEE)
         # ---- S_NAMEE
         with block(R.S_NAMEE):
@@ -834,6 +873,11 @@ class Prog(Base):
                 with self.when(and_(rd, eq(self.v('err'), 0))):
                     dsc = self.m(ite(newi, add(ji, R.IMPC), ite(undef, R.K(R.UNDEF), o)), 'ndsc')
                     self.push_od(dsc, mul(not_(undef), b)); self.set('mode', R.S_OPER)
+        # ---- S_BRK: after break / continue (pn1: break)
+        with block(R.S_BRK):
+            bok = self.m(or_(isID, P(59), PNL, PRB), 'bok')
+            with self.when(not_(bok)): self.fail(53)
+            with self.when(bok): self.jump_loop(self.v('pn1'), isID, th1, th2)
         # ---- S_WDOT: window.x / globalThis.x is the global x (pn1: at a statement's start)
         with block(R.S_WDOT):
             with self.when(not_(isID)): self.fail(69)
@@ -938,7 +982,7 @@ class Prog(Base):
                     with self.when(eq(self.v('curf'), 0)): self.fail(57)
                     with self.when(ne(self.v('curf'), 0)): self.push_cs(R.C_RETURN); self.set('mode', R.S_OPND); self.done()
                 with self.when(or_(KWc('break'), KWc('continue'))):
-                    self.jump_loop(KWc('break'))
+                    self.set('pn1', KWc('break')); self.set('pn2', 0); self.set('mode', R.S_BRK); self.done()
                 with self.when(KWc('function')):
                     bad = self.m(or_(ne(self.v('curf'), 0), ne(self.v('csp'), 0)), 'fbad')
                     with self.when(bad): self.fail(41)
@@ -983,10 +1027,12 @@ class Prog(Base):
             pn1 = self.m(self.v('pn1'), 'dk')
             pn2v = self.m(self.v('pn2'), 'vpn2')              # (a reused global's index + 1)
             jv = self.m(ite(ne(pn2v, 0), sub(pn2v, 1), ite(self.decl_blk(), sub(NS, self.v('nlet')), self.v('nsym') - 1)), 'vj')
+            fo = self.m(and_(or_(KWc('of'), KWc('in')), eq(self.top()[0], R.C_FORINIT)), 'vfo')
+            with self.when(fo): self.forof(jv, KWc('in'))       # for (var x of / in
             with self.when(P(61)):
                 self.push_cs(R.C_ASSIGN, jv, 0, add(pn1, 1)); self.set('mode', R.S_OPND); self.done()
-            with self.when(and_(not_(P(61)), eq(pn1, 2))): self.fail(65)
-            with self.when(and_(not_(P(61)), ne(pn1, 2))):
+            with self.when(and_(not_(fo), not_(P(61)), eq(pn1, 2))): self.fail(65)
+            with self.when(and_(not_(fo), not_(P(61)), ne(pn1, 2))):
                 _, ov, _, _ = self.symkind_addr(jv)
                 with self.when(eq(pn2v, 0)): self.emit(OP['MOV'], (ov, 0), (R.K(R.UNDEF), 0))     # a variable without a value: undefined
                 with self.when(P(44)): self.set('mode', R.S_VAR); self.done()
@@ -1281,6 +1327,8 @@ class Prog(Base):
         c8 = self.m(and_(anyeq(k, (R.C_DOB, R.C_DOB1)), P(41)), 'e8')
         c9 = self.m(eq(k, R.C_PSET), 'e9')
         c10 = self.m(and_(eq(k, R.C_SWITCHC), P(41)), 'e10')
+        c11 = self.m(and_(eq(k, R.C_FOROF), P(41)), 'e11')
+        with self.when(c11): self.forof_end(t)
         with self.when(or_(c1, c2, c3, c8)):               # a branch takes the value: if / while (out when false), for / do (in when true)
             self.pop_cs()
             with self.when(or_(c1, c2)): l1 = self.newlab()     # if: else label; while: end label
@@ -1323,7 +1371,7 @@ class Prog(Base):
                 self.fnw.append((self.x.g, cfn, add(*[mul(eq(cfn, n_), I(f'fh1_{n_}')) for n_ in range(NF)]),
                                  add(*[mul(eq(cfn, n_), I(f'fh2_{n_}')) for n_ in range(NF)]), add(mod(fl, 64), mul(rty, 64), mul(fdiv(fl, 256), 256))))
             o = self.src(i); self.emit(OP['RET'], b=o); self.set('nd', i); self.set('f_compl', 1); self.done()
-        with self.when(not_(or_(c1, c2, c3, c4, c6, c7, c8, c9, c10))): self.fail(50)
+        with self.when(not_(or_(c1, c2, c3, c4, c6, c7, c8, c9, c10, c11))): self.fail(50)
 
     def end_simple_stmt(self, P):
         t = self.top()
@@ -1354,7 +1402,7 @@ class Prog(Base):
             with self.when(or_(close, wait)): self.set('nlet', t[5])
             with self.when(close):
                 self.pop_cs()
-                with self.when(isloop): self.emit(OP['JMP'], label=t[1])
+                with self.when(isloop): self.emit(OP['JMP'], label=t[1]); self.set('tb', sub(self.v('tb'), t[4]))     # (d: a for of's temps)
                 self.deflab(ite(isloop, t[2], t[1]), self.here())
             with self.when(wait):
                 self.pop_cs(); self.set('pendLa', t[1]); self.set('mode', R.S_ELSE)
@@ -1387,6 +1435,7 @@ class Prog(Base):
             # the code (one instruction slot for both): loop JMP top; function RET #0 (and its frame label := its count of locals)
             with self.when(or_(islp, isfn)): self.emit(ite(islp, OP['JMP'], OP['RET']), b=(ite(islp, 512, R.K(R.UNDEF)), 0), label=ite(islp, t[1], -1))
             with self.when(isfn): self.deflab(t[2], self.v('nloc'))
+            with self.when(islp): self.set('tb', sub(self.v('tb'), t[4]))     # (d: a for of's temps)
             # the end label of whichever body closed (one kind per call, so one label port serves them all)
             with self.when(anyeq(k, (R.C_ELSEB, R.C_DOB, R.C_LOOPB, R.C_FUNCB, R.C_SWITCH))):
                 self.deflab(ite(or_(islp, issw), t[2], t[1]), self.here())

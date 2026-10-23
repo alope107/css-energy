@@ -361,13 +361,14 @@ CAT_CLASS = dict(ops=[], pre=CAT_PRE,
                  deps={'z': [('x', None)], 'e': [('y', None)], 'p': [('x', None), ('y', None), ('z', None)]})
 # GETX / SETX: X the array (B / A), Y the index (C / B); z its length and h its ptr (the words before and at its value's address,
 # read only for an array); e the element (GETX, inside the length) or C (SETX)
+_xgtrap = f"calc(1 - var(--xarr) * {smi_v('var(--Y)')})"     # GETX: no array and an integer index: the library
 ARR_PRE = OPND + OPNDA + [
     f"--X: {by_op({'GETX': kv('B', 'x')}, kv('A', 'x'))};", f"--Y: {by_op({'GETX': kv('C', 'y')}, kv('B', 'y'))};",
     f"--xarr: calc((1 - min(1, var(--pst))) * {isarr_v('var(--X)')});",
     "--xin: calc(var(--xarr) * clamp(0, var(--Y) + 1, 1) * clamp(0, var(--vz) - var(--Y), 1));",
     f"--E: {by_op({'GETX': f'calc(var(--xin) * var(--ve) + (1 - var(--xin)) * {R.UNDEF})'}, kv('C', 'e'))};",
-    f"--xhand: calc({eq(pst, 0)} * {isobj_v('var(--X)')} * (1 - {isstr_v('var(--Y)')} * (1 - {own_v('var(--Y)')})));"] + \
-    trap(f"calc((1 - var(--xhand)) * {by_op({'GETX': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')})", f"mod({pst}, {XBACK})", by_op({'GETX': 2}, 3),
+    f"--xhand: calc({eq(pst, 0)} * {isobj_v('var(--X)')} * min(1, calc({smi_v('var(--Y)')} + {own_v('var(--Y)')})));"] + \
+    trap(f"calc((1 - var(--xhand)) * {by_op({'GETX': _xgtrap}, 'calc(1 - var(--xin))')})", f"mod({pst}, {XBACK})", by_op({'GETX': 2}, 3),
          by_op({'GETX': "var(--aA)"}, f"mod({fp} + {TRAPOFF}, 32768)"),
          by_op({'GETX': "if(style(--ts: 0): var(--Y); else: var(--X))"}, "if(style(--ts: 0): var(--E); style(--ts: 1): var(--Y); else: var(--X))"),
          f"calc({by_op({'GETX': 'calc((var(--A) - 256) * 8192)'}, TRAPOFF * 8192)} + ({pc} + 2) / 2)")
