@@ -23,7 +23,9 @@
 // chunk is full; gcnew, galloc and gccat when NEW, ALLOC or a string's + find the heap full; pval to print an array or
 // object. The compiler calls the methods, mkarrN (array literals) and parseint / tostring / fromcc directly.
 
-// ROM address 0 (the first routine): a call of a function that is never declared, and a read of an implicit global that is never
+// ROM address 2 (the first routine; rtlib.py checks): RET F1, where a closure-making function's return (retc) ends
+function rstub(a) { return a; }
+// ROM address 0: a call of a function that is never declared, and a read of an implicit global that is never
 // assigned (cc_ref.NIMP), land here, since the page's undefined labels are 0. JavaScript's ReferenceError, uncaught: the
 // program stops. (The m_ routines print the messages: rtlib.py makes them from its MSGS, a putc per character)
 function refstub() { m_uncaught(); m_referr(); putc(10); halt(); return 0; }
@@ -107,6 +109,7 @@ function scan(s) {
   x = 0 - 2 - h;
   if (x % 8 == 1) { fwdrange(s + 4, s + 4 + peek(s + 2), 0); }
   if (x % 8 == 3) { poke(s + 3, fwd(peek(s + 3))); poke(s + 4, fwd(peek(s + 4))); poke(s + 5, fwd(peek(s + 5))); }     // (a function's env, name, props)
+  if (x % 8 == 4) { if (peek(s + 1) == s + 2) { fwdrange(s + 3, s + 3 + peek(s + 2), 0); } }      // (a closed env cell's frame)
   return x - x % 8;
 }
 // a value -> the same value after the collection: a from-space object, string or array is copied (once); anything else is
@@ -122,6 +125,8 @@ function fwd(w) {
   if (a >= flo + 4) { if (a < flo + __H__) { return fwdblk(w, a - 4, 2); } }
   a = w + __FUNTAG__;
   if (a >= flo + 1) { if (a < flo + __H__) { return fwdblk(w, a - 1, 3); } }
+  a = w + __ENVTAG__;
+  if (a >= flo + 1) { if (a < flo + __H__) { return fwdblk(w, a - 1, 4); } }
   return w;
 }
 // a stack word: a reference only if it starts a block in the map (MFREF found it in a from-space tag range)
@@ -131,6 +136,7 @@ function fwdc(w, flo) {
   if ((b < flo) + (b >= flo + __H__)) { b = w - __ARRTAG__ - 3; }
   if ((b < flo) + (b >= flo + __H__)) { b = w + __DBLTAG__ - 4; }
   if ((b < flo) + (b >= flo + __H__)) { b = w + __FUNTAG__ - 1; }
+  if ((b < flo) + (b >= flo + __H__)) { b = w + __ENVTAG__ - 1; }
   if ((b - flo) % 8) { return w; }
   if (marked(b) == 0) { return w; }
   return fwd(w);
@@ -155,6 +161,7 @@ function fwdblk(w, b, kind) {
   if (x % 8 != kind) { return w; }
   n = peek(__G_FREE__);
   if (kind == 0) { __mcpy(n, b, peek(b + 1) + 3); }
+  else if (kind == 4) { nw = x - 4; __mcpy(n, b, nw); if (peek(n + 1) == b + 2) { poke(n + 1, n + 2); } }    // (an env cell: closed, its base too)
   else if (kind >= 2) { __mcpy(n, b, 8); nw = 8; }        // (a double, a function)
   else {
     cap = peek(b + 1); len = peek(b + 2); nw = rnd8(cap + 4);
@@ -249,6 +256,7 @@ function arith(op, a, b) {
 // instruction's address / 2) of two values as numbers, in the FPU (32-bit integers, as JavaScript computes)
 function dbit(a, b) {
   var k = peek(2 * (peek(__fp()) % 8192)) % 8192 / 1024;
+  if (k == 7) { retc(a, b, __fp() - __TRAPDEF__); poke(__fp(), __TRAPDEF__ * 8192 + __RSTUB__ / 2); return 0; }    // (rstub returns)
   a = tonum(a); b = tonum(b);
   if (k == 0) { __fl(__FL_FAND__, __F0__, a, b); }
   else if (k == 1) { __fl(__FL_FOR__, __F0__, a, b); }
@@ -339,7 +347,36 @@ function numscan(s, i, e) {
   return fbox();
 }
 // a number literal (NUMLIT, the first time it is read): its string's number
-function numlit(s, d) { if (s >= 0) { return mkfn(s); } return numscan(s, 0, peek(s - 1)); }
+function numlit(s, d) {
+  if (s >= 1024) { return mkclo(s, __fp() - __TRAPDEF__); }
+  if (s >= 0) { return mkfn(s); }
+  return numscan(s, 0, peek(s - 1));
+}
+// an inner function's value (cc_ref: NUMLIT's word1 w = its frame's size + 64 * (its index + 16 * the env's slot)): the frame's
+// env cell (made the first time: one that is open on this frame is reused) in its env
+function mkclo(w, fp) {
+  var e = peek(fp + w / 1024); var f = 0;
+  if (isenv(e) == 0) { e = newenv(fp, w % 64); }
+  else if (peek(e) != fp) { e = newenv(fp, w % 64); }
+  poke(fp + w / 1024, e);
+  f = mkfn(w / 64 % 16); poke(f + 2, e);
+  return f;
+}
+// e is an env cell (its value's slot, cc_ref.ENVTAG; any other value lands outside the heap)
+function isenv(e) { var a = e + __ENVTAG__; return (a >= __HEAP0__) * (a < __HEAP_HI__); }
+// a new env cell, open on the frame at fp of n words (cc_ref.ENVTAG: [hdr base n words...])
+function newenv(fp, n) {
+  var b = __alloc(rnd8(n + 3), __A_RAW__);
+  poke(b, 0 - 2 - rnd8(n + 3) - 4); poke(b + 1, fp); poke(b + 2, n); mark(b);
+  return b + 1 - __ENVTAG__;
+}
+// RETC (dbit 7, cc_ref.ret): the function at fp returns v; its env cell e, if open on its frame, takes a copy of the frame (closed:
+// base its own words); v to the frame's slot 1, where rstub's RET finds it
+function retc(v, e, fp) {
+  if (isenv(e)) { if (peek(e) == fp) { __mcpy(e + 2, fp + 1, peek(e + 1)); poke(e, e + __ENVTAG__ + 1); } }     // (base: a raw address)
+  poke(fp + 1, v);
+  return 0;
+}
 // CALLV found no function with as many parameters as arguments (cc_ref CALLV): f is called anyway, entered through this frame's
 // return word. The callee's frame is the CALLV's (fp + off: its return word written here); missing parameters are undefined,
 // written last (MFILL: with many arguments that frame can reach this one's words); not a function: the TypeError
@@ -350,6 +387,7 @@ function callv(f) {
   poke(fc, off * 8192 + r);
   poke(__CVRET__, (__TRAPOFF__ - off) * 8192 + peek(f));
   if (np > n) { __mfill(fc + 1 + n, __UNDEF__, np - n); }
+  if (peek(f + 1) >= 16) { poke(fc + 1 + np, peek(f + 2)); }      // (an inner function: its env in its local 1)
   poke(__fp(), peek(__CVRET__));
   return 0;
 }

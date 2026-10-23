@@ -285,7 +285,7 @@ _dok = {'DADD': f"calc({_dsb} * {smi_v('var(--dr)')})", 'DSUB': f"calc({_dsb} * 
         'DMUL': f"calc({_dsb} * {smi_v('var(--dr)')} * (1 - {eq('var(--dr)', 0)} * min(1, calc({neg_v(xB)} + {neg_v(yC)}))))",
         'DDIV': f"calc({_dsb} * (1 - {zy}) * {eq(f'rem({xB}, {yC} + {zy})', 0)} * (1 - {eq(xB, 0)} * {neg_v(yC)}))",
         'DMOD': f"calc({_dsb} * (1 - {zy}) * (1 - {eq('var(--dr)', 0)} * {neg_v(xB)}))",
-        'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", 'DBIT': f"calc({_dsb} * {smi_v('var(--dr)')})",
+        'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", 'DBIT': f"calc({_dsb} * {smi_v('var(--dr)')} * clamp(0, 6 - {_dk}, 1))",
         **{'D' + o: CMP_FAST[o] for o in CMP_SUFFIX}}
 _dval = {**{o: "var(--dr)" for o in _dr}, **{'D' + o: f"calc({R.FALSE} - {CMP_COND[o]})" for o in CMP_SUFFIX}}
 # NUMLIT A, word1 (a number literal: A its cache, a global): A read as x; nonzero, it stays (written back as it is); 0, the library's
@@ -715,7 +715,8 @@ def isfref_v(w, flo):
             f" + clamp(0, {w} + {STRTAG - 1} - {flo}, 1) * clamp(0, {flo} + {H_ - STRTAG} - {w}, 1)"
             f" + clamp(0, {w} - {ARRTAG + 2} - {flo}, 1) * clamp(0, {flo} + {H_ + ARRTAG} - {w}, 1)"
             f" + clamp(0, {w} + {R.DBLTAG - 3} - {flo}, 1) * clamp(0, {flo} + {H_ - R.DBLTAG} - {w}, 1)"
-            f" + clamp(0, {w} + {R.FUNTAG} - {flo}, 1) * clamp(0, {flo} + {H_ - R.FUNTAG} - {w}, 1)))")
+            f" + clamp(0, {w} + {R.FUNTAG} - {flo}, 1) * clamp(0, {flo} + {H_ - R.FUNTAG} - {w}, 1)"
+            f" + clamp(0, {w} + {R.ENVTAG} - {flo}, 1) * clamp(0, {flo} + {H_ - R.ENVTAG} - {w}, 1)))")
 isw = eq('var(--op)', OP['MWALK'])
 NEWCLASSES['mcmp'] = dict(ops=['MCMP', 'MFEQ', 'MFREF', 'MWALK'], pre=OPND + OPNDA + [f"--zA: {kv('A', 'z')};", f"--mo: {pst};",
     f"--mk: max(0, min(var(--zA) - var(--mo), 4 - var(--up), 4 - {eq('var(--op)', OP['MCMP'])} * var(--ul)));"] +

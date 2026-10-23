@@ -18,7 +18,7 @@ assert MAP >= L['rt_base'] + len(L['rt_cells']) and POWT + 16 <= SP0
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=R.SDATA, STR_LO=U.STR_LO, HEAP0=U.HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=R.STRTAG, OBJTAG=U.OBJTAG, ARRTAG=U.ARRTAG,
-             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, FUNTAG=R.FUNTAG, FTAB=R.FTAB, FCACHE=R.FCACHE, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT)
+             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, FUNTAG=R.FUNTAG, ENVTAG=R.ENVTAG, RSTUB=2, FTAB=R.FTAB, FCACHE=R.FCACHE, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT)
     k.update(CELL); k['NETPARTS'] = L['net_parts']; k['NBUF'] = 2 * L['net_parts']
     k.update({f'K_{n.upper()}': i for i, n in enumerate(R.KINDS)}); k.update({f'A_{n.upper()}': i for i, n in enumerate(R.ALLOCK)})
     k.update({n: v for n, v in zip(R.SPECIALS, range(R.SPV0, R.SPV0 + 8))}); k.update(SPV0=R.SPV0, TRAPDEF=R.TRAPDEF)
@@ -54,6 +54,7 @@ def build(out):
     rom = [words.get(a, 0) for a in range(max(words) + 1)]
     assert len(rom) % 2 == 0
     rom[0:2] = [R.OP['JMP'] * 8192 + entries['refstub'] // 2, 0]     # address 0 (undefined labels: cc_ref.NIMP): to refstub
+    assert entries['rstub'] == 2, 'rstub (RET F1) must be the first routine: retc returns through it'
     entries['pstub'] = len(rom)                         # PRINT's trap: TENTER ptrap (cc_ref.TRAPS)
     rom += [R.OP['TENTER'] * 8192 + entries['ptrap'] // 2, 0]
     missing = [t for t in R.TRAPS.values() if t not in entries]

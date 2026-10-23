@@ -120,7 +120,8 @@ TRAPS = {'DADD': 'dadd', 'DSUB': 'dsub', 'DMUL': 'dmul', 'DDIV': 'ddiv', 'DMOD':
 CATTRAPS = {'DADD': 'gccat'}
 OP = {n: i for i, n in enumerate(OPN)}
 DYNOPS = ('DADD', 'DSUB', 'DMUL', 'DDIV', 'DMOD', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE', 'DLEQ', 'DLNE', 'DNEG', 'DBIT')
-# DBIT A + 1024 k, B, C: the bitwise operator k (BITOPS: & | ^ << >> >>>) of B and C (~x is x ^ -1)
+# DBIT A + 1024 k, B, C: the bitwise operator k (BITOPS: & | ^ << >> >>>) of B and C (~x is x ^ -1); k 7 always traps: RETC B, C,
+# the return of a function that makes closures (RET's label turns it into this: the library's retc closes its env cell C)
 JCMPS = ('JLT', 'JGT', 'JLE', 'JGE', 'JEQ', 'JNE', 'JLEQ', 'JLNE', 'JNLT', 'JNGT', 'JNLE', 'JNGE')
 # JNLT ... JNGE jump when the comparison is false: with NaN a comparison's negation is no comparison (!(x < y) isn't y <= x)
 def dyn_fast(op, x, y, k=0):
@@ -142,6 +143,7 @@ def dyn_fast(op, x, y, k=0):
     if not (issmi(x) and issmi(y)): return None
     if op in ('DLT', 'DGT', 'DLE', 'DGE'): return jsb({'DLT': x < y, 'DGT': x > y, 'DLE': x <= y, 'DGE': x >= y}[op])
     if op == 'DBIT':                                     # (DBIT's operator k; >>> of a negative number: as an unsigned one)
+        if k > 5: return None                            # (7: RETC, cc_ref.ret)
         s = y & 31; r = (x & y, x | y, x ^ y, x << s, x >> s, (x + (x < 0) * 2 ** 32) >> s)[k]
     if op == 'DDIV':
         if y == 0 or x % y or (x == 0 and y < 0): return None
@@ -231,6 +233,11 @@ def isnum(v): return issmi(v) or v in (INF, NINF, NAN, MZERO) or isdbl(v)
 # or 0). (The runtime library makes them: mkfn)
 FUNTAG = 458752
 def isfun(v): return -FUNTAG <= v < -FUNTAG + 32768
+# An env cell (a closure's outer frame, cc_ref.captured) is a heap block (collector kind 4) [hdr | base | size | the frame's
+# words when closed], its value the address of its base word - ENVTAG (slot -12). base: the frame's fp while it runs, else
+# the cell's own address + 1 (the frame's slot k at base + k)
+ENVTAG = 393216
+def isenv(v): return -ENVTAG <= v < -ENVTAG + 32768
 def isref(v): return isstr(v) or isarr(v) or isobj(v) or isdbl(v) or isfun(v)
 
 # ---- the FPU's numbers (Python floats are the same IEEE doubles as Chrome's calc())
@@ -426,7 +433,7 @@ def isfref(w, flo):
     """MFREF's test: w refers to a block in the from-space at flo (an object, a string, an array)"""
     H = LAYOUT['heap_size']
     return (flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
-            or flo + 4 <= w + DBLTAG < flo + H or flo + 1 <= w + FUNTAG < flo + H)
+            or flo + 4 <= w + DBLTAG < flo + H or flo + 1 <= w + FUNTAG < flo + H or flo + 1 <= w + ENVTAG < flo + H)
 def mcase(op, c):
     """MCPY's letters: MUPPER a-z to A-Z, MLOWER A-Z to a-z"""
     lo = 97 if op == 'MUPPER' else 65
@@ -493,6 +500,7 @@ LITK = {KW[w]: v for w, v in LITERALS.items()}
 NIMP, IMPC = 4, 2
 FCACHE = IMPC + NIMP
 WGLOB = (KW['window'], KW['globalThis'])
+RETC = (OP['DBIT'] - OP['RET']) * 8192 + 7 * 1024     # RET + it: DBIT k 7 (cc_ref.ret)
 # JavaScript's reserved words among the keywords: no variable, parameter or function may be named so. A declaration checks at
 # once; a name read or called (an implicit global, a function never declared) is checked at the end, in the tables
 RESERVED = tuple(KW[w] for w in ('var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'break', 'continue',
@@ -548,6 +556,9 @@ M_PAREN, M_CALL, M_ARR, M_METH, M_PUTC, M_PRINT, M_TERN = 100, 101, 102, 103, 10
 M_OBJ, M_OKEY, M_INDEX = 109, 110, 111
 # M_CALLV: a call of a value (the callee in its slot, below the arguments; value: 64 * commas) -> CALLV
 M_CALLV = 113
+# M_FN: a function expression's barrier (its value: the name it takes from an object literal's key, or 0); a function body's
+# expressions use the operator and operand stacks above obase / dbase
+M_FN = 114
 # the runtime library's intrinsics (rom mode): M_INTR's value = the intrinsic (INTR) + 32 * its slot on the operand stack (d0)
 M_INTR = 112
 # control stack kinds. Bodies: IFB / ELSEB / LOOPB and DOB (a = continue target, b = break target; DOB c = the loop
@@ -555,6 +566,11 @@ M_INTR = 112
 # statement, closed when that statement completes. A DOB stays on the stack through its while (cond): a ')' with a DOB on top
 # can only end that condition. A function is declared at the program's top level, so its FUNCB is entry 0.
 C_BLOCK, C_IFB, C_ELSEB, C_DOB, C_LOOPB, C_FUNCB = 1, 2, 3, 4, 5, 6
+# a function's body: C_FUNCB a top-level declaration (static calls), C_FUNCN one inside a function (a local variable of that
+# name gets its value where it stands), C_FUNCE an expression (its value is the operand). a: the label past it, b: its frame
+# label, c: C_FUNCN's local. Functions nest two deep (curf: 0 the top level, 1, 2); fn_enter saves the outer context (sv0 ... sv3)
+C_FUNCN, C_FUNCE = 7, 8
+FUNCS = (C_FUNCB, C_FUNCN, C_FUNCE)
 C_IFC, C_WHILEC, C_FORINIT, C_FORCOND, C_FORSTEP, C_ASSIGN, C_EXPR, C_RETURN = 10, 11, 12, 13, 14, 15, 16, 17
 C_PSET = 19
 # for (x of e) / for (x in e): C_FOROF (a l1, b lb, c x's symbol, d 1 for in) while e is parsed. Two temps below the operand stack
@@ -607,13 +623,71 @@ class Compiler:
         self.lab = [-1] * self.NL; self.nlab = 0
         self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings and names: h1 h2 address
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
+        self.obase = self.dbase = self.fcsp = self.flab = 0; self.sv0 = self.sv1 = self.sv2 = self.sv3 = 0     # (fn_enter)
+        self.optlab = set()                 # labels that may stay undefined (0): the close labels
+        self.fmark = 0                      # nlet when the current function started (its block-scoped names lie below NS - fmark)
+        self.clab = 0                       # the top-level function's close label (cc_ref.closelab)
         self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
         if not rom: self.nsym = NIMP; self.dp = FCACHE + NF
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
 
     # ---------------- helpers
-    def frame_label(self): return self.cs[0][2] if self.curf else None
+    def frame_label(self): return self.flab if self.curf else None
+    def fn_enter(self, k):
+        """a function's body starts (k: its table index): the outer context saved (sv0 the top level's expression stacks, sv1 ... sv3
+        a function's), a fresh one: no locals, empty stacks above the outer's (obase / dbase), a frame label"""
+        if self.curf >= 2: return self.fail(41)
+        if self.curf == 0: self.sv0 = self.obase + 8 * self.dbase + 128 * self.tb
+        else:
+            self.sv1 = self.nloc + 64 * self.npar + 1024 * self.obase
+            self.sv2 = self.dbase + 16 * self.tb + 512 * self.fsym
+            self.sv3 = self.cfn + 16 * self.flab + 1024 * self.fcsp
+        if self.curf == 1 and not self.rom: self.deflab(self.clab, RETC)     # (it makes closures)
+        self.curf += 1; self.cfn = k; self.nloc = self.npar = self.tb = 0; self.fsym = self.nsym; self.fmark = self.nlet
+        self.obase, self.dbase, self.fcsp = self.osp, self.nd, self.csp
+        self.flab = self.newlab(); self.cs[self.csp - 1][2] = self.flab
+        if self.curf == 1 and not self.rom: self.clab = self.newlab(); self.optlab.add(self.clab)     # (its RETs' label)
+    def fn_exit(self):
+        """a function's body ended: the outer context back"""
+        self.nsym = self.fsym; self.curf -= 1
+        if self.curf == 0:
+            v = self.sv0; self.obase, self.dbase, self.tb = v % 8, v // 8 % 16, v // 128
+            self.nloc = self.npar = self.fsym = self.cfn = self.flab = self.fcsp = 0
+        else:
+            self.nloc, self.npar, self.obase = self.sv1 % 64, self.sv1 // 64 % 16, self.sv1 // 1024
+            self.dbase, self.tb, self.fsym = self.sv2 % 16, self.sv2 // 16 % 32, self.sv2 // 512
+            self.cfn, self.flab, self.fcsp = self.sv3 % 16, self.sv3 // 16 % 64, self.sv3 // 1024
+    def closelab(self):
+        """a top-level function's RETs carry its close label (RET + it is RETC once the function makes a closure: fn_enter)"""
+        return self.clab if self.curf == 1 and not self.rom else None
+    def ret(self, b):
+        """RET b; a top-level function's: RET b, local 1 with its close label (cc_ref RETC)"""
+        lab = self.closelab()
+        self.emit('RET', b=b, c=(L(self.npar + 1), 0) if lab is not None else (0, 0), label=lab)
+    # Closures: a function inside a function (curf 2) reads and writes its outer function's variables through that invocation's
+    # env cell (the library's: its base word holds the frame's address while it runs, the cell's own copy of the frame after it
+    # returned: RETC). Every function's local 1 holds an env cell: a top-level function's own (once it makes a closure), an inner
+    # function's outer one (callv writes it: an inner function's meta has 16 added). x at the outer frame's slot s:
+    #   read  LDI t, local1, #0   LDI t, t, #s          write  LDI t, local1, #0   STI t, #s, v
+    def captured(self, j):
+        """symbol j is the outer function's variable (an inner function reads it through its env)"""
+        return (self.sym[j][2] == 2 and self.curf == 2 and not self.rom
+                and (NIMP <= j < self.fsym or j >= NS - self.fmark))
+    def envbase(self, t):
+        """t := the outer frame's base (the env cell's base word)"""
+        self.emit('LDI', t, (L(self.npar + 1), 0), (K(0), 0))
+    def cread(self, j):
+        """captured symbol j's value pushed (a temp)"""
+        i = self.nd; t = self.tmp(i); self.envbase(t); self.emit('LDI', t, t, (K(self.var(j) - 256), 0)); self.push_od(TMP, self.sym[j][4])
+    def cwrite(self, j, v):
+        """captured symbol j := operand v (scratch: the temp above the stack's top)"""
+        t = self.tmp(self.nd); self.envbase(t); self.emit('STI', t, (K(self.var(j) - 256), 0), v)
+    def fnnew(self):
+        """a table entry for a function that isn't called by its name (an expression, one inside a function)"""
+        if self.nfn >= self.NF: self.fail(23); return 0
+        k = self.nfn; self.fn[k] = [0, H2M + k, self.newlab(), 0, 0]; self.nfn += 1; self.nfdef += 1
+        return k
     def emit(self, op, a=(0, 0), b=(512, 0), c=(0, 0), label=None, w1=None):
         """one instruction: op A, B, C, operands as (field, temp?) (a temp adds the frame label: times 1 in A, 1024 in B, 1 in
         C); or A and word1 whole (w1: a value, or (field, temp?) for CALL's offset). label: A is that label's value at link time"""
@@ -641,7 +715,7 @@ class Compiler:
     def push_op(self, code, val=0):
         if self.osp >= OD: self.fail(22); return
         self.ops[self.osp] = code; self.opv[self.osp] = val; self.osp += 1
-    def top_op(self): return (self.ops[self.osp - 1], self.opv[self.osp - 1]) if self.osp else (0, 0)
+    def top_op(self): return (self.ops[self.osp - 1], self.opv[self.osp - 1]) if self.osp > self.obase else (0, 0)
     def lookup(self, h):
         """the latest block-scoped let / const of that name, else the latest other name (in a valid program a visible
         block-scoped binding is always the innermost: a var of the same name in its block would be a redeclaration), else an
@@ -690,7 +764,7 @@ class Compiler:
         return any((self.sym[j][0], self.sym[j][1]) == h for j in js)
     def decl_blk(self):
         """the declaration in progress is block-scoped: let / const (pn[0] 1 / 2) below the function or program level"""
-        return int(self.pn[0] > 0 and self.csp > self.curf)
+        return int(self.pn[0] > 0 and self.csp > self.fcsp)
     def intern(self, h, addr, ln):
         """the interned string of hash h: its address, entering it (at addr) if new; -1 when the table is full. Every string
         and name in the string area is [length][bytes][0], its address that of the first byte: this copy's length word is
@@ -715,7 +789,7 @@ class Compiler:
         the parameters)"""
         k, a = self.sym[j][2], self.sym[j][3]
         return (L(a - PARAM0 + 1) if a >= PARAM0 else L(a)) if k == 2 else a
-    def tmp(self, i): return (L(1 + self.npar * self.curf + self.tb + i), self.curf)    # T(i): past the locals (+ the frame label)
+    def tmp(self, i): return (L(1 + self.npar + self.tb + i - self.dbase), int(self.curf > 0))    # T(i): past the locals (+ the frame label)
     def arg_end(self):
         """an argument or an array element ended: into its temp, which leaves the operand stack (the temps' base tb moves past it
         until the call is made)"""
@@ -750,10 +824,10 @@ class Compiler:
         """operands still on the stack (below n) that a call or ++ / -- is about to change: copied to their temps first. At the
         start of a conditional region (&&, ||, ?:) every variable below is copied: a copy made inside it would be made on one
         path only"""
-        for i in range(self.nd if n is None else n):
+        for i in range(self.dbase, self.nd if n is None else n):
             d = self.desc(i)
             if d < 768 and hit(d):
-                tb = self.od[i] // 16384; f = (L(1 + self.npar * self.curf + tb + i), self.curf)
+                tb = self.od[i] // 16384; f = (L(1 + self.npar + tb + i - self.dbase), int(self.curf > 0))
                 self.emit('MOV', f, (d, 0)); self.od[i] = tb * 16384 + self.otype(i) * 4096 + TMP
     def pend(self, i, cop, b, c):
         """descriptor i := the pending comparison b cop c (or ! b: cop NOT)"""
@@ -847,6 +921,7 @@ class Compiler:
         if t[4]: self.emit('CALL', (self.ent.get('keys', 0) // 2, 0), w1=(a[0] - 256, a[1]))
         self.nd = i; self.deflab(t[1], self.here())
         n, x = self.tmp(0), (self.var(t[3]), 0)                # (GETX's trap needs a temp: n)
+        if self.captured(t[3]): return self.fail(80)          # (an outer function's variable: no for of / in target)
         if t[4]: self.emit('GETX', n, a, ix); self.emit('JEQ', b=n, c=(K(UNDEF), 0), label=t[2]); self.emit('MOV', x, n); self.step1(True)(ix, ix)
         else:
             self.emit('LDI', n, a, (K(-1), 0)); self.emit('JGE', b=ix, c=n, label=t[2]); self.emit('GETX', n, a, ix)
@@ -858,13 +933,13 @@ class Compiler:
 
     def cond_ctx(self, closer):
         """this token ends a statement-level expression that a branch takes (an if / while / do-while condition, a for test)"""
-        if any(self.ops[k] >= 100 for k in range(self.osp)): return False
+        if any(self.ops[k] >= 100 for k in range(self.obase, self.osp)): return False
         t = self.top_cs()[0]
         return (closer == 41 and t in (C_IFC, C_WHILEC, C_DOB, C_DOB1)) or (closer == 59 and t == C_FORCOND)
     def dest_ctx(self):
         """an assignment's value ends here: its last operator may write the target"""
         t = self.top_cs()
-        if any(self.ops[k] >= 100 for k in range(self.osp)) or t[0] != C_ASSIGN or t[2]: return None
+        if any(self.ops[k] >= 100 for k in range(self.obase, self.osp)) or t[0] != C_ASSIGN or t[2] or self.captured(t[1]): return None
         return ('dest', self.var(t[1]))
     def end_mode(self, closer):
         return 'br' if self.cond_ctx(closer) else self.dest_ctx()
@@ -966,14 +1041,14 @@ class Compiler:
         """a case value ended (':'): J!= Tnext, T(0), value  Bk:  (the switch's value in T(0), this one above it; strings are
         compared by the library's jcmp)"""
         c = self.pop_cs(); tn = self.newlab()
-        self.emit('JNE', b=self.src(0), c=self.src(1), label=tn)
-        self.nd = 0
+        self.emit('JNE', b=self.src(self.dbase), c=self.src(self.dbase + 1), label=tn)
+        self.nd = self.dbase
         if c[2]: self.deflab(c[1], self.here())
         t = self.top_cs(); t[1] = tn; t[4] |= 1; self.mode = S_STMT
 
     def stmt_level(self):
         """an assignment to x[k]: only as a statement of its own"""
-        return self.osp == 0 and self.top_cs()[0] == C_EXPR
+        return self.osp == self.obase and self.top_cs()[0] == C_EXPR
 
     def index_read(self, i, keep=False):
         """x[k] with [x, k] at i, i + 1: its value replaces them (keep: pushed above them, for x[k] op= e)"""
@@ -1015,7 +1090,7 @@ class Compiler:
     def print_end(self):
         """console.log(...) ended. Its PRINTs printed every argument, so it leaves no value: it must be a statement of its own
         (C_EXPR, nothing else open)"""
-        if self.osp or self.top_cs()[0] != C_EXPR: return self.fail(30)
+        if self.osp > self.obase or self.top_cs()[0] != C_EXPR: return self.fail(30)
         self.pop_cs(); self.mode = S_INC
 
     def call_end(self, tv, last):
@@ -1036,6 +1111,7 @@ class Compiler:
         if last: self.arg_end()
         self.tb -= argc; d0 = self.nd - 1; f = self.tmp(d0)
         self.emit('CALLV', (argc, 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0); self.mode = S_OPER
+    def mode_stmt(self): self.mode = S_STMT
     def asi_close(self, f):
         """'}' right after a statement without ';': end the statement (knowing the next token is not 'else'),
         then close the block"""
@@ -1047,6 +1123,12 @@ class Compiler:
         j = self.lookup(h)
         if j < 0: return self.fail(6)
         if self.sym[j][5]: return self.fail(64)
+        if self.captured(j):                                 # through the env: base at T(nd + 1), the value at T(nd) (cc_ref.captured)
+            u, t, w = self.tmp(self.nd), self.tmp(self.nd + 1), self.tmp(self.nd + 2); s = (K(self.var(j) - 256), 0)
+            self.envbase(t); self.emit('LDI', u, t, s); self.step1(v == 7)(w if x == 2 else u, u); self.emit('STI', t, s, w if x == 2 else u)
+            if x: self.push_od(TMP, 3); self.pm = 3; self.mode = S_OPER
+            else: self.mode = S_INC
+            return
         o = self.var(j)
         if x: self.snapshot(lambda q: q == o)
         if x == 2: self.push_od(o, 3); self.to_temp(self.nd - 1)
@@ -1176,6 +1258,7 @@ class Compiler:
                 if self.sym[j][2] == 3: self.sym[j][2] = 1
                 return self.forof(j, isK_('in'))
             if isP(58):                                        # a label (outer:): a name of its own (h2 + H2M: no variable's) in the
+                if self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return self.fail(67)     # (not in a for header)
                 if self.nsym + self.nlet >= NS: return self.fail(24)    # block-scoped region, the next statement's control entry
                 self.nlet += 1; self.sym[NS - self.nlet] = [h[0], h[1] + H2M, 0, self.csp, 0, 0]; self.mode = S_STMT; return
             if isP(61) or (kind == 'P' and v in COMPOUND):
@@ -1185,7 +1268,9 @@ class Compiler:
                 if self.err: return
                 if self.sym[j][2] == 3: self.sym[j][2] = 1       # (assigned)
                 if self.sym[j][5]: return self.fail(64)
-                if not isP(61): self.push_od(self.var(j), self.sym[j][4])     # x op= e: x is the left operand, read first
+                if not isP(61):                                # x op= e: x is the left operand, read first
+                    if self.captured(j): self.cread(j)
+                    else: self.push_od(self.var(j), self.sym[j][4])
                 self.push_cs(C_ASSIGN, j, COMPOUND.get(v, 0) if kind == 'P' else 0); self.mode = S_OPND; return
             if isP(7) or isP(8): return self.incdec(h, v)
             if isP(91) and self.lookup(h) < 0: return self.fail(7)        # NAME[e] = e: an expression statement (x[k] below)
@@ -1204,7 +1289,9 @@ class Compiler:
                     self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, GLOBAL_INDEX[h])    # (the receiver: unused)
                 elif not self.rom and self.lookup(h) >= 0:   # a variable's value: CALLV (the callee in its slot)
                     j = self.lookup(h); self.snapshot(lambda q: q < 256)
-                    self.push_od(self.var(j), 0); self.to_temp(self.nd - 1); self.push_op(M_CALLV)
+                    if self.captured(j): self.cread(j)
+                    else: self.push_od(self.var(j), 0); self.to_temp(self.nd - 1)
+                    self.push_op(M_CALLV)
                 else:
                     self.snapshot(lambda q: q < 256)          # the callee may change a global still waiting on the stack
                     k = self.fnfind(h); self.push_op(M_CALL, k + self.FM * self.fn[k][3]); self.push_od(TMP, 0)   # its slot
@@ -1224,7 +1311,8 @@ class Compiler:
             else:
                 if j < 0: j = self.implicit(h, False)
                 if self.err: return
-                self.push_od(self.var(j), self.sym[j][4])
+                if self.captured(j): self.cread(j)
+                else: self.push_od(self.var(j), self.sym[j][4])
             m = self.mode = S_OPER
         if m == S_ELSE:
             if isK_('else'):
@@ -1298,10 +1386,10 @@ class Compiler:
                 if not self.curf: return self.fail(57)
                 self.push_cs(C_RETURN); self.mode = S_OPND; return
             if isK_('break') or isK_('continue'): self.pn = (int(isK_('break')), 0); self.mode = S_BRK; return
-            if isK_('function'):
-                if self.curf or self.csp: return self.fail(41)
+            if isK_('function'):                             # a declaration (inside a function: a local variable's value)
+                if self.curf >= 2 or (self.rom and self.csp): return self.fail(41)
                 lo = self.newlab(); self.emit('JMP', label=lo); self.mode = S_FNAME
-                self.push_cs(C_FUNCB, lo); return
+                self.push_cs(C_FUNCN if self.curf else C_FUNCB, lo); return
             self.pn = v; self.mode = S_NAMES; return
         if m == S_PREINC:
             if kind != 'ID': return self.fail(10)
@@ -1351,15 +1439,23 @@ class Compiler:
             if kind != 'ID': return self.fail(69)
             self.mode = S_NAMES if self.pn[0] else S_NAMEE; self.pn = v; return
         if m == S_FNAME:
-            if kind != 'ID' or v in RESERVED: return self.fail(34)
-            if not self.rom:                                   # its value's descriptor (FTAB): [MOV][its name], the name committed
-                if self.tid >= NOROOM: return self.fail(26)
-                self.datum(self.tid - 1, self.tlen); self.emit('MOV', w1=self.tid - STRTAG)
-            k = self.fnfind(v); self.cfn = k
-            self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
-            self.curf = 1; self.nloc = 0; self.npar = 0; self.fsym = self.nsym
-            le = self.newlab(); self.cs[self.csp - 1][2] = le
-            self.mode = S_FPAREN; return
+            fk = self.top_cs()[0]
+            if fk == C_FUNCE and isP(40):                      # an anonymous function expression
+                nm = self.ops[self.osp - 1] == M_FN and self.opv[self.osp - 1]
+                self.emit('MOV', w1=self.db + nm - STRTAG if nm else 0); self.fn_enter(self.fnnew()); m = self.mode = S_FPAREN
+            else:
+                if kind != 'ID' or v in RESERVED: return self.fail(34)
+                if not self.rom:                               # its value's descriptor (FTAB): [MOV][its name], the name committed
+                    if self.tid >= NOROOM: return self.fail(26)
+                    self.datum(self.tid - 1, self.tlen); self.emit('MOV', w1=self.tid - STRTAG)
+                if fk == C_FUNCB:                              # its calls: CALL its label
+                    k = self.fnfind(v); self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
+                else:
+                    if fk == C_FUNCN:                          # the local variable that holds it (cc_ref FUNCS)
+                        self.nloc += 1; self.declare(v, 2, self.npar + self.nloc); self.cs[self.csp - 1][3] = self.nsym - 1
+                    k = self.fnnew()
+                if self.err: return
+                self.fn_enter(k); self.mode = S_FPAREN; return
         if m == S_FPAREN:
             if not isP(40): return self.fail(35)
             self.mode = S_FPARAM; return
@@ -1416,6 +1512,11 @@ class Compiler:
                 self.push_od(KBIG, 2, e - STRTAG); self.mode = S_OPER; return
             if kind == 'ID' and v in LITK: self.push_od(*LITK[v]); self.mode = S_OPER; return
             if isK_('typeof'): self.push_op(TYPEOF); return
+            if isK_('function') and not self.rom:             # a function expression: its value (its name from a key it is the value of)
+                if self.curf >= 2: return self.fail(41)
+                t, tv = self.top_op()
+                self.push_op(M_FN, tv if t == M_OKEY else 0); lo = self.newlab(); self.emit('JMP', label=lo)
+                self.push_cs(C_FUNCE, lo); self.mode = S_FNAME; return
             if isP(123):                                       # an object literal: NEW, then each pair as o.key = v
                 i = self.nd; self.push_od(TMP, 0)
                 if self.err: return
@@ -1437,12 +1538,12 @@ class Compiler:
                 self.osp -= 1; self.mode = S_OPER; return self.meth_end(self.opv[self.osp], 0)
             if isP(93) and self.top_op()[0] == M_ARR:         # [] (or [a, ] with a trailing comma)
                 self.osp -= 1; return self.arr_end(self.opv[self.osp], 0)
-            if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:
+            if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == self.obase:
                 self.push_od(K(0 if self.rom else UNDEF), 0)
                 if isP(125): return self.asi_close(lambda: self.end_expr_stmt('P', T_NL))
                 return self.end_expr_stmt(kind, v)
             if isP(T_NL): return
-            if isP(59) and self.top_cs()[0] == C_FORCOND and self.osp == 0:
+            if isP(59) and self.top_cs()[0] == C_FORCOND and self.osp == self.obase:
                 self.push_od(K(1), 1); return self.end_expr_stmt(kind, v)
             return self.fail(3)
         if m == S_OPER:
@@ -1502,7 +1603,7 @@ class Compiler:
                 if self.err: return
                 t, tv = self.top_op()
                 if t != M_TERN:
-                    if self.osp == 0 and self.top_cs()[0] == C_CASE: return self.case_end()
+                    if self.osp == self.obase and self.top_cs()[0] == C_CASE: return self.case_end()
                     return self.fail(67)
                 self.osp -= 1; i = self.nd - 1; lbt = self.otype(i); self.to_temp(i); self.nd -= 1
                 if tv >= self.LM:
@@ -1535,7 +1636,7 @@ class Compiler:
                     if t == M_CALL: self.arg_end(); self.opv[self.osp - 1] += 4 * self.FM
                     if t in (M_METH, M_CALLV): self.arg_end(); self.opv[self.osp - 1] += 64    # count the arguments
                     if t in (M_CALL, M_METH, M_PUTC, M_INTR, M_CALLV): self.mode = S_OPND; return
-                    if self.osp == 0 and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
+                    if self.osp == self.obase and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
                     return self.fail(44)
                 if t == M_PAREN: self.osp -= 1; return
                 if t == M_CALL: self.osp -= 1; return self.call_end(tv, 1)
@@ -1545,9 +1646,9 @@ class Compiler:
                 if t == M_PUTC:
                     self.osp -= 1; self.emit('PUTC', b=self.src(self.nd - 1)); self.nd -= 1; self.push_od(K(0), 0); return
                 if t == M_PRINT: self.print_call(10); self.osp -= 1; return self.print_end()
-                if self.osp: return self.fail(46)
+                if self.osp > self.obase: return self.fail(46)
                 return self.end_expr_stmt(kind, v)
-            asiok = (not any(self.ops[k] >= 100 for k in range(self.osp)) and self.top_cs()[0] in (C_ASSIGN, C_EXPR, C_RETURN, C_PSET)
+            asiok = (not any(self.ops[k] >= 100 for k in range(self.obase, self.osp)) and self.top_cs()[0] in (C_ASSIGN, C_EXPR, C_RETURN, C_PSET)
                      and not (self.csp >= 2 and self.cs[self.csp - 2][0] in (C_FORINIT, C_FORSTEP)))
             if isP(T_NL) and not asiok: return
             if isP(125) and asiok:
@@ -1555,7 +1656,7 @@ class Compiler:
             if isP(59) or isP(T_NL):
                 self.popops(1, self.end_mode(59))
                 if self.err: return
-                if self.osp: return self.fail(47)
+                if self.osp > self.obase: return self.fail(47)
                 return self.end_expr_stmt(kind, v)
             return self.fail(48)
         return self.fail(99)
@@ -1572,7 +1673,7 @@ class Compiler:
             self.pop_cs(); self.branch(t[3], True); self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k == C_FOROF and isP(41): return self.forof_end()
         if k == C_SWITCHC and isP(41):                         # the value into T(0), where the case tests read it. C_SWITCH: the
-            self.pop_cs(); self.to_temp(0); ty = self.otype(0); self.nd = 0     # next test's label, the end, default's label,
+            self.pop_cs(); d0 = self.dbase; self.to_temp(d0); ty = self.otype(d0); self.nd = d0     # next test's label, the end, default's label,
             self.push_cs(C_SWITCH, self.newlab(), self.newlab(), 0, 4 * ty); self.mode = S_LBRACE; return    # 4 * type + seen + 2 default
         if k == C_WHILEC and isP(41):
             self.pop_cs(); le = self.newlab(); self.branch(le, False); self.push_cs(C_LOOPB, t[1], le); self.mode = S_LBRACE; return
@@ -1581,7 +1682,11 @@ class Compiler:
             self.push_cs(C_FORSTEP, t[1], t[2], t[3], t[4], e=t[5]); self.mode = S_STMT; return
         if k == C_ASSIGN:                                      # t: symbol, compound op, from a declaration
             self.pop_cs(); o = (self.var(t[1]), 0); i = self.nd - 1
-            if t[2]:                                           # (a snapshot replaced x below e if e changed it)
+            if self.captured(t[1]):                            # (its value in a temp, then through the env)
+                if t[2]: self.settype(t[1], self.compound(t[2], i - 1, self.tmp(i - 1))); self.nd -= 1; i -= 1
+                else: self.settype(t[1], self.otype(i))
+                self.cwrite(t[1], self.src(i))
+            elif t[2]:                                         # (a snapshot replaced x below e if e changed it)
                 self.settype(t[1], self.compound(t[2], i - 1, o)); self.nd -= 1
             else: self.put(o, i); self.settype(t[1], self.otype(i))
             self.nd -= 1
@@ -1599,7 +1704,7 @@ class Compiler:
         if k == C_RETURN and (isP(59) or isP(T_NL)):
             self.pop_cs(); i = self.nd - 1
             if self.otype(i): self.fn[self.cfn][3] = self.otype(i)
-            self.emit('RET', b=self.src(i)); self.nd -= 1; return self.complete_stmt(0)
+            self.ret(self.src(i)); self.nd -= 1; return self.complete_stmt(0)
         return self.fail(50)
 
     # ---- a simple statement's terminator: ';' normally, ';' after a for init, ')' after a for step
@@ -1643,9 +1748,18 @@ class Compiler:
             self.deflab(t[1], self.here())
             if t[4] & 2: self.emit('JMP', label=t[3])
             self.deflab(t[2], self.here()); return self.complete_stmt(0)
-        if k == C_FUNCB:                                   # (still inside: the RET's frame label)
-            self.emit('RET', b=(K(0 if self.rom else UNDEF), 0)); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
-            self.curf = 0; self.nsym = self.fsym; self.mode = S_STMT; return
+        if k in FUNCS:                                     # (still inside: the RET's frame label)
+            self.ret((K(0 if self.rom else UNDEF), 0)); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
+            fk = self.cfn; self.fn_exit()
+            # its value: NUMLIT k (an inner function's: + 64 * (its index + 16 * the env's slot), + the frame's size: npar + the
+            # frame label, which the linker adds: the library's mkfn makes the env cell)
+            w1 = (self.npar + 64 * fk + 1024 * (self.npar + 1), 1) if self.curf == 1 else fk
+            if k == C_FUNCN:                                   # its local's value
+                o = (self.var(t[3]), 0); self.emit('MOV', o, (K(0), 0)); self.emit('NUMLIT', o, w1=w1)
+            if k == C_FUNCE:                                   # its value: a new one each time (NUMLIT of a zeroed temp)
+                self.osp -= 1; i = self.nd; self.push_od(TMP, 0); o = self.tmp(i)
+                self.emit('MOV', o, (K(0), 0)); self.emit('NUMLIT', o, w1=w1); self.mode = S_OPER; return
+            return self.mode_stmt()
         return self.fail(55)
 
     def do_cond(self, t):
@@ -1656,7 +1770,8 @@ class Compiler:
         f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
         if f[4] and f[4] != self.npar + 1: return self.fail(76)
         f[4] = self.npar + 1; self.mode = S_LBRACE
-        if not self.rom: self.datum(FTAB + self.cfn, self.here() + 8192 * self.npar)      # (its value's: FTAB)
+        if not self.rom:                                     # (its value's: FTAB, + 16 parameters: a closure, its env in local 1)
+            self.nloc = 1; self.datum(FTAB + self.cfn, self.here() + 8192 * (self.npar + 16 * (self.curf == 2)))
 
     # ---------------- whole program
     def compile(self, src):
@@ -1676,7 +1791,7 @@ class Compiler:
     def link(self):
         if 2 * self.cp > self.CODESZ: self.fail(62)           # (the page checks this in .fin)
         words = {}
-        fnl = {self.fn[k][2] for k in range(self.nfn)}
+        fnl = {self.fn[k][2] for k in range(self.nfn)} | self.optlab
         for a, (w, lab, m) in self.words_ir().items():
             if lab is not None:
                 if lab >= self.NL or (self.lab[lab] < 0 and (self.rom or lab not in fnl)): self.fail(60)
