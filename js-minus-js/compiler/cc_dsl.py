@@ -44,7 +44,7 @@ def initial_lex(data_base):
 
 def initial_parse(data_base):
     st = {n: 0 for n in parse_state_names()}
-    st['dp'] = R.RCELL + 1; st['mode'] = R.S_STMT        # (global k: data_base + k; cc_ref.NIMP, FCACHE: the implicit globals', the functions')
+    st['dp'] = R.SPCELL + 1; st['mode'] = R.S_STMT        # (global k: data_base + k; cc_ref.NIMP, FCACHE: the implicit globals', the functions')
     st['nsym'] = R.NIMP
     return st
 
@@ -1027,7 +1027,8 @@ class Prog(Base):
                 with self.when(p78n): self.incdec(pn1, pn2, tv, 2, (j, k, o, b, cst))     # x++ in an expression
                 ismath = self.m(and_(eq(pn1, KW['Math'][0]), eq(pn2, KW['Math'][1])), 'ismath')
                 sdot = self.m(and_(not_(p78n), lt(j, 0), or_(ismath, *[and_(eq(pn1, KW[w][0]), eq(pn2, KW[w][1])) for w in ('String', 'Object')]), P(46)), 'sdot')
-                with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', ite(ismath, R.S_MATHDOT, R.S_DOT)); self.done()     # String.fromCharCode
+                isstrn = self.m(and_(eq(pn1, KW['String'][0]), eq(pn2, KW['String'][1])), 'isstrn')
+                with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', ite(isstrn, R.S_DOT, R.S_MATHDOT)); self.done()     # String.fromCharCode
                 tyo = self.m(eq(self.top_op()[0], R.TYPEOF), 'ntyo')       # typeof x, x undeclared: "undefined"
                 undef = self.m(lt(j, 0), 'nund')
                 rd = self.m(and_(not_(p78n), not_(sdot)), 'nrd')
@@ -1274,18 +1275,20 @@ class Prog(Base):
             with self.when(meth): self.set('pn1', 0); self.set('pn2', 0); self.set('pm', add(mi_, 3)); self.set('mode', R.S_OPER); self.done()
             val = self.m(and_(isID, not_(meth), or_(ne(mk_, 0), and_(ne(mi_, 0), ne(mv_, 0)))), 'mval')
             with self.when(and_(not_(meth), not_(val))): self.fail(69)
-            with self.when(val):
-                i = self.m(self.v('nd') - 1, 'mdi'); t = self.tmp(i); isk = self.m(ne(mk_, 0), 'misk')
-                self.emit(OP['MOV'], self.tmp(add(i, 1)), (add(ite(isk, sub(mk_, 1), sub(mv_, 1)), 896), 0))
-                self.emit(OP['CALL'], (ite(isk, self.ent.get('mathk', 0) // 2, self.ent.get('mathfn', 0) // 2), 0), w1=(sub(t[0], 256), t[1]))
-                self.set_od(i, TMP, mul(isk, 3)); self.set('mode', R.S_OPER); self.done()
+            with self.when(val):                               # (dummy[a hidden key], pending as x[k]: cc_ref)
+                isk = self.m(ne(mk_, 0), 'misk')
+                self.push_od(KBIG, 0, sub(R.PKSTAT, ite(isk, sub(mk_, 1), add(sub(mv_, 1), len(R.MATHK)))))
+                self.set('pm', 2); self.set('mode', R.S_OPER); self.done()
         with block(R.S_NEW):                               # new F(...): F's name (cc_ref)
             nbad = self.m(or_(not_(isID), self.isres(th1, th2)), 'nbad')
             with self.when(nbad): self.fail(3)
             with self.when(not_(nbad)): self.set('pn1', th1); self.set('pn2', th2); self.set('mode', R.S_NEWN); self.done()
         with block(R.S_NEWN):
             with self.when(not_(P(40))): self.fail(35)
-            with self.when(P(40)): self.new_call(self.v('pn1'), self.v('pn2'))
+            nw = self.m(add(*[mul(and_(eq(self.v('pn1'), h[0]), eq(self.v('pn2'), h[1])), ix + 1) for h, ix in R.NEW_INDEX.items()]), 'nwi')
+            with self.when(and_(P(40), ne(nw, 0))):            # new Number( ...: a wrapper (cc_ref)
+                self.push_od(TMP, 0); self.set('tb', self.v('tb') + 1); self.push_op(R.M_METH, sub(nw, 1)); self.set('mode', R.S_OPND); self.done()
+            with self.when(and_(P(40), eq(nw, 0))): self.new_call(self.v('pn1'), self.v('pn2'))
         for am in (R.S_AARROW0, R.S_AARROW):              # () => / (a, b) =>
             with block(am):
                 with self.when(not_(P(R.T_ARROW))): self.fail(35)
@@ -1758,9 +1761,11 @@ class Prog(Base):
         """cc_ref.arrow_start (h1 None: no parameter). argc: as fnnew's"""
         curf = self.m(self.v('curf'), 'asc'); tc_, tv_ = self.top_op()
         with self.when(ge(curf, 2)): self.fail(41)
-        opd = self.m(and_(lt(curf, 2), gt(tc_, 0), lt(tc_, 100)), 'aopd')     # (an operator's operand: 1 + x => x)
+        ares = self.m(and_(lt(curf, 2), self.isres(h1, h2)), 'ares') if h1 is not None else K(0)
+        with self.when(ares): self.fail(36)
+        opd = self.m(and_(lt(curf, 2), not_(ares), gt(tc_, 0), lt(tc_, 100)), 'aopd')     # (an operator's operand: 1 + x => x)
         with self.when(opd): self.fail(48)
-        with self.when(and_(lt(curf, 2), not_(opd))):
+        with self.when(and_(lt(curf, 2), not_(ares), not_(opd))):
             nm = self.m(mul(eq(tc_, R.M_OKEY), tv_), 'anm')
             self.push_op(R.M_FN, nm); lo = self.newlab(); self.emit(OP['JMP'], label=lo); self.push_cs(R.C_FUNCE, lo, 0, 0, 1)
             self.emit(OP['MOV'], w1=mul(ne(nm, 0), add(nm, self.db - R.STRTAG))); ka = self.fnnew(argc); self.fn_enter(ka)

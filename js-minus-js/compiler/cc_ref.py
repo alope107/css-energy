@@ -224,6 +224,9 @@ GCELL, GLOBK = 1, -1
 PROTAG = 16 * 32768
 def isplink(k): return k < -OBJTAG
 PKPROTO, PKPT = SPV0 - 1, SPV0 - 2
+# Math.PI ... (MATHK), Math.min / max, Object.create as values (MATHV): x[PKSTAT - i] on the dummy receiver (getx: the constant or
+# the native; setx ignores them: Object.create = f is no error)
+PKSTAT = SPV0 - 3
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)
 RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
 def netw(ans):
@@ -487,7 +490,7 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('startsWith', {1: 'startswith'}, 1), ('endsWith', {1: 'endswith'}, 1), ('repeat', {1: 'repeat'}, 2),
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
            ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0), ('bind', {1: 'bind1', 2: 'bind2', 3: 'bind3'}, 0),
-           ('hasOwnProperty', {1: 'hasown'}, 1), ('create', {1: 'ocreate'}, 0)]
+           ('hasOwnProperty', {1: 'hasown'}, 1)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
 GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
            ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3),       # the network (net/device.py)
@@ -497,10 +500,14 @@ GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('Str
 MATHM = [('abs', {1: 'mabs'}, 3), ('floor', {1: 'mfloor'}, 3), ('ceil', {1: 'mceil'}, 3), ('round', {1: 'mround'}, 3),
          ('trunc', {1: 'mtrunc'}, 3), ('sign', {1: 'msign'}, 3), ('sqrt', {1: 'msqrt'}, 3), ('exp', {1: 'mexp'}, 3), ('log', {1: 'mlog'}, 3),
          ('sin', {1: 'msin'}, 3), ('cos', {1: 'mcos'}, 3), ('tan', {1: 'mtan'}, 3), ('pow', {2: 'mpow'}, 3),
-         ('min', {k: f'min{k}' for k in range(5)}, 3), ('max', {k: f'max{k}' for k in range(5)}, 3), ('random', {0: 'mrandom'}, 3)]
+         ('min', {k: f'min{k}' for k in range(5)}, 3), ('max', {k: f'max{k}' for k in range(5)}, 3), ('random', {0: 'mrandom'}, 3),
+         ('create', {1: 'ocreate'}, 0)]                  # (Object.create: Object. is a dummy receiver as Math. is)
 MATHK = {'PI': 0, 'E': 1, 'LN2': 2, 'LN10': 3, 'LOG2E': 4, 'LOG10E': 5, 'SQRT2': 6, 'SQRT1_2': 7}      # (cc_ref.FCONSTS)
-MATHV = ('min', 'max')                                  # as values: the library's natives (mathfn)
-ALLM = METHODS + GLOBALS + MATHM
+MATHV = ('min', 'max', 'create')                        # as values: the library's natives (mathfn)
+# new Number(x) / new String(x) / new Object(): wrapper objects (the library's wrapnum ...: an object whose first key, PKVAL, holds
+# the primitive, which ToPrimitive (prim) takes)
+NEWM = [('Number', {0: 'wrapnum0', 1: 'wrapnum'}, 0), ('String', {0: 'wrapstr0', 1: 'wrapstr'}, 0), ('Object', {0: 'wrapobj0', 1: 'wrapobj'}, 0)]
+ALLM = METHODS + GLOBALS + MATHM + NEWM
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
@@ -512,6 +519,7 @@ FMETH = {KW['call']: 0, KW['apply']: 1}
 PMFN = 68
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
 MATH_INDEX = {KW[m[0]]: len(METHODS) + len(GLOBALS) + i for i, m in enumerate(MATHM)}
+NEW_INDEX = {KW[m[0]]: len(METHODS) + len(GLOBALS) + len(MATHM) + i for i, m in enumerate(NEWM)}
 assert len(set(KW.values())) == len(KW), 'keyword hashes collide'
 # the literals that are words: their constant operands and static types
 LITERALS = {'true': (K(TRUE), 1), 'false': (K(FALSE), 1), 'null': (K(NULL), 0), 'undefined': (K(UNDEF), 0), 'NaN': (K(NAN), 3),
@@ -528,6 +536,8 @@ FCACHE = IMPC + NIMP
 # so that its end runs them (cc_ref timer_loop)
 TCELL, TIMERS = FCACHE + 16, 64
 RCELL = TCELL + 1                       # Math.random's state
+SPCELL = RCELL + 1                      # String.prototype (an object made the first time)
+PKVAL = 1                               # a wrapper object's key for its primitive (no string's address, no number's key)
 # every global starts undefined (a read before its var runs: hoisting; so var x without a value is no code at the top level),
 # the caches too (FCACHE's, a double literal's: NUMLIT's 'not made yet'). The images hold it (the page's RAM groups with these
 # cells are live from the start, gen_css.py); a cell the program writes can't be an overlay
@@ -678,7 +688,7 @@ class Compiler:
         self.clab = 0                       # the top-level function's close label (cc_ref.closelab)
         self.ca = 0                         # the current function is an arrow's expression body (S_OPERC)
         self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
-        if not rom: self.nsym = NIMP; self.dp = RCELL + 1
+        if not rom: self.nsym = NIMP; self.dp = SPCELL + 1
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
 
@@ -1420,7 +1430,7 @@ class Compiler:
             if h in WGLOB and isP(46): self.pn = (0, 0); self.mode = S_WDOT; return     # window.x: x
             j = self.lookup(h)
             if j < 0 and h in (KW['String'], KW['Object'], KW['Math']) and isP(46):     # String.fromCharCode(...), Object.create(p), Math.f(x):
-                self.push_od(K(0), 0); self.mode = S_MATHDOT if h == KW['Math'] else S_DOT; return     # a method on a dummy receiver
+                self.push_od(K(0), 0); self.mode = S_DOT if h == KW['String'] else S_MATHDOT; return     # a method on a dummy receiver
             tyo = self.top_op()[0] == TYPEOF
             k = self.fnlook(h) if j < 0 and not self.rom else -1
             if (h in WGLOB or h == KW['Math']) and j < 0 and not self.rom:     # window / globalThis (Math alone): the global object
@@ -1604,18 +1614,18 @@ class Compiler:
         if m == S_MATHDOT:                                     # Math. name: a method (the call: S_OPER, M_METH), a constant, min / max's value
             if kind != 'ID' or not (v in MATH_INDEX or v in [KW[c] for c in MATHK]): return self.fail(69)
             if v in MATH_INDEX and self.tparen: self.pn = (0, 0); self.pm = 4 + MATH_INDEX[v]; self.mode = S_OPER; return
-            i = self.nd - 1; t = self.tmp(i)                   # (a library call in the dummy's slot, its argument above it)
-            if v in MATH_INDEX:
+            if v in MATH_INDEX:                                # (a value: dummy[a hidden key], pending as x[k])
                 if ALLM[MATH_INDEX[v]][0] not in MATHV: return self.fail(69)
-                k, e = MATHV.index(ALLM[MATH_INDEX[v]][0]), 'mathfn'
-            else: k, e = MATHK[next(c for c in MATHK if KW[c] == v)], 'mathk'
-            self.emit('MOV', self.tmp(i + 1), (K(k), 0)); self.emit('CALL', (self.ent.get(e, 0) // 2, 0), w1=(t[0] - 256, t[1]))
-            self.set_od(i, TMP, 3 if e == 'mathk' else 0); self.mode = S_OPER; return
+                k = len(MATHK) + MATHV.index(ALLM[MATH_INDEX[v]][0])
+            else: k = MATHK[next(c for c in MATHK if KW[c] == v)]
+            self.push_od(KBIG, 0, PKSTAT - k); self.pm = 2; self.mode = S_OPER; return
         if m == S_NEW:                                         # new F(...): F's name
             if kind != 'ID' or v in RESERVED: return self.fail(3)
             self.pn = v; self.mode = S_NEWN; return
         if m == S_NEWN:                                        # new F( : F's value, a new object (its prototype F's) as its this
             if not isP(40): return self.fail(35)
+            if self.pn in NEW_INDEX:                           # new Number( ...: a method on a dummy receiver (a wrapper)
+                self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, NEW_INDEX[self.pn]); self.mode = S_OPND; return
             return self.new_call(self.pn)
         if m in (S_AARROW0, S_AARROW):                         # () => / (a, b) =>
             if not isP(T_ARROW): return self.fail(35)
@@ -1953,6 +1963,7 @@ class Compiler:
         """an arrow function's head is known ('(a,' '(a) =>' 'a =>' '() =>'): as 'function (' (S_OPND, S_FNAME; C_FUNCE's d 1),
         h its first parameter (None: none)"""
         if self.curf >= 2: return self.fail(41)
+        if h in RESERVED: return self.fail(36)            # ((break, x) =>: the first name came as a pending name)
         t, tv = self.top_op()
         if 0 < t < 100: return self.fail(48)              # (an operator's operand: 1 + x => x)
         nm = tv if t == M_OKEY else 0
@@ -2156,7 +2167,9 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             if s20(hp - (rd(GCLIM) + LAYOUT['heap_size'] - 7)) < 0: wr(HEAP0 + hp, 0); mark(HEAP0 + hp); wr(HP, hp + 8); wr(addr(a), hp + HEAP0 - OBJTAG)
             else: trap('gcnew', a - 256, [], pc - 2)
         elif op == 'GETP':                              # o.key (C: the key's offset from data_base): undefined if missing or not an object
-            o = val(b); wr(addr(a), rd(probe(o, db + c) + 1) if isobj(o) and rd(probe(o, db + c)) else UNDEF)
+            o = val(b)                                  # (a string: the library's getps, String.prototype's)
+            if isstr(o): trap('getps', a - 256, [], pc)     # (no arguments: its frame is at A, below a method's this)
+            else: wr(addr(a), rd(probe(o, db + c) + 1) if isobj(o) and rd(probe(o, db + c)) else UNDEF)
         elif op == 'SETP':                              # o.key = v: the key's pair, else a free pair in place, else the library
             o, v = val(a), val(b)
             if isobj(o): setp(o, db + c, v)

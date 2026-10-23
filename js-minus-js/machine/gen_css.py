@@ -378,7 +378,8 @@ ARR_NX = {'pc': f"if(style(--xhand: 1): {pc}; style(--tr: 0): calc({pc} + 2); st
           'fp': DYN_NX['fp'], 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--xhand))",
           'pst': f"if(style(--xhand: 1): mod(var(--X) + {OBJTAG}, 32768); style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--ts) + 1))"}
 # GETP / SETP / NEW. A probe reads the pair at q (z: the key, h: the value): pst the pair's address, 0 the object's first. The
-# case oc: GETP 1 done (the value or 0), 2 the next pair; SETP 3 a trap's execution (pst 1 ... 3, or the first: a full chunk),
+# case oc: GETP 1 done (the value or 0), 2 the next pair, 3 a string's (the library's getps: its frame at A, no arguments);
+# SETP 3 a trap's execution (pst 1 ... 3, or the first: a full chunk),
 # 4 the new pair (pst: its address + 1; the terminator is written), 5 not an object, 6 the key's value, 7 the new pair's
 # terminator, 8 the next pair; NEW 9 the heap is full (the collector, NEW again), 10 one of its four writes (pst 0 the key word, 1
 # A, 2 the map's bit, 3 HP); 11 SETX's chunk is full (back to the arr class's trap: pst XBACK). GETX and SETX come here (cls_of,
@@ -392,15 +393,16 @@ OBJ_PRE = OPND + OPNDA + [
     f"--ohit: {eq('var(--vz)', 'var(--okey)')};",
     f"--oend: calc({eq('var(--vz)', 0)} + {by_op({'SETP': 1, 'SETX': 1}, 0)} * clamp(0, {-OBJTAG} - var(--vz), 1));",     # (SETP / SETX: a prototype's link ends the keys too)
     f"--onext: calc(clamp(0, -1 * var(--vz), 1) * mod(var(--vz) + {OBJTAG}, 32768) + (1 - clamp(0, -1 * var(--vz), 1)) * ({oq} + 2));",
-    "--oc: " + by_op({'GETP': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))", 'GETX': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))",
+    "--oc: " + by_op({'GETP': f"calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)) + 2 * {isstr_v('var(--O)')})", 'GETX': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))",
                       'NEW': f"calc(10 - {eq('var(--pst)', 0)} * clamp(0, var(--vz) - var(--vh) - {HS - 8}, 1))"},
                      "if(style(--sst: 1): 3; style(--sodd: 1): 4; style(--ob: 0): 5; style(--ohit: 1): 6;"
                      f" style(--oend: 1): calc(3 + 4 * var(--oroom) + 8 * (1 - var(--oroom)) * {eq('var(--op)', OP['SETX'])}); else: 8)") + ";",
     f"--sodd: calc({opin('SETP', 'SETP')} * (1 - var(--sst)) * mod(var(--pst), 2) + {eq('var(--op)', OP['SETX'])} * mod(var(--pst), 2));",
     f"--oroom: clamp(0, 6 - mod({oq} - {HEAP0}, 8), 1);", f"--V: {by_op({'SETX': kv('C', 'e')}, kv('B', 'y'))};",
     f"--omw: {mapword(f'({HEAP0} + var(--vz))')};"] + \
-    trap(f"{eq('var(--oc)', 3)}", "calc(var(--sst) * var(--pst))", 3, f"mod({fp} + {TRAPOFF}, 32768)",
-         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)") + [
+    trap(f"{eq('var(--oc)', 3)}", "calc(var(--sst) * var(--pst))", by_op({'GETP': 0}, 3), by_op({'GETP': "var(--aA)"}, f"mod({fp} + {TRAPOFF}, 32768)"),
+         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))",
+         by_op({'GETP': f"calc((var(--A) - 256) * 8192 + ({pc} + 2) / 2)"}, f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)")) + [
     f"--oaddr: if(style(--oc: 1): var(--aA); style(--oc: 3): var(--taddr); style(--oc: 4): {oq}; style(--oc: 6): calc({oq} + 1);"
     f" style(--oc: 7): calc({oq} + 2); style(--oc: 9) or style(--oc: 11): var(--aA); style(--pst: 0): calc({HEAP0} + var(--vz)); style(--pst: 1): var(--aA);"
     f" style(--pst: 2): var(--omw); else: {HP});",
@@ -410,7 +412,7 @@ OBJ_PRE = OPND + OPNDA + [
     "--oen: if(style(--oc: 2) or style(--oc: 5) or style(--oc: 8) or style(--oc: 11): 0; else: 1);", f"--w2: {eq('var(--oc)', 4)};",
     f"--odone: calc({eq('var(--oc)', 1)} + {eq('var(--oc)', 4)} + {eq('var(--oc)', 5)} + {eq('var(--oc)', 6)} + {eq('var(--oc)', 10)} * {eq('var(--pst)', 3)});",
     f"--ojump: calc(var(--tlast) + {eq('var(--oc)', 9)});"]
-OBJ_NX = {'pc': f"if(style(--odone: 1): calc({pc} + 2); style(--ojump: 1): if(style(--oc: 9): {ENT['gcnew']}; else: {ENT['setp']}); else: {pc})",
+OBJ_NX = {'pc': f"if(style(--odone: 1): calc({pc} + 2); style(--ojump: 1): if(style(--oc: 9): {ENT['gcnew']}; else: {by_op({'GETP': ENT['getps']}, ENT['setp'])}); else: {pc})",
           'fp': f"if(style(--ojump: 1): if(style(--oc: 9): var(--aA); else: var(--tF)); else: {fp})",
           'steps': "calc(var(--steps) + var(--odone) + var(--ojump))",
           'pst': "if(style(--oc: 2) or style(--oc: 8): var(--onext); style(--oc: 7): calc(var(--oq) + 1); style(--oc: 3): if(style(--tlast: 1): 0;"

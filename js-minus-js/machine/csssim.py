@@ -277,7 +277,8 @@ class Sim:
                 else: pc = trap(fp + TRAPOFF, [x, y, e], TRAPOFF * 8192 + pc // 2, 'setx', ps % XBACK)
         elif op == 'GETP':                               # one pair per execution (pst: the pair's address, 0 the first)
             o = val(b); key = DB + c
-            if not R.isobj(o): wr(addr(a), R.UNDEF)
+            if R.isstr(o): pc = trap(addr(a), [], (a - 256) * 8192 + pc // 2, 'getps', ps)     # (cc_ref: String.prototype's)
+            elif not R.isobj(o): wr(addr(a), R.UNDEF)
             else:
                 q = ps or (o + OBJTAG) & AMASK; k, v = rd(q), rd(q + 1)
                 if k == key or k == 0: wr(addr(a), v if k else R.UNDEF)

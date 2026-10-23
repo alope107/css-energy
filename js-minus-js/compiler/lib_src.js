@@ -204,7 +204,11 @@ function fnsrc(f) {
   return r;
 }
 // an array or object as a primitive (its string); anything else as it is
-function prim(v) { if (__kind(v, __K_AO__) + __kind(v, __K_FUN__)) { return tostr(v); } return v; }
+function prim(v) {
+  if (__kind(v, __K_OBJ__)) { if (peek(v) == __PKVAL__) { return peek(v + 1); } }      // (a wrapper: its primitive)
+  if (__kind(v, __K_AO__) + __kind(v, __K_FUN__)) { return tostr(v); }
+  return v;
+}
 // two strings: -1, 0, 1 (by character codes, as JavaScript compares them)
 function scmp(a, b) {
   var la = peek(a - 1); var lb = peek(b - 1); var m = la; var i = 0; var c = 0; var d = 0;
@@ -492,7 +496,11 @@ function mathfn(k) {
   return g + 1 - __FUNTAG__;
 }
 // a native's value for n arguments at p (callv)
-function native(id, n, p) { if (id == 0) { return mm(p, n, 0 - 1); } return mm(p, n, 1); }
+function native(id, n, p) {
+  if (id == 0) { return mm(p, n, 0 - 1); }
+  if (id == 1) { return mm(p, n, 1); }
+  return ocreate(0, peek(p));
+}
 function mrandom(d) {
   var s = peek(__DB__ + __RCELL__);
   if (s == __UNDEF__) { s = 1; }
@@ -864,6 +872,11 @@ function canint(s) {
   return s;
 }
 function getx(x, k) {
+  if ((k <= __PKSTAT__) * (k > __PKSTAT__ - __NSTAT__)) {        // (Math.PI ..., Math.min, Object.create as values)
+    k = __PKSTAT__ - k;
+    if (k < __NMATHK__) { return mathk(k); }
+    return mathfn(k - __NMATHK__);
+  }
   if (k == __PKPROTO__) { return getdp(x); }
   if (k == __PKPT__) { return getpt(x); }
   k = xkey(x, k);
@@ -876,6 +889,7 @@ function getx(x, k) {
   return __UNDEF__;
 }
 function setx(x, k, v) {
+  if ((k <= __PKSTAT__) * (k > __PKSTAT__ - __NSTAT__)) { return 0; }
   if (k == __PKPROTO__) { return setdp(x, v); }
   if (k == __PKPT__) { return setpt(x, v); }
   k = xkey(x, k);
@@ -917,7 +931,7 @@ function okeyn(o, pass, d) {
     if (k == 0) { go = 0; }
     else if (k < 0) { if (k < 0 - __OBJTAG__) { inh = 1; } c = k + __OBJTAG__; }     // (inh: past a prototype's link)
     else {
-      if (__kind(k - __STRTAG__, __K_STR__) == pass) {
+      if ((__kind(k - __STRTAG__, __K_STR__) == pass) * (k != __PKVAL__)) {
         x = 1; if (inh) { x = seen(o, c, k) == 0; }
         if (x) { if (d) { poke(d + n, k - __STRTAG__); } n++; }
       }
@@ -988,11 +1002,32 @@ function setdp(x, p) {
 // f.prototype: a function's (word 4), an object made the first time; f.prototype = p
 function getpt(f) {
   var o = 0;
+  if (f == 0) { return sproto(); }                        // (String.prototype: String. is a dummy receiver, 0)
   if (__kind(f, __K_FUN__) == 0) { return __UNDEF__; }
   if (peek(f + 4) == 0) { o = __alloc(8, __A_CHUNK__); poke(o, 0); poke(f + 4, o - __OBJTAG__); }
   return peek(f + 4);
 }
 function setpt(f, p) { if (__kind(f, __K_FUN__)) { poke(f + 4, p); } return 0; }
+// String.prototype, made the first time (global SPCELL); s.f: a string's property, from it (GETP's trap: its frame at A, no
+// arguments; the key is in the instruction)
+function sproto() {
+  var o = 0;
+  if (__kind(peek(__DB__ + __SPCELL__), __K_OBJ__) == 0) { o = __alloc(8, __A_CHUNK__); poke(o, 0); poke(__DB__ + __SPCELL__, o - __OBJTAG__); }
+  return peek(__DB__ + __SPCELL__);
+}
+function getps(t) {                                    // (t: never written: the slot above A is a method call's this)
+  var w = peek(2 * (peek(__fp()) % 8192) - 1) + 524288;    // (GETP's word 1, made positive: B and C)
+  if (__kind(peek(__DB__ + __SPCELL__), __K_OBJ__) == 0) { return __UNDEF__; }
+  return pget(peek(__DB__ + __SPCELL__), __DB__ + w % 1024);
+}
+// new Number(x), new String(x), new Object(): wrappers ([PKVAL, the primitive, 0]: prim takes it; printed [Number: x])
+function wrap(v) { var o = __alloc(8, __A_CHUNK__); poke(o, __PKVAL__); poke(o + 1, v); poke(o + 2, 0); return o - __OBJTAG__; }
+function wrapnum0(d) { return wrap(0); }
+function wrapnum(d, x) { return wrap(tonum(x)); }
+function wrapstr0(d) { return wrap(__S_EMPTY__); }
+function wrapstr(d, x) { return wrap(tostr(x)); }
+function wrapobj0(d) { var o = __alloc(8, __A_CHUNK__); poke(o, 0); return o - __OBJTAG__; }
+function wrapobj(d, x) { if (__kind(x, __K_AO__) + __kind(x, __K_FUN__)) { return x; } if ((x == __NULL__) + (x == __UNDEF__)) { return wrapobj0(0); } return wrap(x); }
 // new F: an object whose prototype is F's
 function mknew(f) {
   var p = getpt(f); var o = __alloc(8, __A_CHUNK__);
@@ -1242,7 +1277,7 @@ function ptrap() {
 // PRINT's trap for an array or an object (fl: 2 * the separator + 8 if it is a piece of a + chain, which prints as a string)
 function pval(v, fl) {
   var sp = (fl / 2) % 4;
-  if (fl / 8 + (sp == 0)) { prn(tostr(v)); } else { ins(v, 0); }
+  if (fl / 8 + (sp == 0)) { prn(tostr(prim(v))); } else { ins(v, 0); }      // (a wrapper: its primitive)
   if (sp == 1) { putc(32); }
   if (sp == 2) { putc(10); }
   return 0;
@@ -1285,6 +1320,7 @@ function ins(v, d) {
 // an object's keys: number keys first, then the names (bare if they are identifiers, else quoted), in insertion order
 function insobj(v, d) {
   var c = v + __OBJTAG__; var k = 0; var pass = 0; var first = 1; var go = 1;
+  if (peek(c) == __PKVAL__) { return inswrap(peek(c + 1)); }
   if ((peek(c) == 0) + (peek(c) < 0 - __OBJTAG__)) { putc(123); putc(125); return 0; }
   if (d > 2) { putc(91); putc(79); putc(98); putc(106); putc(101); putc(99); putc(116); putc(93); return 0; }
   putc(123); putc(32);
@@ -1307,6 +1343,15 @@ function insobj(v, d) {
     pass++;
   }
   putc(32); putc(125);
+  return 0;
+}
+// a wrapper: [Number: 12], [String: 'abc'], [Boolean: true]
+function inswrap(x) {
+  putc(91);
+  if (__kind(x, __K_STR__)) { putc(83); putc(116); putc(114); putc(105); putc(110); putc(103); }
+  else if (__kind(x, __K_NUM__)) { putc(78); putc(117); putc(109); putc(98); putc(101); putc(114); }
+  else { putc(66); putc(111); putc(111); putc(108); putc(101); putc(97); putc(110); }
+  putc(58); putc(32); insel(x, 3); putc(93);
   return 0;
 }
 function isid(c, first) {
