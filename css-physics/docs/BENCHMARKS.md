@@ -178,6 +178,32 @@ margins, a feature query in place of `-moz-appearance`) add no property or rule:
 scene at 1–3.5 s and on a 48-body rain pile; a state where rounding flips a box corner's clip shows 1–7 of 168,000
 values beyond 1e-2, up to 0.17. Firefox: up to 2.7e-3.
 
+### Art styles
+
+The plain page (the default style) against the page without the styles (main), one bench lease, 2026-10-23,
+`ab.js -p bigmed 'node tools/tr.js {} 1500 1500'`: 16 bodies 0.997 (IQR 0.986–1.113, 10 rounds), 32 bodies 0.969
+(0.918–1.146, 8 rounds). Scoped with `:root:has(#a-NAME:checked)` instead it was 1.11–1.18 (HISTORY.md).
+
+Each style at 16 bodies (tower, `ART=<name>`, `tr.js … 1500 1500`, median of 3 interleaved rounds, one lease).
+Headless Chromium here composites in software, so fps falls with the filters the compositor re-runs on every frame in
+which something under them moves; style per pass hardly changes. In an earlier lease the same day pencil without its
+filter ran at 43 fps and pixel at 45. On a GPU these are shader passes: not measured.
+
+| Style | fps | Style per pass | The compositor runs |
+|---|---|---|---|
+| plain | 44.7 | 9.8 ms | — |
+| cel | 44.0 | 10.0 ms | — |
+| baroque | 42.0 | 10.5 ms | gradients and inset shadows on every face |
+| mondrian | 41.3 | 10.7 ms | — |
+| paper | 40.0 | 11.1 ms | a drop shadow over the scene, a multiply overlay |
+| pencil | 34.0 | 10.6 ms | a displacement over the scene, a multiply overlay |
+| undulating | 32.0 | 11.4 ms | a displacement over the scene, moving stripes under it |
+| impressionist | 31.3 | 12.0 ms | a displacement and blur, a soft-light overlay |
+| wireframe | 28.0 (26–37) | 15.6 ms (noisy: 10.5 in the earlier lease) | a drop-shadow glow over the scene |
+| plasma | 23.3 | 12.4 ms | a hue rotation over the arena, glows |
+| pixel | 20.7 | 11.3 ms | pixelation (tile, morphology) and posterization over the arena |
+| oil | 17.3 | 11.4 ms | a displacement and a lit noise (impasto) over the scene |
+
 ## 2. Style engine cost model (microbenchmarks)
 
 Pages: `experiments/costs/mk*.py` in a scratch directory, then `node tools/stylebench.js <pages> 500 1500` over every

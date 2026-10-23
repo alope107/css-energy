@@ -1735,9 +1735,10 @@ for i, b in enumerate(BODIES):
     render_html.append(f'<div class="bw" id="w{i}"><i class="sh" id="s{i}"></i>{inner}<i class="hd" id="h{i}"><b><i></i><u></u></b></i></div>')
 # box face lighting: world normal of face (axis k, sign) is sign * column k of R (generic rules,
 # the same for every engine)
-LIT = []
+LIT, LAMS = [], []      # (LAMS: each face's lighting term, for the art styles' own shading: art3d.py)
 for fi, (k, sg, tf, wa, ha) in enumerate(FACES):
     lam = ' + '.join(f'var(--r{rr}{k}) * {f(sg * LIGHT[rr])}' for rr in range(3))
+    LAMS.append(lam)
     LIT.append(f'--k{fi}:color-mix(in oklab,var(--cs) calc((0.42 + 0.58 * max(0, {lam})) * 100%),#07080a)')
 SHARED_CSS = [lbl.section('Box face lighting', 'shared by every engine: each face\'s colour from its world normal'),
               '.bx{--cs:color-mix(in oklab,var(--c),var(--acc) calc(var(--sel) * 55%));' + ';'.join(LIT) + '}',
@@ -1852,7 +1853,7 @@ else:
     ENG_ID, INI_ID = 'ENG', 'INI'
 
 import json as _json
-frag = dict(N=N, eng_id=ENG_ID, ini_id=INI_ID, css=ENG_CSS, shared_css='\n'.join(SHARED_CSS), html=ENG_HTML,
+frag = dict(N=N, eng_id=ENG_ID, ini_id=INI_ID, css=ENG_CSS, shared_css='\n'.join(SHARED_CSS), lams=LAMS, html=ENG_HTML,
             scenes=SCENE_NAMES, grav=f(GRAV), nprops=len(g.decl), nlev=NLEV, nreg=len(REGS),
             bodyinfo=[dict(k=b['k'], h=b.get('h'), r=b.get('r')) for b in BODIES],
             consts=dict(VW=VIEW_W, VH=VIEW_H, HS=HS, PERSP=f(PERSP), TILT=f(TILT), TY=f(CAM_TY), DIST=f(CAM_DIST),

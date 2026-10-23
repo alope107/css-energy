@@ -170,6 +170,31 @@ gets neither. A scroll does follow the finger, and the scroller that scrolls say
   lighting by `color-mix` from the rotation columns (3× cheaper than inherited registered props in every face).
 - Shadows are blurred floor discs sized and faded by height.
 
+### Art styles (`src/art3d.py`)
+
+The "style" radios restyle the same scene: plain (the look above), cel, pencil, wireframe, baroque, undulating,
+impressionist, Mondrian, oil, plasma, paper, pixel. `ART=<name>` picks one at build time (for timing a style).
+
+- **Scoping.** The radios are `#app`'s first children (their labels are in the controls row). A style's static rules
+  (page colours and fonts, arena, tray, discs, rings) are scoped to `#app:has(> #a-NAME:checked)`; plain has none.
+  The `>` matters: a `:has()` without it searches `#app`'s whole subtree (the engine, 5,040 pointer cells) once per
+  style pass for each style, as soon as anything restyled in that pass tries one of its rules (+11–18% per pass at 16
+  bodies; HISTORY.md). Rules on what moving bodies restyle every frame (`.bx`, the faces, `.sp`, `.sh`, `.bw`) are
+  inside `@container art-NAME { … }`, a name the style's static rule puts on `.cam`: for a style not picked, each
+  costs one failed lookup. The plain page costs what it did without the styles (BENCHMARKS.md "Art styles").
+- **Shading.** Each style lights faces with its own tone function of gen3d.py's per-face term `lam` (bands for cel,
+  pixel, paper, Mondrian; hatch density for pencil; edge alpha for wireframe) and builds the face's background from
+  it, in one `.bx` rule and one rule per face index.
+- **Effects** are SVG filters in an inline `<svg>` on `.view` (pencil wobble, undulating waves, impressionist and oil
+  edges, oil's impasto relief) or `.arena` (pixel); textures are static `.arena::after` overlays blended by the
+  compositor (paper grain, canvas, brush strokes); the only animations (undulating's stripes, plasma's hue cycle and
+  sphere tendrils) animate `transform`, `rotate` and `filter`, so none needs a style pass. The compositor re-runs a
+  filter on every frame in which something under it moves: in headless Chromium without a GPU, 16 bodies drop from
+  45 fps (plain) to 17–42 depending on the style (BENCHMARKS.md).
+- **Pixel** pixelates in fractions of the arena (`primitiveUnits="objectBoundingBox"`, a 180 × 112 picture): WebKit
+  places user-space primitive subregions from the page origin, not the element (bug 323497, `../bugs/README.md`),
+  which drew nothing.
+
 ## 4. Pages and builds
 
 | Command | Output |

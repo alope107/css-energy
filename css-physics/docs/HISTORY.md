@@ -107,6 +107,20 @@ recognizer, no show-press) and the software-emulated Android emulator (`../../sh
   scrollers. Per-body handles name the body exactly.
 - **The touch-down point inside a handle** (to grab off-centre and swing boxes): nothing gives it on a quick drag.
 
+### Art styles (Oct 23)
+
+- **Scoping a style with `:root:has(#a-NAME:checked)`:** a `:has()` whose argument isn't anchored with `>` searches
+  the whole subtree (the engine and 5,040 pointer cells) once per style pass for each style, as soon as something
+  restyled in that pass tries one of its rules: the plain page cost 11–18% more per pass at 16 and 32 bodies,
+  with 11 styles. Gating the per-frame rules by container name instead got that to 13%; the rest came from the static rules.
+  Now the radios are `#app`'s children and every test is `#app:has(> #a-NAME:checked)`: ±0 (BENCHMARKS.md).
+- **Oil: regular brush stripes on the faces:** under the smearing filter they read as corrugated cardboard. The
+  impasto is now a lit noise in the filter, over everything.
+- **Impressionist: colour flecks** (thresholded colour noise, soft-light) read as confetti, and a posterized
+  displacement (each patch shifted by one vector, meant as dabs) punched holes through the bodies' edges.
+- **Pixel in user-space units** (5 px cells, `feFlood x="2"`): WebKit draws nothing (bug 323497, `../bugs/README.md`).
+  In `objectBoundingBox` units it draws, but its dilation comes out a pixel short, hence the merge over the source.
+
 ### Alternative compute substrates
 
 - **Variable-font metrics** (`1ch`/`1ic` read HVAR, `1ex`/`1cap` MVAR, exactly, at style time):

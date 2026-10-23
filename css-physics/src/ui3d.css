@@ -2,7 +2,7 @@
    header, then a 900x560 stage holding a CSS 3D camera over a walled tray, then controls */
 :root{
   --bg:#14161a;--panel:#1c1f25;--ink:#e8e6e1;--dim:#8b8f98;--line:#2a2e36;--acc:#f2b134;
-  --floor:#1b1e24;--floorline:#2c313b;--void:#0e1013;
+  --on-acc:#14161a;--floor:#1b1e24;--floorline:#2c313b;--void:#0e1013;
   color-scheme:dark;
 }
 @property --yaw{syntax:'<number>';inherits:true;initial-value:0.25}
@@ -144,7 +144,7 @@ header a{color:var(--acc)}
   font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);
   border-radius:4px;padding:4px 10px;cursor:pointer;user-select:none;-webkit-user-select:none}
 .grp label:hover,.grp button:hover{border-color:var(--dim)}
-.grp input:checked+label{background:var(--acc);color:#14161a;border-color:var(--acc)}
+.grp input:checked+label{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
 .grp input:focus-visible+label{outline:2px solid var(--acc);outline-offset:2px}
 .grp label:active,.grp button:active{transform:translateY(1px);border-color:var(--acc)}
 .hint{color:var(--dim);margin:6px 0 0}
@@ -152,6 +152,8 @@ header a{color:var(--acc)}
 @supports not (animation-timeline: --a){.nosda{display:block}}
 footer p{color:var(--dim);font-size:13px;max-width:80ch;margin:18px 0 0}
 footer code{color:var(--ink)}
+/* the art styles' SVG filters (art3d.py): rendered, or some browsers ignore them, but take no room */
+.artfx{position:absolute;width:0;height:0;overflow:hidden}
 
 /* === Engines: shared wrappers, pointer and controls state === */
 /* engines: one complete solver per body count; the unselected ones are display:none, so the
