@@ -36,4 +36,21 @@ async function profileDir() {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-module.exports = { PAINT, B, serve, profileDir, sleep };
+// The cells among `cells` whose writer hasn't finished the write its size asks for (the cell's spinner still shows):
+// each shown writer /c/<k>/w reads (colour, slot) from its viewport and loads d/<colour>.png?<slot>.
+async function pendingWrites(pg, cells, CELL = 22) {
+  const out = [];
+  for (const k of cells) {
+    let done = false;
+    for (const f of pg.mainFrame().childFrames()) {
+      if (f.isDetached() || !f.url().endsWith(`/c/${k}/w`) || !(await (await f.frameElement()).isVisible())) continue;
+      done = await f.evaluate(C => { const L = innerWidth - C, s = innerHeight - C;
+        return performance.getEntriesByType('resource').some(e => e.name.endsWith(`/d/${L}.png?${s}`) && e.responseEnd > 0); }, CELL);
+      break;
+    }
+    if (!done) out.push(k);
+  }
+  return out;
+}
+
+module.exports = { PAINT, B, serve, profileDir, sleep, pendingWrites };

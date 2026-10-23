@@ -99,16 +99,66 @@ def cell_html(k, j):
     return (f'<b class="cr"><b class="c1" style="view-timeline-name: --ch{k}_{j}"></b>'
             f'<b class="cp"></b></b>')
 
+# A parser variant as the page uses it: its rule's declarations and the temp names they register. Building the variants
+# is most of build()'s time (~70 ms each, ~1,000 of them), so worker processes build them (JOBS, default every CPU).
+_vargs = None
+def variant_rule(key):
+    """-> None for a variant that only reports an error, else (key, label ports, is it a no-op, declarations,
+    [(temp name, inherits)])"""
+    data_base, code_base, lib = _vargs
+    pg = D.Prog(data_base, code_base, lib, *key)
+    if isK(pg.x.cur['err']) and pg.x.cur['err'].v != 0: return None
+    pst, tset = D.parse_state_names(), set(D.table_names())
+    X = pg.x; outs = set(pg.out)
+    fixed = {'mode': pg.spec_mode, 'err': 0}     # a no-op: changes nothing (a newline token where it means nothing)
+    noop = not pg.out and all(X.cur[n] == S(n) or (n in fixed and isK(X.cur[n], fixed[n])) for n in pst)
+    pool = {}
+    for n, _ in X.temps:
+        pool[n] = f'q-{n}' if n in outs else f'qp{sum(1 for v in pool.values() if v.startswith("qp"))}'
+    def pref(kind, n):
+        if kind == 'S': return f'var(--x-{n})'
+        if kind == 'I': return f'var(--t-{n})' if n in tset else f'var(--x-{n})'
+        return f'var(--{pool[n]})'
+    decl = [f'--{pool[n]}: {tocss(node, pref)};' for n, node in X.temps]
+    decl += [f'--q-new-{n}: {tocss(X.cur[n], pref)};' for n in pst] + ['--q-ran: 1;']
+    return key, pg.nlports, noop, ' '.join(decl), [(pool[n], n in outs and n not in PORTS) for n, _ in X.temps]
+
+def variant_rules(data_base, code_base, lib):
+    global _vargs
+    _vargs = (data_base, code_base, lib); keys = D.variant_keys()
+    n = min(int(os.environ.get('JOBS') or os.cpu_count() or 1), len(keys))
+    if n <= 1: return [r for r in map(variant_rule, keys) if r]
+    import multiprocessing as mp
+    with mp.get_context('fork').Pool(n) as pool: return [r for r in pool.map(variant_rule, keys, chunksize=4) if r]
+
+# build()'s output is a function of its arguments (of the ROM, its entry points and init) and the sources it imports:
+# build/ccpage5/<hash>.json keeps the last few, so a page whose compiler didn't change (a machine change, the L3 page
+# after the editor page) skips the chain. CCCACHE=0 always builds.
 def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
+    import hashlib
+    lib = {k: lib[k] for k in ('init', 'entries') if k in lib}      # all the chain reads of the ROM
+    h = hashlib.sha256(json.dumps([lib, L, P, TMAX, code_base, data_base, short, D.INLINE, D.SPEC_LEVEL], sort_keys=True).encode())
+    here = os.path.dirname(os.path.abspath(__file__))
+    D.sources_hash(h, sys.modules[__name__])
+    d = os.path.join(here, '..', 'build', 'ccpage5'); path = os.path.join(d, h.hexdigest()[:16] + '.json')
+    if os.environ.get('CCCACHE', '1') == '1' and os.path.exists(path):
+        os.utime(path); return tuple(json.load(open(path)))
+    r = build_chain(lib, L, P, TMAX, code_base, data_base, short)
+    os.makedirs(d, exist_ok=True); tmp = f'{path}.{os.getpid()}'
+    json.dump(r, open(tmp, 'w')); os.replace(tmp, path)
+    for old in sorted((f for f in os.listdir(d) if f.endswith('.json')), key=lambda f: -os.path.getmtime(os.path.join(d, f)))[4:]:
+        os.remove(os.path.join(d, old))
+    return r
+
+def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     code_base = R.LAYOUT['code_base'] if code_base is None else code_base; data_base = R.LAYOUT['data_base'] if data_base is None else data_base
     initw = lib.get('init', R.LAYOUT['init'])
     code_cells = initw - 1 - code_base; data_cells = R.SDATA; ishift = initw - data_base
     lst = [n for n in D.LEX_STATE if n != 'pp']
     pst, tabs = D.parse_state_names(), D.table_names(); tset = set(tabs)
-    progs = [(k, D.Prog(data_base, code_base, lib, *k)) for k in D.variant_keys()]
-    progs = [(k, p) for k, p in progs if not (isK(p.x.cur['err']) and p.x.cur['err'].v != 0)]
+    progs = variant_rules(data_base, code_base, lib)
     lexes = [D.LexProg(data_base, cset=cs) for cs in CLASSES]
-    NLP = max(p.nlports for _, p in progs)
+    NLP = max(r[1] for r in progs)
     E = R.EMAX
     N = Names(short)
     css = []
@@ -281,36 +331,23 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # parser variants. A variant that changes nothing (a newline token where it means nothing) is folded into one
     # pass-through rule per token code, placed first so a mode-specific variant (later in the sheet) overrides it;
     # only when every reachable mode has a variant for that code (else a mode without one must stay 'bad').
-    def is_noop(pg):
-        fixed = {'mode': pg.spec_mode, 'err': 0}
-        return not pg.out and all(pg.x.cur[n] == S(n) or (n in fixed and isK(pg.x.cur[n], fixed[n])) for n in pst)
     allm = set(range(R.NMODES)) - {R.S_ERR}
     noop_tc = []
-    for tc in sorted({c for k, _ in progs for c in D.key_tcodes(k)}):
-        ks = [(k, pg) for k, pg in progs if D.key_tcodes(k) == [tc]]
-        if {k[0] for k, _ in ks} >= allm and any(is_noop(pg) for _, pg in ks): noop_tc.append(tc)
+    for tc in sorted({c for r in progs for c in D.key_tcodes(r[0])}):
+        ks = [r for r in progs if D.key_tcodes(r[0]) == [tc]]
+        if {r[0][0] for r in ks} >= allm and any(r[2] for r in ks): noop_tc.append(tc)
     css.append(lbl.group('Parser variants', 'one rule per parser mode and set of token codes; the first rules are the tokens that change nothing'))
     for tc in noop_tc:
         css.append(f'@container style(--tcq: {tc}) {{ .tpA, .tpB {{ ' + ' '.join(f'--q-new-{n}: var(--x-{n});' for n in pst) + ' --q-ran: 1; } }')
-    progs = [(k, pg) for k, pg in progs if not (D.key_tcodes(k)[0] in noop_tc and len(D.key_tcodes(k)) == 1 and is_noop(pg))]
+    progs = [r for r in progs if not (D.key_tcodes(r[0])[0] in noop_tc and len(D.key_tcodes(r[0])) == 1 and r[2])]
     # variants whose CSS is identical (a third of them: mostly modes that treat many punctuation tokens alike; and the
     # modes that only rename another, cc_ref.CMODES / S_ABODY, outside the tokens they handle) share one rule whose
     # condition lists all their modes and token codes. Every rule costs time on every token level whether it applies or
     # not (docs/BENCHMARKS.md §4c), so fewer rules is faster.
     rules = {}                                         # declarations -> {mode: token codes}, in first-seen order
-    for key, pg in progs:
-        X = pg.x; outs = set(pg.out)
-        pool = {}
-        for n, _ in X.temps:
-            pool[n] = f'q-{n}' if n in outs else f'qp{sum(1 for v in pool.values() if v.startswith("qp"))}'
-        def pref(kind, n, pool=pool):
-            if kind == 'S': return f'var(--x-{n})'
-            if kind == 'I': return f'var(--t-{n})' if n in tset else f'var(--x-{n})'
-            return f'var(--{pool[n]})'
-        decl = [f'--{pool[n]}: {tocss(node, pref)};' for n, node in X.temps]
-        decl += [f'--q-new-{n}: {tocss(X.cur[n], pref)};' for n in pst] + ['--q-ran: 1;']
-        for n, _ in X.temps: N.add(pool[n], n in outs and n not in PORTS)
-        rules.setdefault(' '.join(decl), {}).setdefault(key[0], []).extend(D.key_tcodes(key))
+    for key, _, _, decl, names in progs:
+        for n, inh in names: N.add(n, inh)
+        rules.setdefault(decl, {}).setdefault(key[0], []).extend(D.key_tcodes(key))
     def anyof(name, vs): return f'style(--{name}: {vs[0]})' if len(vs) == 1 else '(' + ' or '.join(f'style(--{name}: {v})' for v in vs) + ')'
     for body, bym in rules.items():
         byt = {}                                       # token codes -> the modes with exactly those

@@ -130,6 +130,7 @@ class Gen:
         if k == 'lit':
             x = r.random()
             v = r.randint(0, 9) if x < .5 else r.randint(10, 999) if x < .8 else r.randint(1000, 9000) if x < .95 else r.randint(8192, 300000)
+            if x > 0.985: return ('raw', f'{v}.')                                      # (1. is 1: the dot is the number's)
             if x > 0.97: return lit(r.choice(['0.5', '1.5', '0.1', '2.25', '3.14', '1e3', '2.5e-3', '1e21', '0.125', '7.5']))
             return lit(v)
         if k == 'var':

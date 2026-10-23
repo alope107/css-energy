@@ -3,6 +3,11 @@
 Measurements of the current code. How to measure: `.claude/skills/benchmark/SKILL.md`. §1–§11 measured the font CPU,
 removed on 2026-10-20 (last at commit `181cbb7`); they stay as the baseline the CSS CPU (§12) is compared with.
 
+**Suite programs changed on 2026-10-23** (busy work removed, the checks kept): `str_keys_gc`, `obj_gc` and
+`gc_rawblock` collect at most twice and fill the heap with empty objects, `str_keys`, `fib` and `deep_recursion` run
+shorter loops, and `obj_gc_small` (a subset of `obj_gc`) is gone. Times for those programs before that date aren't
+comparable with later ones; ratios measured within one run still are.
+
 **Conventions.** Measured 2026-10-17 on the Ubuntu mini PC (Intel i5-12600H, no GPU), headless Chromium
 153.0.8010.12 launched by `tools/browser.js` (profile `fontcpu`), nothing else running unless noted; desktop Chrome
 will differ. A-vs-A noise (`../shared/js/ab.js`, fresh browser per run): the real page's FizzBuzz Run → HALT is

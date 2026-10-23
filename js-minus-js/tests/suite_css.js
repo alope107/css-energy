@@ -28,16 +28,26 @@ const fs = require('fs'), path = require('path');
       await frame(); await frame();
       const t = performance.now(); run.checked = true;
       const vis = el => el.getClientRects().length > 0;
-      let info = 0, ok = 0;
+      let info = 0, ok = 0, d;
       while (performance.now() - t < 60000) {
         await frame();
-        const d = [...document.querySelectorAll('.fin')].find(vis);
+        d = [...document.querySelectorAll('.fin')].find(vis);
         info = d ? d.querySelector('.di').getBoundingClientRect().width : 0;
         if (info % 2 === 1) { ok = d.querySelector('.dn').getBoundingClientRect().width; break; }
       }
       const ms = performance.now() - t; const code = {}, data = {};
-      for (const el of document.querySelectorAll('.ov, .ovd, .ovs, .ovn, .ovk, .ovt, .fin > [class^="sd"]')) {
-        if (!el.getClientRects().length) continue; const an = getComputedStyle(el).anchorName;
+      // the overlays that can show: the string bytes' (.ovs, in the character chain, before #tcr), those of the live
+      // token levels (the visible .fin's level and the levels around it; deeper levels are display: none) and the fin's
+      // own, in tree order (with colliding anchor names the last wins). Without a visible .fin, every overlay.
+      const sel = '.ov, .ovd, .ovs, .ovn, .ovk, .ovt, .fin > [class^="sd"]'; let els = [];
+      if (d && info % 2 === 1) {
+        const lv = []; for (let x = d.parentElement; x && x.id !== 'tcr'; x = x.parentElement) lv.push(x);
+        els.push(...document.querySelectorAll('.ovs'));
+        for (const x of lv.reverse()) els.push(...x.children);
+        els.push(...d.children);
+      } else els = document.querySelectorAll(sel);
+      for (const el of els) {
+        if (!el.matches(sel) || !el.getClientRects().length) continue; const an = getComputedStyle(el).anchorName;
         if (an && an !== 'none') (el.classList.contains('ov') ? code : data)[+an.slice(3) + base] = Math.round(el.getBoundingClientRect().width) - 1048576;
       }
       return { ms, info, ok, code, data };

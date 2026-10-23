@@ -98,8 +98,9 @@ runs alone.
   serially. So `smoke.sh` runs one check at a time, and nothing else should run beside it: no other browser job, no
   fuzz. paint `e2e` is one chain of dependent steps and `goaway` waits for the network to go quiet; `engine-costs`
   times the style engine.
-- `fuzz`'s parallel speed-up is capped by the DSL's parser variants: each worker builds the ones its programs reach
-  (~37 ms each, up to a few hundred), which a cache shared from the parent didn't beat (pickling them is slower).
+- `fuzz` and `l2` share the DSL's parser variants through a disk cache (`js-minus-js/build/dslcache/`): each is
+  built once per compiler version (~70 ms) and loaded by every worker (~0.1 ms). Before it, each worker built the
+  ones its programs reached, up to a few hundred, and that capped the speed-up.
 
 ## Labels in generated CSS
 

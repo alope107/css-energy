@@ -2222,12 +2222,12 @@ def image_mem(c, words, data, init=None):
     mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
 
-def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
+def compile_and_run(src, lib, max_steps=10 ** 6, strict=False, trace=None):
     c = Compiler(LAYOUT['data_base'], LAYOUT['code_base'], lib)
     words, data = c.compile(src)
     if c.err: return c, None
     mem = image_mem(c, words, data, lib.get('init', LAYOUT['init']))
-    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'))
+    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'), trace=trace)
 
 def image(src, lib, ram=False):
     """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero but the globals

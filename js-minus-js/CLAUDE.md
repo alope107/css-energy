@@ -22,14 +22,15 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 
 ```
 npm install && pip install -r requirements.txt     # once
-make page            # build/js_in_css.xhtml: lib -> image -> page (~40 s, reproducible)
-make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, C1
-make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~1.5 min; tests/fuzz/fuzz.py)
+make page            # build/js_in_css.xhtml: lib -> image -> page (~7 s; <1 s if the compiler didn't change)
+make test            # fast gate, no browser (~5 s): Node oracle, L1, quick fuzz, L2, C1
+make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~30 s; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~30 s)
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
+make c2-all          # the same for every program, the collector tests too (~5 min; before merging a runtime change)
 node tests/picker.js build/js_in_css.xhtml [sample...]   # the sample picker on the page (default: three quick ones)
 make l5-net          # the network programs (tests/suite/net_*) on the page, served with the gateway (~1 min)
 node net/server.js .. 8767   # serve the repo root with the network gateway (fetch / read need it; README Network)
@@ -161,6 +162,10 @@ net/       server.js (web server + network gateway: the modem's documents and pr
 - Error 99 on the page means no parser variant accepts that token. L3 accepts any nonzero error for `suite_err`.
 - `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines, so `suite_ref.py` fails one
   that doesn't.
+- A test that collects garbage declares its collections (`// collections: galloc gcnew`, checked by L1) and fills
+  the heap with empty objects where the filler doesn't matter: filling costs a pass per line written, and the GC
+  tests are the slowest pages (ARCHITECTURE §5). Size loops just past the collections they need, not to a round
+  number far beyond.
 - A fuzz failure is in `build/fuzz/`; `python3 tests/fuzz/show.py build/fuzz/<name>` replays it. Check it is inside
   the language (README Limits) before fixing the compiler: the shrinker drops lines, which can remove a declaration
   the generator relied on. A real one becomes a `tests/suite` regression test.

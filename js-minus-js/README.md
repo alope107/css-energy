@@ -34,9 +34,9 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 ```
 npm install                       # playwright-core + @sparticuz/chromium (Linux x64), for the harnesses only
 pip install -r requirements.txt   # fontTools, brotli (the readback font)
-make page                         # -> build/js_in_css.xhtml (about 40 s; reproducible)
-make test                         # fast tests, no browser (about 10 s)
-make fuzz                         # differential tests against Node, no browser (about 1.5 min)
+make page                         # -> build/js_in_css.xhtml (about 7 s; reproducible)
+make test                         # fast tests, no browser (about 5 s)
+make fuzz                         # differential tests against Node, no browser (about 30 s)
 make l3                           # the CSS compiler in Chrome (about 40 s)
 make c2                           # the CSS CPU on CPU-only pages (about 30 s)
 make l5-smoke                     # the real page, typed like a user (about 30 s)
@@ -130,18 +130,23 @@ machine too; a key built at run time is first matched by its characters. Details
 
 - **Program size**: 24 lines of 64 columns, 400 tokens, 1,023 code words (511 instructions); 768 words of string data
   (the length + 2 for every string literal and every `.name` in the program) and 231 globals (a double literal
-  takes one too); 64 labels (an `if`
-  takes 1 or 2, a loop up to 4, a function 3 or 4: functions use them fastest), 32 variables in scope, 16 functions;
-  32 distinct strings and property names; blocks and expressions nest 8 deep, with at most 10 values pending in an
-  expression and 24 counting the arguments of the calls under way; an array literal of at most 127 elements.
+  takes one too); 64 labels (an `if` takes 1 or 2, a loop up to 4, a function 3 or 4: functions use them fastest; a
+  `switch` takes 2, plus 2 per `case` and 1 for a `default`), 32 variables in scope, 16 functions; 32 distinct strings
+  and property names (one interning table; a method's name doesn't count when `(` follows it directly); blocks and
+  expressions nest 8 deep (a long `else if` chain counts as one level), with at most 10 values pending in an expression
+  and 24 counting the arguments of the calls under way; at most 4 unary operators in a row before a binary one
+  (`!!!!x * y` is fine, `!!!!!x * y` isn't); an array literal of at most 127 elements.
 - **Functions** nest two deep (a function inside a function, not a third level; error 41). A function declared at
   the top level and called by its name must be called with as many arguments as it has parameters (error 76); a
   function value can be called with any number.
-- **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has about 7,500 words. The heap holds 3,072 words
-  of live data (an object of up to 3 keys or a double takes 8 words, a function 8, a string its length + 3 rounded
-  up to 8); more halts with `out of memory`.
+- **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has about 7,500 words, so recursion can go a few
+  hundred to a thousand calls deep (a call takes its frame: its `this`, the parameters, the locals and the
+  expression's temps). The heap holds 3,072 words of live data (an object of up to 3 keys or a double takes 8 words, a
+  function 8, a string its length + 3 rounded up to 8, an array 4 words + 1 per element, rounded up to 8); more halts
+  with `out of memory`.
 - **Numbers** print exactly as Node does except below about 10^-6 with many digits or from 10^22 with many digits,
-  where the machine's 17 digits aren't always the shortest.
+  where the machine's 17 digits aren't always the shortest. A literal may end in a dot (`1.` is 1, as in JavaScript,
+  so `1.x` and `12.length` are error 48).
 - **`console.log`** prints each argument as soon as it is computed, where JavaScript computes them all first:
   `console.log("a", f())` prints what `f` prints after `a `. It is a statement, or what a `return` or an arrow's
   expression body gives (`undefined`: `x => console.log(x)`), not a value elsewhere (`var x = console.log(1)`: error 30). Node breaks a long array or object over several lines; the machine prints one line. Node lists

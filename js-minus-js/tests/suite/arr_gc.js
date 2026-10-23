@@ -1,4 +1,5 @@
 // arrays and strings that live across collections
+// collections: gccat
 var keep = [];
 for (var i = 0; i < 60; i++) {
   var junk = [i, i + 1, i + 2, "x" + i];

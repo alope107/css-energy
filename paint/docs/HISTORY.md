@@ -95,11 +95,79 @@ test` and `make test-goaway` (and `GOAWAY=2000`, 5 of 5 loads); the design is ke
 - **Not adopted**: for this canvas, fewer requests don't pay for slower loads. It may when js-minus-js persists memory
   here (a save area read once at boot: many cells, a likely value per cell), so the patch stays.
 
+## 8. Drag to paint, instant colour, a visible blank (2026-10-22)
+
+The asks: see a paint at once (with a saving indicator), tell a blank cell from colour 0, and paint lines by
+dragging, with a mouse and a finger. Headless Chromium 153.
+
+- **A drag can't cross cell documents.** A press is captured by the frame it starts in: pressing in one cell's
+  `<object>` and moving over others kept `:hover` (and `:active`) on the first cell, in its document and in the page,
+  and the release over another cell clicked nothing. So input moved to the page: `.grid:active .c:hover` latches the
+  palette colour into the cell (a transition with a 1e7 s delay holds it). The colour shows in the next frame; the
+  old canvas showed it only when the cell's new document arrived, after a round trip (much longer while the page was
+  still probing).
+- **Writes needed a new channel.** The page can't navigate a cell's document without a click, and re-showing a
+  hidden `<object>` keeps its document (no reload, no fresh fetches), so the cell documents went. A writer document
+  per cell, shown on the first paint, reads (colour, slot) from its size and writes `d/<colour>.png?<slot>`; a
+  per-cell clock gives every change a new slot (`ARCHITECTURE.md`, Writes). Cost: about 110 changes per cell per page
+  load (three writers); a writer's 32 KB of CSS is parsed once per painted cell.
+- **The clock's gate.** `animation-play-state: if(style(--L: var(--W)): …)` on the element whose `--W` transitions
+  left some clocks running forever after the transition ended (animation properties come from the base style and
+  aren't recomputed then). Testing `--d = L - W` on a grandchild works: 40 changes, one cell, the clock moved 50–150 ms
+  each and never in between.
+- **Lost: Back/Forward as undo.** Undo was each cell document's own history. With writes coming from the page there
+  are no history entries, and keeping click-paints as navigations beside drags didn't hold up: the page's latched
+  colour sits over a cell whose document Back restores, so the display would disagree with the store. Not replaced.
+- **Saving indicator.** A mask image still loading paints nothing, so the writer's square, masked by its write,
+  covers the page's spinner exactly when the write has loaded. A global "saving" indicator isn't possible: the page
+  can't see into the writers.
+- **Blank.** The read already tells "never written" (0 px row) from colour 0, so no palette colour was given up: a
+  blank cell shows the grid's checkerboard. A read that failed looks the same until the retry.
+- **Touch.** css-physics's handles (one scroller per cell, a follower for "finger down"). The first build left
+  handles off rest: the follower sat outside `.grid`, so it never saw the non-inherited `--tdx` and `--held` never
+  dropped. Then it was correct but ran at ~8 fps: summing 960 additive animations on `timeline-scope`d timelines
+  (as css-physics does for ≤ 64 bodies) made every layout cost ~94 ms (leased, mini PC). Bisected with a forced
+  layout per variant: no consumers 3.7 ms, consumers inside their own scroller 3.2 ms, 20 row-level sums of 48
+  75 ms, `timeline-scope: all` 24 ms, half the consumers 38.5 ms. So the dragged handle publishes instead: an anchor
+  whose size encodes (cell, drag), read by `anchor-size()` on a container around the canvas
+  (`ARCHITECTURE.md`, Touch). That moved `--held` after the handles in tree order, out of their reach, so a handle
+  now returns to rest after 100 ms without movement, a re-snap Chrome defers to the gesture's end.
+  `tools/touch.js`: drags, a quick drag lifted while moving, a back-and-forth, a fast diagonal, a tap; strokes trail
+  the finger by the touch slop, about a cell at phone scale.
+- **Fast strokes left gaps.** About one pointer position arrives per frame, so a stroke faster than a cell per frame
+  painted every other cell. The page now keeps the last frame's position (a 1 ms transition) and paints the line to
+  the current one. A half-cell distance test made slope-1/2 segments two cells thick at ties; one cell per step along
+  the major axis (Bresenham) draws thin lines. Touch strokes started late: the first scroll update comes past the
+  slop, so the first segment starts at the cell the finger came down on.
+- **"Huge hunks" at fast turns** (the user, 2026-10-23). The previous point was a transition 1 ms late; Chrome
+  starts a transition only at a later frame, so with the pointer moving every frame it was replaced before it ever
+  finished and stayed at the stroke's start: each frame drew a line from there. Headless tests with a move every two
+  frames never saw it; headed Chromium under Xvfb with a move every 4 ms did. Now two latches swap every 10 ms
+  (`ARCHITECTURE.md`, Strokes), after three traps: an `if()` on an animated, inherited value in `transition-delay`
+  is never recomputed; a held transition carries on if the target doesn't change; a style query on the clock
+  restyled the whole grid (100–700 ms frames). The line math moved from 480 cells to 20 rows, and a cell's first
+  writer now loads after the mouse is up (documents loading mid-stroke made 100–500 ms frames; passing "drawing"
+  down into every cell for that cost more, 40–80 ms recalcs, so it is a `.wrap:active` selector). Testing with moves
+  sent through CDP unacknowledged (one per 4 ms, coalesced per frame as a real mouse's are) then showed most of a
+  fast stroke missing, intermittently: each cell decided `--on` and used it in its own `transition-delay`, which was
+  sometimes stale; the latch moved to a child, `.l`. The first frames of a stroke, before a latch has held a point
+  of it, start from the pressed cell (`:active`). Spinners turned for 28 s: a hundred of them, after a big paint,
+  slowed the next stroke enough to cut its corners, so they turn for 2 s and then stay still until covered.
+- **Open flakes** (2026-10-23, a machine shared with other sessions' benchmarks, load 6–28): a write that never
+  reports done (1 run in ~20; `tools/e2e.js` prints the cell's latch and its writers' loads when it happens); a fast
+  touch diagonal with gaps (once, at load 11; 6 of 6 clean at load 6, leased or not).
+- **Touch was never smooth.** The ~3 ms reported above was a forced layout; a real drag, timed later, ran at 8–12 fps:
+  a full re-layerization of 966 composited layers (480 handles) every frame (`ARCHITECTURE.md`, Touch). Not fixed.
+- **Load got lighter:** no cell documents at load (they were 480 documents, 480 mask-image writes and 480
+  `<link>` writes per load, the first "open question" below), and the page shrank from 1.36 MB to 1.14 MB including
+  the touch handles (0.97 MB once the handles publish instead of being summed).
+
 ## Open questions and ideas not tried
 
-- **Fewer requests per load** would make the connection limit fall in fewer loads: the cell pages' own writes on
-  load (480 mask-images now, 480 links when idle) only repeat the stored value. The start page needs the link (undo
-  back to it re-registers), not the mask-image.
+- **Undo** without history entries: one level per cell is cheap (latch the previous colour); more needs per-cell
+  value stacks.
+- **Slop compensation for touch**: the stroke trails the finger by the touch slop; the first movement's direction,
+  latched, would let the page add it back.
 - **Staggered reads**: start the probes a row at a time to keep fewer requests in flight.
 - **Packing**: `zoom: 17^j` on cell j's probes, so one row reads several cells as one number.
 - **A save area for js-minus-js** (`../COMPARISON.md`), with the scroll register (48 bits, synchronous) as a superblock

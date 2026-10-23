@@ -2,7 +2,7 @@
 independently, so they spread over every CPU and still print what the serial run prints, in the same order.
 JOBS=N sets the number of workers (default: every CPU); JOBS=1 runs in this process (for pdb or a profile).
 Workers are forked: they inherit everything loaded so far, and fn may be a closure. Items and results are pickled.
-A cache a worker fills (cmp_dsl's parser variants) is filled once per worker."""
+A cache a worker fills in memory is filled once per worker (cmp_dsl's parser variants are on disk: cc_dsl.compiled)."""
 import os, multiprocessing as mp
 _fn = None
 def _call(x): return _fn(x)

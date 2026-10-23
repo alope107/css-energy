@@ -6,12 +6,10 @@ import cc_ref as R, cc_dsl as D
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 SPEC = os.environ.get('SPEC') == '1'
 DB, CB = R.LAYOUT['data_base'], R.LAYOUT['code_base']
-gen = D.Prog(DB, CB, lib)
-variants = {}
+variants = {}                                    # compiled variants (cc_dsl.compiled: cached in build/dslcache)
 def prog_for(mode, tk, tv):
-    if not SPEC: return gen
-    key = D.variant_key(mode, tk, tv)
-    if key not in variants: variants[key] = D.Prog(DB, CB, lib, *key)
+    key = D.variant_key(mode, tk, tv) if SPEC else (None, None, None)
+    if key not in variants: variants[key] = D.compiled(DB, CB, lib, key)
     return variants[key]
 
 def ref_state(c):
@@ -38,14 +36,14 @@ def ref_state(c):
         for nm, v in ((f'ih1_{k}', e[0]), (f'ih2_{k}', e[1]), (f'iv_{k}', e[2])): st[nm] = v if k < c.nint else None
     return st
 allok = True
-lexp = D.LexProg(DB)
 if SPEC:                                         # class-specialised lexers, as the page picks them (ccpage5.CLASSES)
     import ccpage5 as C5
-    lexes = [D.LexProg(DB, cset=cs) for cs in C5.CLASSES]
+    lexes = [D.compiled(DB, CB, lib, lex=cs) for cs in C5.CLASSES]
     def lex_for(c): return lexes[next(i for i, cs in enumerate(C5.CLASSES) if c in cs)]
 else:
+    lexp = D.LexProg(DB); lexp = D.Compiled(lexp.x.run_python, lexp.out, 0, len(lexp.x.temps))
     def lex_for(c): return lexp
-if __name__ == '__main__': print(f'lexer: {len(lexp.x.temps)} temps; parser: {len(gen.x.temps)} temps')
+if __name__ == '__main__' and not SPEC: print(f'lexer: {lexp.ntemps} temps; parser: {prog_for(0, 0, 0).ntemps} temps')
 work = 0; steps = 0
 def check(text):
     """run the DSL level by level on one source text against cc_ref -> (ok, detail)"""
@@ -68,7 +66,7 @@ def check(text):
                 env = {('S', n): v for n, v in ps.items()}
                 for k in ('tk', 'tv', 'th1', 'th2'): env[('I', k)] = prev['o_' + k]
                 for n, v in tab.items(): env[('I', n)] = v
-                ps, e = pg.x.run_python(env); e = collections.defaultdict(int, e); work += len(pg.x.temps); steps += 1
+                ps, e = pg.run(env); e = collections.defaultdict(int, e); work += pg.ntemps; steps += 1
                 for s in range(R.EMAX):
                     if e[('T', f'o_v{s}')]:
                         a = e[('T', f'o_a{s}')] + DB; l, m = e[('T', f'o_l{s}')], e[('T', f'o_m{s}')]
@@ -79,7 +77,7 @@ def check(text):
                     if e[('T', f'o_lv{k}')]: lab[e[('T', f'o_lj{k}')]] = e[('T', f'o_lx{k}')]
                 pw = collections.defaultdict(int, {n: e[('T', n)] for n in pg.out})
         env = {('S', n): v for n, v in ls.items()}; env[('I', 'c')] = c; env[('I', 'cn')] = cn; env[('I', 'ptk')] = prev['o_tkany']
-        lx_ = lex_for(c); ls, e = lx_.x.run_python(env)
+        lx_ = lex_for(c); ls, e = lx_.run(env)
         prev = {n: e[('T', n)] for n in lx_.out}
         if prev['o_sv']: data[prev['o_sa'] + DB] = prev['o_sw']
     s0 = [ord(ch) for ch in text] + [0]
