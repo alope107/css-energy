@@ -49,7 +49,8 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
 ## The language
 
 Everything in the [learnxinyminutes JavaScript tutorial](https://learnxinyminutes.com/javascript/) compiles and prints
-what Node prints (`tests/suite/` has it section by section, beside 160 other programs). In detail:
+what Node prints: `tests/suite/lxym_1_basics` … `lxym_4_functions` are its first four sections as written, `this_call`,
+`proto_chain`, `builtin_protos` and `arrows` the rest, beside 171 other programs. In detail:
 
 - **Values**: numbers (JavaScript's doubles), strings, `true` / `false`, `null`, `undefined`, `NaN`, `Infinity`,
   arrays, objects and functions. `typeof` names them; `false`, `null`, `undefined`, `NaN`, `0`, `-0` and `""` are
