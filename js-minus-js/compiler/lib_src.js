@@ -392,19 +392,117 @@ function callv(f) {
   if (n == 63) { a = peek(fc + 2); n = 32; if (__kind(a, __K_ARR__)) { n = 32 + peek(a - 1); __mcpy(fc + 2, peek(a), peek(a - 1)); } }
   if (__kind(f, __K_FUN__) == 0) { m_uncaught(); m_typeerr(); m_notfn(); putc(10); halt(); }
   m = peek(f + 1);
+  if (m >= 128) { poke(fc, native(peek(f + 2), n % 32, fc + 2)); return 0; }     // (a native: its value is the call's)
   while (m >= 64) {
     if (m % 2) { i = n % 32; while (i > 0) { i = i - 1; poke(fc + 3 + i, peek(fc + 2 + i)); } poke(fc + 2, peek(f + 6)); n = n + 1; }
     poke(fc + 1, peek(f + 5)); n = n % 32 + 32; f = peek(f + 2); m = peek(f + 1);
+    if (m >= 128) { poke(fc, native(peek(f + 2), n % 32, fc + 2)); return 0; }
   }
   np = m % 16;
   poke(fc, off * 8192 + r);
   poke(__CVRET__, (__TRAPOFF__ - off) * 8192 + peek(f));
-  if (n < 32) { poke(fc + 1, glob()); }
+  if ((n < 32) * (m % 64 >= 32)) { poke(fc + 1, glob()); }      // (only a function that uses this reads it)
   if (np > n % 32) { __mfill(fc + 2 + n % 32, __UNDEF__, np - n % 32); }
   if (m % 32 >= 16) { poke(fc + 2 + np, peek(f + 2)); }      // (an inner function: its env in its local 1)
   poke(__fp(), peek(__CVRET__));
   return 0;
 }
+// ---------------- timers. setTimeout / setInterval queue a callback; they run when the program is done (cc_ref.timer_loop calls
+// nexttimer until it gives 0), by due time and then in the order they were set; an interval comes due again ms later. The
+// queue: global TCELL, an array [now, the next id, then due, f (0: cleared or done), ms (0: once), id per timer]
+function timers() {
+  var t = peek(__DB__ + __TCELL__);
+  if (__kind(t, __K_ARR__) == 0) { t = newarr(8, 2); poke(peek(t), 0); poke(peek(t) + 1, 1); poke(__DB__ + __TCELL__, t); }
+  return t;
+}
+function addtimer(f, ms, rep) {
+  var t = timers(); var p = peek(t); var id = p[1];
+  if (__kind(ms, __K_SMI__) == 0) { ms = 0; }
+  if (ms < 0) { ms = 0; }
+  if (rep * (ms < 1)) { ms = 1; }
+  p[1] = id + 1;
+  push(t, p[0] + ms); push(t, f); push(t, rep * ms); push(t, id);
+  return id;
+}
+function settimeout1(d, f) { return addtimer(f, 0, 0); }
+function settimeout(d, f, ms) { return addtimer(f, ms, 0); }
+function setinterval(d, f, ms) { return addtimer(f, ms, 1); }
+function cleartimer(d, id) {
+  var t = timers(); var p = peek(t); var n = peek(t - 1); var i = 2;
+  while (i < n) { if (p[i + 3] == id) { p[i + 1] = 0; } i = i + 4; }
+  return __UNDEF__;
+}
+function nexttimer() {
+  var t = timers(); var p = peek(t); var n = peek(t - 1); var i = 2; var b = 0; var f = 0;
+  while (i < n) { if (p[i + 1]) { if (b == 0) { b = i; } else if (p[i] < p[b]) { b = i; } } i = i + 4; }
+  if (b == 0) { return 0; }
+  f = p[b + 1]; p[0] = p[b];
+  if (p[b + 2]) { p[b] = p[b] + p[b + 2]; } else { p[b + 1] = 0; }
+  return f;
+}
+// ---------------- Math. Math.f(x) through the FPU (cc_ref MATHM: after Math., a method on a dummy receiver d); min / max of up
+// to 4 arguments, and as values natives (meta 128; callv computes them: their id in the env word); Math.PI ...: FCONST's;
+// Math.random: Park and Miller's generator in doubles (seed 1: the same numbers every run), its state in global RCELL
+function mabs(d, x) { __fl(__FL_FABS__, __F0__, tonum(x), 0); return fbox(); }
+function mfloor(d, x) { __fl(__FL_FFLOOR__, __F0__, tonum(x), 0); return fbox(); }
+function mceil(d, x) { __fl(__FL_FCEIL__, __F0__, tonum(x), 0); return fbox(); }
+function mround(d, x) { __fl(__FL_FROUND__, __F0__, tonum(x), 0); return fbox(); }
+function mtrunc(d, x) { __fl(__FL_FTRUNC__, __F0__, tonum(x), 0); return fbox(); }
+function msqrt(d, x) { __fl(__FL_FSQRT__, __F0__, tonum(x), 0); return fbox(); }
+function mexp(d, x) { __fl(__FL_FEXP__, __F0__, tonum(x), 0); return fbox(); }
+function mlog(d, x) { __fl(__FL_FLOG__, __F0__, tonum(x), 0); return fbox(); }
+function msin(d, x) { __fl(__FL_FSIN__, __F0__, tonum(x), 0); return fbox(); }
+function mcos(d, x) { __fl(__FL_FCOS__, __F0__, tonum(x), 0); return fbox(); }
+function mtan(d, x) { __fl(__FL_FTAN__, __F0__, tonum(x), 0); return fbox(); }
+function mpow(d, x, y) { __fl(__FL_FPOW__, __F0__, tonum(x), tonum(y)); return fbox(); }
+function msign(d, x) {
+  var c = 0; x = tonum(x); c = __fv(__FV_FCMP__, x, 0);
+  if (c == 1) { return 1; }
+  if (c == 0 - 1) { return 0 - 1; }
+  return x;
+}
+function mathk(k) { __fl(__FL_FCONST__, __F0__, 0, k); return fbox(); }
+// the n numbers from p: their least (s -1) or greatest (s 1); NaN if one is
+function mm(p, n, s) {
+  var r = __INF__; var v = 0; var i = 0;
+  if (s > 0) { r = __NINF__; }
+  while (i < n) {
+    v = tonum(peek(p + i));
+    if (__fv(__FV_FCMP__, v, v) == 2) { return __NAN__; }
+    if (__fv(__FV_FCMP__, v, r) == s) { r = v; }
+    i++;
+  }
+  return r;
+}
+function min0(d) { return mm(0, 0, 0 - 1); }
+function min1(d, a) { return mm(__fp() + 2, 1, 0 - 1); }
+function min2(d, a, b) { return mm(__fp() + 2, 2, 0 - 1); }
+function min3(d, a, b, c) { return mm(__fp() + 2, 3, 0 - 1); }
+function min4(d, a, b, c, e) { return mm(__fp() + 2, 4, 0 - 1); }
+function max0(d) { return mm(0, 0, 1); }
+function max1(d, a) { return mm(__fp() + 2, 1, 1); }
+function max2(d, a, b) { return mm(__fp() + 2, 2, 1); }
+function max3(d, a, b, c) { return mm(__fp() + 2, 3, 1); }
+function max4(d, a, b, c, e) { return mm(__fp() + 2, 4, 1); }
+// Math.min / Math.max as values: [hdr][0][128][its id][0 (anonymous)][0][0][0] (mathk, mathfn: called in the dummy's slot, k above it)
+function mathfn(k) {
+  var g = __alloc(8, __A_RAW__);
+  poke(g, 0 - 13); poke(g + 1, 0); poke(g + 2, 128); poke(g + 3, k); poke(g + 4, 0); poke(g + 5, 0); poke(g + 6, 0); poke(g + 7, 0);
+  mark(g);
+  return g + 1 - __FUNTAG__;
+}
+// a native's value for n arguments at p (callv)
+function native(id, n, p) { if (id == 0) { return mm(p, n, 0 - 1); } return mm(p, n, 1); }
+function mrandom(d) {
+  var s = peek(__DB__ + __RCELL__);
+  if (s == __UNDEF__) { s = 1; }
+  __fl(__FL_FSCALE__, __F2__, 1, 31); __fl(__FL_FSUB__, __F2__, __F2__, 1);     // (2^31 - 1: beyond the library's literals)
+  __fl(__FL_FMUL__, __F0__, s, 16807); __fl(__FL_FMOD__, __F0__, __F0__, __F2__); s = fbox(); poke(__DB__ + __RCELL__, s);
+  __fl(__FL_FDIV__, __F0__, s, __F2__);
+  return fbox();
+}
+// alert(x): the page has no dialogs: the message on the console, as console.log(x) prints it
+function alert(d, x) { prn(x); putc(10); return __UNDEF__; }
 // the global object (cc_ref GCELL: made the first time)
 function glob() {
   var o = 0;
@@ -813,13 +911,16 @@ function keyarr(o) {
 }
 // o's keys of kind pass (0 integers, 1 names) -> their count; d: where to write them (0: count only)
 function okeyn(o, pass, d) {
-  var c = o + __OBJTAG__; var k = 0; var n = 0; var go = 1;
+  var c = o + __OBJTAG__; var k = 0; var n = 0; var go = 1; var inh = 0; var x = 0;
   while (go) {
     k = peek(c);
     if (k == 0) { go = 0; }
-    else if (k < 0) { c = k + __OBJTAG__; }
+    else if (k < 0) { if (k < 0 - __OBJTAG__) { inh = 1; } c = k + __OBJTAG__; }     // (inh: past a prototype's link)
     else {
-      if (__kind(k - __STRTAG__, __K_STR__) == pass) { if (seen(o, c, k) == 0) { if (d) { poke(d + n, k - __STRTAG__); } n++; } }
+      if (__kind(k - __STRTAG__, __K_STR__) == pass) {
+        x = 1; if (inh) { x = seen(o, c, k) == 0; }
+        if (x) { if (d) { poke(d + n, k - __STRTAG__); } n++; }
+      }
       c = c + 2;
     }
   }
@@ -844,24 +945,27 @@ function pget(o, key) {
 }
 // o.key = v: the key's pair, else the first free pair (the keys end after it), else a new chunk linked from the last
 function pset(o, key, v) {
-  var c = o + __OBJTAG__; var k = 0; var n = 0;
+  var c = o + __OBJTAG__; var k = 0;
   while (1) {
     k = peek(c);
     if (k == key) { poke(c + 1, v); return 0; }
-    if ((k == 0) + (k < 0 - __OBJTAG__)) {                // its keys' end: 0, or its prototype's link (carried on)
-      if ((c - __HEAP0__) % 8 < 6) { poke(c, key); poke(c + 1, v); poke(c + 2, k); return 0; }     // (the third pair: L := the end)
-      n = __alloc(8, __A_CHUNK__); c = o + __OBJTAG__;     // (the collector may have moved everything: the end read again)
-      while (ischunk(peek(c + 6))) { c = peek(c + 6) + __OBJTAG__; }
-      poke(n, key); poke(n + 1, v); poke(n + 2, peek(c + 6));
-      poke(c + 6, n - __OBJTAG__);
-      return 0;
-    }
-    if (k < 0) { c = k + __OBJTAG__; } else { c = c + 2; }
+    if (k > 0) { c = c + 2; }
+    else if (k == 0) { return pend(o, c, key, v); }
+    else if (k < 0 - __OBJTAG__) { return pend(o, c, key, v); }      // (its prototype's link)
+    else { c = k + __OBJTAG__; }
   }
   return 0;
 }
-// w links an object's chunk to the next (a prototype's link is below: tag -16, cc_ref.PROTAG)
-function ischunk(w) { return (w < 0) * (w >= 0 - __OBJTAG__); }
+// o's keys end at c (0, or its prototype's link, carried on): key and v there, else in a new chunk linked from the last
+function pend(o, c, key, v) {
+  var n = 0; var last = 0;
+  if ((c - __HEAP0__) % 8 < 6) { poke(c + 2, peek(c)); poke(c, key); poke(c + 1, v); return 0; }     // (the third pair: L := the end)
+  last = c - 6 - __OBJTAG__;                             // (the full chunk, as a value: the collector moves it with the rest)
+  n = __alloc(8, __A_CHUNK__); c = last + __OBJTAG__ + 6;
+  poke(n, key); poke(n + 1, v); poke(n + 2, peek(c));
+  poke(c, n - __OBJTAG__);
+  return 0;
+}
 // the word that ends o's own keys (0, or its prototype's link)
 function oend(o) {
   var c = o + __OBJTAG__; var k = peek(c);

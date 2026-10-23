@@ -490,18 +490,28 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('hasOwnProperty', {1: 'hasown'}, 1), ('create', {1: 'ocreate'}, 0)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
 GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
-           ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
-ALLM = METHODS + GLOBALS
+           ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3),       # the network (net/device.py)
+           ('setTimeout', {1: 'settimeout1', 2: 'settimeout'}, 3), ('setInterval', {2: 'setinterval'}, 3),
+           ('clearTimeout', {1: 'cleartimer'}, 0), ('clearInterval', {1: 'cleartimer'}, 0), ('alert', {1: 'alert'}, 0)]
+# Math.f(...) (after 'Math.': S_MATHDOT; not methods of anything else); its constants (FCONST's); min / max as values: natives
+MATHM = [('abs', {1: 'mabs'}, 3), ('floor', {1: 'mfloor'}, 3), ('ceil', {1: 'mceil'}, 3), ('round', {1: 'mround'}, 3),
+         ('trunc', {1: 'mtrunc'}, 3), ('sign', {1: 'msign'}, 3), ('sqrt', {1: 'msqrt'}, 3), ('exp', {1: 'mexp'}, 3), ('log', {1: 'mlog'}, 3),
+         ('sin', {1: 'msin'}, 3), ('cos', {1: 'mcos'}, 3), ('tan', {1: 'mtan'}, 3), ('pow', {2: 'mpow'}, 3),
+         ('min', {k: f'min{k}' for k in range(5)}, 3), ('max', {k: f'max{k}' for k in range(5)}, 3), ('random', {0: 'mrandom'}, 3)]
+MATHK = {'PI': 0, 'E': 1, 'LN2': 2, 'LN10': 3, 'LOG2E': 4, 'LOG10E': 5, 'SQRT2': 6, 'SQRT1_2': 7}      # (cc_ref.FCONSTS)
+MATHV = ('min', 'max')                                  # as values: the library's natives (mathfn)
+ALLM = METHODS + GLOBALS + MATHM
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
-                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply', '__proto__', 'prototype', 'Object']
+                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply', '__proto__', 'prototype', 'Object', 'Math'] + list(MATHK)
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 # f.call( / f.apply( (pm PMFN + 0 / 1): f is called with this = the first argument (apply: the second's elements as arguments)
 FMETH = {KW['call']: 0, KW['apply']: 1}
 PMFN = 68
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
+MATH_INDEX = {KW[m[0]]: len(METHODS) + len(GLOBALS) + i for i, m in enumerate(MATHM)}
 assert len(set(KW.values())) == len(KW), 'keyword hashes collide'
 # the literals that are words: their constant operands and static types
 LITERALS = {'true': (K(TRUE), 1), 'false': (K(FALSE), 1), 'null': (K(NULL), 0), 'undefined': (K(UNDEF), 0), 'NaN': (K(NAN), 3),
@@ -514,6 +524,10 @@ LITK = {KW[w]: v for w, v in LITERALS.items()}
 # ReferenceError at run time: its label stays undefined, and the page's undefined labels are 0, the library's refstub
 NIMP, IMPC = 4, 2
 FCACHE = IMPC + NIMP
+# the timers' queue (setTimeout / setInterval): global TCELL, past the functions' caches; nfdef + TIMERS once the program sets one,
+# so that its end runs them (cc_ref timer_loop)
+TCELL, TIMERS = FCACHE + 16, 64
+RCELL = TCELL + 1                       # Math.random's state
 # every global starts undefined (a read before its var runs: hoisting; so var x without a value is no code at the top level),
 # the caches too (FCACHE's, a double literal's: NUMLIT's 'not made yet'). The images hold it (the page's RAM groups with these
 # cells are live from the start, gen_css.py); a cell the program writes can't be an overlay
@@ -616,7 +630,8 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
 # that only those variants carry that code (the others are S_OPER's / S_NAMEE's: ccpage5 shares their rules)
 S_APAR1, S_AARROW0, S_AARROW, S_ABODY, S_OPERC, S_NAMEEC = range(29, 35)
 S_NEW, S_NEWN = 35, 36                    # new F( : after new, after its name
-NMODES = 37
+S_MATHDOT = 37                            # after Math.
+NMODES = 38
 CMODES = {S_OPERC: S_OPER, S_NAMEEC: S_NAMEE}
 ACLOSE = (41, 44, 59, 125, T_NL)          # the tokens that can end an expression body (not ']' or ':': [x => x] and c ? x => 1 : 2
                                           # need parentheses; four rules fewer, ccpage5)
@@ -663,7 +678,7 @@ class Compiler:
         self.clab = 0                       # the top-level function's close label (cc_ref.closelab)
         self.ca = 0                         # the current function is an arrow's expression body (S_OPERC)
         self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
-        if not rom: self.nsym = NIMP; self.dp = FCACHE + NF
+        if not rom: self.nsym = NIMP; self.dp = RCELL + 1
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
 
@@ -1183,6 +1198,13 @@ class Compiler:
         self.emit('CALL', (self.ent.get('mknew', 0) // 2, 0), w1=(f[0] - 256, f[1]))
         self.tb += 1; self.push_op(M_CALLV, 8); self.mode = S_OPND
 
+    def timer_loop(self):
+        """the program's end when it set a timer: L: CALL nexttimer -> T(0) (a callback, or 0: none left); JZ T(0) -> end;
+        CALLV 0 T(0); JMP L"""
+        t = self.tmp(0); l = self.here()
+        self.emit('CALL', (self.ent.get('nexttimer', 0) // 2, 0), w1=(t[0] - 256, t[1])); self.emit('JZ', (l + 4, 0), b=t)
+        self.emit('CALLV', (0, 0), w1=(t[0] - 256, t[1])); self.emit('JMP', (l, 0))
+
     def this_val(self):
         """this: a function's own (frame slot 1; its entry's d |= 2: uthis); an arrow's is its outer function's (through the env,
         that function's entry d |= 2); at the top level, and in an arrow there, the global object"""
@@ -1383,6 +1405,7 @@ class Compiler:
                     self.push_op(M_INTR, [KW[n] for n in INTR].index(h) + 32 * self.nd); self.push_od(TMP, 0)
                 elif h in GLOBAL_INDEX:                                  # parseInt(s), ...: a method on a dummy receiver
                     self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, GLOBAL_INDEX[h])    # (the receiver: unused)
+                    if h in (KW['setTimeout'], KW['setInterval']) and self.nfdef < TIMERS: self.nfdef += TIMERS
                 elif not self.rom and self.lookup(h) >= 0:   # a variable's value: CALLV (the callee in its slot)
                     j = self.lookup(h); self.snapshot(lambda q: q < 256)
                     if self.captured(j): self.cread(j)
@@ -1396,11 +1419,11 @@ class Compiler:
             if isP(7) or isP(8): return self.incdec(h, v, 2)
             if h in WGLOB and isP(46): self.pn = (0, 0); self.mode = S_WDOT; return     # window.x: x
             j = self.lookup(h)
-            if j < 0 and h in (KW['String'], KW['Object']) and isP(46):     # String.fromCharCode(...), Object.create(p): a method on a dummy receiver
-                self.push_od(K(0), 0); self.mode = S_DOT; return
+            if j < 0 and h in (KW['String'], KW['Object'], KW['Math']) and isP(46):     # String.fromCharCode(...), Object.create(p), Math.f(x):
+                self.push_od(K(0), 0); self.mode = S_MATHDOT if h == KW['Math'] else S_DOT; return     # a method on a dummy receiver
             tyo = self.top_op()[0] == TYPEOF
             k = self.fnlook(h) if j < 0 and not self.rom else -1
-            if h in WGLOB and j < 0 and not self.rom:          # window / globalThis: the global object
+            if (h in WGLOB or h == KW['Math']) and j < 0 and not self.rom:     # window / globalThis (Math alone): the global object
                 self.emit('NUMLIT', (GCELL, 0), w1=GLOBK); self.push_od(GCELL, 0)
             elif k >= 0:                                       # a function's name as a value: its object (made once, cached)
                 self.emit('NUMLIT', (FCACHE + k, 0), w1=k); self.push_od(FCACHE + k, 0)
@@ -1447,6 +1470,7 @@ class Compiler:
                 if not self.rom and (any((self.sym[j][0], self.sym[j][1]) in RESERVED for j in range(self.nsym) if j >= NIMP or j < self.nimp)
                                      or any(self.sym[k][2] == 3 for k in range(self.nimp))     # read, never assigned or declared
                                      or any((self.fn[k][0], self.fn[k][1]) in RESERVED for k in range(self.nfn))): return self.fail(4)
+                if self.nfdef >= TIMERS and not self.rom: self.timer_loop()
                 self.emit('HALT'); return
             if isP(123): self.push_cs(C_BLOCK); return
             if isP(125): return self.close_block()
@@ -1577,6 +1601,16 @@ class Compiler:
         if m == S_APAR1:                                       # (a, b: an arrow's (a in pn)
             if kind != 'ID' or v in RESERVED: return self.fail(36)
             self.arrow_start(self.pn); self.pn = v; self.mode = S_FPSEP; return
+        if m == S_MATHDOT:                                     # Math. name: a method (the call: S_OPER, M_METH), a constant, min / max's value
+            if kind != 'ID' or not (v in MATH_INDEX or v in [KW[c] for c in MATHK]): return self.fail(69)
+            if v in MATH_INDEX and self.tparen: self.pn = (0, 0); self.pm = 4 + MATH_INDEX[v]; self.mode = S_OPER; return
+            i = self.nd - 1; t = self.tmp(i)                   # (a library call in the dummy's slot, its argument above it)
+            if v in MATH_INDEX:
+                if ALLM[MATH_INDEX[v]][0] not in MATHV: return self.fail(69)
+                k, e = MATHV.index(ALLM[MATH_INDEX[v]][0]), 'mathfn'
+            else: k, e = MATHK[next(c for c in MATHK if KW[c] == v)], 'mathk'
+            self.emit('MOV', self.tmp(i + 1), (K(k), 0)); self.emit('CALL', (self.ent.get(e, 0) // 2, 0), w1=(t[0] - 256, t[1]))
+            self.set_od(i, TMP, 3 if e == 'mathk' else 0); self.mode = S_OPER; return
         if m == S_NEW:                                         # new F(...): F's name
             if kind != 'ID' or v in RESERVED: return self.fail(3)
             self.pn = v; self.mode = S_NEWN; return

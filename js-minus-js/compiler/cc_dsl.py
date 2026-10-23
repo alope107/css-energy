@@ -44,7 +44,7 @@ def initial_lex(data_base):
 
 def initial_parse(data_base):
     st = {n: 0 for n in parse_state_names()}
-    st['dp'] = R.FCACHE + NF; st['mode'] = R.S_STMT        # (global k: data_base + k; cc_ref.NIMP, FCACHE: the implicit globals', the functions')
+    st['dp'] = R.RCELL + 1; st['mode'] = R.S_STMT        # (global k: data_base + k; cc_ref.NIMP, FCACHE: the implicit globals', the functions')
     st['nsym'] = R.NIMP
     return st
 
@@ -1003,6 +1003,8 @@ class Prog(Base):
                 with self.when(isputc): self.push_op(R.M_PUTC)
                 with self.when(and_(not_(isputc), ne(gi, 0))):            # parseInt(s), ...: a method on a dummy receiver
                     self.push_od(TMP, 0); self.set('tb', self.v('tb') + 1); self.push_op(R.M_METH, sub(gi, 1))
+                    tms = self.m(and_(anyeq(sub(gi, 1), tuple(R.GLOBAL_INDEX[KW[w]] for w in ('setTimeout', 'setInterval'))), lt(self.v('nfdef'), R.TIMERS)), 'tms')
+                    with self.when(tms): self.set('nfdef', self.v('nfdef') + R.TIMERS)     # (cc_ref: the timers run at the end)
                 jc = self.lookup(pn1, pn2); kc, oc, _, _ = self.symkind_addr(jc); dyn = self.m(ge(jc, 0), 'cdyn')
                 with self.when(and_(not_(isputc), eq(gi, 0), dyn)):      # a variable's value: CALLV (cc_ref)
                     self.snapshot(lambda d: lt(d, 256)); i = self.m(self.v('nd'), 'cvi'); ccap = self.captured(jc, kc)
@@ -1020,12 +1022,13 @@ class Prog(Base):
                 j = self.lookup(pn1, pn2)
                 k, o, b, cst = self.symkind_addr(j)
                 with self.when(p78n): self.incdec(pn1, pn2, tv, 2, (j, k, o, b, cst))     # x++ in an expression
-                sdot = self.m(and_(not_(p78n), lt(j, 0), or_(*[and_(eq(pn1, KW[w][0]), eq(pn2, KW[w][1])) for w in ('String', 'Object')]), P(46)), 'sdot')
-                with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', R.S_DOT); self.done()     # String.fromCharCode
+                ismath = self.m(and_(eq(pn1, KW['Math'][0]), eq(pn2, KW['Math'][1])), 'ismath')
+                sdot = self.m(and_(not_(p78n), lt(j, 0), or_(ismath, *[and_(eq(pn1, KW[w][0]), eq(pn2, KW[w][1])) for w in ('String', 'Object')]), P(46)), 'sdot')
+                with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', ite(ismath, R.S_MATHDOT, R.S_DOT)); self.done()     # String.fromCharCode
                 tyo = self.m(eq(self.top_op()[0], R.TYPEOF), 'ntyo')       # typeof x, x undeclared: "undefined"
                 undef = self.m(lt(j, 0), 'nund')
                 rd = self.m(and_(not_(p78n), not_(sdot)), 'nrd')
-                wgv = self.m(and_(rd, undef, wgn), 'nwgv')    # window / globalThis: the global object (cc_ref)
+                wgv = self.m(and_(rd, undef, or_(wgn, ismath)), 'nwgv')    # window / globalThis (Math alone): the global object (cc_ref)
                 with self.when(wgv): self.emit(OP['NUMLIT'], (R.GCELL, 0), w1=R.GLOBK)
                 fk = self.fnlook(pn1, pn2); isfv = self.m(and_(rd, undef, not_(wgv), ge(fk, 0)), 'nfv')      # a function's name: its value (cc_ref)
                 with self.when(isfv): self.emit(OP['NUMLIT'], (add(fk, R.FCACHE), 0), w1=fk)
@@ -1094,7 +1097,12 @@ class Prog(Base):
                                   *[and_(lt(k, ni_), eq(fdiv(mod(I(f'sk_{k}'), 65536), 16384), 3)) for k in range(R.NIMP)],     # read, never assigned
                                   *[and_(lt(k, nf_), self.isres(I(f'fh1_{k}'), I(f'fh2_{k}'))) for k in range(NF)]), 'eres')
                 with self.when(and_(eq(self.v('csp'), 0), eres)): self.fail(4)
-                with self.when(and_(eq(self.v('csp'), 0), not_(eres))): self.emit(OP['HALT']); self.done()
+                with self.when(and_(eq(self.v('csp'), 0), not_(eres))):
+                    with self.when(ge(self.v('nfdef'), R.TIMERS)):    # cc_ref.timer_loop
+                        t = self.tmp(K(0)); l = self.here()
+                        self.emit(OP['CALL'], (self.ent.get('nexttimer', 0) // 2, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JZ'], (add(l, 4), 0), b=t)
+                        self.emit(OP['CALLV'], (0, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JMP'], (l, 0))
+                    self.emit(OP['HALT']); self.done()
             with self.when(P(123)): self.push_cs(R.C_BLOCK); self.done()
             with self.when(P(125)): self.close_block()
             with self.when(P(59)): self.set('f_simple', 1)
@@ -1253,6 +1261,21 @@ class Prog(Base):
             with self.when(pres): self.fail(36)
             with self.when(not_(pres)):
                 self.arrow_start(self.v('pn1'), self.v('pn2')); self.set('pn1', th1); self.set('pn2', th2); self.set('mode', R.S_FPSEP); self.done()
+        with block(R.S_MATHDOT):                           # Math. name (cc_ref)
+            mm_ = [(KW[m[0]], R.MATH_INDEX[KW[m[0]]], m[0]) for m in R.MATHM]
+            mi_ = self.m(add(*[mul(and_(eq(th1, h[0]), eq(th2, h[1])), ix + 1) for h, ix, _ in mm_]), 'mmi')     # (its ALLM index + 1)
+            mv_ = self.m(add(*[mul(and_(eq(th1, h[0]), eq(th2, h[1])), R.MATHV.index(n) + 1) for h, ix, n in mm_ if n in R.MATHV]), 'mmv')
+            mk_ = self.m(add(*[mul(and_(eq(th1, KW[c][0]), eq(th2, KW[c][1])), k + 1) for c, k in R.MATHK.items()]), 'mmk')
+            tpar = self.m(ge(tv, 262144), 'mtp')
+            meth = self.m(and_(isID, ne(mi_, 0), tpar), 'mmeth')
+            with self.when(meth): self.set('pn1', 0); self.set('pn2', 0); self.set('pm', add(mi_, 3)); self.set('mode', R.S_OPER); self.done()
+            val = self.m(and_(isID, not_(meth), or_(ne(mk_, 0), and_(ne(mi_, 0), ne(mv_, 0)))), 'mval')
+            with self.when(and_(not_(meth), not_(val))): self.fail(69)
+            with self.when(val):
+                i = self.m(self.v('nd') - 1, 'mdi'); t = self.tmp(i); isk = self.m(ne(mk_, 0), 'misk')
+                self.emit(OP['MOV'], self.tmp(add(i, 1)), (add(ite(isk, sub(mk_, 1), sub(mv_, 1)), 896), 0))
+                self.emit(OP['CALL'], (ite(isk, self.ent.get('mathk', 0) // 2, self.ent.get('mathfn', 0) // 2), 0), w1=(sub(t[0], 256), t[1]))
+                self.set_od(i, TMP, mul(isk, 3)); self.set('mode', R.S_OPER); self.done()
         with block(R.S_NEW):                               # new F(...): F's name (cc_ref)
             nbad = self.m(or_(not_(isID), self.isres(th1, th2)), 'nbad')
             with self.when(nbad): self.fail(3)
