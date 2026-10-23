@@ -1052,7 +1052,7 @@ else:
 <div class="frame"><div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
-<p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>
+<p class="nested">Some lines are nested inside another, so they show and run as one line: formatted text pasted with its markup, or Chrome's editing. Undo (Ctrl+Z), then paste as plain text (Ctrl+Shift+V), or press Enter or paste at the start of the next line.</p>
 </section>
 <section class="notes">{notes}</section>
 {ui_rb.probes_html(UIL, UIP, 8)}

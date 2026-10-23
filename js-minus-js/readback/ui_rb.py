@@ -104,19 +104,30 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
   padding: 12px 14px; outline: none; caret-color: var(--accent); color: var(--ink);
 }}
 /* No rule may match the line divs: Chrome copies the properties of matched rules into style="" on every copied line,
-   and pasting such lines nests them inside the line at the caret. Pasted rich text (p, b, span, ...) shows inline and
-   unstyled; a div nested in a line (Chrome makes one on Enter in a line typed straight into the empty editor, or when
-   lines are pasted into an empty line) shows inline too, so the line looks the way the scan reads it (.nested says so). */
-.ed :not(div, br) {{ all: unset; display: inline; }}
-.ed div div {{ display: inline; unicode-bidi: normal; }}   /* a div isolates (UA style): its own shaping run, unread */
+   and pasting such lines nests them inside the line at the caret. Pasted rich text (p, b, span, pre, ...) shows inline
+   and unstyled; a div nested in a line (Chrome makes one on Enter in a line typed straight into the empty editor, when
+   lines are pasted into an empty line, and when formatted text brings its own) shows inline too, so the line looks the
+   way the scan reads it (.nested says so). !important beats the style attribute a paste brings (a font, white-space:
+   pre: the line would show one way and read another), and `all` leaves unicode-bidi: a <pre> or a div isolates (UA
+   style), which makes its text a shaping run of its own, unread (ENGINE_NOTES 75). Embedded content shows nothing. A
+   line div that came with a style attribute is a pasted one: it takes the editor's style too. */
+.ed :not(div, br) {{ all: unset !important; display: inline !important; unicode-bidi: normal !important; }}
+.ed div div {{ all: unset !important; display: inline !important; unicode-bidi: normal !important; }}
+.ed > div[style] {{ all: unset !important; display: block !important; }}
+.ed :is(img, svg, video, audio, iframe, object, embed, canvas, input, select, textarea, button, hr, math) {{ display: none !important; }}
 /* a <br> in a line would start a second row that the scan doesn't read (the line's sentinel is on its last row): Chrome's
    placeholder in an empty line made it two rows tall and put everything below one row off, Shift+Enter inserts one,
    and so does a nest. The sentinel gives an empty line its height. */
 .ed div br {{ display: none; }}
 .ed::before, .ed > div::after {{ content: "\\2058"; }}
 .rbout {{ anchor-name: --rbout; height: 0; visibility: hidden; }}
+/* the probes' contents lay out only from Run on (#app's --rbrun, a style query): while the user edits nothing reads
+   them, and a paste or a deletion restyles them on every line it adds or removes (the rules that name the lines'
+   sentinels and hide the probes of absent lines are positional selectors and :has(), checked even inside a style query
+   that is false). content-visibility, not display: none, keeps their boxes, so Run doesn't build ~6,000 of them
+   (ENGINE_NOTES 76; BENCHMARKS §18) */
 .probe {{ position: absolute; top: calc(anchor(--rbout top) + var(--rbk) * 24px); left: anchor(--rbout left);
-  width: calc({P} * 10px); container-type: size; visibility: hidden; }}
+  width: calc({P} * 10px); container-type: size; visibility: hidden; content-visibility: hidden; }}
 .row {{ position: absolute; left: 0; top: 0; max-width: 100cqw; overflow: hidden; visibility: hidden; font: 15px/24px monospace; white-space: pre; }}
 .row > b {{ font-weight: inherit; --rbglive: calc(min(1, var(--rbgj)) * (100cqh / 1px + 31 * sign(100cqh))); }}
 .row i {{
@@ -130,18 +141,18 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
 """)
     g.append(lbl.group('Line probes: one per editor line', 'each line\'s end is an anchor; its probe is as tall as the line is long'))
     g.append('.ed::before { anchor-name: --rbs0; }')
-    for k in range(1, L):
-        g.append(f'.ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}')
     for k in range(L):
         g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); }}')
     # (:has() on the editors' section with child combinators: on #app it searched ~10,000 elements, per rule and editor,
     # and the picker's eleven editors made a compile ~1.7 s slower)
+    run = ['.probe { content-visibility: visible; }'] + [f'.ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}' for k in range(1, L)]
     for e in range(EDS):
         pane = f'#pk{e}:checked ~ #app > .pane' if EDS > 1 else '#app > .pane'
         for k in range(1, L):
-            g.append(f'{pane}:not(:has(> .frame > .ed{e} > div:nth-of-type({k}))) ~ .probes .probe:nth-child({k + 1}) {{ display: none; }}')
+            run.append(f'{pane}:not(:has(> .frame > .ed{e} > div:nth-of-type({k}))) ~ .probes .probe:nth-child({k + 1}) {{ display: none; }}')
         g.append(f'{pane}:has(> .frame > .ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
         g.append(f'{pane}:has(> .frame > .ed{e} div div) .nested {{ display: block; }}')
+    g.append('@container rbscan style(--rbrun: 1) {\n' + '\n'.join(run) + '\n}')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1

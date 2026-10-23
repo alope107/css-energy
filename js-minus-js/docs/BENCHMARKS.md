@@ -593,3 +593,18 @@ round ran 25% faster than the next on this machine), and in all 8 of 4 more roun
 (`net_fetch` 3.4–4.8 s against 3.8–5.4 s, `net_long` 9.1–12.4 s against 10.3–13.7 s; ratios 0.87–0.94): a median
 0.89, ~11% less time.
 
+
+## 18. Pasting into the editor (2026-10-23, branch `editor-paste`)
+
+Pasting over many lines froze the page (ENGINE_NOTES 76). The probes' contents now lay out only from Run on. Paste
+times, `main`'s page against this one, interleaved (`shared/js/ab.js`) in a bench lease:
+
+| Paste | `main` | `display: none` probes while editing | `content-visibility: hidden` (kept) |
+|---|---|---|---|
+| 200 plain lines over 200 | 2,451 ms | 660 ms | — |
+| 200 formatted lines over 200 (VS Code's HTML) | 3,251–3,509 ms | 675–730 ms | 1,212 ms |
+| 2 formatted lines over FizzBuzz | 80 ms | 40 ms | — |
+| Compile, FizzBuzz (`compiledMs`, ratio to `main`, median and IQR) | 1.00 | 1.02–1.04 (IQR up to 1.07; A-vs-A 1.018, 0.96–1.06) | 0.96 (0.92–1.07) |
+
+`display: none` was faster to paste into but built ~6,000 probe boxes at Run, a few percent of the compile; the
+content-visibility version keeps them and showed no compile cost above the noise.

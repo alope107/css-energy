@@ -1,7 +1,8 @@
 // editor_input.js page.xhtml [case …] — the editor under user input (harness only). Each case loads the page, edits the
 // editor like a user, presses Run and waits for the compile. It checks what matters: the scan latched what the editor
 // shows. Latch row r must equal visual row r of the editor, where each character is placed by its on-screen position.
-// Also: the page warns when Chrome has nested lines (.nested), and a selection's highlight stays still while editing.
+// Also: the page warns when Chrome has nested lines (.nested), a selection's highlight stays still while editing, and
+// formatted text pasted from other apps reads as it shows.
 // Cases marked known make Chrome nest lines: they pass when the merged line is read as shown and .nested says so.
 // They're reported but don't fail the run. EXP=grid also runs 'enter after line 1' to HALT.
 const { launch, fileUrl } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
@@ -31,6 +32,21 @@ async function clipPlain(p, text) {
     if (window.__keep) { const sel = getSelection(); sel.removeAllRanges(); sel.addRange(window.__keep); } });
 }
 const TWO = '  if (i == 7) { console.log(77); }\n  if (i == 8) { console.log(88); }';
+// put HTML on the clipboard with its plain text, as copying formatted text from another app does
+async function clipRich(p, html, text) {
+  await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await p.evaluate(([html, text]) => navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }),
+    'text/plain': new Blob([text], { type: 'text/plain' }) })]), [html, text]);
+}
+const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const [T1, T2] = TWO.split('\n');
+// what VS Code puts on the clipboard: a styled div (its font, white-space: pre) holding a div per line
+const VSCODE = `<meta charset='utf-8'><div style="color: #cccccc;background-color: #1f1f1f;font-family: 'Droid Sans Mono', monospace;font-weight: normal;font-size: 14px;line-height: 19px;white-space: pre;">` +
+  [T1, T2].map(l => `<div><span style="color: #c586c0;">${esc(l.slice(0, 4))}</span><span style="color: #cccccc;">${esc(l.slice(4))}</span></div>`).join('') + '</div>';
+// a code block on a web page: a <pre> (a block that isolates its text, UA style) with highlighting spans
+const PRE = `<pre class="language-js" style="background: #f6f8fa; padding: 16px; font-size: 85%;"><code><span style="color: #cf222e;">var</span> k = <span style="color: #0550ae;">3</span>;</code></pre>`;
+// Google Docs: paragraphs in a <b>, each line a styled span
+const GDOCS = `<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1"><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;"><span style="font-size:11pt;font-family:Arial,sans-serif;white-space:pre-wrap;">${esc(T1)}</span></p><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;"><span style="font-size:11pt;font-family:Arial,sans-serif;white-space:pre-wrap;">${esc(T2)}</span></p></b>`;
 
 const CASES = {
   'initial': async () => {},
@@ -54,6 +70,10 @@ const CASES = {
     await caretAt(p, '  else if (i % 3', 0); await keys(p, 'Home', 'Shift+ArrowDown', 'Control+C');
     await caretAt(p, '  i = i + 1;'); await keys(p, 'End', 'Enter', 'Control+V'); } },
   'shift+enter': { known: true, edit: async p => { await caretAt(p, 'var i = 1;'); await keys(p, 'End', 'Shift+Enter'); await p.keyboard.insertText('var j = 2;'); } },
+  // formatted text: the editor shows it in its own font and style (what was pasted can't restyle it), so it reads as shown
+  'paste formatted code (VS Code)': { known: true, edit: async p => { await caretAt(p, '  i = i + 1;', 0); await keys(p, 'Home'); await clipRich(p, VSCODE, TWO + '\n'); await keys(p, 'Control+V'); } },
+  "paste a formatted line (a web page's <pre>)": async p => { await caretAt(p, '  i = i + 1;'); await keys(p, 'End', 'Enter'); await clipRich(p, PRE, 'var k = 3;'); await keys(p, 'Control+V'); },
+  'paste formatted lines (Google Docs)': async p => { await caretAt(p, '  i = i + 1;', 0); await keys(p, 'Home'); await clipRich(p, GDOCS, TWO); await keys(p, 'Control+V'); },
 };
 
 // the editor as the user sees it: rows of 24 px, columns of 10 px, from each character's box
