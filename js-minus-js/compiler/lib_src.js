@@ -223,6 +223,19 @@ function arith(op, a, b) {
   else { __fl(__FL_FMUL__, __F0__, a, 0 - 1); }
   return fbox();
 }
+// DBIT's trap: the bitwise operator in its instruction's A (A's 1024s: 0 & 1 | 2 ^ 3 << 4 >> 5 >>>; the return word holds the
+// instruction's address / 2) of two values as numbers, in the FPU (32-bit integers, as JavaScript computes)
+function dbit(a, b) {
+  var k = peek(2 * (peek(__fp()) % 8192)) % 8192 / 1024;
+  a = tonum(a); b = tonum(b);
+  if (k == 0) { __fl(__FL_FAND__, __F0__, a, b); }
+  else if (k == 1) { __fl(__FL_FOR__, __F0__, a, b); }
+  else if (k == 2) { __fl(__FL_FXOR__, __F0__, a, b); }
+  else if (k == 3) { __fl(__FL_FSHL__, __F0__, a, b); }
+  else if (k == 4) { __fl(__FL_FSHR__, __F0__, a, b); }
+  else { __fl(__FL_FUSHR__, __F0__, a, b); }
+  return fbox();
+}
 
 // ---------------- numbers. The FPU (cc_ref FLOPS / FVOPS): __fl(K, d, a, b) makes the number line d (an address, or a double's
 // value) op K of the numbers a and b (an integer of the machine's range, NaN, +-Infinity, -0, or a double: a number line's

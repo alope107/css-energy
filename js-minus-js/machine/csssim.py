@@ -221,7 +221,7 @@ class Sim:
             else:
                 d = R.fscr(a) or val(a)
                 for j in range(4): wr(d + j, cv // 10 ** (5 * j) % 100000 if j < 3 else cv // 10 ** 15)
-        elif op in R.FLOPS or op in R.FVOPS:            # the FPU: B and C (a scratch line, or a number: a double's line), then
+        elif op in R.FLOPS or op in R.FVOPS or op in R.FBOPS:     # the FPU (and the fbit class): B and C (a scratch line, or a number: a double's line), then
             def fop(o):                                 # A's line (FLOPS: 4 words) or A (FVOPS)
                 f = R.fscr(o)
                 if f is not None: return R.fdec([rd(f + j) for j in range(4)])
@@ -229,14 +229,15 @@ class Sim:
                 if R.isdbl(v): q = (v + R.DBLTAG) & AMASK; return R.fdec([rd(q + j) for j in range(4)])
                 return R.fval(v, rd)
             x, y = fop(b), fop(c)
-            if op in R.FLOPS:
+            if op not in R.FVOPS:
                 d = R.fscr(a) or val(a)
                 for j, w in enumerate(R.fenc(R.fline_op(op, x, y))): wr(d + j, w)
             else: wr(addr(a), R.fval_op(op, x, y, val(b)))
         elif op in R.DYNOPS and ps == WBACK:            # after the library's trap: its value (the frame's first word) into A
-            wr(addr(a), rd(fp + TRAPDEF))
+            wr(addr(a % 1024), rd(fp + TRAPDEF))
         elif op in R.DYNOPS:                            # two integers (cc_ref.dyn_fast) here; a string's + to the cat class; else
-            x, y = val(b), val(c); r = None if ps else R.dyn_fast(op, x, y)     # the library, the frame at TRAPDEF, back here
+            k = a // 1024; a %= 1024                    # the library, the frame at TRAPDEF, back here (DBIT: its operator k)
+            x, y = val(b), val(c); r = None if ps else R.dyn_fast(op, x, y, k)
             if r is not None: wr(addr(a), r)
             elif op == 'DADD' and not ps and R.catok(x, y): npst = CAT0; done = False; pc -= 2
             else: pc = trap((fp + TRAPDEF) & AMASK, [x, y], TRAPDEF * 8192 + (pc - 2) // 2, R.TRAPS[op], ps)

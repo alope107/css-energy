@@ -50,7 +50,7 @@ def initial_parse(data_base):
 # punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant.
 # '?' and ':' are not among them: every variant costs some time on every token level, whether it applies or not, and
 # only S_OPER (and the modes that fall into it) accepts them, so they share the 'other punctuation' variant there
-PUNCT = sorted({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL} | set(R.BIN) | set(R.COMPOUND))
+PUNCT = sorted(({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL} | set(R.BIN) | set(R.COMPOUND)) - set(R.BITTOK))     # (cc_ref.BITTOK)
 import os
 SPEC_LEVEL = os.environ.get('SPECK', 'mtv')     # m: mode only; mt: + token kind; mtv: + punctuation value
 def variant_key(mode, tk, tv):
@@ -181,10 +181,12 @@ class Prog(Base):
         w = self.m(add(*[mul(eq(osp, k + 1), self.v(f'op{k}')) for k in range(OD)]), 'topw')
         return self.m(fdiv(w, 8192), 'topc'), self.m(mod(w, 8192), 'topv')
     def prec(self, code):
-        assert (R.ADD, R.MUL, R.LT, R.EQ, R.LNE, R.AND, R.OR, R.NOT, R.TYPEOF) == (8, 10, 13, 17, 20, 21, 22, 23, 25)
-        return self.m(add(mul(inrange(code, 10, 12), 7), mul(inrange(code, 8, 9), 6), mul(inrange(code, 13, 16), 5),
-                          mul(inrange(code, 17, 20), 4), mul(eq(code, 21), 3), mul(eq(code, 22), 2), mul(inrange(code, 23, 25), 8),
-                          mul(eq(code, R.M_CADD), 6), eq(code, R.M_TELSE)), 'prec')
+        assert ((R.ADD, R.MUL, R.LT, R.EQ, R.LNE, R.BAND, R.BOR, R.BXOR, R.SHL, R.USHR, R.AND, R.OR, R.NOT, R.BNOT) ==
+                (8, 10, 13, 17, 20, 21, 22, 23, 24, 26, 27, 28, 29, 32))
+        return self.m(add(mul(inrange(code, 10, 12), 11), mul(inrange(code, 8, 9), 10), mul(inrange(code, 24, 26), 9), mul(inrange(code, 13, 16), 8),
+                          mul(inrange(code, 17, 20), 7), mul(eq(code, 21), 6), mul(eq(code, 23), 5), mul(eq(code, 22), 4),
+                          mul(eq(code, 27), 3), mul(eq(code, 28), 2), mul(inrange(code, 29, 32), 12),
+                          mul(eq(code, R.M_CADD), 10), eq(code, R.M_TELSE)), 'prec')
     def tmerge(self, a, b): return self.m(ite(or_(eq(a, 1), eq(b, 1)), 1, mul(eq(a, b), b)), 'tmg')     # cc_ref.tmerge
     def lookup(self, h1, h2):
         """index of the symbol with this name, or -1: the latest block-scoped one (scores NS+1..2NS), else the latest
@@ -380,9 +382,13 @@ class Prog(Base):
         with self.when(L(5)): self.set('lx', 0)
         with self.when(L(6)): self.set('lx', 4)
         with self.when(L(0)):
-            with self.when(ne(p2, 0)):
-                tok(4, p2, and_(or_(eq(p2, 1), eq(p2, 2)), ne(cn, 61))); self.set('p2', 0)     # (== / !=: hash1 is the flag, cc_ref.tflag)
-                with self.when(and_(or_(eq(p2, 1), eq(p2, 2)), eq(cn, 61))): self.set('lx', 5)
+            with self.when(ne(p2, 0)):                      # (c: a two-character token's second; < and > are punctuation)
+                ext = self.m(and_(ceq(62), eq(p2, 16), eq(cn, 62)), 'p2x')                      # >> then >: >>> (or >>>=)
+                asg = self.m(and_(or_(ceq(60), ceq(62)), inrange(p2, 15, 17), eq(cn, 61)), 'p2a')     # <<= >>= >>>=
+                with self.when(ext): self.set('p2', 17)
+                with self.when(not_(ext)):
+                    tok(4, add(p2, mul(asg, 6)), and_(or_(eq(p2, 1), eq(p2, 2)), ne(cn, 61))); self.set('p2', 0)     # (== / !=: hash1 is the flag, cc_ref.tflag)
+                    with self.when(or_(and_(or_(eq(p2, 1), eq(p2, 2)), eq(cn, 61)), asg)): self.set('lx', 5)
             with self.when(eq(p2, 0)):
                 sp = self.m(or_(*[ceq(v) for v in R.BLANK]), 'spc')
                 with self.when(ceq(10)): newline()
@@ -476,7 +482,7 @@ class Prog(Base):
                 ptop = self.v('ptop'); dR, tR, tL = self.m(mod(ptop, 4096), 'pdR'), self.m(mod(fdiv(ptop, 4096), 4), 'ptR'), self.otype(iL)
                 oR, oL, TR, TL = self.opnd(iR, dR), self.opnd(iL), self.tmp(iR), self.tmp(iL)
                 isAO = self.m(or_(eq(code, R.AND), eq(code, R.OR)), 'pao'); isTE = self.m(eq(code, R.M_TELSE), 'pte')
-                isUN = self.m(inrange(code, R.NOT, R.TYPEOF), 'pun'); isCA = self.m(eq(code, R.M_CADD), 'pca')
+                isUN = self.m(inrange(code, R.NOT, R.BNOT), 'pun'); isCA = self.m(eq(code, R.M_CADD), 'pca')
                 hasstr = self.m(or_(eq(val, 2), eq(tR, 2)), 'pstr')
                 popped = self.m(or_(popped, go), 'ppd')
                 ok = K(1)
@@ -490,11 +496,14 @@ class Prog(Base):
                 # the one instruction: && / || MOV T(iL), right; M_TELSE MOV T(iR), right (if not there); ! / - (dest or T(iR));
                 # binary (dest or T(iL)) left op right
                 with self.when(and_(ok, or_(isAO, and_(isTE, ne(dR, TMP)), and_(isUN, not_(pnot)), and_(isBIN, not_(pcmp))))):
-                    op = ite(or_(isAO, isTE), OP['MOV'], ite(isUN, ite(eq(code, R.NOT), OP['NOT'], ite(eq(code, R.NEG), OP['DNEG'], OP['KIND'])), self.dop(binc)))
-                    dst = ite(isAO, TL[0], ite(or_(isTE, and_(isUN, not_(isd))), TR[0], ite(isd, dfield, TL[0])))
+                    dopc, bs = self.dop(binc)
+                    op = ite(or_(isAO, isTE), OP['MOV'], ite(isUN, ite(eq(code, R.NOT), OP['NOT'], ite(eq(code, R.NEG), OP['DNEG'],
+                                                                    ite(eq(code, R.TYPEOF), OP['KIND'], OP['DBIT']))), dopc))
+                    dst = add(ite(isAO, TL[0], ite(or_(isTE, and_(isUN, not_(isd))), TR[0], ite(isd, dfield, TL[0]))),
+                              mul(1024, add(mul(isBIN, bs), mul(eq(code, R.BNOT), R.BXOR - R.BAND))))     # (DBIT's operator; ~x: x ^ -1)
                     dstt = mul(not_(and_(isd, not_(isAO), not_(isTE))), self.v('curf'))
                     un = or_(isAO, isTE, isUN)
-                    cU = ite(eq(code, R.NEG), R.K(0), ite(eq(code, R.TYPEOF), R.K(R.KINDS.index('typeof')), 0))     # (DNEG: #0; KIND: typeof's test)
+                    cU = ite(eq(code, R.NEG), R.K(0), ite(eq(code, R.TYPEOF), R.K(R.KINDS.index('typeof')), ite(eq(code, R.BNOT), R.K(-1), 0)))     # (DNEG: #0; KIND: typeof's test)
                     self.emit(op, (self.m(dst, 'pdst'), self.m(dstt, 'pdstt')), (ite(un, oR[0], oL[0]), ite(un, oR[1], oL[1])),
                               (ite(isBIN, oR[0], cU), mul(isBIN, oR[1])))
                 here = self.here()
@@ -561,9 +570,12 @@ class Prog(Base):
         return self.m(fdiv(add(*[mul(eq(best, k + 1), self.v(f'op{k}')) for k in range(OD)]), 8192), 'mkc')
     def num(self, t): return or_(eq(t, 1), eq(t, 3))
     def dop(self, code):
-        """cc_ref.opname: the dynamic operator of binary operator code (ADD ... LNE are in DADD ... DLNE's order)"""
+        """cc_ref.dynop: the dynamic operator of binary operator code (ADD ... LNE are in DADD ... DLNE's order, then BAND ... USHR
+        are DBIT) and its A's 1024s (DBIT's operator, code - BAND)"""
         assert all(OP[R.DYN[c]] - OP['DADD'] == c - R.ADD for c in R.DYN) and R.CNDOPS.index(R.LNE) == R.LNE - R.LT
-        return self.m(add(OP['DADD'] - R.ADD, code), 'dop')
+        assert OP['DBIT'] == OP['DLNE'] + 1 and R.BAND == R.LNE + 1
+        bs = self.m(mx(sub(code, R.BAND), K(0)), 'dbs')
+        return self.m(sub(add(OP['DADD'] - R.ADD, code), bs), 'dop'), bs
     def btype(self, code, tl, tr):
         """cc_ref.btype: a comparison 1; + 2 with a string side, else 0; the rest 3"""
         return self.m(ite(inrange(code, R.LT, R.LNE), 1, ite(eq(code, R.ADD), mul(2, or_(eq(tl, 2), eq(tr, 2))), 3)), 'bty')
@@ -599,8 +611,8 @@ class Prog(Base):
     def compound(self, code, i, o, otemp):
         """cc_ref.compound: x op= e, the old value at i, e above it, into o -> the static type"""
         tl, tr = self.otype(i), self.otype(i + 1)
-        r = self.src(i + 1); l = self.opnd(i)
-        self.emit(add(OP['DADD'] - R.ADD, code), o, l, r)
+        r = self.src(i + 1); l = self.opnd(i); dopc, bs = self.dop(code)
+        self.emit(dopc, (add(o[0], mul(1024, bs)), o[1]), l, r)
         return self.btype(code, tl, tr)
     def meth_end(self, tv, last):
         """cc_ref.meth_end: a method call's ')' (tv: the method + 64 * its commas; last: an argument just ended)"""
@@ -1009,6 +1021,7 @@ class Prog(Base):
             with self.when(P(40)): self.push_op(R.M_PAREN); self.done()
             with self.when(P(33)): self.push_op(R.NOT); self.done()
             with self.when(P(45)): self.push_op(R.NEG); self.done()
+            with self.when(P(126)): self.push_op(R.BNOT); self.done()
             with self.when(or_(P(7), P(8))): self.set('pn1', tv); self.set('pn2', 1); self.set('mode', R.S_PREINC); self.done()
             with self.when(and_(isID, not_(tf), not_(tyo))): self.set('pn1', th1); self.set('pn2', th2); self.set('mode', R.S_NAMEE); self.done()
             rest = self.m(and_(live(), eq(mode(), R.S_OPND)), 'orest')
@@ -1104,7 +1117,7 @@ class Prog(Base):
                 plus = self.m(and_(not_(piece), eq(binop, R.ADD)), 'plus')
                 with self.when(plus): self.push_op(ite(inpr, R.M_CADD, R.ADD), ty)
                 rest = self.m(and_(not_(piece), not_(plus)), 'brest')
-                with self.when(and_(rest, not_(gt(self.prec(binop), 6)))): self.join_pieces()     # (* / % bind tighter: they end no piece)
+                with self.when(and_(rest, not_(gt(self.prec(binop), 10)))): self.join_pieces()     # (* / % bind tighter: they end no piece)
                 nd2 = self.m(self.v('nd'), 'bnd2'); ty2 = self.otype(nd2 - 1)
                 logic = self.m(and_(rest, or_(eq(binop, R.AND), eq(binop, R.OR))), 'logic')
                 with self.when(logic):                         # a: tested in its temp; b joins it there (popops)

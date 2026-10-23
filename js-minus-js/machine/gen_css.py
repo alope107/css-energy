@@ -269,20 +269,29 @@ JCOND = {**{'J' + o: CMP_COND[o] for o in CMP_SUFFIX}, **{'JN' + o: f"calc(1 - {
 CMP_PRE = [f"--dix: {smi_v(xB)};", f"--diy: {smi_v(yC)};", f"--cbs: {bothstr};", f"--cdb: {anydbl};", f"--cqs: min(1, calc({isstr_v(xB)} + {isstr_v(yC)}));",
            f"--cao: max(calc({isarr_v(xB)} + {isobj_v(xB)} - {isarr_v(yC)} - {isobj_v(yC)}), calc({isarr_v(yC)} + {isobj_v(yC)} - {isarr_v(xB)} - {isobj_v(xB)}));"]
 zy = eq(yC, 0)
+# DBIT (A's 1024s: the operator k) of two integers: their bits from the two's complement, an integer's 19 (bit 18 its sign)
+_dk = "round(down, var(--A) / 1024)"
+def _bit(x, i): return f"mod(round(down, {x} / {2 ** i}), 2)"
+_dand = "calc(" + " + ".join(f"{2 ** i} * {_bit(xB, i)} * {_bit(yC, i)}" for i in range(18)) + f" - {2 ** 18} * {_bit(xB, 18)} * {_bit(yC, 18)})"
+_dsh = f"pow(2, mod({yC}, 32))"
+_dbit = (f"calc(clamp(0, 3 - {_dk}, 1) * (({_dand}) * (1 - 2 * min(1, {_dk}) - {eq(_dk, 2)}) + ({xB} + {yC}) * min(1, {_dk}))"     # & | ^
+         f" + {eq(_dk, 3)} * {xB} * {_dsh} + {eq(_dk, 4)} * round(down, {xB} / {_dsh})"
+         f" + {eq(_dk, 5)} * round(down, ({xB} + 4294967296 * clamp(0, -1 * {xB}, 1)) / {_dsh}))")
 _dr = {'DADD': f"calc({xB} + {yC})", 'DSUB': f"calc({xB} - {yC})", 'DMUL': f"calc({xB} * {yC})",
-       'DDIV': f"calc(({xB}) / ({yC} + {zy}))", 'DMOD': f"rem({xB}, {yC} + {zy})", 'DNEG': f"calc(-1 * {xB})"}
+       'DDIV': f"calc(({xB}) / ({yC} + {zy}))", 'DMOD': f"rem({xB}, {yC} + {zy})", 'DBIT': _dbit, 'DNEG': f"calc(-1 * {xB})"}
 _dsb = "calc(var(--dix) * var(--diy))"
 _dok = {'DADD': f"calc({_dsb} * {smi_v('var(--dr)')})", 'DSUB': f"calc({_dsb} * {smi_v('var(--dr)')})",
         'DMUL': f"calc({_dsb} * {smi_v('var(--dr)')} * (1 - {eq('var(--dr)', 0)} * min(1, calc({neg_v(xB)} + {neg_v(yC)}))))",
         'DDIV': f"calc({_dsb} * (1 - {zy}) * {eq(f'rem({xB}, {yC} + {zy})', 0)} * (1 - {eq(xB, 0)} * {neg_v(yC)}))",
         'DMOD': f"calc({_dsb} * (1 - {zy}) * (1 - {eq('var(--dr)', 0)} * {neg_v(xB)}))",
-        'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", **{'D' + o: CMP_FAST[o] for o in CMP_SUFFIX}}
+        'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", 'DBIT': f"calc({_dsb} * {smi_v('var(--dr)')})",
+        **{'D' + o: CMP_FAST[o] for o in CMP_SUFFIX}}
 _dval = {**{o: "var(--dr)" for o in _dr}, **{'D' + o: f"calc({R.FALSE} - {CMP_COND[o]})" for o in CMP_SUFFIX}}
 # NUMLIT A, word1 (a number literal: A its cache, a global): A read as x; nonzero, it stays (written back as it is); 0, the library's
 # numlit parses the string word1 (the trap's arguments: word1, 0) and the instruction moves its value into A
 DYNC = DYNOPS + ['NUMLIT']
 _dok['NUMLIT'] = "calc(1 - " + eq('var(--vx)', 0) + ")"; _dval['NUMLIT'] = "var(--vx)"
-DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('var(--A)')};", f"--dwb: {eq('var(--pst)', WBACK)};", f"--dnl: {eq('var(--op)', OP['NUMLIT'])};",
+DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('mod(var(--A), 1024)')};", f"--dwb: {eq('var(--pst)', WBACK)};", f"--dnl: {eq('var(--op)', OP['NUMLIT'])};",
                    f"--dr: {by_op({o: _dr[o] for o in list(_dr)[:-1]}, _dr['DNEG'])};", f"--dok: {by_op({o: _dok[o] for o in DYNC[:-1]}, _dok[DYNC[-1]])};",
                    f"--dcat: calc({eq('var(--op)', OP['DADD'])} * (1 - min(1, var(--pst))) * (1 - var(--dok)) * var(--cqs) * (1 - {anyao}) * {0 if NOCAT else 1});",
                    f"--dval: {by_op({o: _dval[o] for o in DYNC[:-1]}, _dval[DYNC[-1]])};"] +
@@ -857,6 +866,32 @@ NEWCLASSES['fpu'] = dict(ops=R.FLOPS + R.FVOPS, pre=FPU_PRE,
     wline=("calc(1 + 3 * var(--fdl))", lambda j: f"if(style(--fdl: 1): var(--frw{j}); else: var(--fval))"),
     nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)], 'l': [('y', None)]})
 NEWCLASSES['fdig'] = NEWCLASSES.pop('fdig')       # (its opcodes follow the FPU's)
+# FAND ... FUSHR (DBIT's trap, dbit): B and C as 32-bit integers in 16-bit halves (gs0 gs: B's high and low, gb gu: C's; grf gr:
+# their & ; gdl gdc: & | ^'s), the result an exact double into A's line (the FPU's fr temps, fdouble's operands)
+def _u32(ln, val): return f"if(style(--f{ln}k: 2) or style(--f{ln}k: 3): 0; else: mod(round(to-zero, {fdouble(ln, val)}), 4294967296))"
+def _and16(a, b): return "calc(" + " + ".join(f"{2 ** i} * {_bit(a, i)} * {_bit(b, i)}" for i in range(16)) + ")"
+_g = {n: f"var(--{n})" for n in ("gs0", "gs", "gb", "gu", "grf", "gr", "gdl", "gdc")}
+_ua = f"calc({_g['gs0']} * 65536 + {_g['gs']})"; _bsh = f"pow(2, mod({_g['gu']}, 32))"
+_shl = f"mod(({_ua}) * {_bsh}, 4294967296)"
+FBR = by_op({'FSHL': f"calc({_shl} - 4294967296 * clamp(0, {_shl} - 2147483647, 1))",
+             'FSHR': f"round(down, ({_ua} - 4294967296 * clamp(0, {_g['gs0']} - 32767, 1)) / {_bsh})",
+             'FUSHR': f"round(down, ({_ua}) / {_bsh})"},
+            f"calc({_g['gdl']} * 65536 + {_g['gdc']} - 4294967296 * clamp(0, {_g['gdl']} - 32767, 1))")
+FB_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') + fopnd('C', yC, 'l') +
+          [f"--fac: calc(var(--kA) * clamp(0, var(--A) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--A), 1));",
+           f"--fda: if(style(--fac: 1): calc({FB_} + 4 * (var(--A) - {896 + R.FSCR})); else: mod(var(--zA) + {R.DBLTAG}, 32768));",
+           f"--gs0: round(down, {_u32('p', xB)} / 65536);", f"--gs: calc({_u32('p', xB)} - 65536 * var(--gs0));",
+           f"--gb: round(down, {_u32('l', yC)} / 65536);", f"--gu: calc({_u32('l', yC)} - 65536 * var(--gb));",
+           f"--grf: {_and16(_g['gs0'], _g['gb'])};", f"--gr: {_and16(_g['gs'], _g['gu'])};",
+           f"--gdl: {by_op({'FAND': _g['grf'], 'FOR': f'calc({_g['gs0']} + {_g['gb']} - {_g['grf']})'}, f'calc({_g['gs0']} + {_g['gb']} - 2 * {_g['grf']})')};",
+           f"--gdc: {by_op({'FAND': _g['gr'], 'FOR': f'calc({_g['gs']} + {_g['gu']} - {_g['gr']})'}, f'calc({_g['gs']} + {_g['gu']} - 2 * {_g['gr']})')};"] +
+          fenc_decls(FBR, 'fr'))
+NEWCLASSES['fbit'] = dict(ops=list(R.FBOPS), pre=FB_PRE,
+    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(1 - var(--kA))")],
+    lines=[("p", "var(--fpa)", "var(--fpl)"), ("l", "var(--fla)", "var(--fll)")],
+    write=("var(--fda)", None, None, "1"),
+    wline=("4", lambda j: f"var(--frw{j})"),
+    nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)], 'l': [('y', None)]})
 FPU_NAMES = (["fpc", "fpl", "fpa", "fpk", "fps", "flc", "fll", "fla", "flk", "fls", "fdl", "fac", "fda", "fni", "fve", "fval"] +
              [f"fr{x}" for x in ("f", "i", "z", "s", "e0", "e", "k1", "m1", "m2", "m3", "w0", "w1", "w2", "w3")] + ["fxe0", "fxe"])
 for c_, k_ in NEWCLASSES.items(): build_class(c_, k_)

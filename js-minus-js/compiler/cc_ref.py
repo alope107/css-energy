@@ -44,10 +44,10 @@ AMASK = 32767                           # addresses are 15-bit
 
 # the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
 OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNGT JNLE JNGE HALT  JZ JNZ  CALL RET NOT TENTER '
-       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DNEG NUMLIT  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC'
+       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DBIT DNEG NUMLIT  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC'
        '  APUSH  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET'
        '  FLD FADD FSUB FMUL FDIV FMOD FPOW FSQRT FFLOOR FCEIL FROUND FTRUNC FABS FTPLO FSCALE FP10 FCONST FEXP FLOG FSIN FCOS FTAN'
-       '  FNORM FINT FCMP FEXPO FLOG10 FDIGIT  FCOK FCDIG  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
+       '  FNORM FINT FCMP FEXPO FLOG10 FDIGIT  FCOK FCDIG  FAND FOR FXOR FSHL FSHR FUSHR  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
 # The FPU (the runtime library's): a number line is 4 words at an aligned address (fline): w0 = s * (E + 1100) for a finite
 # nonzero s * M * 2^(E - 52) (E in -1022 ... 1023; M = w1 * 2^36 + w2 * 2^18 + w3 < 2^53, >= 2^52 unless subnormal), s for +-0,
 # s * 3000 for +-Infinity, 4000 for NaN. A boxed double is an 8-word heap block [header 0 0 0 | its number line], its value the
@@ -62,7 +62,10 @@ FVOPS = OPN[OPN.index('FNORM'):OPN.index('FDIGIT') + 1]
 # (0 ... 22: the integer c nearest B * 10^C, B > 0 a double below 2^53) reads back as B; FCDIG A, B, C: the line at A := c's
 # 5-digit limbs [c mod 1e5, ..., c / 1e15] (fcand: exact, with the two-product's low part)
 FDOPS = ('FCOK', 'FCDIG')
-FLINE_I, FVAL_I = FLOPS + ['FCDIG'], FVOPS + ['FCOK']      # __fl's and __fv's ops by index
+# the bitwise operators' (a class of their own): FAND ... FUSHR A, B, C: the line at A := B op C, B and C as 32-bit integers
+# (JavaScript's ToInt32; >>> ToUint32), the result an integer (a double for the machine when out of its range)
+FBOPS = ('FAND', 'FOR', 'FXOR', 'FSHL', 'FSHR', 'FUSHR')
+FLINE_I, FVAL_I = FLOPS + ['FCDIG'] + list(FBOPS), FVOPS + ['FCOK']      # __fl's and __fv's ops by index
 FCONSTS = ('pi', 'e', 'ln2', 'ln10', 'log2e', 'log10e', 'sqrt2', 'sqrt1_2')
 NFLINES = 14                            # the runtime's scratch number lines at fpu_base; then its digit buffer (20 words) and two cells
 FSCR = 100                              # in an FPU instruction the constant operands 100 ... 113 are the scratch lines (no LOADK)
@@ -109,14 +112,15 @@ TRAPDEF = 61
 WBACK = 512                             # (the CSS CPU's pst for that move: a trap's own executions count from 1)
 TRAPS = {'DADD': 'dadd', 'DSUB': 'dsub', 'DMUL': 'dmul', 'DDIV': 'ddiv', 'DMOD': 'dmod', 'DNEG': 'dneg',
          'DLT': 'dlt', 'DGT': 'dgt', 'DLE': 'dle', 'DGE': 'dge', 'DEQ': 'deq', 'DNE': 'dne', 'DLEQ': 'dleq', 'DLNE': 'dlne',
-         'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc', 'JLT': 'jcmp'}
+         'DBIT': 'dbit', 'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc', 'JLT': 'jcmp'}
 # a string's + that finds the heap full (the cat class's trap): the routine collects, then joins
 CATTRAPS = {'DADD': 'gccat'}
 OP = {n: i for i, n in enumerate(OPN)}
-DYNOPS = ('DADD', 'DSUB', 'DMUL', 'DDIV', 'DMOD', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE', 'DLEQ', 'DLNE', 'DNEG')
+DYNOPS = ('DADD', 'DSUB', 'DMUL', 'DDIV', 'DMOD', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE', 'DLEQ', 'DLNE', 'DNEG', 'DBIT')
+# DBIT A + 1024 k, B, C: the bitwise operator k (BITOPS: & | ^ << >> >>>) of B and C (~x is x ^ -1)
 JCMPS = ('JLT', 'JGT', 'JLE', 'JGE', 'JEQ', 'JNE', 'JLEQ', 'JLNE', 'JNLT', 'JNGT', 'JNLE', 'JNGE')
 # JNLT ... JNGE jump when the comparison is false: with NaN a comparison's negation is no comparison (!(x < y) isn't y <= x)
-def dyn_fast(op, x, y):
+def dyn_fast(op, x, y, k=0):
     """a dynamic operator's (or a jump's: J... as D...) result in user code when the machine computes it, else None (the trap).
     Two integers: a result that is one (and not -0); DEQ / DNE: identity unless both are strings or one is NaN (-0 is 0);
     DLEQ / DLNE (==, !=): that, with null == undefined and a boolean as 1 / 0, unless a string or one object is involved"""
@@ -134,6 +138,8 @@ def dyn_fast(op, x, y):
     if op == 'DNEG': return -x if issmi(x) and x != 0 and issmi(-x) else None
     if not (issmi(x) and issmi(y)): return None
     if op in ('DLT', 'DGT', 'DLE', 'DGE'): return jsb({'DLT': x < y, 'DGT': x > y, 'DLE': x <= y, 'DGE': x >= y}[op])
+    if op == 'DBIT':                                     # (DBIT's operator k; >>> of a negative number: as an unsigned one)
+        s = y & 31; r = (x & y, x | y, x ^ y, x << s, x >> s, (x + (x < 0) * 2 ** 32) >> s)[k]
     if op == 'DDIV':
         if y == 0 or x % y or (x == 0 and y < 0): return None
         r = x // y
@@ -141,13 +147,16 @@ def dyn_fast(op, x, y):
         if y == 0: return None
         r = x - y * int(x / y)
         if r == 0 and x < 0: return None
-    else:
+    elif op != 'DBIT':
         r = {'DADD': x + y, 'DSUB': x - y, 'DMUL': x * y}[op]
         if op == 'DMUL' and r == 0 and (x < 0 or y < 0): return None
     return r if issmi(r) else None
 # operator codes on the parser's operator stack (and their precedences: prec)
-NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, LEQ, LNE, AND, OR, NOT, NEG, TYPEOF = range(26)
-# (ADD ... LNE in the order of their dynamic instructions, DADD ... DLNE: the opcode is the code + a constant)
+(NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, LEQ, LNE,
+ BAND, BOR, BXOR, SHL, SHR, USHR, AND, OR, NOT, NEG, TYPEOF, BNOT) = range(33)
+# (ADD ... LNE in the order of their dynamic instructions, DADD ... DLNE: the opcode is the code + a constant; BAND ... USHR right
+# after them are DBIT, whose A's 1024s are the code - BAND)
+BITOPS = (BAND, BOR, BXOR, SHL, SHR, USHR)
 NAME = {ADD: 'ADD', SUB: 'SUB', MUL: 'MUL', DIV: 'DIV', MOD: 'MOD', LT: 'LT', GT: 'GT', LE: 'LE', GE: 'GE', EQ: 'EQ', NE: 'NE',
         NOT: 'NOT', NEG: 'NEG', LEQ: 'EQ', LNE: 'NE'}            # (== and != in the runtime library: raw)
 CMPS = (LT, GT, LE, GE, EQ, NE, LEQ, LNE)
@@ -311,7 +320,14 @@ def fline_op(op, x, y):
     if op == 'FEXP': return _f1(math.exp, x)
     if op == 'FLOG': return flog(x)
     if op in ('FSIN', 'FCOS', 'FTAN'): return math.nan if math.isinf(x) else getattr(math, op[1:].lower())(x)
+    if op in FBOPS:
+        a, b = toi32(x), toi32(y); s = b & 31
+        return float((a & b, a | b, a ^ b, toi32(a << s), a >> s, (a % 2 ** 32) >> s)[FBOPS.index(op)])
     raise ValueError(op)
+def toi32(x):
+    """JavaScript's ToInt32 of the double x"""
+    u = int(math.trunc(x)) % 2 ** 32 if math.isfinite(x) else 0
+    return u - 2 ** 32 * (u >= 2 ** 31)
 def fcand(v, n):
     """FCOK / FCDIG: the candidate at scale n for v > 0 (below 2^53): (c, ok), exactly as the CSS computes it (numstr's notes)"""
     E = max(math.frexp(v)[1] - 1, -1022); q = E - 52; M = fscale(v, -q)
@@ -460,29 +476,33 @@ LITK = {KW[w]: v for w, v in LITERALS.items()}
 # statement (identifier, number, string, ) ] } ++ --), for automatic semicolon insertion. (After a block's '}' the parser
 # is in a mode that ignores it; after an object literal's it ends the statement.)
 TWO = {(61, 61): 1, (33, 61): 2, (60, 61): 3, (62, 61): 4, (38, 38): 5, (124, 124): 6, (43, 43): 7, (45, 45): 8,
-       (43, 61): 9, (45, 61): 10, (42, 61): 11, (47, 61): 12, (37, 61): 13}
+       (43, 61): 9, (45, 61): 10, (42, 61): 11, (47, 61): 12, (37, 61): 13, (60, 60): 15, (62, 62): 16, (38, 61): 18, (124, 61): 19, (94, 61): 20}
+# (the lexer makes three- and four-character ones of them: >>> 17 (>> and >); <<= 21, >>= 22, >>>= 23 (<< >> >>> and =: + 6))
 T_NL = 14
 # == and != are === and !== (1, 2) with the token's flag set (cc_ref: tflag; the page: its hash1 word), which the lexer knows from the
 # character after them: so they share the parser's variants
-BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE, 1: EQ, 2: NE, 5: AND, 6: OR}
+BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE, 1: EQ, 2: NE, 5: AND, 6: OR,
+       38: BAND, 124: BOR, 94: BXOR, 15: SHL, 16: SHR, 17: USHR}
 # Semicolon insertion. A newline after a token that can end a statement (lt) is pending (pnl) until the next significant
 # character, which the lexer sees as the lookahead cn of the blank or comment end before it: a line starting with one of
 # CONT continues the statement or ends it by itself (no T_NL: ';' and '}' end it without one), any other starts a new one (T_NL). '+' '-' (++x / --x start a statement, x + y
 # continues) and '/' (a comment or a division) are decided on the character itself. After return (lt 2, JavaScript's
 # restricted production) the newline always ends the statement. A newline inside a /* */ comment counts.
-CONT = (46, 91, 40, 63, 58, 44, 41, 93, 42, 37, 60, 62, 38, 124, 61, 59, 125)    # . [ ( ? : , ) ] * % < > & | = ; }
+CONT = (46, 91, 40, 63, 58, 44, 41, 93, 42, 37, 60, 62, 38, 124, 94, 61, 59, 125)    # . [ ( ? : , ) ] * % < > & | ^ = ; }
 BLANK = (9, 10, 13, 32)
-COMPOUND = {9: ADD, 10: SUB, 11: MUL, 12: DIV, 13: MOD}
+COMPOUND = {9: ADD, 10: SUB, 11: MUL, 12: DIV, 13: MOD, 18: BAND, 19: BOR, 20: BXOR, 21: SHL, 22: SHR, 23: USHR}
+# the bitwise operators' tokens: rare, so the CSS compiler's variants don't tell them apart (cc_dsl.PUNCT)
+BITTOK = (38, 124, 94, 126, 15, 16, 17, 18, 19, 20, 21, 22, 23)
 ESC = {110: 10, 116: 9, 114: 13}
 def prec(code):
-    return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, LEQ: 4, LNE: 4, AND: 3, OR: 2, M_TELSE: 1,
-            NOT: 8, NEG: 8, TYPEOF: 8}.get(code, 0)
+    return {MUL: 11, DIV: 11, MOD: 11, ADD: 10, M_CADD: 10, SUB: 10, SHL: 9, SHR: 9, USHR: 9, LT: 8, GT: 8, LE: 8, GE: 8,
+            EQ: 7, NE: 7, LEQ: 7, LNE: 7, BAND: 6, BXOR: 5, BOR: 4, AND: 3, OR: 2, M_TELSE: 1, NOT: 12, NEG: 12, TYPEOF: 12, BNOT: 12}.get(code, 0)
 
 # popops pops at most popcap(minprec) operators: between markers the binary operators' precedences increase upwards (one per
-# class from minprec to 7, M_TELSE at 1), and unary ones (8) stack only on top: UNARYRUN of them at most (more: error 22). The CSS
+# class from minprec to 11, M_TELSE at 1), and unary ones (12) stack only on top: UNARYRUN of them at most (more: error 22). The CSS
 # compiler's popops loops that many times
 UNARYRUN = 4
-def popcap(minprec): return min(OD, 8 - minprec + UNARYRUN)
+def popcap(minprec): return min(OD, 12 - minprec + UNARYRUN)
 # + at the top level of a console.log argument (value: the left operand's static type); precedence of +. M_PRINT's value: 2 after a
 # ',' (until the next argument starts) + 4 * the pieces of a + chain already on the operand stack (PIECES at most)
 M_CADD = 50
@@ -715,10 +735,12 @@ class Compiler:
                 i = self.nd - 1; t = tmerge(val // self.LM, self.otype(i)); self.to_temp(i); self.set_od(i, TMP, t); self.deflab(val % self.LM, self.here())
             elif code == NOT and last and mode == 'br':
                 i = self.nd - 1; self.pend(i, NOT, self.src(i), (0, 0))
-            elif code in (NOT, NEG, TYPEOF):            # (user code's -x: DNEG; typeof x: KIND's test 'typeof')
-                i = self.nd - 1; b = self.src(i); t = {NOT: 1, NEG: 3, TYPEOF: 2}[code]
-                op = 'KIND' if code == TYPEOF else 'DNEG' if code == NEG and not self.rom else NAME[code]
-                c = (K(KINDS.index('typeof')) if code == TYPEOF else K(0) if op == 'DNEG' else 0, 0); o = self.tmp(i) if dest is None else (dest, 0)
+            elif code in (NOT, NEG, TYPEOF, BNOT):      # (user code's -x: DNEG; typeof x: KIND's test 'typeof'; ~x: x ^ -1)
+                i = self.nd - 1; b = self.src(i); t = {NOT: 1, NEG: 3, TYPEOF: 2, BNOT: 3}[code]
+                op = 'KIND' if code == TYPEOF else 'DBIT' if code == BNOT else 'DNEG' if code == NEG and not self.rom else NAME[code]
+                c = (K(KINDS.index('typeof')) if code == TYPEOF else K(-1) if code == BNOT else K(0) if op == 'DNEG' else 0, 0)
+                o = self.tmp(i) if dest is None else (dest, 0)
+                if code == BNOT: o = (o[0] + 1024 * (BXOR - BAND), o[1])
                 self.emit(op, o, b, c); self.set_od(i, TMP if dest is None else dest, t)
             elif code == M_CADD:                        # + at a console.log argument's top level: a string on either side splits it
                 i = self.nd - 2
@@ -737,6 +759,10 @@ class Compiler:
         """user code's arithmetic and comparisons are the dynamic operators (integers in the machine, anything else in the
         library); the runtime library's are raw"""
         return NAME[code] if self.rom else DYN[code]
+    def dynop(self, code, o, b, c):
+        """o := b code c (a bitwise operator: DBIT, the operator in A's 1024s)"""
+        if code in BITOPS: self.emit('DBIT', (o[0] + 1024 * (code - BAND), o[1]), b, c)
+        else: self.emit(self.opname(code), o, b, c)
     def btype(self, code, lt, rt):
         """the static type of lt code rt: a comparison is a boolean; + a string if either side is one (else unknown)"""
         if code in CMPS: return 1
@@ -746,12 +772,12 @@ class Compiler:
         lt, rt = self.otype(i), self.otype(i + 1)
         b, c = self.src(i), self.src(i + 1); self.nd -= 1; t = self.btype(code, lt, rt)
         if pend and code in CMPS: self.pend(i, code, b, c)      # (user code: the jump traps for anything but integers)
-        elif dest is None: self.emit(self.opname(code), self.tmp(i), b, c); self.set_od(i, TMP, t)
-        else: self.emit(self.opname(code), (dest, 0), b, c); self.set_od(i, dest, t)
+        elif dest is None: self.dynop(code, self.tmp(i), b, c); self.set_od(i, TMP, t)
+        else: self.dynop(code, (dest, 0), b, c); self.set_od(i, dest, t)
 
     def compound(self, code, i, o):
         """x op= e with the old value at i, e above: into o; its static type"""
-        self.emit(self.opname(code), o, self.src(i), self.src(i + 1)); return self.btype(code, self.otype(i), self.otype(i + 1))
+        self.dynop(code, o, self.src(i), self.src(i + 1)); return self.btype(code, self.otype(i), self.otype(i + 1))
 
     def cond_ctx(self, closer):
         """this token ends a statement-level expression that a branch takes (an if / while / do-while condition, a for test)"""
@@ -979,9 +1005,11 @@ class Compiler:
             elif c == 10: tok = self.newline()
         elif self.lx == 5: self.lx = 0; gap = 1           # the '/' of '*/' (or the third char of === / !==)
         elif self.lx == 6: self.lx = 4                    # the '*' of '/*'
+        elif self.p2 == 16 and cn == 62: self.p2 = 17       # >> then >: >>> (or >>>=)
         elif self.p2:
-            tok = ('P', self.p2); self.tflag = int(self.p2 in (1, 2) and cn != 61)      # (== / !=: the flag)
-            if self.p2 in (1, 2) and cn == 61: self.lx = 5
+            asg = int(self.p2 in (15, 16, 17) and cn == 61)                              # <<= >>= >>>=
+            tok = ('P', self.p2 + 6 * asg); self.tflag = int(self.p2 in (1, 2) and cn != 61)      # (== / !=: the flag)
+            if (self.p2 in (1, 2) and cn == 61) or asg: self.lx = 5
             self.p2 = 0
         elif c == 0: tok = ('EOF', 0)
         elif c in BLANK:
@@ -1260,6 +1288,7 @@ class Compiler:
             if isP(40): self.push_op(M_PAREN); return
             if isP(33): self.push_op(NOT); return
             if isP(45): self.push_op(NEG); return
+            if isP(126): self.push_op(BNOT); return
             if isP(7) or isP(8): self.pn = (v, 1); self.mode = S_PREINC; return
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
             if isP(41) and self.top_op()[0] == M_CALL:
@@ -1624,7 +1653,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'NUMLIT':                            # a number literal: its cache, or the library parses it (once)
             if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
             elif rd(addr(a)) == 0: trap('numlit', TRAPDEF, [w1, 0], pc - 2)
-        elif op in FLOPS:                               # the line at A's value (or scratch line A) := op of B and C
+        elif op in FLOPS or op in FBOPS:                # the line at A's value (or scratch line A) := op of B and C
             x, y = fopnd(b), fopnd(c); d = fscr(a) or val(a)
             for j, w in enumerate(fenc(fline_op(op, x, y))): wr(d + j, w)
         elif op in FVOPS: wr(addr(a), fval_op(op, fopnd(b), fopnd(c), val(b)))
@@ -1633,7 +1662,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             cv = fcand(fopnd(b), val(c))[0]; d = fscr(a) or val(a)
             for j in range(4): wr(d + j, cv // 10 ** (5 * j) % 100000 if j < 3 else cv // 10 ** 15)
         elif op in DYNOPS:                              # (pst WBACK: the library's value, after its trap)
-            x, y = val(b), val(c); r = dyn_fast(op, x, y) if not pst else None
+            k = a // 1024; a %= 1024                    # (DBIT's operator)
+            x, y = val(b), val(c); r = dyn_fast(op, x, y, k) if not pst else None
             if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
             elif r is not None: wr(addr(a), r)
             elif op == 'DADD' and catok(x, y):

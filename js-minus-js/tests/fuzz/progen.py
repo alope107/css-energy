@@ -34,8 +34,9 @@ NAMES = ['a', 'b', 'c', 'd', 'e', 'g', 'h', 'x', 'y', 'z', 'u', 'v', 'w', 'p', '
 KEYS = ['a', 'b', 'k', 'len', 'next', 'v2']
 URLS = ['"hello.txt"', '"n.txt"', '"nope.txt"', '"/data/lines.txt"', '"http://x/"']     # fetch's (tests/net/)
 SKEYS = ['"c d"', '"x"', "'k'"]          # string keys ('k' is the same property as the identifier key k)
-PREC = {'||': 2, '&&': 3, '==': 4, '!=': 4, '===': 4, '!==': 4, '<': 5, '>': 5, '<=': 5, '>=': 5, '+': 6, '-': 6,
-        '*': 7, '/': 7, '%': 7}
+PREC = {'||': 2, '&&': 3, '|': 3.2, '^': 3.4, '&': 3.6, '==': 4, '!=': 4, '===': 4, '!==': 4, '<': 5, '>': 5, '<=': 5, '>=': 5,
+        '<<': 5.5, '>>': 5.5, '>>>': 5.5, '+': 6, '-': 6, '*': 7, '/': 7, '%': 7}
+BITS = ['&', '|', '^', '<<', '>>', '>>>']
 
 # ---------------- expressions: (kind, ...) tuples; render(e, t) -> (text, precedence)
 def lit(v): return ('lit', v)
@@ -50,6 +51,9 @@ def rend(e, t):
     if k == 'not':
         s, p = rend(e[1], t)
         return '!' + (f'({s})' if p < 8 else s), 8
+    if k == 'bnot':
+        s, p = rend(e[1], t)
+        return '~' + (f'({s})' if p < 8 else s), 8
     if k == 'bin':
         op, a, b = e[1], e[2], e[3]
         sa, pa = rend(a, t); sb, pb = rend(b, t)
@@ -87,7 +91,8 @@ class Var:
 class Fn:
     def __init__(self, name, params, ret, depth):
         self.name, self.params, self.ret, self.depth = name, params, ret, depth     # params: [(name, ty)]
-        self.prints = False                           # its body (or a function it calls) prints
+        self.prints = False                           # its body (or a function it calls) prints, or changes an array or object
+                                                      # (an argument printed before the call would show it in Node)
 
 # ---------------- statements render to lines; layout decisions are made at generation time and stored
 class Gen:
@@ -127,10 +132,10 @@ class Gen:
             vs = self.vars(lambda v: v.ty == 'num')
             return ('raw', r.choice(vs).name) if vs else lit(r.randint(0, 20))
         if k == 'bin':
-            op = r.choice('+-*+-*/%')
+            op = r.choice('+-*+-*/%') if r.random() < .85 else r.choice(BITS)
             a, b = self.num(d + 1), self.num(d + 1)
             return ('bin', op, a, b)
-        if k == 'neg': return ('neg', self.num(d + 1))
+        if k == 'neg': return ('neg' if r.random() < .9 else 'bnot', self.num(d + 1))
         if k == 'tern': return ('tern', self.cond(d + 1), self.num(d + 1), self.num(d + 1))
         if k == 'par': return ('par', self.num(d + 1))
         if k == 'logic': return ('bin', r.choice(['&&', '||']), self.num(d + 1), self.num(d + 1))
@@ -162,7 +167,9 @@ class Gen:
             if x < 0.4: return ('meth', a[0], 'indexOf', [self.num(d + 1)])
             if x < 0.7: return ('meth', ('arr', [self.num(d + 1), self.num(d + 1)]), 'pop', [])
             vs = self.vars(lambda v: v.ty == 'arr' and not v.counter)
-            if vs and not self.inlog: return ('meth', ('raw', r.choice(vs).name), 'push', [self.num(d + 1)])
+            if vs and not self.inlog:
+                if self.cur is not None: self.cur.prints = True
+                return ('meth', ('raw', r.choice(vs).name), 'push', [self.num(d + 1)])
             return ('dot', a[0], 'length')
     def index(self, ln, d):
         """an index expression in 0 .. ln - 1 (ln known) or, for an array of unknown length, 0"""
@@ -371,7 +378,7 @@ class Gen:
         v = r.choice(vs)
         if v.ty == 'str': return [('ASG', v.name, '=', self.strx())]
         if v.ty == 'bool': return [('ASG', v.name, '=', self.cond())]
-        op = r.choice(['=', '=', '+=', '-=', '*=', '/=', '%='])
+        op = r.choice(['=', '=', '+=', '-=', '*=', '/=', '%=', r.choice(['=', '&=', '|=', '^=', '<<=', '>>=', '>>>='])])
         return [('ASG', v.name, op, self.num())]
     def s_inc(self):
         vs = self.vars(lambda v: v.ty == 'num' and not v.const and not v.counter)
@@ -379,6 +386,7 @@ class Gen:
         n = self.r.choice(vs).name; op = self.r.choice(['++', '--'])
         return self.simple(self.r.choice([n + op, op + n]))
     def s_aset(self):
+        if self.cur is not None: self.cur.prints = True
         r = self.r
         cs = [v for v in self.vars(lambda v: v.ty == 'arr' and v.ln)]
         if not cs: return None
@@ -388,6 +396,7 @@ class Gen:
         op = r.choice(['=', '=', '+=', '-=', '*='])
         return [('ASET', v.name, i, op, self.num())]
     def s_push(self):
+        if self.cur is not None: self.cur.prints = True
         """an array grows: push, or a store at its length (its known minimum length stays valid)"""
         r = self.r
         cs = self.vars(lambda v: v.ty in ('arr', 'sarr') and not v.counter)
@@ -396,6 +405,7 @@ class Gen:
         if r.random() < 0.7: return [('EXPR', ('meth', ('raw', v.name), 'push', [e]), self.semi())]
         return [('ASET', v.name, ('dot', ('raw', v.name), 'length'), '=', e)]
     def s_pset(self):
+        if self.cur is not None: self.cur.prints = True
         r = self.r
         cs = self.vars(lambda v: v.ty == 'obj')
         if not cs: return None
