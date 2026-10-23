@@ -30,13 +30,19 @@ function rnd8(n) { return n + (8 - n % 8) % 8; }
 function gcnew() { gc(8); return 0; }
 // ALLOC found the heap full (nw: its block's words): collect; ALLOC executes again
 function galloc(nw) { gc(nw); return 0; }
-// a string's + found the heap full: collect, then join (DADDL / DADDR: that side's boolean as its string)
+// a string's + found the heap full: collect, then join
 function gccat(a, b) { gc(catw(a, b)); return __dadd(a, b); }
-function gccatl(a, b) { a = boolstr(a); gc(catw(a, b)); return __dadd(a, b); }
-function gccatr(a, b) { b = boolstr(b); gc(catw(a, b)); return __dadd(a, b); }
-function boolstr(v) { if (v == 1) { return __TRUEV__; } if (v == 0) { return __FALSEV__; } return v; }
-// v's characters: a string's length, a number's digits
-function clen(v) { if (__kind(v, __K_STR__)) { return peek(v - 1); } return __kind(v, __K_NLEN__); }
+// a special (true, false, null, undefined, NaN, +-Infinity, -0) as its name, as a string's + joins it (-0 as "0"): the
+// built-in strings (cc_ref BSTRS), twelve words apart; anything else as it is
+function catv(v) {
+  if (__kind(v, __K_SPECIAL__) == 0) { return v; }
+  if (v == __MZERO__) { return __S_ZERO__; }
+  return __BSTRV0__ + 12 * (v - __SPV0__);
+}
+// v's characters: a string's (or a special's name's) length, a number's digits
+function clen(v) { v = catv(v); if (__kind(v, __K_STR__)) { return peek(v - 1); } return __kind(v, __K_NLEN__); }
+// a JavaScript boolean from 0 / 1 (the ROM's own tests stay raw)
+function jsb(c) { return __FALSE__ - c; }
 function catw(a, b) { return rnd8(clen(a) + clen(b) + 3); }
 // Cheney's copying collector between the two semi-spaces. HP / GCLIM are offsets from HEAP0: the next free word and the
 // current space's start (0: space A, as RAM starts). The roots: the globals, and the stack from SP0 up to this routine's
@@ -145,11 +151,12 @@ function fwdblk(w, b, kind) {
 // ---------------- strings
 // a new string of n bytes (its length and NUL written), the bytes uninitialised -> its value
 function newstr(n) { return __alloc(n, __A_STR__); }
-// v as a string: a string is itself; a boolean (b: its static type is boolean) true / false; an array its elements
-// joined by commas; an object [object Object]; a number its decimal form
-function tostr(v, b) {
+// v as a string: a string is itself; a special its name (-0 "0"); an array its elements joined by commas; an object
+// [object Object]; a number its decimal form
+function tostr(v) {
   var r = 0;
   if (__kind(v, __K_STR__)) { return v; }
+  if (__kind(v, __K_SPECIAL__)) { return catv(v); }
   if (__kind(v, __K_ARR__)) { return join(v, 0); }
   if (__kind(v, __K_OBJ__)) {
     r = newstr(15);
@@ -157,20 +164,11 @@ function tostr(v, b) {
     poke(r + 7, 32); poke(r + 8, 79); poke(r + 9, 98); poke(r + 10, 106); poke(r + 11, 101); poke(r + 12, 99); poke(r + 13, 116); poke(r + 14, 93);
     return r;
   }
-  if (b) {                                      // (the string area's first strings, cc_ref SEED)
-    if (v == 1) { return __TRUEV__; }
-    if (v == 0) { return __FALSEV__; }
-  }
   r = newstr(__kind(v, __K_NLEN__)); __nput(r, v);
   return r;
 }
-// a + b with an array or object on either side (DADD traps here; the cat class joins strings, numbers and booleans): fl 1 a's
-// static type is boolean, 2 b's
-function cat(a, b, fl) {
-  if (__kind(a, __K_AO__) + fl % 2) { a = tostr(a, fl % 2); }
-  if (__kind(b, __K_AO__) + fl / 2) { b = tostr(b, fl / 2); }
-  return __dadd(a, b);
-}
+// an array or object as a primitive (its string); anything else as it is
+function prim(v) { if (__kind(v, __K_AO__)) { return tostr(v); } return v; }
 // two strings: -1, 0, 1 (by character codes, as JavaScript compares them)
 function scmp(a, b) {
   var la = peek(a - 1); var lb = peek(b - 1); var m = la; var i = 0; var c = 0; var d = 0;
@@ -180,26 +178,77 @@ function scmp(a, b) {
   if (i < m) { c = peek(a + i); d = peek(b + i); return (c > d) - (c < d); }
   return (la > lb) - (la < lb);
 }
-// the dynamic operators' slow paths (DADD ... DNE trap here: an array or object on either side for +; a string, array or
-// object for the others; for DEQ / DNE two strings). DADDL / DADDR: the left / right operand's static type is boolean (true /
-// false when joined to a string). Comparisons: arrays and objects as their strings; two strings by their characters, a
-// string and a number as numbers (parseInt: 0 where JavaScript has NaN)
-function dadd(a, b) { return cat(a, b, 0); }
-function daddl(a, b) { if (__kind(a, __K_REF__) + __kind(b, __K_REF__)) { return cat(a, b, 1); } return a + b; }
-function daddr(a, b) { if (__kind(a, __K_REF__) + __kind(b, __K_REF__)) { return cat(a, b, 2); } return a + b; }
+// The dynamic operators' slow paths: DADD ... DNE trap here (cc_ref.dyn_fast: whatever isn't two integers, or for + a string
+// the cat class joins; DEQ / DNE two strings); their frame is at TRAPDEF and the machine moves the value into the
+// instruction's destination. + : arrays and objects as their strings, then a string on either side joins; otherwise numbers
+// (ToNumber: true 1, false and null 0, undefined NaN, a string's integer)
+function dadd(a, b) {
+  a = prim(a); b = prim(b);
+  if (__kind(a, __K_STR__) + __kind(b, __K_STR__)) { return __dadd(a, b); }
+  return arith(0, a, b);
+}
+function dsub(a, b) { return arith(1, a, b); }
+function dmul(a, b) { return arith(2, a, b); }
+function ddiv(a, b) { return arith(3, a, b); }
+function dmod(a, b) { return arith(4, a, b); }
+function dneg(a, b) { return arith(5, a, 0); }
+// ToNumber for the operators: an integer, NaN, +-Infinity or -0
+function tonum(v) {
+  v = prim(v);
+  if (__kind(v, __K_STR__)) { return strnum(v); }
+  if (__kind(v, __K_SPECIAL__) == 0) { return v; }
+  if (v == __TRUE__) { return 1; }
+  if ((v == __FALSE__) + (v == __NULL__)) { return 0; }
+  if (v == __UNDEF__) { return __NAN__; }
+  return v;
+}
+// a string as a number: blanks around a decimal integer ("" is 0), else NaN
+function strnum(s) {
+  var n = peek(s - 1); var i = 0; var r = 0;
+  while (i < n) { if (isblank(peek(s + i))) { i++; } else { n = 0 - n; } }
+  if (n < 0) { n = 0 - n; }
+  if (i == n) { return 0; }
+  r = parseint(0, s);
+  if (r == __NAN__) { return r; }
+  return r;
+}
+// op 0 + 1 - 2 * 3 / 4 % 5 unary - on two values as numbers. (Integers only for now: a quotient truncates, an integer outside
+// the machine's range wraps; Infinity is NaN)
+function arith(op, a, b) {
+  var r = 0; var neg = 0;
+  a = tonum(a); b = tonum(b);
+  if (a == __MZERO__) { a = 0; neg = 1; }
+  if (b == __MZERO__) { b = 0; neg = neg + 2; }
+  if (op == 5) { if (a == __INF__) { return __NINF__; } if (a == __NINF__) { return __INF__; } }
+  if (__kind(a, __K_SPECIAL__) + __kind(b, __K_SPECIAL__)) { return __NAN__; }
+  if (op == 0) { r = a + b; if (r == 0) { if (neg == 3) { return __MZERO__; } } return r; }
+  if (op == 1) { r = a - b; if (r == 0) { if (neg == 1) { return __MZERO__; } } return r; }
+  if (op == 2) { r = a * b; if (r == 0) { if ((a < 0) + (b < 0) + neg % 2 + neg / 2 == 1) { return __MZERO__; } } return r; }
+  if (op == 5) { if (a == 0) { if (neg) { return 0; } return __MZERO__; } return 0 - a; }
+  if (b == 0) { if (op == 4) { return __NAN__; } if (a == 0) { return __NAN__; } if ((a < 0) + neg / 2 == 1) { return __NINF__; } return __INF__; }
+  if (op == 3) { r = a / b; if (r == 0) { if ((a < 0) + (b < 0) + neg % 2 == 1) { return __MZERO__; } } return r; }
+  r = a % b; if (r == 0) { if ((a < 0) + neg % 2) { return __MZERO__; } } return r;
+}
+// a and b compared: -1, 0, 1, or 2 (unordered: NaN). Arrays and objects as their strings; two strings by their characters,
+// otherwise as numbers
 function dcmp(a, b) {
-  if (__kind(a, __K_AO__)) { a = tostr(a, 0); }
-  if (__kind(b, __K_AO__)) { b = tostr(b, 0); }
+  a = prim(a); b = prim(b);
   if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return scmp(a, b); }
-  if (__kind(a, __K_STR__)) { a = parseint(0, a); }
-  if (__kind(b, __K_STR__)) { b = parseint(0, b); }
+  a = tonum(a); b = tonum(b);
+  if (a == __MZERO__) { a = 0; }
+  if (b == __MZERO__) { b = 0; }
+  if ((a == __NAN__) + (b == __NAN__)) { return 2; }
+  if (a == b) { return 0; }
+  if ((a == __NINF__) + (b == __INF__)) { return 0 - 1; }
+  if ((a == __INF__) + (b == __NINF__)) { return 1; }
   return (a > b) - (a < b);
 }
-function dlt(a, b) { return dcmp(a, b) < 0; }
-function dgt(a, b) { return dcmp(a, b) > 0; }
-function dle(a, b) { return dcmp(a, b) <= 0; }
-function dge(a, b) { return dcmp(a, b) >= 0; }
-function deq(a, b) {
+function dlt(a, b) { return jsb(dcmp(a, b) == 0 - 1); }
+function dgt(a, b) { return jsb(dcmp(a, b) == 1); }
+function dle(a, b) { var c = dcmp(a, b); return jsb((c == 0 - 1) + (c == 0)); }
+function dge(a, b) { var c = dcmp(a, b); return jsb((c == 0) + (c == 1)); }
+// a === b, raw: strings by their characters, NaN equal to nothing, -0 equal to 0
+function deqr(a, b) {
   var n = 0;
   if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) {
     if (a == b) { return 1; }
@@ -207,14 +256,52 @@ function deq(a, b) {
     if (peek(b - 1) != n) { return 0; }
     return __mcmp(a, b, n) == n;
   }
+  if (a == __NAN__) { return 0; }
+  if (a == __MZERO__) { a = 0; }
+  if (b == __MZERO__) { b = 0; }
   return a == b;
 }
-function dne(a, b) { return deq(a, b) == 0; }
-// s[k]: a one-character string, or 0 past the end (JavaScript: undefined)
+function deq(a, b) { return jsb(deqr(a, b)); }
+function dne(a, b) { return jsb(deqr(a, b) == 0); }
+// a == b, raw: null and undefined equal each other only; two objects by identity; otherwise primitives (an object's
+// string), two strings by their characters, anything else as numbers
+function leqr(a, b) {
+  if ((a == __NULL__) + (a == __UNDEF__)) { return (b == __NULL__) + (b == __UNDEF__); }
+  if ((b == __NULL__) + (b == __UNDEF__)) { return 0; }
+  if (__kind(a, __K_AO__) * __kind(b, __K_AO__)) { return a == b; }
+  a = prim(a); b = prim(b);
+  if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return deqr(a, b); }
+  return dcmp(a, b) == 0;
+}
+function dleq(a, b) { return jsb(leqr(a, b)); }
+function dlne(a, b) { return jsb(leqr(a, b) == 0); }
+// JLT ... JNE in user code on anything but two integers: the jump is decided here. The frame is at TRAPOFF and returns to
+// the instruction after the jump; a jump taken rewrites the return word to its target (A, from the instruction itself)
+function jcmp(a, b) {
+  var f = __fp(); var r = peek(f) % 8192; var w0 = peek(r - 2); var op = w0 / 8192; var c = 0; var t = 0;
+  if (op == __OP_JEQ__) { t = deqr(a, b); }
+  else if (op == __OP_JNE__) { t = deqr(a, b) == 0; }
+  else if (op == __OP_JLEQ__) { t = leqr(a, b); }
+  else if (op == __OP_JLNE__) { t = leqr(a, b) == 0; }
+  else {
+    c = dcmp(a, b);
+    if (op == __OP_JLT__) { t = c == 0 - 1; }
+    if (op == __OP_JGT__) { t = c == 1; }
+    if (op == __OP_JLE__) { t = (c == 0 - 1) + (c == 0); }
+    if (op == __OP_JGE__) { t = (c == 0) + (c == 1); }
+    if (op == __OP_JNLT__) { t = c != 0 - 1; }
+    if (op == __OP_JNGT__) { t = c != 1; }
+    if (op == __OP_JNLE__) { t = (c != 0 - 1) * (c != 0); }
+    if (op == __OP_JNGE__) { t = (c != 0) * (c != 1); }
+  }
+  if (t) { poke(f, peek(f) - r + w0 % 8192); }
+  return 0;
+}
+// s[k]: a one-character string, or undefined past the end
 function charat(s, k) {
   var r = 0;
-  if (k < 0) { return 0; }
-  if (k >= peek(s - 1)) { return 0; }
+  if (k < 0) { return __UNDEF__; }
+  if (k >= peek(s - 1)) { return __UNDEF__; }
   r = newstr(1); poke(r, peek(s + k));
   return r;
 }
@@ -238,14 +325,14 @@ function grow(x, need) {
   poke(x, d); poke(x - 2, cap);
   return 0;
 }
-// x[k] = v outside the length (SETX stores inside it): the array grows to k + 1, any gap filled with 0
+// x[k] = v outside the length (SETX stores inside it): the array grows to k + 1, any gap filled with undefined
 function aset(x, k, v) {
   var n = peek(x - 1); var p = 0;
   if (k < 0) { return 0; }
   if (k < n) { p = peek(x); p[k] = v; return 0; }
   if (k >= peek(x - 2)) { grow(x, k + 1); }
   p = peek(x);
-  __mfill(p + n, 0, k - n);
+  __mfill(p + n, __UNDEF__, k - n);
   p[k] = v; poke(x - 1, k + 1);
   return 0;
 }
@@ -260,8 +347,8 @@ function pushs(x, v) {
 }
 function pop(x) {
   var n = peek(x - 1);
-  if (__kind(x, __K_ARR__) == 0) { return 0; }
-  if (n == 0) { return 0; }
+  if (__kind(x, __K_ARR__) == 0) { return __UNDEF__; }
+  if (n == 0) { return __UNDEF__; }
   poke(x - 1, n - 1);
   return peek(peek(x) + n - 1);
 }
@@ -276,13 +363,14 @@ function pput(p, v) {
 // string first, in a copy of the elements (t); a number's digits are written in place
 function join(x, sep) {
   var n = peek(x - 1); var i = 0; var r = 0; var e = 0; var t = x; var tot = 0; var p = 0; var ls = 1;
-  if (__kind(sep, __K_AO__)) { sep = tostr(sep, 0); }
+  if (__kind(sep, __K_AO__)) { sep = tostr(sep); }
   if (sep != 0) { ls = clen(sep); }
   while (i < n) {
     e = peek(peek(t) + i);
-    if (__kind(e, __K_AO__)) {
+    if (__kind(e, __K_AO__) + __kind(e, __K_SPECIAL__)) {
       if (t == x) { t = newarr(n, n); __mcpy(peek(t), peek(x), n); }
-      e = tostr(e, 0); poke(peek(t) + i, e);
+      if ((e == __NULL__) + (e == __UNDEF__)) { e = __S_EMPTY__; } else { e = tostr(e); }
+      poke(peek(t) + i, e);
     }
     tot = tot + clen(e); i++;
   }
@@ -302,20 +390,20 @@ function join(x, sep) {
 function getx(x, k) {
   if (__kind(x, __K_STR__)) { return charat(x, k); }
   if (__kind(x, __K_OBJ__)) { return pget(x, okey(x, k, 0) + __STRTAG__); }
-  return 0;
+  return __UNDEF__;
 }
 function setx(x, k, v) {
   if (__kind(x, __K_ARR__)) { aset(x, k, v); return 0; }
   if (__kind(x, __K_OBJ__)) { pset(x, okey(x, k, 1) + __STRTAG__, v); }
   return 0;
 }
-// o's value for key (0 if it has none)
+// o's value for key (undefined if it has none)
 function pget(o, key) {
   var c = o + __OBJTAG__; var k = 0;
   while (1) {
     k = peek(c);
     if (k == key) { return peek(c + 1); }
-    if (k == 0) { return 0; }
+    if (k == 0) { return __UNDEF__; }
     if (k < 0) { c = k + __OBJTAG__; } else { c = c + 2; }
   }
   return 0;
@@ -356,11 +444,7 @@ function apush(x, v) { push(x, v); return x; }
 
 // ---------------- methods: (receiver, arguments) -> the result. A string's and an array's length both sit in the word
 // before the value's address: peek(x - 1)
-function eqv(a, b) {                       // a === b (strings by their characters)
-  if (a == b) { return 1; }
-  if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return deq(a, b); }
-  return 0;
-}
+function eqv(a, b) { return deqr(a, b); }    // a === b (strings by their characters)
 // the first index i >= from (step 1) or <= from (step -1) where t occurs in s (a string) or equals an element; -1. Forwards,
 // MFEQ finds the next element equal to t (not a string) or the next place t's first character occurs, a line per execution
 function find(x, t, from, step) {
@@ -389,7 +473,7 @@ function find(x, t, from, step) {
 }
 function indexof(x, t) { return find(x, t, 0, 1); }
 function lastindexof(x, t) { return find(x, t, peek(x - 1) - 1, 0 - 1); }
-function includes(x, t) { return find(x, t, 0, 1) >= 0; }
+function includes(x, t) { return jsb(find(x, t, 0, 1) >= 0); }
 function join0(x) { return join(x, 0); }
 // a JavaScript index argument: negative counts from the end; clamped to [0, n]
 function cidx(i, n) { if (i < 0) { i = i + n; } if (i < 0) { i = 0; } if (i > n) { i = n; } return i; }
@@ -436,8 +520,8 @@ function fill(x, v) {
 }
 function shift(x) {
   var n = peek(x - 1); var p = peek(x); var v = 0;
-  if (__kind(x, __K_ARR__) == 0) { return 0; }
-  if (n == 0) { return 0; }
+  if (__kind(x, __K_ARR__) == 0) { return __UNDEF__; }
+  if (n == 0) { return __UNDEF__; }
   v = p[0];
   __mcpy(p, p + 1, n - 1);
   poke(x - 1, n - 1);
@@ -449,9 +533,9 @@ function unshift(x, v) {
   p[0] = v;
   return n;
 }
-function charat1(s, k) { var r = charat(s, k); if (r == 0) { r = newstr(0); } return r; }
+function charat1(s, k) { var r = charat(s, k); if (r == __UNDEF__) { r = __S_EMPTY__; } return r; }
 function charcode(s, k) {
-  if (__kind(s, __K_STR__) == 0) { return 0; } if (k < 0) { return 0; } if (k >= peek(s - 1)) { return 0; }
+  if (__kind(s, __K_STR__) == 0) { return __NAN__; } if (k < 0) { return __NAN__; } if (k >= peek(s - 1)) { return __NAN__; }
   return peek(s + k);
 }
 function fromcc(d, c) { var r = newstr(1); poke(r, c); return r; }
@@ -467,13 +551,13 @@ function trim(s) {
   return slice(s, a, b);
 }
 function startswith(s, t) {
-  if (__kind(s, __K_STR__) * __kind(t, __K_STR__) == 0) { return 0; } if (peek(t - 1) > peek(s - 1)) { return 0; }
-  return __mcmp(s, t, peek(t - 1)) == peek(t - 1);
+  if (__kind(s, __K_STR__) * __kind(t, __K_STR__) == 0) { return __FALSE__; } if (peek(t - 1) > peek(s - 1)) { return __FALSE__; }
+  return jsb(__mcmp(s, t, peek(t - 1)) == peek(t - 1));
 }
 function endswith(s, t) {
   var k = peek(s - 1) - peek(t - 1);
-  if (__kind(s, __K_STR__) * __kind(t, __K_STR__) == 0) { return 0; } if (k < 0) { return 0; }
-  return __mcmp(s + k, t, peek(t - 1)) == peek(t - 1);
+  if (__kind(s, __K_STR__) * __kind(t, __K_STR__) == 0) { return __FALSE__; } if (k < 0) { return __FALSE__; }
+  return jsb(__mcmp(s + k, t, peek(t - 1)) == peek(t - 1));
 }
 // s.repeat(n): one string of the copies, each doubling the copied part
 function repeat(s, n) {
@@ -497,21 +581,21 @@ function split(s, sep) {
   push(r, slice(s, i, peek(s - 1)));
   return r;
 }
-function tostring(d, v) { return tostr(v, 0); }
-function tostring0(v) { return tostr(v, 0); }
-// parseInt(s) / Number(s): the decimal integer s starts with (after blanks, a sign); 0 if none (JavaScript: NaN)
+function tostring(d, v) { return tostr(v); }
+function tostring0(v) { return tostr(v); }
+// parseInt(s) / Number(s): the decimal integer s starts with (after blanks, a sign); NaN if none
 function parseint(d, s) {
-  var n = 0; var m = 0; var i = 0; var g = 1; var neg = 0; var c = 0;
+  var n = 0; var m = 0; var i = 0; var g = 1; var neg = 0; var c = 0; var any = 0;
   if (__kind(s, __K_STR__) == 0) { return s; }
   m = peek(s - 1);
   while (i < m) { if (isblank(peek(s + i))) { i++; } else { m = 0 - m; } }
   if (m < 0) { m = 0 - m; }
   if (i < m) { c = peek(s + i); if (c == 45) { neg = 1; i++; } else if (c == 43) { i++; } }
-  while (g) { g = 0; if (i < m) { c = peek(s + i); if (c >= 48) { if (c <= 57) { n = n * 10 + c - 48; i++; g = 1; } } } }
-  if (neg) { return 0 - n; }
+  while (g) { g = 0; if (i < m) { c = peek(s + i); if (c >= 48) { if (c <= 57) { n = n * 10 + c - 48; i++; g = 1; any = 1; } } } }
+  if (any == 0) { return __NAN__; }
+  if (neg) { if (n == 0) { return __MZERO__; } return 0 - n; }
   return n;
 }
-function tostringb(d, v) { return tostr(v, 1); }
 
 // ---------------- console.log of an array or object (PRINT traps into pval): Node's one-line form [ 1, 'a', [ 2 ] ],
 // { k: 1, 'a b': [] }; below depth 2 [Array] / [Object]. fl: PRINT's flags, its separator * 2 + boolean; no separator: a
@@ -521,6 +605,7 @@ function tostringb(d, v) { return tostr(v, 1); }
 function ptrap() {
   var f = __fp(); var r = peek(f) % 8192; var cf = f - __TRAPOFF__; var w1 = peek(r - 1); var c = (w1 % 1024 + 1024) % 1024;
   var b = (w1 - c) / 1024 + 512; var v = b - 896;
+  if (b >= 1016) { v = b - 1016 + __SPV0__; }
   if (b < 256) { v = peek(__DB__ + b); }
   else if (b < 768) { v = peek(cf + b - 256); }
   pval(v, peek(r - 2) % 8192);
@@ -529,7 +614,7 @@ function ptrap() {
 // PRINT's trap for an array or an object (fl: 2 * the separator + 8 if it is a piece of a + chain, which prints as a string)
 function pval(v, fl) {
   var sp = (fl / 2) % 4;
-  if (fl / 8 + (sp == 0)) { prn(tostr(v, 0)); } else { ins(v, 0); }
+  if (fl / 8 + (sp == 0)) { prn(tostr(v)); } else { ins(v, 0); }
   if (sp == 1) { putc(32); }
   if (sp == 2) { putc(10); }
   return 0;
@@ -640,7 +725,7 @@ function okey(o, k, add) {
 function netw(p) { var s = 1 - peek(__NETSEQ__); poke(__NETSEQ__, s); return __net(2 * p + s); }
 function fetch(d, u) {
   var p = 0; var c = 0; var c2 = 0; var r = 0;
-  if (__kind(u, __K_STR__) == 0) { u = tostr(u, 0); }
+  if (__kind(u, __K_STR__) == 0) { u = tostr(u); }
   poke(__RLEFT__, 0);
   p = u; c = peek(p);
   while (c) {

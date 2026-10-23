@@ -21,6 +21,9 @@ def consts():
              INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT)
     k.update(CELL); k['NETPARTS'] = L['net_parts']; k['NBUF'] = 2 * L['net_parts']
     k.update({f'K_{n.upper()}': i for i, n in enumerate(R.KINDS)}); k.update({f'A_{n.upper()}': i for i, n in enumerate(R.ALLOCK)})
+    k.update({n: v for n, v in zip(R.SPECIALS, range(R.SPV0, R.SPV0 + 8))}); k.update(SPV0=R.SPV0, TRAPDEF=R.TRAPDEF)
+    k.update({f'S_{n}': R.BSTRV(i) for n, i in (('ZERO', R.BS_ZERO), ('EMPTY', R.BS_EMPTY))}); k['BSTRV0'] = R.BSTRV(0)
+    k.update({f'OP_{n}': i for i, n in enumerate(R.OPN)})
     return k
 
 def build(out):

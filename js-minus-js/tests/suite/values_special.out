@@ -1,0 +1,12 @@
+[ 'Hello', 45, true, null, undefined ]
+32;false;js;12
+-1-
+1 undefined undefined undefined
+undefined undefined number string boolean
+object object object undefined
+13true 14 2 1
+-0 -0 true [ true ] true false
+NaN NaN Infinity -Infinity
+undefined undefined xnullundefined
+not false
+false true true

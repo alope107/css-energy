@@ -3,8 +3,9 @@
 A program is generated once as a tree and rendered twice from the same tree, with the same layout (line breaks,
 optional semicolons, comments):
 - for our compiler ('o'), as written;
-- for Node ('n'), with the machine's integer semantics spelled out: + - * and unary - wrap to 20 bits (W), / truncates
-  and gives 0 for a zero divisor (D), % gives 0 for a zero divisor (M). PRELUDE defines them.
+- for Node ('n'), with the machine's integer semantics spelled out: + - * and unary - wrap to 20 bits (W; -0, NaN and the
+  infinities stay), / truncates (D; a zero divisor gives JavaScript's Infinity or NaN), % is JavaScript's (M). PRELUDE
+  defines them.
 So Node's output is what the program must print on our machine.
 
 The generator stays inside the documented language (README "The language" and "Limits"), so any difference is a bug:
@@ -27,8 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import cc_ref as _R
 TAGGED = [(_R.STRV_LO, _R.STRV_HI), (_R.HEAP0 - _R.OBJTAG, _R.HEAP_HI - _R.OBJTAG), (_R.HEAP0 + _R.ARRTAG, _R.HEAP_HI + _R.ARRTAG)]
 
-PRELUDE = ('function W(x){x=((x%1048576)+1048576)%1048576;return x>=524288?x-1048576:x}'
-           'function D(a,b){return b===0?0:W(Math.trunc(a/b))}function M(a,b){return b===0?0:a%b}')
+PRELUDE = ('function W(x){if(x===0||x!==x||x===1/0||x===-1/0)return x;x=((x%1048576)+1048576)%1048576;return x>=524288?x-1048576:x}'
+           'function D(a,b){return b===0?a/b:W(Math.trunc(a/b))}function M(a,b){return a%b}')
 
 STRS = ['"a"', '"hi"', "'x y'", '""', '"Fizz"', '"it\'s"', "'q\\\"t'", '"t\\tx"', '"n\\\\m"', "'ok!'", '"A\\nB"']
 NAMES = ['a', 'b', 'c', 'd', 'e', 'g', 'h', 'x', 'y', 'z', 'u', 'v', 'w', 'p', 'q', 'r', 's', 't', 'k', 'm', 'n2', 'val',

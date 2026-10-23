@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 
 WOFF = 1 << 20
+BSTRW = [(a, w) for a, w in sorted(R.BSTRW.items()) if w]      # the built-in strings' words (cc_ref BSTRS; RAM holds the zeros)
 OTH = {'A': 'B', 'B': 'A'}
 DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v')) for f in ('h1', 'h2', last)}   # read by var() one level down
 PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
@@ -344,7 +345,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
                # the string untag constant at data_base (the program never writes it)
                f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c0; width: {R.STRTAG + WOFF}px; }}'
-               + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{data_cells + 1 + i}; width: {w + WOFF}px; }}' for i, w in enumerate(R.SEED))
+               + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{a - data_base}; width: {w + WOFF}px; }}' for i, (a, w) in enumerate(BSTRW))
                # the string area's end, for the runtime's key lookups
                + f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
                + ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
@@ -353,7 +354,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(R.SEED))) + '<b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

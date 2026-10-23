@@ -42,9 +42,13 @@ assert LAYOUT['data_base'] == LAYOUT['rom_size'], 'RAM index = address - rom_siz
 AMASK = 32767                           # addresses are 15-bit
 
 # the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
-OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE HALT  JZ JNZ  CALL RET NOT TENTER '
-       ' LDI STI  DADD DADDL DADDR DLT DGT DLE DGE DEQ DNE  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC  APUSH'
-       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET').split()
+OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNGT JNLE JNGE HALT  JZ JNZ  CALL RET NOT TENTER '
+       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DNEG  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC  APUSH'
+       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
+# (user code's instructions come first: word0 = op * 8192 + A must stay below 2^19, the CSS CPU's registers' range; the ones only
+# the runtime library uses (the raw arithmetic, the primitives) may lie above)
+USEROPS = OPN.index('ALLOC')            # the first that only the runtime library uses
+assert USEROPS <= 64
 # NET A, B: A = the network gateway's answer to the word B (net/device.py), every part's bytes left in RBUF0 … (netw); the
 # lib's fetch(url) / read() are made of it (the ROM reaches it as __net)
 # The runtime's primitives (the ROM reaches them through intrinsics; the CSS CPU runs them a cache line per execution):
@@ -56,11 +60,14 @@ OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP KIND  JMP JLT
 # the from-space at C; MWALK: through [len][bytes][0] strings from B, the offset of the first of length A, or of the first at
 # or past C). APUSH 0, B, C: B.push(C) and return, as the ROM's push routine's first instruction (no array, or a full one:
 # on to the next instruction)
-KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap']
+KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap', 'typeof', 'special', 'smi']
 ALLOCK = ['str', 'arr', 'raw', 'chunk']
 # LDI A, B, C: A = mem[B + C]; STI A, B, C: mem[A + B] = C (raw memory: the runtime library's peek, poke and p[i]); GETFP A: A = fp.
-# The dynamic operators: DADD A, B, C (DADDL / DADDR: B / C is a boolean) and DLT ... DNE compute numbers here and trap into the
-# runtime library for a string, array or object. GETX A, B, C: A = B[C] (an array inside its length here, else the library);
+# The dynamic operators (user code's arithmetic and comparisons): DADD ... DMOD A, B, C, DNEG A, B and DLT ... DNE compute two
+# integers here (a result in range, not -0), DEQ / DNE also compare by identity anything but two strings or NaN, and DADD
+# joins a string with a string, an integer or a special (the cat class); anything else traps into the runtime library. The
+# jumps JLT ... JNE in user code likewise: two integers here (JEQ / JNE: as DEQ / DNE), else the library's jcmp, which
+# decides the jump. GETX A, B, C: A = B[C] (an array inside its length here, else the library);
 # GETP A, B, C: A = B.key (C: the key's string-area offset; one execution per pair it probes); NEW A: a new object. SETX A, B, C:
 # A[B] = C (an array inside its length here); SETP A, B, C: A.key = B (C the key; a new key in the chunk here, a full chunk in the
 # library). A trap is a call into the library: a dest trap's frame is its destination, a temp, so the routine's value lands there;
@@ -69,19 +76,58 @@ ALLOCK = ['str', 'arr', 'raw', 'chunk']
 # return word at fp + TRAPOFF (pst + 2) and calls A, ptrap, which decodes the PRINT's operand itself (the out class writes no
 # memory). TRAPS names each trapping instruction's routine (lib.json entries)
 TRAPOFF = 60
-TRAPS = {'DADD': 'dadd', 'DADDL': 'daddl', 'DADDR': 'daddr', 'DLT': 'dlt', 'DGT': 'dgt', 'DLE': 'dle', 'DGE': 'dge', 'DEQ': 'deq', 'DNE': 'dne',
-         'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc'}
+# a dynamic operator's trap (its destination may be any variable): the frame at fp + TRAPDEF, the return to the instruction
+# itself, and RET from a frame at that offset leaves pst = 1, which makes the instruction move the routine's value (the
+# frame's return word) into A
+TRAPDEF = 61
+WBACK = 512                             # (the CSS CPU's pst for that move: a trap's own executions count from 1)
+TRAPS = {'DADD': 'dadd', 'DSUB': 'dsub', 'DMUL': 'dmul', 'DDIV': 'ddiv', 'DMOD': 'dmod', 'DNEG': 'dneg',
+         'DLT': 'dlt', 'DGT': 'dgt', 'DLE': 'dle', 'DGE': 'dge', 'DEQ': 'deq', 'DNE': 'dne', 'DLEQ': 'dleq', 'DLNE': 'dlne',
+         'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc', 'JLT': 'jcmp'}
 # a string's + that finds the heap full (the cat class's trap): the routine collects, then joins
-CATTRAPS = {'DADD': 'gccat', 'DADDL': 'gccatl', 'DADDR': 'gccatr'}
+CATTRAPS = {'DADD': 'gccat'}
 OP = {n: i for i, n in enumerate(OPN)}
+DYNOPS = ('DADD', 'DSUB', 'DMUL', 'DDIV', 'DMOD', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE', 'DLEQ', 'DLNE', 'DNEG')
+JCMPS = ('JLT', 'JGT', 'JLE', 'JGE', 'JEQ', 'JNE', 'JLEQ', 'JLNE', 'JNLT', 'JNGT', 'JNLE', 'JNGE')
+# JNLT ... JNGE jump when the comparison is false: with NaN a comparison's negation is no comparison (!(x < y) isn't y <= x)
+def dyn_fast(op, x, y):
+    """a dynamic operator's (or a jump's: J... as D...) result in user code when the machine computes it, else None (the trap).
+    Two integers: a result that is one (and not -0); DEQ / DNE: identity unless both are strings or one is NaN (-0 is 0);
+    DLEQ / DLNE (==, !=): that, with null == undefined and a boolean as 1 / 0, unless a string or one object is involved"""
+    if op in ('DLEQ', 'DLNE'):
+        if isstr(x) or isstr(y) or (isarr(x) or isobj(x)) != (isarr(y) or isobj(y)): return None
+        nul = lambda v: v in (NULL, UNDEF)
+        norm = lambda v: 1 if v == TRUE else 0 if v in (FALSE, MZERO) else v
+        e = (nul(x) and nul(y)) if nul(x) or nul(y) else x != NAN and norm(x) == norm(y)
+        return jsb(e == (op == 'DLEQ'))
+    if op in ('DEQ', 'DNE'):
+        if isstr(x) and isstr(y): return None
+        e = x != NAN and (0 if x == MZERO else x) == (0 if y == MZERO else y)
+        return jsb(e == (op == 'DEQ'))
+    if op == 'DNEG': return -x if issmi(x) and x != 0 and issmi(-x) else None
+    if not (issmi(x) and issmi(y)): return None
+    if op in ('DLT', 'DGT', 'DLE', 'DGE'): return jsb({'DLT': x < y, 'DGT': x > y, 'DLE': x <= y, 'DGE': x >= y}[op])
+    if op == 'DDIV':
+        if y == 0 or x % y or (x == 0 and y < 0): return None
+        r = x // y
+    elif op == 'DMOD':
+        if y == 0: return None
+        r = x - y * int(x / y)
+        if r == 0 and x < 0: return None
+    else:
+        r = {'DADD': x + y, 'DSUB': x - y, 'DMUL': x * y}[op]
+        if op == 'DMUL' and r == 0 and (x < 0 or y < 0): return None
+    return r if issmi(r) else None
 # operator codes on the parser's operator stack (and their precedences: prec)
-NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG = range(23)
+NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, LEQ, LNE, AND, OR, NOT, NEG, TYPEOF = range(26)
+# (ADD ... LNE in the order of their dynamic instructions, DADD ... DLNE: the opcode is the code + a constant)
 NAME = {ADD: 'ADD', SUB: 'SUB', MUL: 'MUL', DIV: 'DIV', MOD: 'MOD', LT: 'LT', GT: 'GT', LE: 'LE', GE: 'GE', EQ: 'EQ', NE: 'NE',
-        NOT: 'NOT', NEG: 'NEG'}
-CMPS = (LT, GT, LE, GE, EQ, NE)
-INV = {LT: GE, GE: LT, GT: LE, LE: GT, EQ: NE, NE: EQ}
-DYN = {ADD: 'DADD', LT: 'DLT', GT: 'DGT', LE: 'DLE', GE: 'DGE', EQ: 'DEQ', NE: 'DNE'}
-SEP = {0: 0, 32: 1, 10: 2}              # PRINT / PRINTK's A: separator * 2 + boolean
+        NOT: 'NOT', NEG: 'NEG', LEQ: 'EQ', LNE: 'NE'}            # (== and != in the runtime library: raw)
+CMPS = (LT, GT, LE, GE, EQ, NE, LEQ, LNE)
+INV = {LT: GE, GE: LT, GT: LE, LE: GT, EQ: NE, NE: EQ, LEQ: LNE, LNE: LEQ}
+DYN = {ADD: 'DADD', SUB: 'DSUB', MUL: 'DMUL', DIV: 'DDIV', MOD: 'DMOD', LT: 'DLT', GT: 'DGT', LE: 'DLE', GE: 'DGE', EQ: 'DEQ', NE: 'DNE',
+       LEQ: 'DLEQ', LNE: 'DLNE'}
+SEP = {0: 0, 32: 1, 10: 2}              # PRINT / PRINTK's A: separator * 2
 
 # limits (= the CSS chain's fixed table sizes)
 OD, CD, NS, NF, NL, NI = 8, 8, 32, 16, 64, 32  # NI: interned strings and property names
@@ -91,12 +137,31 @@ EMAX = 7                                # instructions per step (14 code words)
 SDATA = 256                             # globals: data_base + 1 .. + SDATA - 1 (data_base itself holds STRTAG, for the lib)
 STR0 = LAYOUT['data_base'] + SDATA      # the string area: STR0 (the lib's empty DONE marker) .. SEND
 SEND = STR0 + LAYOUT['str_size']
-# the string area's first strings, there before any program's: "true" and "false" ([len][bytes][0] each), for a boolean made a
-# string (the ROM's b2s, tostr) without allocating. TRUEV / FALSEV: their values
-SEED = [w for t in ('true', 'false') for w in [len(t)] + [ord(ch) for ch in t] + [0]]
-SEED += [0] * (-len(SEED) % 4)          # (a multiple of 4: the program's strings keep their alignment to the cache's blocks)
-TRUEV, FALSEV = STR0 + 2 - 262144, STR0 + 8 - 262144                 # (- STRTAG)
-STRP0 = STR0 + 1 + len(SEED)            # the program's own strings start here
+# The special values: words of slot 15 (no number, string, array or object is one), JavaScript's values that aren't numbers in
+# the machine's integer range: the booleans, null, undefined, and the numbers NaN, +-Infinity and -0. Comparisons and ! make
+# TRUE / FALSE in user code (the ROM keeps raw 0 / 1). Falsy: 0, FALSE ... MZERO and the empty string
+SPECIALS = ('INF', 'NINF', 'TRUE', 'FALSE', 'NULL', 'UNDEF', 'NAN', 'MZERO')
+SPV0 = 524280
+INF, NINF, TRUE, FALSE, NULL, UNDEF, NAN, MZERO = range(SPV0, SPV0 + 8)
+def isspecial(v): return v >= SPV0
+def jsb(c): return FALSE - int(bool(c))       # a JavaScript boolean
+# The machine's integers (V8's Smis): every number in [SMI_LO, SMI_HI] is one word; slot -8 (strings) is outside it, so a number
+# is never a reference. Arithmetic in user code works on these and traps to the ROM for anything else
+SMI_LO, SMI_HI = -229376, 262143
+def issmi(v): return SMI_LO <= v <= SMI_HI
+# The built-in strings (BSTR, the compile chain's .fin overlays): slot k (12 words, [len][bytes][0] at BSTR + 12 k) holds special
+# k's name (the console's: -0 prints as -0), then "0" (-0 made a string), typeof's names by type code, "". PRINT and a string's
+# + find a special's name by arithmetic. BSTRV(k): slot k's string value
+BSTR = LAYOUT['bstr']
+BSTRS = ['Infinity', '-Infinity', 'true', 'false', 'null', 'undefined', 'NaN', '-0', '0',
+         'undefined', 'object', 'boolean', 'number', 'string', 'function', '']
+BS_ZERO, BS_TYPE, BS_EMPTY = 8, 9, 15        # "0", typeof's first ("undefined": type 0), ""
+TYPENAMES = ('undefined', 'object', 'boolean', 'number', 'string', 'function')
+def BSTRV(k): return BSTR + 12 * k + 1 - 262144                       # (- STRTAG)
+BSTRW = {BSTR + 12 * k + i: w for k, t in enumerate(BSTRS) for i, w in enumerate([len(t)] + [ord(ch) for ch in t] + [0])}
+assert all(len(t) <= 10 for t in BSTRS) and BSTR + 12 * len(BSTRS) <= LAYOUT['strend']
+TRUEV, FALSEV = BSTRV(2), BSTRV(3)
+STRP0 = STR0 + 1                        # the program's own strings start here (STR0 is the empty DONE marker)
 assert SEND == LAYOUT['code_base']
 CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 holds the staged-data count)
 STRTAG = 262144                         # a string value is its address - STRTAG (machine words are 20-bit signed)
@@ -117,16 +182,31 @@ def isstr(v): return STRV_LO <= v < STRV_HI
 def isarr(v): return HEAP0 <= v - ARRTAG < HEAP_HI
 def isobj(v): return HEAP0 <= v + OBJTAG < HEAP_HI
 def isref(v): return isstr(v) or isarr(v) or isobj(v)
-def truthy(mem, v):
-    """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address)"""
-    return v != 0 and not (isstr(v) and mem[(v - 1) & AMASK] == 0)
+def truthy(mem, v, user=True):
+    """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address); in user
+    code also FALSE, null, undefined, NaN and -0"""
+    return v != 0 and not (user and v >= FALSE) and not (isstr(v) and mem[(v - 1) & AMASK] == 0)
+def catv(v):
+    """an operand of a string's +: a special as its name (-0 as "0"), anything else as it is"""
+    return BSTRV(BS_ZERO if v == MZERO else v - SPV0) if isspecial(v) else v
+def catok(x, y):
+    """a string's + the machine joins (the cat class): a string with a string, an integer or a special"""
+    return (isstr(x) or isstr(y)) and not any(isarr(v) or isobj(v) for v in (x, y))
 def notown(v):
-    """a string that isn't the program's own (a heap string, or SEED's): run-time keys look these up by their characters"""
-    return isstr(v) and not (STRP0 <= v + STRTAG < HEAP0)
+    """a string that isn't the program's own (a heap string, or a built-in one): run-time keys look these up by their characters"""
+    return isstr(v) and not (STRP0 <= v + STRTAG < SEND)
+def typecode(v):
+    """typeof's type code (TYPENAMES)"""
+    if isstr(v): return 4
+    if isarr(v) or isobj(v) or v == NULL: return 1
+    if v == UNDEF: return 0
+    if v in (TRUE, FALSE): return 2
+    return 3
 def kind(k, v):
     """KIND's tests (KINDS[k])"""
     return [isstr(v) + 2 * isarr(v) + 3 * isobj(v), int(isstr(v)), int(isarr(v)), int(isobj(v)), int(isarr(v) or isobj(v)),
-            int(notown(v)), len(str(v)), int(isref(v)), int(isstr(v) and v + STRTAG >= HEAP0)][k]
+            int(notown(v)), len(str(v)), int(isref(v)), int(isstr(v) and v + STRTAG >= HEAP0), BSTRV(BS_TYPE + typecode(v)),
+            int(isspecial(v)), int(issmi(v))][k]
 def rnd8(n): return -(-n // 8) * 8
 def allocw(k, n):
     """an ALLOC's block, in words: a string of n bytes ([hdr][len][bytes][0]), an array of capacity n ([hdr][cap][len][ptr]
@@ -165,8 +245,13 @@ H1M, H2M = 65521, 65519
 
 # operand encodings (10-bit fields)
 def L(off): return 256 + off            # frame slot fp + off
-def K(v): return 896 + v                # constant -128 ... 127
+KLIM = 120                              # constants -128 ... 119 are 768 ... 1015; the specials 1016 ... 1023
+def K(v):
+    assert -128 <= v < KLIM or isspecial(v), v
+    return 896 + v if v < KLIM else 1016 + v - SPV0
 def isK(o): return 768 <= o < 1024
+def kval(o): return o - 896 if o < 1016 else o - 1016 + SPV0         # a constant operand's value
+FALSYK = range(K(FALSE), K(MZERO) + 1)  # the falsy specials' operands (and K(0))
 # operand descriptors (od entries: type * 4096 + descriptor): an operand encoding (< 1024), KBIG (the value pk, LOADK must load it:
 # only on top), TMP (the value is in this entry's temp), CND + cop * 4 + nloc flags of B and C (a pending comparison; B and C in
 # pk as word1 packs them; only on top)
@@ -198,19 +283,27 @@ GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'parseint'}, 3), ('S
 ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
-                           'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String']
+                           'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
+                           'undefined', 'NaN', 'Infinity', 'typeof']
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
+assert len(set(KW.values())) == len(KW), 'keyword hashes collide'
+# the literals that are words: their constant operands and static types
+LITERALS = {'true': (K(TRUE), 1), 'false': (K(FALSE), 1), 'null': (K(NULL), 0), 'undefined': (K(UNDEF), 0), 'NaN': (K(NAN), 3),
+            'Infinity': (K(INF), 3)}
+LITK = {KW[w]: v for w, v in LITERALS.items()}
 
-# punctuation codes: single chars by ASCII; two-char ops: == 1, != 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
-# += 9, -= 10, *= 11, /= 12, %= 13 (=== and !== lex as == and !=); NL 14: a newline after a token that can end a
+# punctuation codes: single chars by ASCII; two-char ops: === 1, !== 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
+# += 9, -= 10, *= 11, /= 12, %= 13 (== and != as === and !== with tflag); NL 14: a newline after a token that can end a
 # statement (identifier, number, string, ) ] } ++ --), for automatic semicolon insertion. (After a block's '}' the parser
 # is in a mode that ignores it; after an object literal's it ends the statement.)
 TWO = {(61, 61): 1, (33, 61): 2, (60, 61): 3, (62, 61): 4, (38, 38): 5, (124, 124): 6, (43, 43): 7, (45, 45): 8,
        (43, 61): 9, (45, 61): 10, (42, 61): 11, (47, 61): 12, (37, 61): 13}
-BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE, 1: EQ, 2: NE, 5: AND, 6: OR}
 T_NL = 14
+# == and != are === and !== (1, 2) with the token's flag set (cc_ref: tflag; the page: its hash1 word), which the lexer knows from the
+# character after them: so they share the parser's variants
+BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE, 1: EQ, 2: NE, 5: AND, 6: OR}
 # Semicolon insertion. A newline after a token that can end a statement (lt) is pending (pnl) until the next significant
 # character, which the lexer sees as the lookahead cn of the blank or comment end before it: a line starting with one of
 # CONT continues the statement or ends it by itself (no T_NL: ';' and '}' end it without one), any other starts a new one (T_NL). '+' '-' (++x / --x start a statement, x + y
@@ -221,8 +314,8 @@ BLANK = (9, 10, 13, 32)
 COMPOUND = {9: ADD, 10: SUB, 11: MUL, 12: DIV, 13: MOD}
 ESC = {110: 10, 116: 9, 114: 13}
 def prec(code):
-    return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, AND: 3, OR: 2, M_TELSE: 1,
-            NOT: 8, NEG: 8}.get(code, 0)
+    return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, LEQ: 4, LNE: 4, AND: 3, OR: 2, M_TELSE: 1,
+            NOT: 8, NEG: 8, TYPEOF: 8}.get(code, 0)
 
 # popops pops at most popcap(minprec) operators: between markers the binary operators' precedences increase upwards (one per
 # class from minprec to 7, M_TELSE at 1), and unary ones (8) stack only on top: UNARYRUN of them at most (more: error 22). The CSS
@@ -279,9 +372,9 @@ class Compiler:
         # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
-        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0
+        self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0; self.tflag = 0
         self.dp = data_base + 1             # globals (parser); data_base holds STRTAG
-        self.sdp = data_base + SDATA + 1 + len(SEED)    # string literals and property names (lexer; after SEED); data_base + SDATA itself is the lib's
+        self.sdp = data_base + SDATA + 1    # string literals and property names (lexer); data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at
         # parser
         self.mode = S_STMT; self.pn = (0, 0)
@@ -399,7 +492,7 @@ class Compiler:
         if d == KBIG: self.pk = k
     def push_num(self, v, t=3):
         v = s20(v)
-        if -128 <= v < 128: self.push_od(K(v), t)
+        if -128 <= v < KLIM: self.push_od(K(v), t)
         else: self.push_od(KBIG, t, v)
     def src(self, i):
         """descriptor i as a source operand (field, temp?): a big constant is loaded into its temp first"""
@@ -430,9 +523,9 @@ class Compiler:
         if d >= CND:
             cop = CNDOPS[(d - CND) // 4]; b = (self.pk // 1024 + 512, (d - CND) // 2 % 2); c = (self.pk % 1024, (d - CND) % 2)
             if cop == NOT: return self.emit('JZ' if sense else 'JNZ', b=b, label=lab)
-            return self.emit('J' + NAME[cop if sense else INV[cop]], b=b, c=c, label=lab)
+            return self.emit(self.jname(cop, sense), b=b, c=c, label=lab)
         if isK(d):                                       # a constant condition: jump or not, known now
-            if (d != K(0)) == sense: self.emit('JMP', label=lab)
+            if (d != K(0) and d not in FALSYK) == sense: self.emit('JMP', label=lab)
             return
         if d == KBIG and self.otype(i) != 2:
             if (self.pk != 0) == sense: self.emit('JMP', label=lab)
@@ -461,10 +554,11 @@ class Compiler:
                 i = self.nd - 1; t = tmerge(val // self.LM, self.otype(i)); self.to_temp(i); self.set_od(i, TMP, t); self.deflab(val % self.LM, self.here())
             elif code == NOT and last and mode == 'br':
                 i = self.nd - 1; self.pend(i, NOT, self.src(i), (0, 0))
-            elif code in (NOT, NEG):
-                i = self.nd - 1; b = self.src(i)
-                if dest is None: self.emit(NAME[code], self.tmp(i), b); self.set_od(i, TMP, 1 if code == NOT else 3)
-                else: self.emit(NAME[code], (dest, 0), b); self.set_od(i, dest, 1 if code == NOT else 3)
+            elif code in (NOT, NEG, TYPEOF):            # (user code's -x: DNEG; typeof x: KIND's test 'typeof')
+                i = self.nd - 1; b = self.src(i); t = {NOT: 1, NEG: 3, TYPEOF: 2}[code]
+                op = 'KIND' if code == TYPEOF else 'DNEG' if code == NEG and not self.rom else NAME[code]
+                c = (K(KINDS.index('typeof')) if code == TYPEOF else K(0) if op == 'DNEG' else 0, 0); o = self.tmp(i) if dest is None else (dest, 0)
+                self.emit(op, o, b, c); self.set_od(i, TMP if dest is None else dest, t)
             elif code == M_CADD:                        # + at a console.log argument's top level: a string on either side splits it
                 i = self.nd - 2
                 if 2 in (val, self.otype(i + 1)) and self.opv[self.osp - 1] < 4 * (PIECES - 1):
@@ -472,33 +566,31 @@ class Compiler:
                 else: self.binop(ADD, i, dest)                 # (past PIECES: the last two joined)
             else: self.binop(code, self.nd - 2, dest, mode == 'br' and last)
 
-    def isdyn(self, code, lt, rt):
-        """the dynamic operator for + unless both operands are numbers or booleans, for a comparison unless either is (cc_ref's
-        static types: a string, array or object compares by the runtime library's rules)"""
-        num = lambda t: t in (1, 3)
-        if self.rom: return False                       # (the runtime library's words are raw)
-        if code == ADD: return not (num(lt) and num(rt))
-        return code in CMPS and not (num(lt) or num(rt))
-    def dynop(self, code, lt, rt):
-        return ('DADDL' if lt == 1 else 'DADDR' if rt == 1 else 'DADD') if code == ADD else DYN[code]
+    def jname(self, cop, sense=True):
+        """the jump on comparison cop, or (sense false) on its negation: user code's == / != are the loose jumps, and a relation's
+        negation is JNLT ... JNGE (NaN: false either way)"""
+        if not sense and cop in (LT, GT, LE, GE) and not self.rom: return 'JN' + NAME[cop]
+        if not sense: cop = INV[cop]
+        return 'J' + (DYN[cop][1:] if cop in (LEQ, LNE) and not self.rom else NAME[cop])
+    def opname(self, code):
+        """user code's arithmetic and comparisons are the dynamic operators (integers in the machine, anything else in the
+        library); the runtime library's are raw"""
+        return NAME[code] if self.rom else DYN[code]
+    def btype(self, code, lt, rt):
+        """the static type of lt code rt: a comparison is a boolean; + a string if either side is one (else unknown)"""
+        if code in CMPS: return 1
+        if code == ADD: return 2 if 2 in (lt, rt) else 0
+        return 3
     def binop(self, code, i, dest, pend=False):
         lt, rt = self.otype(i), self.otype(i + 1)
-        b, c = self.src(i), self.src(i + 1); self.nd -= 1
-        if self.isdyn(code, lt, rt):                    # (into its temp: a trap's frame is the destination)
-            self.emit(self.dynop(code, lt, rt), self.tmp(i), b, c)
-            return self.set_od(i, TMP, 1 if code in CMPS else 2 if 2 in (lt, rt) else 0)
-        t = 1 if code in CMPS else 3
-        if pend and code in CMPS: self.pend(i, code, b, c)
-        elif dest is None: self.emit(NAME[code], self.tmp(i), b, c); self.set_od(i, TMP, t)
-        else: self.emit(NAME[code], (dest, 0), b, c); self.set_od(i, dest, t)
+        b, c = self.src(i), self.src(i + 1); self.nd -= 1; t = self.btype(code, lt, rt)
+        if pend and code in CMPS: self.pend(i, code, b, c)      # (user code: the jump traps for anything but integers)
+        elif dest is None: self.emit(self.opname(code), self.tmp(i), b, c); self.set_od(i, TMP, t)
+        else: self.emit(self.opname(code), (dest, 0), b, c); self.set_od(i, dest, t)
 
     def compound(self, code, i, o):
-        """x op= e with the old value at i, e above: into o (the dynamic + into i's temp, then o); its static type"""
-        lt, rt = self.otype(i), self.otype(i + 1)
-        if not self.isdyn(code, lt, rt): self.emit(NAME[code], o, self.src(i), self.src(i + 1)); return 3
-        self.emit(self.dynop(code, lt, rt), self.tmp(i), self.src(i), self.src(i + 1))
-        if o != self.tmp(i): self.emit('MOV', o, b=self.tmp(i))
-        return 2 if 2 in (lt, rt) else 0
+        """x op= e with the old value at i, e above: into o; its static type"""
+        self.emit(self.opname(code), o, self.src(i), self.src(i + 1)); return self.btype(code, self.otype(i), self.otype(i + 1))
 
     def cond_ctx(self, closer):
         """this token ends a statement-level expression that a branch takes (an if / while / do-while condition, a for test)"""
@@ -517,7 +609,7 @@ class Compiler:
         """a console.log argument ended: its pieces (a + chain with a string) are on the operand stack from d0; print each"""
         c = self.opv[self.osp - 1] // 4; d0 = self.nd - 1 - c
         for i in range(d0, self.nd):
-            flags = 2 * (SEP[sep] if i == self.nd - 1 else 0) + int(self.otype(i) == 1) + 8 * (c > 0)   # (8: a piece, made a string)
+            flags = 2 * (SEP[sep] if i == self.nd - 1 else 0) + 8 * (c > 0)   # (8: a piece, made a string)
             if self.desc(i) == KBIG: self.emit('PRINTK', (flags, 0), w1=self.pk)
             else: self.emit('PRINT', (flags, 0), self.src(i))
         self.nd = d0
@@ -535,9 +627,7 @@ class Compiler:
         t, tv = self.top_op()
         if t != M_PRINT or tv < 4: return
         d0 = self.nd - 1 - tv // 4; self.src(self.nd - 1)    # (a big constant on top first: one instruction per join)
-        for k in range(d0 + 1, self.nd):
-            lt, rt = self.otype(d0), self.otype(k)
-            self.emit(self.dynop(ADD, lt, rt), self.tmp(d0), self.src(d0), self.src(k)); self.set_od(d0, TMP, 2)
+        for k in range(d0 + 1, self.nd): self.emit('DADD', self.tmp(d0), self.src(d0), self.src(k)); self.set_od(d0, TMP, 2)
         self.nd = d0 + 1; self.opv[self.osp - 1] = tv % 4
 
     def prop_read(self, i, key, keep=False):
@@ -556,7 +646,7 @@ class Compiler:
         """a method call's ')': M_METH's value tv = the method + 64 * the commas; the receiver and the arguments above its slot"""
         name, ents, ty = ALLM[tv % 64]; argc = tv // 64 + last
         if argc not in ents: return self.fail(77)
-        e = 'tostringb' if name == 'String' and self.otype(self.nd - 1) == 1 else ents[argc]       # String(a boolean): true / false
+        e = ents[argc]
         if last: self.arg_end()
         self.tb -= argc + 1; d0 = self.nd - 1; f = self.tmp(d0)
         self.emit('CALL', (self.ent.get(e, 0), 0), w1=(f[0] - 256, f[1]))
@@ -573,7 +663,7 @@ class Compiler:
 
     def arr_store(self, k):
         """element k (past the eighth, on top) into the array below it"""
-        if k > 127: return self.fail(22)
+        if k >= KLIM: return self.fail(22)
         i = self.nd - 1; self.emit('SETX', self.src(i - 1), (K(k), 0), self.src(i)); self.nd = i
 
     def arr_make(self, n):
@@ -600,11 +690,10 @@ class Compiler:
         else: self.mode = S_OKEY
 
     def case_end(self):
-        """a case value ended (':'): J!= Tnext, T(0), value  Bk:  (the switch's value in T(0), this one above it)"""
+        """a case value ended (':'): J!= Tnext, T(0), value  Bk:  (the switch's value in T(0), this one above it; strings are
+        compared by the library's jcmp)"""
         c = self.pop_cs(); tn = self.newlab()
-        if self.isdyn(EQ, self.otype(0), self.otype(1)):
-            self.emit('DEQ', self.tmp(1), self.src(0), self.src(1)); self.emit('JZ', b=self.tmp(1), label=tn)
-        else: self.emit('JNE', b=self.src(0), c=self.src(1), label=tn)
+        self.emit('JNE', b=self.src(0), c=self.src(1), label=tn)
         self.nd = 0
         if c[2]: self.deflab(c[1], self.here())
         t = self.top_cs(); t[1] = tn; t[4] |= 1; self.mode = S_STMT
@@ -679,10 +768,15 @@ class Compiler:
         o = self.var(j)
         if x: self.snapshot(lambda q: q == o)
         if x == 2: self.push_od(o, 3); self.to_temp(self.nd - 1)
-        self.emit('ADD' if v == 7 else 'SUB', (o, 0), (o, 0), (K(1), 0))
+        self.step1(v == 7)((o, 0), (o, 0))
         if x == 1: self.push_od(o, 3)
         if x: self.pm = 3; self.mode = S_OPER
         else: self.mode = S_INC
+
+    def step1(self, up):
+        """++ / -- of an operand: the instruction and its constant operand C (user code: x - -1, which never joins strings)"""
+        if self.rom: return lambda a, b: self.emit('ADD' if up else 'SUB', a, b, (K(1), 0))
+        return lambda a, b: self.emit('DSUB', a, b, (K(-1 if up else 1), 0))
 
     # ---------------- lexer: one character -> at most one token
     def sbyte(self, a, v):
@@ -713,7 +807,7 @@ class Compiler:
         elif self.lx == 5: self.lx = 0; gap = 1           # the '/' of '*/' (or the third char of === / !==)
         elif self.lx == 6: self.lx = 4                    # the '*' of '/*'
         elif self.p2:
-            tok = ('P', self.p2)
+            tok = ('P', self.p2); self.tflag = int(self.p2 in (1, 2) and cn != 61)      # (== / !=: the flag)
             if self.p2 in (1, 2) and cn == 61: self.lx = 5
             self.p2 = 0
         elif c == 0: tok = ('EOF', 0)
@@ -805,8 +899,10 @@ class Compiler:
             j = self.lookup(h)
             if j < 0 and h == KW['String'] and isP(46):          # String.fromCharCode(...): a method on a dummy receiver
                 self.push_od(K(0), 0); self.mode = S_DOT; return
-            if j < 0: return self.fail(4)
-            self.push_od(self.var(j), self.sym[j][4]); m = self.mode = S_OPER
+            if j < 0 and self.top_op()[0] != TYPEOF: return self.fail(4)
+            if j < 0: self.push_od(K(UNDEF), 0)                  # typeof x, x undeclared: "undefined"
+            else: self.push_od(self.var(j), self.sym[j][4])
+            m = self.mode = S_OPER
         if m == S_ELSE:
             if isK_('else'):
                 t = self.top_cs(); reuse = t[0] == C_ELSEB1
@@ -898,7 +994,7 @@ class Compiler:
             if isP(61):
                 self.push_cs(C_ASSIGN, j, 0, 1 + self.pn[0]); self.mode = S_OPND; return
             if self.pn[0] == 2: return self.fail(65)
-            if self.curf: self.emit('MOV', (self.var(j), 0), (K(0), 0))      # a local without a value: 0
+            if self.curf or not self.rom: self.emit('MOV', (self.var(j), 0), (K(0 if self.rom else UNDEF), 0))      # a variable without a value: undefined
             if isP(44): self.mode = S_VAR; return
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
@@ -969,8 +1065,8 @@ class Compiler:
                 e = self.intern((v[1], v[2]), v[0], v[3])
                 if e < 0: return
                 self.push_od(KBIG, 2, e - STRTAG); self.mode = S_OPER; return
-            if isK_('true') or isK_('false'): self.push_od(K(int(isK_('true'))), 1); self.mode = S_OPER; return
-            if isK_('null'): self.push_od(K(0), 0); self.mode = S_OPER; return
+            if kind == 'ID' and v in LITK: self.push_od(*LITK[v]); self.mode = S_OPER; return
+            if isK_('typeof'): self.push_op(TYPEOF); return
             if isP(123):                                       # an object literal: NEW, then each pair as o.key = v
                 i = self.nd; self.push_od(TMP, 0)
                 if self.err: return
@@ -990,7 +1086,7 @@ class Compiler:
             if isP(93) and self.top_op()[0] == M_ARR:         # [] (or [a, ] with a trailing comma)
                 self.osp -= 1; return self.arr_end(self.opv[self.osp], 0)
             if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:
-                self.push_od(K(0), 0)
+                self.push_od(K(0 if self.rom else UNDEF), 0)
                 if isP(125): return self.asi_close(lambda: self.end_expr_stmt('P', T_NL))
                 return self.end_expr_stmt(kind, v)
             if isP(T_NL): return
@@ -1018,7 +1114,7 @@ class Compiler:
                         else: self.prop_read(self.nd - 1, key, keep=True)
                         if self.err: return
                     if isP(7) or isP(8):                       # o.x++ / x[k]--
-                        i = self.nd - 1; self.emit('ADD' if isP(7) else 'SUB', self.tmp(i), self.tmp(i), (K(1), 0))
+                        i = self.nd - 1; self.step1(isP(7))(self.tmp(i), self.tmp(i))
                         if dyn: self.index_write(i - 2, self.tmp(i))
                         else: self.prop_write(i - 1, key, self.tmp(i))
                         self.pop_cs(); self.mode = S_INC; return
@@ -1028,7 +1124,8 @@ class Compiler:
                 if dyn: self.index_read(self.nd - 2)
                 else: self.prop_read(self.nd - 1, key)
             if kind == 'P' and v in BIN:
-                op = BIN[v]; self.popops(prec(op))
+                op = BIN[v] + 2 * (v in (1, 2) and self.tflag)            # (== / !=: LEQ / LNE)
+                self.popops(prec(op))
                 if self.err: return
                 t, tv = self.top_op()
                 if op == ADD and t == M_PRINT and (tv >= 4 or self.otype(self.nd - 1) == 2) and tv < 4 * (PIECES - 1):   # "..." + x in console.log: a piece
@@ -1191,7 +1288,7 @@ class Compiler:
             if t[4] & 2: self.emit('JMP', label=t[3])
             self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k == C_FUNCB:                                   # (still inside: the RET's frame label)
-            self.emit('RET', b=(K(0), 0)); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
+            self.emit('RET', b=(K(0 if self.rom else UNDEF), 0)); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
             self.curf = 0; self.nsym = self.fsym; self.mode = S_STMT; return
         return self.fail(55)
 
@@ -1243,23 +1340,25 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
     pc, fp, optr, steps, out, pst = LAYOUT['code_base'], sp0, 0, 0, [], 0
     def addr(o): return (db + o if o < 256 else fp + o - 256) & AMASK
     def rd(a): a &= AMASK; return mem[a] if a >= ROMN else 0
-    def val(o): return o - 896 if o >= 768 else rd(addr(o))
+    def val(o): return kval(o) if o >= 768 else rd(addr(o))
     def wr(a, v):
         a &= AMASK
         if a >= ROMN: mem[a] = s20(v)
+    CB = LAYOUT['code_base']
     def trap(name, base, args, ret):
         """a call into the runtime library: the frame at fp + base (the arguments above its return word)"""
         nonlocal fp, pc
         for i, x in enumerate(args): wr(fp + base + 1 + i, x)
         wr(fp + base, base * 8192 + ret); fp += base; pc = ent[name]
-    def chars(v, boolean):
-        """a string, number or boolean operand of +: its characters"""
+    def chars(v):
+        """a string, number or special operand of +: its characters (a special's name: catv)"""
+        v = catv(v)
         if isstr(v): p = (v + STRTAG) & AMASK; return [rd(p + i) for i in range(rd(p - 1))]
-        return [ord(ch) for ch in ('true' if v else 'false')] if boolean and v in (0, 1) else [ord(ch) for ch in str(v)]
-    def cat(a, x, y, bx, by):
-        """the + of a string with a string, number or boolean (bx / by: DADDL / DADDR's boolean side) into A, as the ROM's cat lays
-        it out (newstr: [hdr][len][bytes][0] from HP); False if the heap is full (the ROM's cat collects)"""
-        t = chars(x, bx) + chars(y, by); n = len(t); nw = (n + 10) // 8 * 8; hp = rd(HP)
+        return [ord(ch) for ch in str(v)]
+    def cat(a, x, y):
+        """the + of a string with a string, number or special into A, as the ROM's cat lays it out (newstr: [hdr][len][bytes][0]
+        from HP); False if the heap is full (the ROM's cat collects)"""
+        t = chars(x) + chars(y); n = len(t); nw = (n + 10) // 8 * 8; hp = rd(HP)
         if hp + nw - 8 >= rd(GCLIM) + LAYOUT['heap_size'] - 7: return False
         base = HEAP0 + hp; wr(HP, hp + nw)
         for i, w in enumerate([-2 - nw, n] + t + [0]): wr(base + i, w)
@@ -1298,48 +1397,53 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         op = OPN[w0 // 8192]; a = w0 % 8192; b = w1 // 1024 + 512; c = w1 % 1024
         if trace: trace(pc, op, a, b, c, w1)
         pc += 2
+        user = pc - 2 >= CB
         if op in ALU: wr(addr(a), ALU[op](val(b), val(c)))
         elif op == 'MOV': wr(addr(a), val(b))
         elif op == 'NEG': wr(addr(a), -val(b))
-        elif op == 'NOT': wr(addr(a), int(not truthy(mem, val(b))))
+        elif op == 'NOT': f = not truthy(mem, val(b), user); wr(addr(a), jsb(f) if user else int(f))
         elif op == 'LOADK': wr(addr(a), w1)
         elif op == 'GETFP': wr(addr(a), fp)
         elif op == 'LDI': wr(addr(a), rd(val(b) + val(c)))
         elif op == 'STI': wr(val(a) + val(b), val(c))
         elif op == 'JMP': pc = a
-        elif op == 'JZ': pc = a if not truthy(mem, val(b)) else pc
-        elif op == 'JNZ': pc = a if truthy(mem, val(b)) else pc
+        elif op == 'JZ': pc = a if not truthy(mem, val(b), user) else pc
+        elif op == 'JNZ': pc = a if truthy(mem, val(b), user) else pc
         elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
             if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
             return steps, ''.join(map(chr, out))
-        elif op[0] == 'J': pc = a if ALU[op[1:]](val(b), val(c)) else pc
+        elif op[0] == 'J':
+            x, y = val(b), val(c); ng = op[1] == 'N' and op != 'JNE'
+            if not user: pc = a if ALU[op[1:]](x, y) else pc
+            else:                                       # (anything but integers: the library's jcmp decides, see TRAPS)
+                r = dyn_fast('D' + op[1 + ng:], x, y)
+                if r is None: trap('jcmp', TRAPOFF, [x, y], pc)
+                elif (r == TRUE) != ng: pc = a
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc); fp += w1; pc = a
-        elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = r % 8192
+        elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = r % 8192; pst = WBACK * int(r // 8192 == TRAPDEF)
         elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's one-line form)
         elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + pst + 2); fp += TRAPOFF; pc = a; pst = 0
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1; sep = (0, 32, 10)[a // 2 % 4]
+            if isspecial(v): v = catv(v) if a & 8 else BSTRV(v - SPV0)     # (its name; a + chain's piece as a string: -0 is 0)
             if isstr(v):                                   # a literal or a heap string (data_base + SDATA: the lib's DONE marker, empty)
                 p = v + STRTAG; text = []
                 while p != db + SDATA and mem[p] != 0: text.append(mem[p]); p += 1
-            elif a % 2 and v in (0, 1): text = [ord(ch) for ch in ('true' if v else 'false')]
             else: text = [ord(ch) for ch in str(v)]
             for ch in text + ([sep] if sep else []): emit(ch)
         elif op == 'PUTC': emit(val(b))
-        elif op in ('DADD', 'DADDL', 'DADDR'):
-            x, y = val(b), val(c)
-            if not (isref(x) or isref(y)): wr(addr(a), x + y)
-            elif isarr(x) or isobj(x) or isarr(y) or isobj(y): trap(TRAPS[op], a - 256, [x, y], pc)
-            elif not cat(a, x, y, op == 'DADDL', op == 'DADDR'): trap(CATTRAPS[op], a - 256, [x, y], pc)
-        elif op in ('DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE'):
-            x, y = val(b), val(c)
-            if (isstr(x) and isstr(y)) if op in ('DEQ', 'DNE') else (isref(x) or isref(y)): trap(TRAPS[op], a - 256, [x, y], pc)
-            else: wr(addr(a), ALU[op[1:]](x, y))
+        elif op in DYNOPS:                              # (pst WBACK: the library's value, after its trap)
+            x, y = val(b), val(c); r = dyn_fast(op, x, y) if not pst else None
+            if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
+            elif r is not None: wr(addr(a), r)
+            elif op == 'DADD' and catok(x, y):
+                if not cat(a, x, y): trap(CATTRAPS[op], TRAPDEF, [x, y], pc - 2)
+            else: trap(TRAPS[op], TRAPDEF, [x, y], pc - 2)
         elif op == 'GETX':                              # an array: its element (0 past its length); anything else: the library
             x, k = val(b), val(c)
             if isarr(x):
-                q = (x - ARRTAG) & AMASK; wr(addr(a), rd(rd(q) + k) if 0 <= k < rd(q - 1) else 0)
-            elif isobj(x) and not notown(k): q = probe(x, s20(k + STRTAG)); wr(addr(a), rd(q + 1) if rd(q) else 0)
+                q = (x - ARRTAG) & AMASK; wr(addr(a), rd(rd(q) + k) if 0 <= k < rd(q - 1) else UNDEF)
+            elif isobj(x) and not notown(k): q = probe(x, s20(k + STRTAG)); wr(addr(a), rd(q + 1) if rd(q) else UNDEF)
             else: trap('getx', a - 256, [x, k], pc)
         elif op == 'SETX':                              # an array, k inside its length: the store; anything else: the library
             x, k, v = val(a), val(b), val(c); q = (x - ARRTAG) & AMASK
@@ -1350,8 +1454,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             hp = rd(HP)
             if s20(hp - (rd(GCLIM) + LAYOUT['heap_size'] - 7)) < 0: wr(HEAP0 + hp, 0); mark(HEAP0 + hp); wr(HP, hp + 8); wr(addr(a), hp + HEAP0 - OBJTAG)
             else: trap('gcnew', a - 256, [], pc - 2)
-        elif op == 'GETP':                              # o.key (C: the key's offset from data_base): 0 if missing or not an object
-            o = val(b); wr(addr(a), rd(probe(o, db + c) + 1) if isobj(o) and rd(probe(o, db + c)) else 0)
+        elif op == 'GETP':                              # o.key (C: the key's offset from data_base): undefined if missing or not an object
+            o = val(b); wr(addr(a), rd(probe(o, db + c) + 1) if isobj(o) and rd(probe(o, db + c)) else UNDEF)
         elif op == 'SETP':                              # o.key = v: the key's pair, else a free pair in place, else the library
             o, v = val(a), val(b)
             if isobj(o): setp(o, db + c, v)
@@ -1398,7 +1502,7 @@ def image_mem(c, words, data, init=None):
     mem[init - 1] = c.dp - c.db
     assert all(a >= sbase for a in data), 'nothing is staged: globals start at 0'
     mem[c.db] = STRTAG                  # the untag constant at data_base (read only: an overlay on the page)
-    for i, w in enumerate(SEED): mem[sbase + 1 + i] = w
+    mem.update(BSTRW)                   # the built-in strings (the page: .fin's overlays)
     mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
 
