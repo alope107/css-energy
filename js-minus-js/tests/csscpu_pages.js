@@ -1,7 +1,9 @@
 // csscpu_pages.js dir [name...] — level C2 driver (harness script): each CSS CPU page that tests/csscpu_pages.py built
-// in dir runs from load until --halt is 1 (polled every 50 ms; 60 s at most); its console must be Node's output and its
-// step count cc_ref's. SHARDS=N runs N browsers at once, each taking the next page as it finishes one; the lines print
-// in list order. The verdicts don't depend on it; the ms column does (the default, 1, for timing).
+// in dir runs from load until --halt is 1 (polled every 50 ms, or a twentieth of the time so far, up to 1 s: a poll
+// restyles the page between frames, and at 50 ms that slowed a long run by ~5%; MAXMS, default 60 s, at most); its
+// console must be Node's output and its step count cc_ref's. SHARDS=N runs N browsers at once, each taking the next page as it finishes one, the most steps
+// first (so the longest pages don't start last); the lines print in list order. The verdicts don't depend on it; the ms
+// column does (the default, 1, for timing).
 const path = require('path'), fs = require('fs');
 const { launch, fileUrl } = require(path.join(__dirname, '..', 'tools', 'browser.js'));
 const { consoleCodes, gridText } = require(path.join(__dirname, '..', 'tools', 'page.js'));
@@ -9,6 +11,8 @@ const { consoleCodes, gridText } = require(path.join(__dirname, '..', 'tools', '
   const dir = path.resolve(process.argv[2]); const only = process.argv.slice(3);
   const names = fs.readFileSync(path.join(dir, 'list.txt'), 'utf8').split('\n').filter(n => n && (!only.length || only.includes(n)));
   const shards = Math.max(1, Math.min(+(process.env.SHARDS || 1), names.length));
+  const steps = names.map(n => JSON.parse(fs.readFileSync(path.join(dir, n + '.json'), 'utf8')).steps);
+  const order = names.map((_, i) => i).sort((a, b) => steps[b] - steps[a] || a - b);
   const lines = []; let printed = 0, next = 0, pass = 0; const fails = [];
   const flush = () => { while (printed < names.length && lines[printed] !== undefined) console.log(lines[printed++]); };
   // the console as the page shows it: Node's output laid out on the grid (8 columns, 16 rows, wrapping, newlines)
@@ -17,13 +21,13 @@ const { consoleCodes, gridText } = require(path.join(__dirname, '..', 'tools', '
     return gridText(cells, rows, cols); };
   async function shard() {
     const b = await launch({});
-    for (let i; (i = next++) < names.length;) {
-      const name = names[i], im = JSON.parse(fs.readFileSync(path.join(dir, name + '.json'), 'utf8'));
+    for (let k; (k = next++) < names.length;) {
+      const i = order[k], name = names[i], im = JSON.parse(fs.readFileSync(path.join(dir, name + '.json'), 'utf8'));
       const p = await b.newPage({ viewport: { width: 1200, height: 800 } }); const t0 = Date.now();
       await p.goto(fileUrl(path.join(dir, name + '.html')), { timeout: 120000 });
       let r = { halted: false, steps: 0 };
       while (Date.now() - t0 < +(process.env.MAXMS || 60000) && !r.halted) {
-        await p.waitForTimeout(50);
+        await p.waitForTimeout(Math.min(1000, Math.max(50, (Date.now() - t0) / 20)));
         r = await p.evaluate(() => { const cs = getComputedStyle(document.querySelector('#cpu')); return { halted: +cs.getPropertyValue('--halt') === 1, steps: +cs.getPropertyValue('--steps') }; });
       }
       const ms = Date.now() - t0;

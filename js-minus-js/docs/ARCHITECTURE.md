@@ -117,7 +117,8 @@ It exists twice, and the two must agree exactly (L2).
   (wrapping to 20 bits). Its rom mode (`Compiler(..., rom=True)`) compiles the runtime library: raw memory, the
   intrinsics `peek` `poke` `__fp` `prn` `halt`, no dynamic operators, larger tables.
 - **`compiler/cc_dsl.py`**, the same step in the integer DSL of `compiler/dsl.py`: predicated straight-line code
-  (`with self.when(cond): …`) over SSA temps. Evaluated in Python it is L2's model of the page; compiled to CSS each
+  (`with self.when(cond): …`) over SSA temps. Evaluated in Python it is L2's model of the page (each step compiled to
+  one Python function, `dsl.pysrc`; `DSLEVAL=both` checks it against the tree evaluator `dsl.ev`); compiled to CSS each
   temp is one custom-property declaration. `Prog` parses one token per call, `LexProg` lexes one character.
   `dsl.Ctx.inline` puts a temp used once into its user's expression (a ternary's else operand counts twice: `css2`
   writes `ite(c, a, b)` as `b + c × (a − b)`), which takes a fifth of the declarations off a token level.
@@ -459,6 +460,10 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
   program in 11 layouts), `gen` (random programs from `progen.py`, inside the documented language), `mut` (suite
   programs with token edits). Failures are shrunk into `build/fuzz/`; `tests/fuzz/show.py` replays one.
 - L5 runs only programs under 1,500 steps (`tests/suite_ui.py`). Harnesses detect HALT by the page's `--isHALT` flag.
+- Caches in `build/`, keyed by a hash of every input (sources, ROM entry points, settings), so they are never stale:
+  `dslcache/` the parser variants compiled for L2 (`cc_dsl.compiled`; building one takes ~70 ms, loading it ~0.1 ms),
+  `ccpage5/` the compile chain (`ccpage5.build`, shared by the product page and the L3 page). `DSLCACHE=0` and
+  `CCCACHE=0` build without them.
 
 ---
 
@@ -471,6 +476,8 @@ make dist   # copy it to dist/
 
 - Reproducible (the Makefile pins `PYTHONHASHSEED` and `SOURCE_DATE_EPOCH`). The image (`mkimage.py tests/fizz.js`)
   supplies the ROM and the editor's initial program; `samples/*.js` the picker's.
+- The compile chain's ~1,000 parser variants are built on every CPU (`JOBS`), and the chain is reused while the
+  compiler doesn't change (`build/ccpage5/`, §5): a page takes ~7 s, or under a second after a machine-only change.
 - `gen_css.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
   the compiler's readable property names; `K` the levels per pass (32); `INLINE=0` (cc_dsl) keeps every temp.
   Without `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`).

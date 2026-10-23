@@ -1341,3 +1341,57 @@ class LexProg(Prog):
         self.named('o_sw', add(*[mul(g, v) for g, a, v in self.data]))
         self.x.dce(self.out)
         if INLINE: self.x.inline(set(self.out))
+
+
+# ---------------- compiled variants, cached on disk (the L2 levels: tests/cmp_dsl.py, the fuzzer)
+# Building a parser variant takes ~70 ms and every L2 worker process needs a few hundred; its Python function
+# (dsl.pyfn) marshals to ~15 KB and loads in ~0.1 ms. build/dslcache/<hash>/ holds them, the hash naming every input:
+# the sources this module imports (sources_hash), layout.json, the ROM's entry points, the bases, INLINE, SPECK and
+# Python's version (marshal's format). DSLCACHE=0 builds every variant in memory; DSLEVAL=interp or both
+# (dsl.Ctx.run_python) bypasses it.
+import sys, hashlib, marshal, shutil, dsl
+class Compiled:
+    """what the L2 levels use of a Prog: run(env) -> ({state: value}, env + {('T', temp): value}), out, nlports, ntemps"""
+    def __init__(self, run, out, nlports, ntemps): self.run, self.out, self.nlports, self.ntemps = run, out, nlports, ntemps
+_HERE = os.path.dirname(os.path.abspath(__file__))
+def sources_hash(h, *mods):
+    """h.update() with the source of every module of this repository that mods import, directly or not (found through
+    their globals: imported modules, and the modules of imported functions and classes), and with compiler/layout.json,
+    which cc_ref reads at import"""
+    root = os.path.dirname(os.path.dirname(_HERE)); seen = {}; todo = list(mods)
+    while todo:
+        m = todo.pop(); f = getattr(m, '__file__', None)
+        if not f or os.path.abspath(f) in seen or not os.path.abspath(f).startswith(root + os.sep): continue
+        f = os.path.abspath(f)
+        seen[f] = m
+        for v in vars(m).values():
+            d = v if type(v) is type(os) else sys.modules.get(getattr(v, '__module__', None) or '')
+            if d is not None: todo.append(d)
+    for f in sorted(seen) + [os.path.join(_HERE, 'layout.json')]: h.update(f.encode()); h.update(open(f, 'rb').read())
+    return h
+_cdir = {}
+def _cache_dir(data_base, code_base, lib):
+    k = (data_base, code_base, id(lib))
+    if k not in _cdir:
+        h = hashlib.sha256(repr((data_base, code_base, INLINE, SPEC_LEVEL, sys.version, sorted((lib or {}).get('entries', {}).items()))).encode())
+        sources_hash(h, sys.modules[__name__])
+        _cdir[k] = os.path.join(_HERE, '..', 'build', 'dslcache', h.hexdigest()[:16])
+    return _cdir[k]
+def compiled(data_base, code_base, lib, key=(None, None, None), lex=None):
+    """the variant `key` of Prog (or LexProg(data_base, cset=lex) when lex is a set of characters), compiled"""
+    use = os.environ.get('DSLCACHE', '1') == '1' and dsl.EVAL == 'py'
+    path = os.path.join(_cache_dir(data_base, code_base, lib), ('lex_' + '_'.join(map(str, sorted(lex))) if lex is not None else '_'.join(map(str, key))) + '.bin')
+    if use and os.path.exists(path):
+        code, out, nl, nt = marshal.loads(open(path, 'rb').read()); g = {}; exec(code, g)
+        return Compiled(g['f'], out, nl, nt)
+    pg = LexProg(data_base, cset=lex) if lex is not None else Prog(data_base, code_base, lib, *key)
+    if not use: return Compiled(pg.x.run_python, pg.out, getattr(pg, 'nlports', 0), len(pg.x.temps))
+    src = dsl.pysrc(pg.x.temps, pg.x.cur, pg.x.state)
+    d = os.path.dirname(path)
+    if not os.path.isdir(d):                     # a new version of the sources: keep the 8 newest versions' caches
+        os.makedirs(d, exist_ok=True); up = os.path.dirname(d)
+        for old in sorted(os.listdir(up), key=lambda n: -os.path.getmtime(os.path.join(up, n)))[8:]: shutil.rmtree(os.path.join(up, old), ignore_errors=True)
+    tmp = f'{path}.{os.getpid()}'
+    with open(tmp, 'wb') as f: f.write(marshal.dumps((compile(src, '<dsl.pyfn>', 'exec'), pg.out, getattr(pg, 'nlports', 0), len(pg.x.temps))))
+    os.replace(tmp, path)
+    return compiled(data_base, code_base, lib, key, lex)
