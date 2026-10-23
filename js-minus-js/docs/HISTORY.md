@@ -74,6 +74,17 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   faster than a user sees it (64), and a server-wide cap on held loads starved `make l5-net`'s 6 browsers (the cap is
   per browser now, by cookie).
   `NET` moved to the register machine with the hybrid's merge (2026-10-23): `NET A, B` (ARCHITECTURE §3.8).
+- **17, the learnxinyminutes language (2026-10-23, branch `lxym`).** Everything in the learnxinyminutes JavaScript
+  tutorial, one phase at a time, each through every test level: specials and `typeof`; doubles in an FPU of `calc()`
+  (IEEE in Chrome, bit for bit) with JavaScript's shortest printing; bitwise operators; expression statements,
+  implicit globals, labels, for of / in; functions as values, function expressions, nested functions and closures
+  (an env cell per frame, closed on return by a label that turns RET into a trap); arrows; hoisting; `this`, method
+  calls, `call` / `apply` / `bind`; prototypes as a link where an object's keys end, which the machine's probes follow;
+  `new`; timers; `Math`; wrappers and `String.prototype`. The ROM grew to 12,288 words. Two new mechanisms carried
+  most of it: a library call can find its operands in the instruction that trapped (as `jcmp` already did), and keys
+  no probe takes (`x[hidden]`) send rare properties (`__proto__`, `prototype`, `Math.PI`) to the library without new
+  instructions. Compile time +3–4% (arrows' rules and ports), run time +2.4% passes over the suite (the `this` slot,
+  `callv`'s new cases) (BENCHMARKS §17).
 
 ## Dead ends and superseded approaches
 
@@ -151,8 +162,27 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 70 | The answer as a quirks-mode stylesheet (`rx`, `application/json`) per load | one more request per load; the gateway writes the documents anyway | the answer in the document (`#t`'s position) |
 | 71 | 4 modems, one answer each | each document costs the page two forced style passes (ENGINE_NOTES 63): 8 per word | 2 modems, two answers each (x and y) |
 | 72 | A render-blocking stylesheet arriving after the parse, to skip `FinishedParsing`'s forced update | still forced, at 0 and 15 ms | — |
+| 73 | `const` assignment as a run-time TypeError through a getter-like slot | +91 temps in the hottest variants | compile error 64, as before |
+| 74 | An arrow's expression body closed by S_OPER's own closer variants | the close's code in every `)` `;` `,` level of every program | modes of their own (S_OPERC / S_NAMEEC) whose other variants share S_OPER's rules (ccpage5 merges identical CSS across modes) |
+| 75 | The global object as a static chunk outside the heap | `isobj` is a heap-range test: GETP / SETP saw no object | a heap object made on first use, kept in global 1 |
+| 76 | The lexer's `this` / `new` test on one combined hash (h1 × 65519 + h2) | exact in Python (L2 passed), but a registered integer keeps 6 significant digits (ENGINE_NOTES 2): the page took `this` for a name | each half compared |
+| 77 | GETP's string trap with its arguments in its frame at A | the frame (and the routine's locals) overwrite the slot above A, a method call's `this` | no arguments (the key decoded from the instruction) and one unused parameter (the locals start a slot higher) |
+| 78 | Inner functions' calls through the library's `callv` every time | closure_gc +5% passes, func_expr +15% after `this` added cases to `callv` | open lead: a CALLV fast path for them |
 
 ## Open leads (untried)
+
+- **CALLV for closures.** An inner function's call always traps to `callv` (its env goes into local 1): two CALLV
+  executions (the env word from the block's first line, which the class already reads, then the return word) would
+  skip the library for exact-arity calls.
+- **Labels.** 64 per program (6-bit fields, and each level's label multiplexers grow with the count); a function takes
+  3–4 (the close label for RETC whether or not it makes a closure). The generator's programs hit error 20 a third of
+  the time.
+- **Names from variables.** Node prints `var f = function () {}` as `[Function: f]`; the machine names functions only
+  from declarations and object keys (the variable's name bytes aren't in the string area).
+- **Callbacks from the library.** `map`, `forEach`, `sort` with a function: the library can't call user code except by
+  returning into it (as `callv` does); the timers' loop is user code that asks the library for the next callback, a
+  pattern that would also do for these.
+- **A stalled C2 page** (arrows, step 786 of 1,363, no HALT for 60 s; 2026-10-23 at `a02921a`), once; the rerun passed.
 
 - **What a register costs.** ~20 µs a pass each, changing or not (BENCHMARKS §15: 80 unused registers +2.3% on FizzBuzz),
   about four times the style cost measured for a subject alone: the 358 registers are ~2 ms of a light pass, and a
