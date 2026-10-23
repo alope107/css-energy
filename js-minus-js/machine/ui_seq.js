@@ -2,8 +2,8 @@
 // then for each further program: Edit, retype the editor, Run, and check the console (or the status, for 'ERR:text').
 // SHARDS=N runs the programs in N browsers at once (make l5 does), each starting as above and then taking the next
 // program as it finishes one, the longest source first (compiling is most of a program's time, so the slowest don't
-// start last); their lines print in the arguments' order. The verdicts don't depend on it; compiledMs
-// and haltMs do (the default, 1, for timing).
+// start last); their lines print in the arguments' order. The verdicts don't depend on it; compiledMs and haltMs do
+// (the default, 1, for timing, keeps the arguments' order).
 // NETROOT=dir: serve dir with the network gateway (net/server.js) and open the page there over http, not file: (the NET
 // instruction's modem needs both; each page gets its own gateway session).
 const { launch, fileUrl, envArgs } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));

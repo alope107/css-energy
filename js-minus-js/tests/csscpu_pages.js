@@ -1,7 +1,7 @@
 // csscpu_pages.js dir [name...] — level C2 driver (harness script): each CSS CPU page that tests/csscpu_pages.py built
 // in dir runs from load until --halt is 1 (polled every 50 ms, or a twentieth of the time so far, up to 1 s: a poll
-// restyles the page between frames, and at 50 ms that slowed a long run by ~5%; MAXMS, default 60 s, at most); its console must be Node's output and its
-// step count cc_ref's. SHARDS=N runs N browsers at once, each taking the next page as it finishes one, the most steps
+// restyles the page between frames, and at 50 ms that slowed a long run by ~5%; MAXMS, default 60 s, at most); its
+// console must be Node's output and its step count cc_ref's. SHARDS=N runs N browsers at once, each taking the next page as it finishes one, the most steps
 // first (so the longest pages don't start last); the lines print in list order. The verdicts don't depend on it; the ms
 // column does (the default, 1, for timing).
 const path = require('path'), fs = require('fs');

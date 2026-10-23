@@ -1346,19 +1346,35 @@ class LexProg(Prog):
 # ---------------- compiled variants, cached on disk (the L2 levels: tests/cmp_dsl.py, the fuzzer)
 # Building a parser variant takes ~70 ms and every L2 worker process needs a few hundred; its Python function
 # (dsl.pyfn) marshals to ~15 KB and loads in ~0.1 ms. build/dslcache/<hash>/ holds them, the hash naming every input:
-# this module's, dsl's and cc_ref's sources, layout.json, the ROM's entry points, the bases, INLINE, SPECK and Python's
-# version (marshal's format). DSLCACHE=0 builds every variant in memory; DSLEVAL=interp or both (dsl.Ctx.run_python) bypasses it.
+# the sources this module imports (sources_hash), layout.json, the ROM's entry points, the bases, INLINE, SPECK and
+# Python's version (marshal's format). DSLCACHE=0 builds every variant in memory; DSLEVAL=interp or both
+# (dsl.Ctx.run_python) bypasses it.
 import sys, hashlib, marshal, shutil, dsl
 class Compiled:
     """what the L2 levels use of a Prog: run(env) -> ({state: value}, env + {('T', temp): value}), out, nlports, ntemps"""
     def __init__(self, run, out, nlports, ntemps): self.run, self.out, self.nlports, self.ntemps = run, out, nlports, ntemps
 _HERE = os.path.dirname(os.path.abspath(__file__))
+def sources_hash(h, *mods):
+    """h.update() with the source of every module of this repository that mods import, directly or not (found through
+    their globals: imported modules, and the modules of imported functions and classes), and with compiler/layout.json,
+    which cc_ref reads at import"""
+    root = os.path.dirname(os.path.dirname(_HERE)); seen = {}; todo = list(mods)
+    while todo:
+        m = todo.pop(); f = getattr(m, '__file__', None)
+        if not f or os.path.abspath(f) in seen or not os.path.abspath(f).startswith(root + os.sep): continue
+        f = os.path.abspath(f)
+        seen[f] = m
+        for v in vars(m).values():
+            d = v if type(v) is type(os) else sys.modules.get(getattr(v, '__module__', None) or '')
+            if d is not None: todo.append(d)
+    for f in sorted(seen) + [os.path.join(_HERE, 'layout.json')]: h.update(f.encode()); h.update(open(f, 'rb').read())
+    return h
 _cdir = {}
 def _cache_dir(data_base, code_base, lib):
     k = (data_base, code_base, id(lib))
     if k not in _cdir:
         h = hashlib.sha256(repr((data_base, code_base, INLINE, SPEC_LEVEL, sys.version, sorted((lib or {}).get('entries', {}).items()))).encode())
-        for f in ('cc_dsl.py', 'dsl.py', 'cc_ref.py', 'layout.json'): h.update(open(os.path.join(_HERE, f), 'rb').read())
+        sources_hash(h, sys.modules[__name__])
         _cdir[k] = os.path.join(_HERE, '..', 'build', 'dslcache', h.hexdigest()[:16])
     return _cdir[k]
 def compiled(data_base, code_base, lib, key=(None, None, None), lex=None):

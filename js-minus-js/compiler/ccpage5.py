@@ -130,16 +130,15 @@ def variant_rules(data_base, code_base, lib):
     import multiprocessing as mp
     with mp.get_context('fork').Pool(n) as pool: return [r for r in pool.map(variant_rule, keys, chunksize=4) if r]
 
-# build()'s output is a function of its arguments (of the ROM, its entry points and init) and the compiler's sources: build/ccpage5/<hash>.json keeps the last
-# few, so a page whose compiler didn't change (a machine change, the L3 page after the editor page) skips the chain.
-# CCCACHE=0 always builds.
+# build()'s output is a function of its arguments (of the ROM, its entry points and init) and the sources it imports:
+# build/ccpage5/<hash>.json keeps the last few, so a page whose compiler didn't change (a machine change, the L3 page
+# after the editor page) skips the chain. CCCACHE=0 always builds.
 def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     import hashlib
     lib = {k: lib[k] for k in ('init', 'entries') if k in lib}      # all the chain reads of the ROM
     h = hashlib.sha256(json.dumps([lib, L, P, TMAX, code_base, data_base, short, D.INLINE, D.SPEC_LEVEL], sort_keys=True).encode())
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('ccpage5.py', 'cc_dsl.py', 'dsl.py', 'cc_ref.py', 'layout.json', os.path.join('..', '..', 'shared', 'py', 'csslabel.py')):
-        h.update(open(os.path.join(here, f), 'rb').read())
+    D.sources_hash(h, sys.modules[__name__])
     d = os.path.join(here, '..', 'build', 'ccpage5'); path = os.path.join(d, h.hexdigest()[:16] + '.json')
     if os.environ.get('CCCACHE', '1') == '1' and os.path.exists(path):
         os.utime(path); return tuple(json.load(open(path)))
