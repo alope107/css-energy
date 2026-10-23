@@ -47,7 +47,7 @@ OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNG
        ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DNEG NUMLIT  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC'
        '  APUSH  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET'
        '  FLD FADD FSUB FMUL FDIV FMOD FPOW FSQRT FFLOOR FCEIL FROUND FTRUNC FABS FTPLO FSCALE FP10 FCONST FEXP FLOG FSIN FCOS FTAN'
-       '  FNORM FINT FCMP FEXPO FLOG10 FDIGIT  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
+       '  FNORM FINT FCMP FEXPO FLOG10 FDIGIT  FCOK FCDIG  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
 # The FPU (the runtime library's): a number line is 4 words at an aligned address (fline): w0 = s * (E + 1100) for a finite
 # nonzero s * M * 2^(E - 52) (E in -1022 ... 1023; M = w1 * 2^36 + w2 * 2^18 + w3 < 2^53, >= 2^52 unless subnormal), s for +-0,
 # s * 3000 for +-Infinity, 4000 for NaN. A boxed double is an 8-word heap block [header 0 0 0 | its number line], its value the
@@ -58,6 +58,11 @@ OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNG
 # NUMLIT A, word1 (user code): A is a number literal's cache (a global); 0: the library's numlit parses the string word1 into it
 FLOPS = OPN[OPN.index('FLD'):OPN.index('FNORM')]
 FVOPS = OPN[OPN.index('FNORM'):OPN.index('FDIGIT') + 1]
+# the shortest-digits search's (numstr) instructions, a class of their own: FCOK A, B, C: A = 1 if the candidate at decimal scale C
+# (0 ... 22: the integer c nearest B * 10^C, B > 0 a double below 2^53) reads back as B; FCDIG A, B, C: the line at A := c's
+# 5-digit limbs [c mod 1e5, ..., c / 1e15] (fcand: exact, with the two-product's low part)
+FDOPS = ('FCOK', 'FCDIG')
+FLINE_I, FVAL_I = FLOPS + ['FCDIG'], FVOPS + ['FCOK']      # __fl's and __fv's ops by index
 FCONSTS = ('pi', 'e', 'ln2', 'ln10', 'log2e', 'log10e', 'sqrt2', 'sqrt1_2')
 NFLINES = 14                            # the runtime's scratch number lines at fpu_base; then its digit buffer (20 words) and two cells
 FSCR = 100                              # in an FPU instruction the constant operands 100 ... 113 are the scratch lines (no LOADK)
@@ -307,6 +312,20 @@ def fline_op(op, x, y):
     if op == 'FLOG': return flog(x)
     if op in ('FSIN', 'FCOS', 'FTAN'): return math.nan if math.isinf(x) else getattr(math, op[1:].lower())(x)
     raise ValueError(op)
+def fcand(v, n):
+    """FCOK / FCDIG: the candidate at scale n for v > 0 (below 2^53): (c, ok), exactly as the CSS computes it (numstr's notes)"""
+    E = max(math.frexp(v)[1] - 1, -1022); q = E - 52; M = fscale(v, -q)
+    f5 = cpow(5.0, n); Nh = M * f5; Nl = ftplo(M, f5); s = q + n
+    xh, xl = Nh * cpow(2.0, s), Nl * cpow(2.0, s)
+    if s >= 0: return int(xh) + int(xl), 1
+    if xh >= 2.0 ** 52:
+        rf = math.floor(xl); d = xl - rf; chi = xh; clo = rf + (d > 0.5 or (d == 0.5 and rf % 2 != 0))
+    else:
+        f = math.floor(xh); hf = 0.5 - (xh - f); chi = f + (xl > hf or (xl == hf and f % 2 == 1)); clo = 0
+    t1 = 1 - s
+    D = (chi * cpow(2.0, t1) - 2 * Nh) + clo * cpow(2.0, t1) - 2 * Nl
+    lim = f5 / (2 if D < 0 and M == 2.0 ** 52 and E > -1022 else 1)
+    return int(chi) + int(clo), int(abs(D) < lim or (abs(D) == lim and M % 2 == 0))
 def fval_op(op, x, y, v):
     """FVOPS op on the doubles x, y (v: the value B, for FNORM's double)"""
     if op == 'FNORM': return fnorm(x, v)
@@ -883,8 +902,8 @@ class Compiler:
         elif name == '__nput': self.emit('NPUT', a[0], a[1], (K(0), 0))
         elif name == '__apush': self.emit('APUSH', (K(0), 0), a[0], a[1])
         elif name == '__net': self.emit('NET', t, a[0])
-        elif name == '__fl': self.emit(FLOPS[kval(a[0][0])], a[1], a[2], a[3])
-        elif name == '__fv': self.emit(FVOPS[kval(a[0][0])], t, a[1], a[2])
+        elif name == '__fl': self.emit(FLINE_I[kval(a[0][0])], a[1], a[2], a[3])
+        elif name == '__fv': self.emit(FVAL_I[kval(a[0][0])], t, a[1], a[2])
         elif name in ('__mcmp', '__mfeq', '__mfref', '__mwalk'): self.emit('MOV', t, a[2]); self.emit(name[2:].upper(), t, a[0], a[1])
         elif name != 'halt': self.emit(name[2:].upper(), a[0], a[1], a[2])         # (MCPY, MUPPER, MLOWER, MFILL)
         else: self.emit('HALT')
@@ -1609,6 +1628,10 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             x, y = fopnd(b), fopnd(c); d = fscr(a) or val(a)
             for j, w in enumerate(fenc(fline_op(op, x, y))): wr(d + j, w)
         elif op in FVOPS: wr(addr(a), fval_op(op, fopnd(b), fopnd(c), val(b)))
+        elif op == 'FCOK': wr(addr(a), fcand(fopnd(b), val(c))[1])
+        elif op == 'FCDIG':
+            cv = fcand(fopnd(b), val(c))[0]; d = fscr(a) or val(a)
+            for j in range(4): wr(d + j, cv // 10 ** (5 * j) % 100000 if j < 3 else cv // 10 ** 15)
         elif op in DYNOPS:                              # (pst WBACK: the library's value, after its trap)
             x, y = val(b), val(c); r = dyn_fast(op, x, y) if not pst else None
             if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0

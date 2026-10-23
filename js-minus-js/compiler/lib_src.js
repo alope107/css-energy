@@ -318,14 +318,14 @@ function numstr(v) {
   E = __fv(__FV_FEXPO__, __F2__, 0); q = E - 52;
   __fl(__FL_FSCALE__, __F3__, __F2__, 0 - q); __fl(__FL_FSCALE__, __F11__, 1, 52);         // M (|v| = M * 2^q); 2^52
   __fl(__FL_FFLOOR__, __F4__, __F2__, 0);
-  if (E < 53) { if (__fv(__FV_FCMP__, __F4__, __F2__) == 0) { __fl(__FL_FLD__, __F7__, __F2__, 0); nd = putdig(0); return numfmt(neg, nd, nd); } }
+  if (E < 53) { if (__fv(__FV_FCMP__, __F4__, __F2__) == 0) { __fl(__FL_FCDIG__, __F7__, __F2__, 0); nd = limbdig(); return numfmt(neg, nd, nd); } }
   k = __fv(__FV_FLOG10__, __F2__, 0);
   if (E < 53) {                                                  // a fraction: p digits at scale n = p - 1 - k
     lo = k + 1; if (lo < 1) { lo = 1; } hi = 23 + k; if (hi > 17) { hi = 17; }
     if (lo > hi) { return numapx(neg, k); }
-    if (cand(q, hi - 1 - k) == 0) { return numapx(neg, k); }
-    while (lo < hi) { mid = (lo + hi) / 2; if (cand(q, mid - 1 - k)) { hi = mid; } else { lo = mid + 1; } }
-    n = lo - 1 - k; cand(q, n); nd = putdig(peek(__CLO__));
+    if (hi < 17) { if (__fv(__FV_FCOK__, __F2__, hi - 1 - k) == 0) { return numapx(neg, k); } }
+    while (lo < hi) { mid = (lo + hi) / 2; if (__fv(__FV_FCOK__, __F2__, mid - 1 - k)) { hi = mid; } else { lo = mid + 1; } }
+    n = lo - 1 - k; __fl(__FL_FCDIG__, __F7__, __F2__, n); nd = limbdig();
     return numfmt(neg, nd, nd - n);
   }
   lo = 1; hi = 17;                                               // an integer from 2^53: c * 10^m, m = k - p + 1
@@ -412,6 +412,17 @@ function rhe() {
   if (r > 0) { return f + 1; }
   if (r == 0) { if (f % 2 != 0) { return f + 1; } }
   return f;
+}
+// the decimal digits of FCDIG's limbs in F7 (c = l0 + l1 1e5 + l2 1e10 + l3 1e15) at DIGS (characters) -> their count
+function limbdig() {
+  var j = 3; var n = 0; var v = 0; var go = 0; var d = 0;
+  while (j >= 0) {
+    v = peek(__FPU__ + 28 + j);
+    if (go) { __mfill(__DIGS__ + n, 48, 5); d = __kind(v, __K_NLEN__); __nput(__DIGS__ + n + 5 - d, v); n = n + 5; }
+    else if ((v != 0) + (j == 0)) { d = __kind(v, __K_NLEN__); __nput(__DIGS__ + n, v); n = n + d; go = 1; }
+    j = j - 1;
+  }
+  return n;
 }
 // the decimal digits of the integer in F7, plus clo (a small integer), at DIGS (characters) -> their count
 function putdig(clo) {

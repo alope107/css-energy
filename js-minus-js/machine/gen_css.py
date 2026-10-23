@@ -813,12 +813,50 @@ FPU_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') + fop
            fenc_decls(FR, 'fr') +
            [f"--fve: var(--fxe);"] + fenc_decls(FX, 'fx')[4:6] +
            [f"--fval: {by_op({o: FVAL[o] for o in R.FVOPS[:-1]}, FVAL[R.FVOPS[-1]])};"])
+# FCOK / FCDIG (numstr's search: cc_ref.fcand): B's number line (p: a scratch line or a boxed double), C the scale n; ok into A, or
+# the candidate's 5-digit limbs into A's line. The candidate c = c_hi + c_lo exactly: c_hi a double, c_lo small (registered)
+def _gt0(x): return f"clamp(0, sign({x}), 1)"
+def _ge0(x): return f"clamp(0, sign({x}) + 1, 1)"
+_pw = [f"var(--pw{j})" for j in range(4)]
+_M = f"calc({_pw[1]} * pow(2, 36) + {_pw[2]} * pow(2, 18) + {_pw[3]})"
+_F5 = f"pow(5, {yC})"
+_NH = f"calc(({_M}) * {_F5})"; _NL = _tplo(_M, _F5)
+_XH = f"calc(({_NH}) * pow(2, var(--gs0)))"; _XL = f"calc(({_NL}) * pow(2, var(--gs0)))"
+_FL = f"round(down, {_XH})"; _HF = f"calc(0.5 - (({_XH}) - ({_FL})))"
+_CHI = f"if(style(--gs: 1) or style(--gb: 1): {_XH}; else: calc({_FL} + var(--gu)))"
+_CLO = "if(style(--gs: 1): 0; style(--gb: 1): var(--gr); else: 0)"
+_D = f"calc((({_CHI}) * pow(2, 1 - var(--gs0)) - 2 * ({_NH})) + ({_CLO}) * pow(2, 1 - var(--gs0)) - 2 * ({_NL}))"
+_CLOX = f"if(style(--gs: 1): {_XL}; else: {_CLO})"
+def _limb(j): return f"calc((rem({_CHI}, pow(10, {5 * j + 5})) - rem({_CHI}, pow(10, {5 * j}))) / pow(10, {5 * j}))"
+FD_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') +
+          [f"--fac: calc(var(--kA) * clamp(0, var(--A) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--A), 1));",
+           f"--fda: if(style(--fac: 1): calc({FB_} + 4 * (var(--A) - {896 + R.FSCR})); else: mod(var(--zA) + {R.DBLTAG}, 32768));",
+           f"--fdl: {eq('var(--op)', OP['FCDIG'])};",
+           f"--gs0: calc(abs({_pw[0]}) - 1152 + {yC});", f"--gs: {_ge0('var(--gs0)')};", f"--gb: {_ge0(f'({_XH}) - pow(2, 52)')};",
+           f"--gu: calc({_gt0(f'({_XL}) - ({_HF})')} + {eq(f'sign(({_XL}) - ({_HF}))', 0)} * rem({_FL}, 2));",
+           f"--grf: round(down, {_XL});",
+           f"--gr: calc(var(--grf) + {_gt0(f'({_XL}) - var(--grf) - 0.5')} + {eq(f'sign(({_XL}) - var(--grf) - 0.5)', 0)} * abs(rem(var(--grf), 2)));",
+           f"--gdl: calc({eq(f'sign({_D})', -1)} * {eq(_pw[1], 65536)} * {eq(_pw[2], 0)} * {eq(_pw[3], 0)} * {_gt0(f'abs({_pw[0]}) - 78')});",
+           f"--gdc: sign(abs({_D}) - {_F5} / (1 + var(--gdl)));",
+           f"--gok: if(style(--gs: 1): 1; else: calc({eq('var(--gdc)', -1)} + {eq('var(--gdc)', 0)} * (1 - rem({_pw[3]}, 2))));",
+           f"--gl0x: calc(rem({_CHI}, 100000) + ({_CLOX}));", "--gc0: round(down, var(--gl0x) / 100000);", "--gl0: calc(var(--gl0x) - 100000 * var(--gc0));",
+           f"--gl1x: calc({_limb(1)} + var(--gc0));", "--gc1: round(down, var(--gl1x) / 100000);", "--gl1: calc(var(--gl1x) - 100000 * var(--gc1));",
+           f"--gl2x: calc({_limb(2)} + var(--gc1));", "--gc2: round(down, var(--gl2x) / 100000);", "--gl2: calc(var(--gl2x) - 100000 * var(--gc2));",
+           f"--gl3: calc({_limb(3)} + var(--gc2));"])
+NEWCLASSES['fdig'] = dict(ops=list(R.FDOPS), pre=FD_PRE,
+    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(var(--fdl) * (1 - var(--kA)))")],
+    lines=[("p", "var(--fpa)", "1")],
+    write=("if(style(--fdl: 1): var(--fda); else: var(--aA))", None, None, "1"),
+    wline=("calc(1 + 3 * var(--fdl))", lambda j: f"if(style(--fdl: 1): var(--gl{j}); else: var(--gok))"),
+    nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)]})
+FD_NAMES = ["gs0", "gs", "gb", "gu", "grf", "gr", "gdl", "gdc", "gok", "gl0x", "gc0", "gl0", "gl1x", "gc1", "gl1", "gl2x", "gc2", "gl2", "gl3"]
 NEWCLASSES['fpu'] = dict(ops=R.FLOPS + R.FVOPS, pre=FPU_PRE,
     reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(var(--fdl) * (1 - var(--kA)))")],
     lines=[("p", "var(--fpa)", "var(--fpl)"), ("l", "var(--fla)", "var(--fll)")],
     write=("if(style(--fdl: 1): var(--fda); else: var(--aA))", None, None, "1"),
     wline=("calc(1 + 3 * var(--fdl))", lambda j: f"if(style(--fdl: 1): var(--frw{j}); else: var(--fval))"),
     nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)], 'l': [('y', None)]})
+NEWCLASSES['fdig'] = NEWCLASSES.pop('fdig')       # (its opcodes follow the FPU's)
 FPU_NAMES = (["fpc", "fpl", "fpa", "fpk", "fps", "flc", "fll", "fla", "flk", "fls", "fdl", "fac", "fda", "fni", "fve", "fval"] +
              [f"fr{x}" for x in ("f", "i", "z", "s", "e0", "e", "k1", "m1", "m2", "m3", "w0", "w1", "w2", "w3")] + ["fxe0", "fxe"])
 for c_, k_ in NEWCLASSES.items(): build_class(c_, k_)
@@ -856,7 +894,7 @@ P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "
      "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pf", "pcut", "pn0", "pblk", "pfr0", "pfr1", "pfr2", "pfr3", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
      "wval2", "vh", "vj"]
 # the new classes' scratch (.x only)
-XNEW = FPU_NAMES + ["kA", "aA", "zA", "dcat", "dwb", "dnl", "dr", "dok", "dval", "dix", "diy", "cqs", "cao", "cbs", "cdb", "juser", "jcr", "jok", "jcu", "jho",
+XNEW = FPU_NAMES + FD_NAMES + ["kA", "aA", "zA", "dcat", "dwb", "dnl", "dr", "dok", "dval", "dix", "diy", "cqs", "cao", "cbs", "cdb", "juser", "jcr", "jok", "jcu", "jho",
         "cX", "cY", "csx", "csy", "cla", "clb", "ctn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
         "cvv", "cvs", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
         "oroom", "oq", "ohit", "oend", "onext", "oc", "V", "oaddr", "oval", "oen", "w2", "odone", "ojump"]
