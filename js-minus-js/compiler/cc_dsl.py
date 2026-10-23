@@ -26,7 +26,7 @@ LEX_STATE = ['lx', 'q', 'lt', 'tkc', 'acc', 'h1', 'h2', 'p2', 'sstart', 'sdp', '
 
 def parse_state_names():
     s = ['dp', 'mode', 'pn1', 'pn2', 'osp', 'csp', 'nsym', 'nlet', 'nfn', 'nlab', 'cp', 'curf', 'cfn', 'nfdef', 'nloc', 'npar', 'fsym', 'pendLa',
-         'err', 'nint', 'pm', 'nd', 'pk', 'tb']
+         'err', 'nint', 'pm', 'nd', 'pk', 'tb', 'nimp']
     s += [f'op{k}' for k in range(OD)]
     s += [f'csA{k}' for k in range(CD)] + [f'csB{k}' for k in range(CD)]
     s += [f'od{k}' for k in range(ODN)]
@@ -44,7 +44,8 @@ def initial_lex(data_base):
 
 def initial_parse(data_base):
     st = {n: 0 for n in parse_state_names()}
-    st['dp'] = 1; st['mode'] = R.S_STMT                # (global k: data_base + k)
+    st['dp'] = R.IMPC + R.NIMP; st['mode'] = R.S_STMT      # (global k: data_base + k; cc_ref.NIMP: the implicit globals')
+    st['nsym'] = R.NIMP
     return st
 
 # punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant.
@@ -53,10 +54,14 @@ def initial_parse(data_base):
 PUNCT = sorted(({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL} | set(R.BIN) | set(R.COMPOUND)) - set(R.BITTOK))     # (cc_ref.BITTOK)
 import os
 SPEC_LEVEL = os.environ.get('SPECK', 'mtv')     # m: mode only; mt: + token kind; mtv: + punctuation value
+# at a statement's start ( [ ! - (cc_ref.XSTART) begin an expression statement: there they share the 'other punctuation'
+# variant, which falls into S_OPND (one variant for the five, not one each)
+STMTM = (R.S_STMT, R.S_ELSE)
+def spec_p(mode, tv): return tv in PUNCT and not (mode in STMTM and tv in R.XSTART)
 def variant_key(mode, tk, tv):
     if SPEC_LEVEL == 'm': return (mode, None, None)
     if SPEC_LEVEL == 'mt': return (mode, tk, None)
-    return (mode, tk, tv if tk == 4 and tv in PUNCT else None)
+    return (mode, tk, tv if tk == 4 and spec_p(mode, tv) else None)
 def tcode(tk, tv):
     if tk == 4 and tv in PUNCT: return 6 + PUNCT.index(tv)
     return tk
@@ -64,12 +69,14 @@ def key_tcodes(key):
     """token codes a variant key covers"""
     m, tk, tv = key
     if tk is None: return list(range(1, 6 + len(PUNCT)))
-    if tk == 4 and tv is None: return [4] if SPEC_LEVEL == 'mtv' else [4] + list(range(6, 6 + len(PUNCT)))
+    if tk == 4 and tv is None:
+        if SPEC_LEVEL != 'mtv': return [4] + list(range(6, 6 + len(PUNCT)))
+        return [4] + [tcode(4, v) for v in R.XSTART if v in PUNCT and not spec_p(m, v)]
     return [tcode(tk, tv)]
 def variant_keys():
     if SPEC_LEVEL == 'm': return [(m, None, None) for m in range(R.S_ERR + 1)]
     if SPEC_LEVEL == 'mt': return [(m, k, None) for m in range(R.S_ERR + 1) for k in range(1, 6)]
-    return [(m, k, v) for m in range(R.S_ERR + 1) for k in range(1, 6) for v in ((PUNCT + [None]) if k == 4 else [None])]
+    return [(m, k, v) for m in range(R.S_ERR + 1) for k in range(1, 6) for v in (([p for p in PUNCT if spec_p(m, p)] + [None]) if k == 4 else [None])]
 
 ALPHA = set(range(65, 91)) | set(range(97, 123)) | {95, 36}
 DIGIT = set(range(48, 58))
@@ -89,7 +96,7 @@ class Prog(Base):
         self.ent = (lib or {}).get('entries', {})   # ROM routines (cc_ref)
         self.spec_mode, self.spec_tk, self.spec_tv = mode, tk, tv
         X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2'])
-        X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0))
+        X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), f_imp=K(0))
         X.cur.update({f'sc{c}{f}': K(0) for c in 'AOT' for f in ('', 'l', 'x')}); X.cur['ptop'] = K(0); X.cur['psp'] = K(0)
         if mode is not None: X.cur['mode'] = K(mode); X.cur['err'] = K(0)
         self.code = []      # (valid, instruction index, word0 (op * 8192 + A), 0, word0's label or -1, word1, word1's multiplier, frame label)
@@ -192,7 +199,8 @@ class Prog(Base):
         """index of the symbol with this name, or -1: the latest block-scoped one (scores NS+1..2NS), else the latest
         other one (1..NS)"""
         n, lo = self.v('nsym'), self.m(sub(NS, self.v('nlet')), 'slo')
-        best = self.m(mx(*[mul(and_(eq(I(f'sh1_{j}'), h1), eq(I(f'sh2_{j}'), h2)), add(mul(lt(j, n), j + 1), mul(ge(j, lo), 2 * NS - j)))
+        ni = self.v('nimp')                             # (entries 0 ... NIMP - 1: the implicit globals, nimp of them)
+        best = self.m(mx(*[mul(and_(eq(I(f'sh1_{j}'), h1), eq(I(f'sh2_{j}'), h2)), add(mul(lt(j, ni if j < R.NIMP else n), j + 1), mul(ge(j, lo), 2 * NS - j)))
                            for j in range(NS)]), 'sbest')
         return self.m(ite(gt(best, NS), sub(2 * NS, best), sub(best, 1)), 'sym')
     def sym_sel(self, j, f, h):
@@ -207,10 +215,14 @@ class Prog(Base):
         o = self.m(ite(eq(k, 2), add(256, ite(ispar, sub(a, R.PARAM0 - 1), a)), a), 'svar')
         return k, o, b, cst
     def set_symbool(self, j, b):
-        """symbol j's type := b (write port: the whole entry)"""
-        sk = self.sym_sel(j, 'sk_', 'sk')
-        self.symw.append((self.x.g, lift(j), self.sym_sel(j, 'sh1_', 'sy1'), self.sym_sel(j, 'sh2_', 'sy2'),
-                          self.m(add(mod(sk, 65536), mul(fdiv(sk, 262144), 262144), mul(b, 65536)), 'syk')))
+        """cc_ref.settype: symbol j's type := b (write port: the whole entry), unless this step wrote an implicit global's entry
+        (f_imp): then the type stays, or error 61 if it was a string's"""
+        sk = self.sym_sel(j, 'sk_', 'sk'); old = self.m(mod(fdiv(sk, 65536), 4), 'syo')
+        fi = self.m(and_(self.v('f_imp'), ne(old, b)), 'syfi')
+        with self.when(and_(fi, eq(old, 2))): self.fail(61)
+        with self.when(not_(self.v('f_imp'))):
+            self.symw.append((self.x.g, lift(j), self.sym_sel(j, 'sh1_', 'sy1'), self.sym_sel(j, 'sh2_', 'sy2'),
+                              self.m(add(mod(sk, 65536), mul(fdiv(sk, 262144), 262144), mul(b, 65536)), 'syk')))
     def declare(self, h1, h2, kind, addr, cst=0, blk=0):
         """blk: a block-scoped let / const (written at NS - 1 - nlet)"""
         n, nl = self.m(self.v('nsym'), 'ns'), self.m(self.v('nlet'), 'nlt')
@@ -222,6 +234,29 @@ class Prog(Base):
             self.symw.append((self.x.g, self.m(ite(blk, sub(NS - 1, nl), n), 'sdi'), lift(h1), lift(h2), sk))
             with self.when(blk): self.set('nlet', nl + 1)
             with self.when(not_(blk)): self.set('nsym', n + 1)
+    def isres(self, h1, h2):
+        """cc_ref.RESERVED: a reserved word's name"""
+        return or_(*[and_(eq(h1, a), eq(h2, b)) for a, b in R.RESERVED])
+    def implicit(self, h1, h2, assign):
+        """cc_ref.implicit: an undeclared name's global -> its symbol index"""
+        assign = lift(assign)
+        top = self.m(and_(eq(self.v('curf'), 0), assign), 'itop')
+        n, k = self.m(self.v('nsym'), 'ins'), self.m(self.v('nimp'), 'ink')
+        with self.when(top):
+            full = self.m(ge(self.v('dp'), R.SDATA), 'igf')
+            with self.when(full): self.fail(25)
+            with self.when(not_(full)): self.declare(h1, h2, 1, self.v('dp')); self.set('dp', self.v('dp') + 1)
+        with self.when(not_(top)):
+            with self.when(ge(k, R.NIMP)): self.fail(24)
+            with self.when(lt(k, R.NIMP)):
+                self.symw.append((self.x.g, k, lift(h1), lift(h2), self.m(add(mul(ite(assign, 1, 3), 16384), k, R.IMPC + 8192), 'isk')))
+                self.set('nimp', k + 1); self.set('f_imp', 1)
+        return self.m(ite(top, n, k), 'ij')
+    def sym_kind(self, j, kind, cst):
+        """symbol j's kind := kind, its const flag := cst (cc_ref: an implicit global assigned, a var of a global's name)"""
+        sk = self.sym_sel(j, 'sk_', 'sk')
+        self.symw.append((self.x.g, lift(j), self.sym_sel(j, 'sh1_', 'sy1'), self.sym_sel(j, 'sh2_', 'sy2'),
+                          self.m(add(mod(sk, 16384), mul(mod(fdiv(sk, 65536), 4), 65536), mul(kind, 16384), mul(cst, 262144)), 'syk2')))
     def decl_blk(self):
         """cc_ref.decl_blk: let / const (pn1 1 / 2) below the function or program level"""
         return self.m(and_(gt(self.v('pn1'), 0), gt(self.v('csp'), self.v('curf'))), 'dblk')
@@ -434,11 +469,13 @@ class Prog(Base):
                     more = self.m(or_(dgcn, and_(eq(nst, 2), anyeq(cn, (46, 69, 101))), and_(eq(nst, 3), anyeq(cn, (69, 101))),
                                       and_(eq(nst, 4), anyeq(cn, (43, 45)))), 'nmore')
                     with self.when(not_(more)):
-                        isd = self.m(or_(nh2, gt(nacc, R.SMI_HI)), 'nisd')      # a double: its string, committed
+                        nbad = self.m(or_(eq(nst, 4), and_(eq(nst, 5), not_(dgc))), 'nbad')     # cc_ref: an exponent without digits
+                        with self.when(nbad): tok(4, 31)
+                        isd = self.m(and_(not_(nbad), or_(nh2, gt(nacc, R.SMI_HI))), 'nisd')      # a double: its string, committed
                         with self.when(isd):
                             tok(1, strtok(gt(add(sdp, nh1 + 2), SEND), sdp + 1, nh1), 0, 1)
                             self.set('inul', add(sdp, nh1 + 1)); self.set('sdp', add(sdp, nh1 + 2))
-                        with self.when(not_(isd)): tok(1, nacc)
+                        with self.when(and_(not_(nbad), not_(isd))): tok(1, nacc)
                         self.set('tkc', 0)
                 with self.when(cK): self.set('p2', two)
                 with self.when(cL): tok(4, c)
@@ -717,7 +754,7 @@ class Prog(Base):
     def token(self, tk, tv, th1, th2):
         # a variant for 'other punctuation' (tk 4, no tv) only sees codes outside PUNCT
         other_p = self.spec_tk == 4 and self.spec_tv is None and SPEC_LEVEL == 'mtv'
-        P = lambda ch: K(0) if other_p and ch in PUNCT else self.m(and_(eq(tk, 4), eq(tv, ch)), f'P{ch}_')
+        P = lambda ch: K(0) if other_p and spec_p(self.spec_mode, ch) else self.m(and_(eq(tk, 4), eq(tv, ch)), f'P{ch}_')
         isID = self.m(eq(tk, 2), 'isID'); isNUM = self.m(eq(tk, 1), 'isNUM'); isSTR = self.m(eq(tk, 3), 'isSTR'); isEOF = self.m(eq(tk, 5), 'isEOF')
         KWc = lambda k: self.m(and_(isID, eq(th1, KW[k][0]), eq(th2, KW[k][1])), 'kw_' + k)
         live = lambda: self.m(self.v('live'), 'live')
@@ -727,38 +764,53 @@ class Prog(Base):
         # (after a dynamic mode change the analysis could not prove them unreachable)
         FALL = {R.S_NAMES: (R.S_NAMEE, R.S_OPER), R.S_NAMEE: (R.S_OPER,), R.S_ELSE: (R.S_DOWHILE, R.S_STMT), R.S_AFTERELSE: (R.S_STMT,),
                 R.S_LBRACE: (R.S_STMT,), R.S_CONFIRST: (R.S_OPND,), R.S_SWCASE: (R.S_STMT,)}
+        if self.spec_tk in (None, 1, 3) or (self.spec_tk == 4 and self.spec_tv is None):     # an expression statement's first token
+            FALL[R.S_STMT] = (R.S_OPND,); FALL[R.S_ELSE] += (R.S_OPND,)
         reach = None if self.spec_mode is None else {self.spec_mode, *FALL.get(self.spec_mode, ())}
         def block(md):
             if reach is not None and md not in reach: return self.when(K(0))
             return self.when(and_(live(), eq(mode(), md)))
         PNL, PRB = P(R.T_NL), P(125)
+        fallin = self.m(anyeq(mode(), (R.S_AFTERELSE, R.S_LBRACE)), 'fallin')     # (cc_ref: a braceless body's statement)
+        lits = lambda: [(KWc(w), k, t) for w, (k, t) in R.LITERALS.items()]      # true false null undefined NaN Infinity
+        def push_lit(ls):
+            self.push_od(add(*[mul(c, k) for c, k, _ in ls]), add(*[mul(c, t) for c, _, t in ls if t])); self.set('mode', R.S_OPER); self.done()
         # a newline token means nothing outside the modes where it can end a statement
         with self.when(and_(PNL, not_(anyeq(mode(), (R.S_NAMES, R.S_NAMEE, R.S_OPER, R.S_VARAFTER, R.S_INC, R.S_OPND))))): self.done()
         # ---- S_NAMES
+        isw = lambda p1, p2: self.m(and_(or_(*[and_(eq(p1, KW[w][0]), eq(p2, KW[w][1])) for w in ('window', 'globalThis')]), P(46)), 'isw')
         with block(R.S_NAMES):
             pn1, pn2 = self.v('pn1'), self.v('pn2')
+            wd = isw(pn1, pn2)
+            with self.when(wd): self.set('pn1', 1); self.set('pn2', 0); self.set('mode', R.S_WDOT); self.done()     # window.x: x
             j = self.lookup(pn1, pn2)
             k, o, b, cst = self.symkind_addr(j)
-            asg = self.m(or_(P(61), ne(compound, 0)), 'asg')
+            asg = self.m(and_(not_(wd), or_(P(61), ne(compound, 0))), 'asg')
             with self.when(asg):
-                with self.when(lt(j, 0)): self.fail(5)
-                with self.when(and_(ge(j, 0), cst)): self.fail(64)
-                with self.when(and_(ge(j, 0), not_(cst))):
+                undef = self.m(lt(j, 0), 'aund')
+                with self.when(and_(undef, not_(P(61)))): self.fail(5)
+                with self.when(and_(undef, P(61))): ja = self.implicit(pn1, pn2, K(1))      # cc_ref.implicit
+                with self.when(and_(not_(undef), eq(k, 3))): self.sym_kind(j, 1, cst)     # (assigned)
+                ccst = self.m(and_(not_(undef), cst), 'accst')
+                with self.when(ccst): self.fail(64)
+                with self.when(and_(or_(not_(undef), P(61)), not_(ccst))):
                     with self.when(not_(P(61))): self.push_od(o, b)        # x op= e: x is the left operand, read first
-                    self.push_cs(R.C_ASSIGN, j, compound); self.set('mode', R.S_OPND); self.done()
-            with self.when(or_(P(7), P(8))): self.incdec(pn1, pn2, tv)
-            with self.when(and_(P(91), lt(j, 0))): self.fail(7)      # NAME[e] = e: an expression statement (x[k])
-            with self.when(not_(or_(asg, P(7), P(8), and_(P(91), lt(j, 0))))):
+                    self.push_cs(R.C_ASSIGN, ite(undef, ja, j), compound); self.set('mode', R.S_OPND); self.done()
+            with self.when(and_(not_(wd), or_(P(7), P(8)))): self.incdec(pn1, pn2, tv)
+            with self.when(and_(not_(wd), P(91), lt(j, 0))): self.fail(7)      # NAME[e] = e: an expression statement (x[k])
+            with self.when(not_(or_(wd, asg, P(7), P(8), and_(P(91), lt(j, 0))))):
                 self.push_cs(R.C_EXPR); self.set('mode', R.S_NAMEE)
         # ---- S_NAMEE
         with block(R.S_NAMEE):
             pn1, pn2 = self.m(self.v('pn1'), 'pn1'), self.m(self.v('pn2'), 'pn2')
-            iscon = self.m(and_(eq(pn1, KW['console'][0]), eq(pn2, KW['console'][1])), 'iscon')
+            wd = isw(pn1, pn2)
+            with self.when(wd): self.set('pn1', 0); self.set('pn2', 0); self.set('mode', R.S_WDOT); self.done()     # window.x: x
+            iscon = self.m(and_(not_(wd), eq(pn1, KW['console'][0]), eq(pn2, KW['console'][1])), 'iscon')
             isputc = self.m(and_(eq(pn1, KW['putc'][0]), eq(pn2, KW['putc'][1])), 'isputc')
             with self.when(iscon):
                 with self.when(not_(P(46))): self.fail(30)
                 with self.when(P(46)): self.set('mode', R.S_CONLOG); self.done()
-            with self.when(and_(not_(iscon), P(40))):
+            with self.when(and_(not_(wd), not_(iscon), P(40))):
                 gi = self.m(add(*[mul(and_(eq(pn1, KW[g[0]][0]), eq(pn2, KW[g[0]][1])), R.GLOBAL_INDEX[KW[g[0]]] + 1) for g in R.GLOBALS]), 'gi')
                 with self.when(isputc): self.push_op(R.M_PUTC)
                 with self.when(and_(not_(isputc), ne(gi, 0))):            # parseInt(s), ...: a method on a dummy receiver
@@ -768,7 +820,7 @@ class Prog(Base):
                     fi, _, fb = self.fnfind(pn1, pn2); self.push_op(R.M_CALL, add(fi, mul(fb, 16))); self.push_od(TMP, 0)    # its slot
                 self.set('mode', R.S_OPND); self.done()
             p78n = self.m(or_(P(7), P(8)), 'p78n')
-            with self.when(and_(not_(iscon), not_(P(40)))):
+            with self.when(and_(not_(wd), not_(iscon), not_(P(40)))):
                 j = self.lookup(pn1, pn2)
                 k, o, b, cst = self.symkind_addr(j)
                 with self.when(p78n): self.incdec(pn1, pn2, tv, 2, (j, k, o, b, cst))     # x++ in an expression
@@ -776,9 +828,17 @@ class Prog(Base):
                 with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', R.S_DOT); self.done()     # String.fromCharCode
                 tyo = self.m(eq(self.top_op()[0], R.TYPEOF), 'ntyo')       # typeof x, x undeclared: "undefined"
                 undef = self.m(lt(j, 0), 'nund')
-                with self.when(and_(not_(p78n), undef, not_(sdot), not_(tyo))): self.fail(4)
-                with self.when(and_(not_(p78n), or_(not_(undef), and_(not_(sdot), tyo)))):
-                    self.push_od(ite(undef, R.K(R.UNDEF), o), mul(not_(undef), b)); self.set('mode', R.S_OPER)
+                rd = self.m(and_(not_(p78n), not_(sdot)), 'nrd')
+                newi = self.m(and_(rd, undef, not_(tyo)), 'nnew')
+                with self.when(newi): ji = self.implicit(pn1, pn2, K(0))     # cc_ref.implicit: read first (its global)
+                with self.when(and_(rd, eq(self.v('err'), 0))):
+                    dsc = self.m(ite(newi, add(ji, R.IMPC), ite(undef, R.K(R.UNDEF), o)), 'ndsc')
+                    self.push_od(dsc, mul(not_(undef), b)); self.set('mode', R.S_OPER)
+        # ---- S_WDOT: window.x / globalThis.x is the global x (pn1: at a statement's start)
+        with block(R.S_WDOT):
+            with self.when(not_(isID)): self.fail(69)
+            with self.when(isID):
+                self.set('mode', ite(ne(self.v('pn1'), 0), R.S_NAMES, R.S_NAMEE)); self.set('pn1', th1); self.set('pn2', th2); self.done()
         # ---- S_ELSE
         with block(R.S_ELSE):
             with self.when(KWc('else')):
@@ -821,9 +881,13 @@ class Prog(Base):
             t0 = self.top()[0]
             with self.when(isEOF):
                 with self.when(ne(self.v('csp'), 0)): self.fail(40)
-                undef = self.m(lt(self.v('nfdef'), self.v('nfn')), 'undef')
-                with self.when(and_(eq(self.v('csp'), 0), undef)): self.fail(60)
-                with self.when(and_(eq(self.v('csp'), 0), not_(undef))): self.emit(OP['HALT']); self.done()
+                # a reserved word read or called (cc_ref: an implicit global, a function never declared)
+                ni_, ns_, nf_ = self.v('nimp'), self.v('nsym'), self.v('nfn')
+                eres = self.m(or_(*[and_(lt(j, ni_) if j < R.NIMP else lt(j, ns_), self.isres(I(f'sh1_{j}'), I(f'sh2_{j}'))) for j in range(NS)],
+                                  *[and_(lt(k, ni_), eq(fdiv(mod(I(f'sk_{k}'), 65536), 16384), 3)) for k in range(R.NIMP)],     # read, never assigned
+                                  *[and_(lt(k, nf_), self.isres(I(f'fh1_{k}'), I(f'fh2_{k}'))) for k in range(NF)]), 'eres')
+                with self.when(and_(eq(self.v('csp'), 0), eres)): self.fail(4)
+                with self.when(and_(eq(self.v('csp'), 0), not_(eres))): self.emit(OP['HALT']); self.done()
             with self.when(P(123)): self.push_cs(R.C_BLOCK); self.done()
             with self.when(P(125)): self.close_block()
             with self.when(P(59)): self.set('f_simple', 1)
@@ -831,8 +895,17 @@ class Prog(Base):
             with self.when(fstep): self.set('f_simple', 1)
             with self.when(or_(P(7), P(8))): self.set('pn1', tv); self.set('pn2', 0); self.set('mode', R.S_PREINC); self.done()
             other = self.m(and_(not_(isEOF), not_(P(123)), not_(P(125)), not_(P(59)), not_(fstep), not_(P(7)), not_(P(8))), 'oth')
-            with self.when(and_(other, not_(isID))): self.fail(8)
-            with self.when(and_(other, isID)):
+            exs = self.m(and_(other, or_(isNUM, isSTR, *[P(c) for c in R.XSTART])), 'exs')     # an expression statement (cc_ref)
+            with self.when(and_(exs, fallin)): self.fail(8)
+            with self.when(and_(exs, not_(fallin))): self.push_cs(R.C_EXPR); self.set('mode', R.S_OPND)      # (into S_OPND)
+            with self.when(and_(other, not_(isID), not_(exs))): self.fail(8)
+            ls = lits(); tfs = self.m(or_(*[c for c, _, _ in ls]), 'tfs'); tys = KWc('typeof')
+            with self.when(and_(other, or_(tfs, tys), fallin)): self.fail(8)
+            with self.when(and_(other, or_(tfs, tys), not_(fallin))):       # a literal word or typeof: as S_OPND would take it
+                self.push_cs(R.C_EXPR)
+                with self.when(tfs): push_lit(ls)
+                with self.when(tys): self.push_op(R.TYPEOF); self.set('mode', R.S_OPND); self.done()
+            with self.when(and_(other, isID, not_(tfs), not_(tys))):
                 kws = ['var', 'let', 'const', 'if', 'while', 'do', 'for', 'return', 'function', 'break', 'continue', 'switch', 'case', 'default']
                 with self.when(or_(KWc('var'), KWc('let'), KWc('const'))):
                     self.set('pn1', add(KWc('let'), mul(KWc('const'), 2))); self.set('pn2', 0); self.set('mode', R.S_VAR); self.done()
@@ -879,8 +952,9 @@ class Prog(Base):
             with self.when(isID): self.incdec(th1, th2, self.v('pn1'), self.v('pn2'))
         # ---- S_VAR
         with block(R.S_VAR):
-            with self.when(not_(isID)): self.fail(9)
-            with self.when(isID):
+            vres = self.m(or_(not_(isID), self.isres(th1, th2)), 'vres')
+            with self.when(vres): self.fail(9)
+            with self.when(not_(vres)):
                 curf = self.m(self.v('curf'), 'curf')
                 cst, blk = self.m(eq(self.v('pn1'), 2), 'dcst'), self.decl_blk()
                 # cc_ref.redecl: a let / const of a name its scope declares already (error 78)
@@ -888,24 +962,33 @@ class Prog(Base):
                 lo = self.m(ite(ne(curf, 0), self.v('fsym'), 0), 'rlo'); ns_ = self.m(self.v('nsym'), 'rns')
                 inb = lambda j: and_(ge(j, sub(NS, nl_)), lt(j, sub(NS, e_)))
                 inf = lambda j: and_(ge(j, lo), lt(j, ns_))
-                rd = self.m(and_(ne(self.v('pn1'), 0), or_(*[and_(eq(I(f'sh1_{j}'), th1), eq(I(f'sh2_{j}'), th2), ite(blk, inb(j), inf(j))) for j in range(NS)])), 'redecl')
+                ni_, var_ = self.m(self.v('nimp'), 'rni'), self.m(eq(self.v('pn1'), 0), 'rvar')
+                same = lambda j: and_(eq(I(f'sh1_{j}'), th1), eq(I(f'sh2_{j}'), th2))
+                ru = self.m(mul(and_(eq(curf, 0), not_(blk)), mx(*[mul(and_(same(j), lt(j, ni_) if j < R.NIMP else and_(lt(j, ns_), var_)), j + 1) for j in range(NS)])), 'vru')
+                with self.when(ne(ru, 0)):                     # cc_ref: the same variable
+                    self.sym_kind(sub(ru, 1), 1, cst); self.set('pn2', ru); self.set('mode', R.S_VARAFTER); self.done()
+                rd = self.m(and_(eq(ru, 0), ne(self.v('pn1'), 0), or_(*[and_(same(j), ite(blk, inb(j), inf(j))) for j in range(NS)])), 'redecl')
                 with self.when(rd): self.fail(78)
-                with self.when(and_(ne(curf, 0), not_(rd))):
+                with self.when(eq(ru, 0)): self.set('pn2', 0)
+                go = self.m(and_(eq(ru, 0), not_(rd)), 'vgo')
+                with self.when(and_(ne(curf, 0), go)):
                     nl = self.m(self.v('nloc') + 1, 'nl'); self.set('nloc', nl); self.declare(th1, th2, 2, add(self.v('npar'), nl), cst, blk)
                 full = self.m(ge(self.v('dp'), R.SDATA), 'gfull')
-                with self.when(and_(eq(curf, 0), full, not_(rd))): self.fail(25)
-                with self.when(and_(eq(curf, 0), not_(full), not_(rd))):
+                with self.when(and_(eq(curf, 0), full, go)): self.fail(25)
+                with self.when(and_(eq(curf, 0), not_(full), go)):
                     self.declare(th1, th2, 1, self.v('dp'), cst, blk); self.set('dp', self.v('dp') + 1)
-                with self.when(and_(or_(ne(curf, 0), not_(full)), not_(rd))): self.set('mode', R.S_VARAFTER); self.done()
+                with self.when(and_(or_(ne(curf, 0), not_(full)), go)): self.set('mode', R.S_VARAFTER); self.done()
         # ---- S_VARAFTER
         with block(R.S_VARAFTER):
             pn1 = self.m(self.v('pn1'), 'dk')
-            jv = self.m(ite(self.decl_blk(), sub(NS, self.v('nlet')), self.v('nsym') - 1), 'vj')
+            pn2v = self.m(self.v('pn2'), 'vpn2')              # (a reused global's index + 1)
+            jv = self.m(ite(ne(pn2v, 0), sub(pn2v, 1), ite(self.decl_blk(), sub(NS, self.v('nlet')), self.v('nsym') - 1)), 'vj')
             with self.when(P(61)):
                 self.push_cs(R.C_ASSIGN, jv, 0, add(pn1, 1)); self.set('mode', R.S_OPND); self.done()
             with self.when(and_(not_(P(61)), eq(pn1, 2))): self.fail(65)
             with self.when(and_(not_(P(61)), ne(pn1, 2))):
-                _, ov, _, _ = self.symkind_addr(jv); self.emit(OP['MOV'], (ov, 0), (R.K(R.UNDEF), 0))     # a variable without a value: undefined
+                _, ov, _, _ = self.symkind_addr(jv)
+                with self.when(eq(pn2v, 0)): self.emit(OP['MOV'], (ov, 0), (R.K(R.UNDEF), 0))     # a variable without a value: undefined
                 with self.when(P(44)): self.set('mode', R.S_VAR); self.done()
                 with self.when(not_(P(44))): self.simple_end(PNL, PRB)
         with block(R.S_INC):
@@ -916,8 +999,9 @@ class Prog(Base):
                 t = self.top()
                 self.set('mode', ite(eq(t[0], R.C_FORINIT), R.S_STMT, R.S_OPND)); self.done()
         with block(R.S_FNAME):
-            with self.when(not_(isID)): self.fail(34)
-            with self.when(isID):
+            fres = self.m(or_(not_(isID), self.isres(th1, th2)), 'fres')
+            with self.when(fres): self.fail(34)
+            with self.when(not_(fres)):
                 fi, l, _ = self.fnfind(th1, th2); self.set('cfn', fi); self.deflab(l, self.here()); self.set('nfdef', self.v('nfdef') + 1)
                 self.set('curf', 1); self.set('nloc', 0); self.set('npar', 0); self.set('fsym', self.v('nsym'))
                 le = self.newlab()
@@ -928,8 +1012,9 @@ class Prog(Base):
             with self.when(P(40)): self.set('mode', R.S_FPARAM); self.done()
         with block(R.S_FPARAM):
             with self.when(P(41)): self.end_params()
-            with self.when(and_(not_(P(41)), not_(isID))): self.fail(36)
-            with self.when(and_(not_(P(41)), isID)):
+            pres = self.m(or_(not_(isID), self.isres(th1, th2)), 'pres')
+            with self.when(and_(not_(P(41)), pres)): self.fail(36)
+            with self.when(and_(not_(P(41)), not_(pres))):
                 self.declare(th1, th2, 2, add(self.v('npar'), R.PARAM0)); self.set('npar', self.v('npar') + 1); self.set('mode', R.S_FPSEP); self.done()
         with block(R.S_FPSEP):
             with self.when(P(44)): self.set('mode', R.S_FPARAM); self.done()
@@ -1008,10 +1093,8 @@ class Prog(Base):
                 with self.when(lt(tsa, 1024)):
                     e, ok = self.intern(th1, th2, add(tsa, self.db), fdiv(tv, 2048))
                     with self.when(ok): self.push_od(KBIG, 2, sub(e, R.STRTAG)); self.set('mode', R.S_OPER); self.done()
-            lits = [(KWc(w), k, t) for w, (k, t) in R.LITERALS.items()]          # true false null undefined NaN Infinity
-            tf = self.m(or_(*[c for c, _, _ in lits]), 'tf')
-            with self.when(tf):
-                self.push_od(add(*[mul(c, k) for c, k, _ in lits]), add(*[mul(c, t) for c, _, t in lits if t])); self.set('mode', R.S_OPER); self.done()
+            ls = lits(); tf = self.m(or_(*[c for c, _, _ in ls]), 'tf')
+            with self.when(tf): push_lit(ls)
             tyo = KWc('typeof')
             with self.when(tyo): self.push_op(R.TYPEOF); self.done()
             with self.when(P(123)):                            # an object literal: NEW, then each pair as o.key = v

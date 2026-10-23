@@ -18,7 +18,7 @@ def ref_state(c):
     st = dict(lx=c.lx, q=c.q, lt=c.lt, tkc=c.tkc, acc=c.acc, h1=c.h1, h2=c.h2, p2=c.p2, sstart=c.sstart, dp=c.dp, mode=c.mode, pn1=c.pn[0], pn2=c.pn[1],
               sdp=c.sdp, pnl=c.pnl, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
               osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
-              pendLa=c.pendLa, err=c.err, nd=c.nd, tb=c.tb)
+              pendLa=c.pendLa, err=c.err, nd=c.nd, tb=c.tb, nimp=c.nimp)
     for k in range(R.ODN): st[f'od{k}'] = c.od[k] if k < c.nd else None
     st['pk'] = c.pk if c.nd and c.desc(c.nd - 1) >= R.KBIG and c.desc(c.nd - 1) != R.TMP else None     # (a big constant or comparison on top)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
@@ -26,7 +26,7 @@ def ref_state(c):
         e = c.cs[k]; st[f'csA{k}'] = e[0] * 4096 + e[1] * 64 + e[2] if k < c.csp else None; st[f'csB{k}'] = e[5] * 4096 + e[3] * 64 + e[4] if k < c.csp else None
     for j in range(R.NS):
         e = c.sym[j]
-        live = j < c.nsym or j >= R.NS - c.nlet                    # function / program level, or block-scoped
+        live = R.NIMP <= j < c.nsym or j < c.nimp or j >= R.NS - c.nlet     # function / program level, implicit, or block-scoped
         for nm, v in ((f'sh1_{j}', e[0]), (f'sh2_{j}', e[1]), (f'sk_{j}', (e[4] + 4 * e[5]) * 65536 + e[2] * 16384 + e[3] + 8192)):
             st[nm] = v if live else None
     for k in range(R.NF):

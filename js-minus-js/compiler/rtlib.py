@@ -31,9 +31,14 @@ def consts():
     k.update(DIGS=R.DIGS, CLO=R.DIGS + 20, NEND=R.DIGS + 21, DBLTAG=R.DBLTAG, SMI_LO=R.SMI_LO, SMI_HI=R.SMI_HI)
     return k
 
+# the runtime's messages (it has no string literals): m_<name>() prints one, a putc per character
+MSGS = {'uncaught': 'Uncaught ', 'referr': 'ReferenceError'}
+def msgs():
+    return ''.join(f"function m_{n}() {{ {' '.join(f'putc({ord(ch)});' for ch in t)} return 0; }}\n" for n, t in MSGS.items())
+
 def build(out):
     k = consts()
-    src = re.sub(r'__([A-Z0-9_]+)__', lambda m: str(k[m.group(1)]), open(os.path.join(HERE, 'lib_src.js')).read())
+    src = re.sub(r'__([A-Z0-9_]+)__', lambda m: str(k[m.group(1)]), open(os.path.join(HERE, 'lib_src.js')).read()) + msgs()
     c = R.Compiler(DB, 0, None, rom=True)
     words, data = c.compile(src)
     if c.err: raise SystemExit(f'lib_src.js: compile error {c.err} (instruction {c.cp})')
@@ -44,6 +49,7 @@ def build(out):
         entries[n] = 2 * c.lab[f[2]]                  # (code labels are instruction pairs: the address / 2)
     rom = [words.get(a, 0) for a in range(max(words) + 1)]
     assert len(rom) % 2 == 0
+    rom[0:2] = [R.OP['JMP'] * 8192 + entries['refstub'] // 2, 0]     # address 0 (undefined labels: cc_ref.NIMP): to refstub
     entries['pstub'] = len(rom)                         # PRINT's trap: TENTER ptrap (cc_ref.TRAPS)
     rom += [R.OP['TENTER'] * 8192 + entries['ptrap'] // 2, 0]
     missing = [t for t in R.TRAPS.values() if t not in entries]

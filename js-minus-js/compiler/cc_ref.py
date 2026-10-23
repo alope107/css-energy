@@ -461,7 +461,7 @@ ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
-                           'undefined', 'NaN', 'Infinity', 'typeof']
+                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis']
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
@@ -470,6 +470,20 @@ assert len(set(KW.values())) == len(KW), 'keyword hashes collide'
 LITERALS = {'true': (K(TRUE), 1), 'false': (K(FALSE), 1), 'null': (K(NULL), 0), 'undefined': (K(UNDEF), 0), 'NaN': (K(NAN), 3),
             'Infinity': (K(INF), 3)}
 LITK = {KW[w]: v for w, v in LITERALS.items()}
+# Implicit globals (an assignment to an undeclared name, window.x, or a name read before it is declared): symbol entries 0 ...
+# NIMP - 1 are kept for those that appear inside a function or are read first (one assigned at the top level first is an
+# ordinary global); entry k is global IMPC + k. One read first is kind 3 until it is assigned or declared; a name that never
+# is is an undefined variable (error 4, at the end). A call of a function that is never declared is JavaScript's
+# ReferenceError at run time: its label stays undefined, and the page's undefined labels are 0, the library's refstub
+NIMP, IMPC = 4, 2
+WGLOB = (KW['window'], KW['globalThis'])
+# JavaScript's reserved words among the keywords: no variable, parameter or function may be named so. A declaration checks at
+# once; a name read or called (an implicit global, a function never declared) is checked at the end, in the tables
+RESERVED = tuple(KW[w] for w in ('var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'break', 'continue',
+                                 'do', 'switch', 'case', 'default', 'typeof', 'true', 'false', 'null'))
+# punctuation that can start an expression statement (not a statement): ( [ ! - ~; at a statement's start the CSS compiler's
+# variants don't tell them apart (cc_dsl.variant_key: STMTM)
+XSTART = (40, 91, 33, 45, 126)
 
 # punctuation codes: single chars by ASCII; two-char ops: === 1, !== 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
 # += 9, -= 10, *= 11, /= 12, %= 13 (== and != as === and !== with tflag); NL 14: a newline after a token that can end a
@@ -531,7 +545,7 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
 # parser modes
 (S_STMT, S_OPND, S_OPER, S_NAMES, S_NAMEE, S_VAR, S_VARAFTER, S_LPAREN, S_LBRACE, S_ELSE, S_FNAME, S_FPAREN, S_FPARAM,
  S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_INC, S_AFTERELSE, S_PREINC,
- S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_ERR) = range(27)
+ S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_WDOT, S_ERR) = range(28)
 # pm = 3 after x++ / ++x in an expression, which no '.' or '[' may follow.
 
 def tmerge(a, b):
@@ -569,6 +583,8 @@ class Compiler:
         self.lab = [-1] * self.NL; self.nlab = 0
         self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings and names: h1 h2 address
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
+        self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
+        if not rom: self.nsym = NIMP; self.dp = IMPC + NIMP
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
 
@@ -604,12 +620,29 @@ class Compiler:
     def top_op(self): return (self.ops[self.osp - 1], self.opv[self.osp - 1]) if self.osp else (0, 0)
     def lookup(self, h):
         """the latest block-scoped let / const of that name, else the latest other name (in a valid program a visible
-        block-scoped binding is always the innermost: a var of the same name in its block would be a redeclaration)"""
+        block-scoped binding is always the innermost: a var of the same name in its block would be a redeclaration), else an
+        implicit global"""
         for j in range(NS - self.nlet, NS):
             if (self.sym[j][0], self.sym[j][1]) == h: return j
         for j in range(self.nsym - 1, -1, -1):
-            if (self.sym[j][0], self.sym[j][1]) == h: return j
+            if (j >= NIMP or j < self.nimp or self.rom) and (self.sym[j][0], self.sym[j][1]) == h: return j
         return -1
+    def settype(self, j, t):
+        """symbol j's static type := t. (The CSS compiler writes one symbol per token: when this token wrote an implicit global's
+        entry the type stays, unless it is a string's, which would make a + chain print in pieces: error 61)"""
+        if self.symstep and self.sym[j][4] != t:
+            if self.sym[j][4] == 2: self.fail(61)
+            return
+        self.sym[j][4] = t
+    def implicit(self, h, assign):
+        """an undeclared name becomes a global: at the top level, assigned, an ordinary one; else implicit entry nimp (kind 3 if read
+        first, until it is assigned)"""
+        if not self.curf and assign:
+            if self.dp >= SDATA: self.fail(25); return 0
+            self.declare(h, 1, self.dp); self.dp += 1; return self.nsym - 1
+        k = self.nimp
+        if k >= NIMP: self.fail(24); return 0
+        self.sym[k] = [h[0], h[1], 1 if assign else 3, IMPC + k, 0, 0]; self.nimp += 1; self.symstep = 1; return k
     def fnfind(self, h):
         """function table index for a name (adding it, with a new label, if absent)"""
         for k in range(self.nfn):
@@ -1029,7 +1062,8 @@ class Compiler:
             self.sbyte(self.sdp + 1 + self.h1, c); self.h1 += 1                     # (a double's characters: a string the parser commits)
             st = self.tkc
             if not (isdg(cn) or (st == 2 and cn in (46, 69, 101)) or (st == 3 and cn in (69, 101)) or (st == 4 and cn in (43, 45))):
-                if (self.h2 or self.acc > SMI_HI) and not self.rom:     # a double: its string [len][characters][0] at sdp (the ROM's are raw words)
+                if st == 4 or (st == 5 and not isdg(c)): tok = ('P', 31)        # an exponent without digits ("2e", "1e+"): no number
+                elif (self.h2 or self.acc > SMI_HI) and not self.rom:     # a double: its string [len][characters][0] at sdp (the ROM's are raw words)
                     tok = ('NUM', (self.sdp + 1 + NOROOM * int(self.sdp + 2 + self.h1 > SEND), self.h1))
                     self.inul = self.sdp + 1 + self.h1; self.sdp += self.h1 + 2
                 else: tok = ('NUM', self.acc)
@@ -1078,13 +1112,19 @@ class Compiler:
         if self.err: return
         isP = lambda c: kind == 'P' and v == c
         isK_ = lambda k: kind == 'ID' and v == KW[k]
+        self.symstep = 0                                   # (this token wrote an implicit global's entry: settype)
         m = self.mode
+        fallin = m in (S_AFTERELSE, S_LBRACE)              # (a braceless body's statement: no expression statement there)
         if isP(T_NL) and m not in (S_NAMES, S_NAMEE, S_OPER, S_VARAFTER, S_INC, S_OPND): return
         if m == S_NAMES:
             h = self.pn
+            if h in WGLOB and isP(46): self.pn = (1, 0); self.mode = S_WDOT; return      # window.x: x
             if isP(61) or (kind == 'P' and v in COMPOUND):
                 j = self.lookup(h)
-                if j < 0: return self.fail(5)
+                if j < 0 and (self.rom or not isP(61)): return self.fail(5)
+                if j < 0: j = self.implicit(h, True)
+                if self.err: return
+                if self.sym[j][2] == 3: self.sym[j][2] = 1       # (assigned)
                 if self.sym[j][5]: return self.fail(64)
                 if not isP(61): self.push_od(self.var(j), self.sym[j][4])     # x op= e: x is the left operand, read first
                 self.push_cs(C_ASSIGN, j, COMPOUND.get(v, 0) if kind == 'P' else 0); self.mode = S_OPND; return
@@ -1108,12 +1148,18 @@ class Compiler:
                     k = self.fnfind(h); self.push_op(M_CALL, k + self.FM * self.fn[k][3]); self.push_od(TMP, 0)   # its slot
                 self.mode = S_OPND; return
             if isP(7) or isP(8): return self.incdec(h, v, 2)
+            if h in WGLOB and isP(46): self.pn = (0, 0); self.mode = S_WDOT; return     # window.x: x
             j = self.lookup(h)
             if j < 0 and h == KW['String'] and isP(46):          # String.fromCharCode(...): a method on a dummy receiver
                 self.push_od(K(0), 0); self.mode = S_DOT; return
-            if j < 0 and self.top_op()[0] != TYPEOF: return self.fail(4)
-            if j < 0: self.push_od(K(UNDEF), 0)                  # typeof x, x undeclared: "undefined"
-            else: self.push_od(self.var(j), self.sym[j][4])
+            tyo = self.top_op()[0] == TYPEOF
+            if j < 0 and (tyo or self.rom):
+                if not tyo: return self.fail(4)
+                self.push_od(K(UNDEF), 0)                        # typeof x, x undeclared: "undefined"
+            else:
+                if j < 0: j = self.implicit(h, False)
+                if self.err: return
+                self.push_od(self.var(j), self.sym[j][4])
             m = self.mode = S_OPER
         if m == S_ELSE:
             if isK_('else'):
@@ -1145,13 +1191,19 @@ class Compiler:
         if m == S_STMT:
             if kind == 'EOF':
                 if self.csp: return self.fail(40)
-                if self.nfdef < self.nfn: return self.fail(60)
+                if self.rom and self.nfdef < self.nfn: return self.fail(60)
+                if not self.rom and (any((self.sym[j][0], self.sym[j][1]) in RESERVED for j in range(self.nsym) if j >= NIMP or j < self.nimp)
+                                     or any(self.sym[k][2] == 3 for k in range(self.nimp))     # read, never assigned or declared
+                                     or any((self.fn[k][0], self.fn[k][1]) in RESERVED for k in range(self.nfn))): return self.fail(4)
                 self.emit('HALT'); return
             if isP(123): self.push_cs(C_BLOCK); return
             if isP(125): return self.close_block()
             if isP(59): return self.end_simple_stmt(kind, v)
             if isP(41) and self.top_cs()[0] == C_FORSTEP: return self.end_simple_stmt(kind, v)
             if isP(7) or isP(8): self.pn = (v, 0); self.mode = S_PREINC; return
+            if kind in ('NUM', 'STR') or (kind == 'P' and v in XSTART) or (kind == 'ID' and (v in LITK or isK_('typeof'))):
+                if fallin: return self.fail(8)
+                self.push_cs(C_EXPR); self.mode = S_OPND; return self.token(kind, v)     # an expression statement: its value is dropped
             if kind != 'ID': return self.fail(8)
             if isK_('var') or isK_('let') or isK_('const'):
                 self.pn = (int(isK_('let')) + 2 * int(isK_('const')), 0); self.mode = S_VAR; return
@@ -1193,20 +1245,24 @@ class Compiler:
             if kind != 'ID': return self.fail(10)
             return self.incdec(v, self.pn[0], self.pn[1])
         if m == S_VAR:
-            if kind != 'ID': return self.fail(9)
+            if kind != 'ID' or v in RESERVED: return self.fail(9)
             cst, blk = int(self.pn[0] == 2), self.decl_blk()
+            j = self.lookup(v) if not self.curf and not blk and not self.rom else -1
+            if j >= 0 and (j < NIMP or (j < self.nsym and not self.pn[0])):    # the program's global of that name (an implicit one,
+                self.sym[j][2] = 1; self.sym[j][5] = cst; self.pn = (self.pn[0], j + 1)     # or a var's): the same variable
+                self.mode = S_VARAFTER; return
             if self.pn[0] and self.redecl(v): return self.fail(78)
             if self.curf: self.nloc += 1; self.declare(v, 2, self.npar + self.nloc, cst, blk)
             else:
                 if self.dp >= SDATA: return self.fail(25)
                 self.declare(v, 1, self.dp, cst, blk); self.dp += 1
-            self.mode = S_VARAFTER; return
+            self.pn = (self.pn[0], 0); self.mode = S_VARAFTER; return
         if m == S_VARAFTER:
-            j = NS - self.nlet if self.decl_blk() else self.nsym - 1
+            j = self.pn[1] - 1 if self.pn[1] else NS - self.nlet if self.decl_blk() else self.nsym - 1     # (pn[1]: a reused global + 1)
             if isP(61):
                 self.push_cs(C_ASSIGN, j, 0, 1 + self.pn[0]); self.mode = S_OPND; return
             if self.pn[0] == 2: return self.fail(65)
-            if self.curf or not self.rom: self.emit('MOV', (self.var(j), 0), (K(0 if self.rom else UNDEF), 0))      # a variable without a value: undefined
+            if (self.curf or not self.rom) and not self.pn[1]: self.emit('MOV', (self.var(j), 0), (K(0 if self.rom else UNDEF), 0))      # a variable without a value: undefined
             if isP(44): self.mode = S_VAR; return
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
@@ -1218,8 +1274,11 @@ class Compiler:
         if m == S_LPAREN:
             if not isP(40): return self.fail(32)
             self.mode = S_STMT if self.top_cs()[0] == C_FORINIT else S_OPND; return
+        if m == S_WDOT:                                        # window.x / globalThis.x: the global x
+            if kind != 'ID': return self.fail(69)
+            self.mode = S_NAMES if self.pn[0] else S_NAMEE; self.pn = v; return
         if m == S_FNAME:
-            if kind != 'ID': return self.fail(34)
+            if kind != 'ID' or v in RESERVED: return self.fail(34)
             k = self.fnfind(v); self.cfn = k; self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
             self.curf = 1; self.nloc = 0; self.npar = 0; self.fsym = self.nsym
             le = self.newlab(); self.cs[self.csp - 1][2] = le
@@ -1229,7 +1288,7 @@ class Compiler:
             self.mode = S_FPARAM; return
         if m == S_FPARAM:
             if isP(41): return self.end_params()
-            if kind != 'ID': return self.fail(36)
+            if kind != 'ID' or v in RESERVED: return self.fail(36)
             self.declare(v, 2, PARAM0 + self.npar); self.npar += 1; self.mode = S_FPSEP; return
         if m == S_FPSEP:
             if isP(44): self.mode = S_FPARAM; return
@@ -1440,8 +1499,8 @@ class Compiler:
         if k == C_ASSIGN:                                      # t: symbol, compound op, from a declaration
             self.pop_cs(); o = (self.var(t[1]), 0); i = self.nd - 1
             if t[2]:                                           # (a snapshot replaced x below e if e changed it)
-                self.sym[t[1]][4] = self.compound(t[2], i - 1, o); self.nd -= 1
-            else: self.put(o, i); self.sym[t[1]][4] = self.otype(i)
+                self.settype(t[1], self.compound(t[2], i - 1, o)); self.nd -= 1
+            else: self.put(o, i); self.settype(t[1], self.otype(i))
             self.nd -= 1
             if isP(44) and t[3]: self.pn = (t[3] - 1, 0); self.mode = S_VAR; return     # var a = 1, b ...
             return self.end_simple_stmt(kind, v)
@@ -1533,10 +1592,11 @@ class Compiler:
     def link(self):
         if 2 * self.cp > self.CODESZ: self.fail(62)           # (the page checks this in .fin)
         words = {}
+        fnl = {self.fn[k][2] for k in range(self.nfn)}
         for a, (w, lab, m) in self.words_ir().items():
             if lab is not None:
-                if lab >= self.NL or self.lab[lab] < 0: self.fail(60)
-                else: w += m * self.lab[lab]
+                if lab >= self.NL or (self.lab[lab] < 0 and (self.rom or lab not in fnl)): self.fail(60)
+                else: w += m * max(0, self.lab[lab])      # (a function never declared: 0, the library's refstub)
             words[a] = w
         return words, dict(self.data)
 

@@ -23,6 +23,12 @@
 // chunk is full; gcnew, galloc and gccat when NEW, ALLOC or a string's + find the heap full; pval to print an array or
 // object. The compiler calls the methods, mkarrN (array literals) and parseint / tostring / fromcc directly.
 
+// ROM address 0 (the first routine): a call of a function that is never declared, and a read of an implicit global that is never
+// assigned (cc_ref.NIMP), land here, since the page's undefined labels are 0. JavaScript's ReferenceError, uncaught: the
+// program stops. (The m_ routines print the messages: rtlib.py makes them from its MSGS, a putc per character)
+function refstub() { m_uncaught(); m_referr(); putc(10); halt(); return 0; }
+
+
 function rnd8(n) { return n + (8 - n % 8) % 8; }
 
 // ---------------- allocation and the collector
