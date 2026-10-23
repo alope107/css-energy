@@ -30,8 +30,8 @@ proposing an idea).
 - Rebuild: `python3 build.py [W] [H]` (cells ≤ 490). Self-test site: `python3 selftest/build.py`.
 - Tests: `make test` = `node tools/selftest.js` (~10 s, its four hosts at once: `SHARDS`), `node tools/e2e.js [seed]`
   (~1.5 min, mouse) and `node tools/touch.js` (~40 s, finger strokes on a phone viewport); `make test-goaway` (~2 min,
-  needs openssl) checks reads over an HTTP/2 host that ends connections like Cloudflare. Through `make`, a test whose site, tools and browser haven't changed since it passed prints `up to date`;
-  `RERUN=1` runs it.
+  needs openssl) checks reads over an HTTP/2 host that ends connections like Cloudflare. Through `make`, a test whose
+  site, tools and browser haven't changed since it passed prints `up to date`; `RERUN=1` runs it.
   Long runs exceed default tool timeouts: write output to a file and poll it.
 
 ## Non-obvious gotchas
@@ -63,11 +63,20 @@ proposing an idea).
   `/c/<k>/` namespace: every page URL is extensionless. Pages joined a header set by two `_headers` rules with `, `
   (unchecked on Workers): no overlapping rules (a joined `Cache-Control` containing `no-cache` stops registration).
 - A spinner still showing on a cell means its write hasn't loaded: a reload then can lose it. `tools/e2e.js`
-  waits for each writer's current URL in its `performance` entries before reloading.
+  waits for each writer's current URL in its `performance` entries before reloading, then 500 ms: a reload ~50 ms
+  after a write completed once read the old colour (1 run in ~12).
 - Touch uses css-physics's handles, but the dragged handle **publishes** its drag as an anchor's size
   (`docs/ARCHITECTURE.md#touch`): don't sum hundreds of handles with `timeline-scope`d timelines, each consumer costs
   ~0.1 ms per layout (960 made every layout ~94 ms). The stroke values are `inherits: false` and each element that
   needs them takes them with `inherit` (the follower `.fo` sits inside `.grid` for this).
+- **Chrome starts a transition only at a later frame**: a "1 ms late" copy of a value that changes every frame never
+  updates. And `transition-delay`/`animation-play-state` from an `if()` on an animated value that reaches the element
+  by inheritance, or computed on the same element from such values, aren't reliably recomputed: decide on the parent,
+  use it (inherited) on the child. A held transition (long delay) only ends when its target changes. Test strokes
+  with pointer moves every 4 ms sent through CDP without awaiting each (`tools/e2e.js` streamStroke): Playwright's
+  `mouse.move` waits for the renderer, and its sparse moves hid the "hunks".
+- On touch screens every scroller is a composited layer; with 480 handles a drag re-layerizes the page every frame
+  (~8–12 fps, `docs/ARCHITECTURE.md#touch`). `anchor()` ignores scroll offsets (only `position-anchor` follows).
 - Time things under the bench lease (`../.claude/worktrees/bench-queue/shared/py/bench.py run -m p -- …` until it is
   merged): other sessions benchmark on this machine, and an unleased run lands on the E-cores.
 - **Cloudflare ends each connection after ~10,000 requests** (HTTP/2 `GOAWAY`, HTTP/3 close), and a load is ~9,000.

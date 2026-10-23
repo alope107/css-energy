@@ -139,6 +139,21 @@ dragging, with a mouse and a finger. Headless Chromium 153.
   the current one. A half-cell distance test made slope-1/2 segments two cells thick at ties; one cell per step along
   the major axis (Bresenham) draws thin lines. Touch strokes started late: the first scroll update comes past the
   slop, so the first segment starts at the cell the finger came down on.
+- **"Huge hunks" at fast turns** (the user, 2026-10-23). The previous point was a transition 1 ms late; Chrome
+  starts a transition only at a later frame, so with the pointer moving every frame it was replaced before it ever
+  finished and stayed at the stroke's start: each frame drew a line from there. Headless tests with a move every two
+  frames never saw it; headed Chromium under Xvfb with a move every 4 ms did. Now two latches swap every 10 ms
+  (`ARCHITECTURE.md`, Strokes), after three traps: an `if()` on an animated, inherited value in `transition-delay`
+  is never recomputed; a held transition carries on if the target doesn't change; a style query on the clock
+  restyled the whole grid (100–700 ms frames). The line math moved from 480 cells to 20 rows, and a cell's first
+  writer now loads after the mouse is up (documents loading mid-stroke made 100–500 ms frames; passing "drawing"
+  down into every cell for that cost more, 40–80 ms recalcs, so it is a `.wrap:active` selector). Testing with moves
+  sent through CDP unacknowledged (one per 4 ms, coalesced per frame as a real mouse's are) then showed most of a
+  fast stroke missing, intermittently: each cell decided `--on` and used it in its own `transition-delay`, which was
+  sometimes stale; the latch moved to a child, `.l`. The first frames of a stroke, before a latch has held a point
+  of it, start from the pressed cell (`:active`).
+- **Touch was never smooth.** The ~3 ms reported above was a forced layout; a real drag, timed later, ran at 8–12 fps:
+  a full re-layerization of 966 composited layers (480 handles) every frame (`ARCHITECTURE.md`, Touch). Not fixed.
 - **Load got lighter:** no cell documents at load (they were 480 documents, 480 mask-image writes and 480
   `<link>` writes per load, the first "open question" below), and the page shrank from 1.36 MB to 1.14 MB including
   the touch handles (0.97 MB once the handles publish instead of being summed).

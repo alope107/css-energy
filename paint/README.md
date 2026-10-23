@@ -61,7 +61,8 @@ test D's four-page chain:
   `tools/touch.js` (finger strokes on a phone viewport: slow, quick, back and forth, fast diagonal, tap).
 - No undo: Back/Forward undo went with the cell documents (docs/HISTORY.md, 8). A cell can change about 110 times
   per page load before its writes stop (its spinner then stays); a reload resets that.
-- A touch stroke trails the finger by the touch slop, about a cell on a phone.
+- A touch stroke trails the finger by the touch slop, about a cell on a phone, and a touch drag runs at ~8–12 fps
+  in desktop Chromium (docs/ARCHITECTURE.md, Touch).
 - The click-only canvas worked on Cloudflare Workers; this version (writers at `/c/<k>/w`, write URLs with a
   `?<slot>` query) hasn't been deployed yet. The console shows `ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER` 15 times per painted cell:
   the probes answering "no". Cloudflare ends connections after ~10,000 requests and Chrome drops some queued probes;

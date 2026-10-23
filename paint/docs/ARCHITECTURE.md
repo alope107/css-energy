@@ -105,8 +105,8 @@ document of its own and painting was a link click that navigated it: `HISTORY.md
 ### Input and display
 
 ```css
-.c                    { --L: -1; transition: --L 0s 1e7s }              /* the colour painted in this page */
-.grid:active .c:hover { --L: var(--pal); transition-delay: 0s }
+.l                       { --L: -1; transition: --L 0s 1e7s }           /* the colour painted in this page */
+.grid:active .c:hover>.l { --L: var(--pal); transition-delay: 0s }      /* .l: the cell's one child */
 .px { background: if(style(--L: -1): <the colour read>; else: <colour L>) }
 ```
 
@@ -122,24 +122,55 @@ document of its own and painting was a link click that navigated it: `HISTORY.md
 ### Strokes
 
 Chrome delivers about one pointer position per frame, so a stroke faster than a cell per frame (~1,300 px/s at 60 Hz)
-would leave gaps. The page draws the line between consecutive frames' positions instead:
+would leave gaps. The page draws the line from a recent earlier position to the current one instead:
+
+```
+.grid  --qr/--qc/--qv     the stroke's cell and "drawing" (mouse: :has(:hover) rules; touch: the handles)
+  .gw  --ph               a clock, 0/1 every 10 ms, running only while drawing
+    .gx  --pz, --fa/--fb  the phase copied; which latch follows
+      .gy                 latches a and b (--ar/--ac/--av, --br/--bc/--bv); the grid of cells
+        .r  --lo/--hi     per row (display: contents): the columns of this row on the line
+          .c  --on        lo ≤ my column ≤ hi
+            .l  --L       the latch: on → the palette colour (a child: see below)
+```
 
 - `.grid` holds the stroke's cell as numbers, `--qr`/`--qc`, and `--qv` = drawing: for the mouse 20 row and 24 column
   rules, `.wrap:active:has(.y5:hover) { --hr: 5 }` (gated by `:active`, so hovering costs nothing; a tapped
-  touch handle carries the same classes); for a touch drag the handles' drag, below. `--or`/`--oc` is where a stroke's first segment starts: the cell itself for the mouse, the cell
-  the finger came down on for touch.
-- `.gw` (`display: contents`, between the grid and the cells) copies them 1 ms late with transitions: at the next
-  frame the transition has finished, so `.gw` holds the previous frame's position (`--pr`/`--pc`/`--pv`).
-- Each cell paints if it is on the line from the previous position (or the origin, on a stroke's first frame) to the
-  current one: one cell per step along the major axis, the nearest, rounding half up (Bresenham's line, as
-  arithmetic on the cell's own `--kr`/`--kc`). `tools/e2e.js` checks lines that jump 6 cells a frame cell by cell.
-- All of these are registered `inherits: false`, and `.c` takes them with `inherit`: a stroke frame restyles the 480
-  `.c` elements and nothing under them.
+  touch handle carries the same classes); for a touch drag the handles' drag, below. `--or`/`--oc` is where a
+  stroke's first segments start, before a latch holds a point of it: the pressed cell for the mouse (`:active`
+  stays on it, read by `.wrap:has(.y5:active)` rules), the cell the finger came down on for touch (the first update
+  comes past the slop), the latter only within 4 cells (after a frame where "drawing" dropped, it isn't the start).
+- **The previous point.** Two latches take turns: while one follows the stroke (no transition) the other holds
+  (target -100, a 1e7 s delay keeps its last value); they swap every 10 ms. The holding one is 1–2 frames old. Both
+  follow while nothing is drawn, so a stroke never starts from the last one's end.
+- **Each row** works out which of its columns are on the line from the previous point (or the origin, if there is
+  none and it is within 2 cells) to the current one: Bresenham's line, one cell per step along the major axis, the
+  nearest, rounding half up. x-major rows hold a run, y-major rows one cell. A cell compares its column with its row's
+  `[--lo, --hi]`: 20 row computations a recalc instead of 480.
+- All of these are registered `inherits: false` and taken with `inherit`, so a stroke frame restyles the rows and the
+  480 `.c` elements and nothing under them.
+- **What failed first** (the "hunks" reported 2026-10-23): the previous point was a transition 1 ms late, and Chrome
+  starts a transition only at a later frame, so a point moving every frame replaced it each time and it stayed at the
+  stroke's start: every frame drew a line from there, a fan at each turn. Making the latches swap took two more
+  traps: `transition-delay: if(style(--ph: 0) …)` on the element the animated `--ph` reaches by inheritance was never
+  recomputed (copy it into another property on the parent first); and a latch switched back to "follow" with the same
+  target kept its running hold (the hold target must differ). A style query on `--ph` instead restyled the whole grid
+  every 10 ms (100–700 ms frames).
+- **Decide on the parent, latch on the child.** A `transition-delay: if(style(--on: 1) …)` on the element that
+  computes `--on` from values that change through transitions upstream was sometimes left stale: a cell got its
+  colour target with a 1e7 s delay and never showed it (most of a fast stroke missing, intermittently). `.c` computes
+  `--on`; its child `.l` takes it with `inherit` and holds `--L`. The writers' `--seen` latch is split the same way
+  (`--wsh` on `.q`, the latch on `.t`), as is the cell clock (`--d` on `.q`, the play state on `.t`).
+- `tools/e2e.js` checks lines that jump 6 cells a frame, and a turning stroke sent like a real mouse: a move every
+  4 ms through CDP without waiting for each (Playwright's `mouse.move` waits, which spaces moves a frame or more
+  apart and hid the bug), which must stay within 1.5 cells of its path and reach its corners.
 
 ### Writes
 
 Each cell holds three writer `<object>`s, `/c/k/w`, all hidden until the cell is first painted in this page; a hidden
-`<object>` creates no frame and loads nothing, so a page that paints nothing loads no documents. A shown writer is
+`<object>` creates no frame and loads nothing, so a page that paints nothing loads no documents. The first writer
+appears once no stroke is being drawn (`--seen` keeps it): a document loaded per newly painted cell mid-stroke made
+frames of 100–500 ms, and the stroke lost its corners. A shown writer is
 sized `(22 + L) × (22 + slot)` px, and reads both from its viewport:
 
 ```css
@@ -169,8 +200,9 @@ loaded: the slot.
 The page draws a spinner (`mix-blend-mode: difference`, visible on every colour) under the writer. The writer's
 square is masked by its write: a mask image still loading paints nothing, so the spinner shows through until the
 dictionary file has loaded, which is when it registers. Each slot restarts the spinner (`--wp`, the slot's parity
-between two identical keyframes); it stops turning after 28 s but stays visible. A reload before it disappears
-can lose that paint.
+between two identical keyframes); it turns for 2 s, then stays still until covered (a hundred spinners turning for
+28 s after a big paint cost the next stroke its frames). A reload before it disappears
+can lose that paint, and once a reload ~50 ms after it disappeared read the old colour (`tools/e2e.js` waits 500 ms).
 
 ### Touch
 
@@ -199,8 +231,14 @@ css-physics's handles (`../../css-physics/docs/ARCHITECTURE.md`, Touch), with a 
   hoisted with `timeline-scope`, as css-physics does for its ≤ 64 bodies. With 960 of them every layout took ~94 ms
   (mini PC, leased): scoped timelines consumed by animations cost about 0.1 ms each per layout, wherever the
   consumers sit (20 row elements of 48: 75 ms; `timeline-scope: all`: 24 ms). Named or anonymous timelines consumed
-  inside their own scroller cost nothing measurable. A stroke lays out every frame (the follow area, the follower,
-  new writers), so the page ran at ~8 fps.
+  inside their own scroller cost nothing measurable. Publishing brought a forced layout to ~3 ms.
+- **Still slow: a touch drag runs at ~8–12 fps** (leased, headless and headed). On a touch screen (high DPI) every
+  scroller is composited: the handles make 966 layers (a scroll layer and a contents layer each) against 4 for the
+  mouse. Every frame of a drag ticks scroll-driven animations, which re-layerizes the whole page (`Layerize`, ~60 ms
+  a frame; with no animations in the handles, 10 ms a stroke). 480 bare scrollers with animations re-layerize
+  cheaply; this page's don't, for a reason not found (not the canvas, the probes, the spinners, the scale, content
+  size or layer order). Hiding the handles' content cut it to a quarter. Fewer, larger handles would cut it further
+  (half the handles: a quarter of the cost) at the price of knowing less exactly where a stroke starts.
 - **Finger down**: the follower `.fo`, a snap container whose snap area sits at the drag, re-snaps after every layout
   except while a scroll gesture is active (`touch-snap-defer` in `../../engine/`), so `--held` is "`.fo` lags".
   A stroke needs `--held` and a handle off rest.
