@@ -55,12 +55,7 @@ def fits(src):
 
 NUM = re.compile(r'-?\d+')
 def outside(out):
-    """Node printed something our machine cannot (README Limits): a non-integer, NaN, undefined, a number outside
-    20 bits or in the string / object / array value ranges"""
-    if re.search(r'\d\.\d|NaN|Infinity|undefined|e\+', out): return True
-    for m in NUM.finditer(out):
-        v = int(m.group())
-        if not -524288 <= v <= 524287 or any(lo <= v < hi for lo, hi in TAGGED): return True
+    """Node printed something our machine cannot (README Limits): nothing about numbers since they are JavaScript's"""
     return False
 # values that are strings, objects or arrays on our machine (cc_ref): numbers there print as those
 TAGGED = [(R.STRV_LO, R.STRV_HI), (R.HEAP0 - R.OBJTAG, R.HEAP_HI - R.OBJTAG), (R.HEAP0 + R.ARRTAG, R.HEAP_HI + R.ARRTAG)]

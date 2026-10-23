@@ -44,8 +44,28 @@ AMASK = 32767                           # addresses are 15-bit
 
 # the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
 OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNGT JNLE JNGE HALT  JZ JNZ  CALL RET NOT TENTER '
-       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DNEG  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC  APUSH'
-       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
+       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DNEG NUMLIT  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC'
+       '  APUSH  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET'
+       '  FLD FADD FSUB FMUL FDIV FMOD FPOW FSQRT FFLOOR FCEIL FROUND FTRUNC FABS FTPLO FSCALE FP10 FCONST FEXP FLOG FSIN FCOS FTAN'
+       '  FNORM FINT FCMP FEXPO FLOG10 FDIGIT  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
+# The FPU (the runtime library's): a number line is 4 words at an aligned address (fline): w0 = s * (E + 1100) for a finite
+# nonzero s * M * 2^(E - 52) (E in -1022 ... 1023; M = w1 * 2^36 + w2 * 2^18 + w3 < 2^53, >= 2^52 unless subnormal), s for +-0,
+# s * 3000 for +-Infinity, 4000 for NaN. A boxed double is an 8-word heap block [header 0 0 0 | its number line], its value the
+# line's address - DBLTAG. FLOPS A, B, C: the line at A's value := op of the numbers B and C (an integer, NaN, +-Infinity, -0, or
+# a double: its line); FVOPS A, B, C: A := a value (FNORM: B as the machine's value: an integer, a special, or B itself, a double; FINT:
+# B truncated, a plain integer of the machine's range (-0 is 0);
+# FCMP: -1 / 0 / 1, 2 unordered; FEXPO: B's binary exponent E; FLOG10: floor(log10 |B|); FDIGIT: B's decimal digit C, 0 the ones).
+# NUMLIT A, word1 (user code): A is a number literal's cache (a global); 0: the library's numlit parses the string word1 into it
+FLOPS = OPN[OPN.index('FLD'):OPN.index('FNORM')]
+FVOPS = OPN[OPN.index('FNORM'):OPN.index('FDIGIT') + 1]
+FCONSTS = ('pi', 'e', 'ln2', 'ln10', 'log2e', 'log10e', 'sqrt2', 'sqrt1_2')
+NFLINES = 14                            # the runtime's scratch number lines at fpu_base; then its digit buffer (20 words) and two cells
+FSCR = 100                              # in an FPU instruction the constant operands 100 ... 113 are the scratch lines (no LOADK)
+DIGS = LAYOUT['fpu_base'] + 4 * NFLINES
+def fscr(o):
+    """an FPU operand field's scratch line address, or None"""
+    return LAYOUT['fpu_base'] + 4 * (kval(o) - FSCR) if isK(o) and FSCR <= kval(o) < FSCR + NFLINES else None
+assert DIGS + 22 <= LAYOUT['sp0']
 # (user code's instructions come first: word0 = op * 8192 + A must stay below 2^19, the CSS CPU's registers' range; the ones only
 # the runtime library uses (the raw arithmetic, the primitives) may lie above)
 USEROPS = OPN.index('ALLOC')            # the first that only the runtime library uses
@@ -61,8 +81,8 @@ assert USEROPS <= 64
 # the from-space at C; MWALK: through [len][bytes][0] strings from B, the offset of the first of length A, or of the first at
 # or past C). APUSH 0, B, C: B.push(C) and return, as the ROM's push routine's first instruction (no array, or a full one:
 # on to the next instruction)
-KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap', 'typeof', 'special', 'smi']
-ALLOCK = ['str', 'arr', 'raw', 'chunk']
+KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap', 'typeof', 'special', 'smi', 'dbl', 'num']
+ALLOCK = ['str', 'arr', 'raw', 'chunk', 'dbl']
 # LDI A, B, C: A = mem[B + C]; STI A, B, C: mem[A + B] = C (raw memory: the runtime library's peek, poke and p[i]); GETFP A: A = fp.
 # The dynamic operators (user code's arithmetic and comparisons): DADD ... DMOD A, B, C, DNEG A, B and DLT ... DNE compute two
 # integers here (a result in range, not -0), DEQ / DNE also compare by identity anything but two strings or NaN, and DADD
@@ -95,6 +115,7 @@ def dyn_fast(op, x, y):
     """a dynamic operator's (or a jump's: J... as D...) result in user code when the machine computes it, else None (the trap).
     Two integers: a result that is one (and not -0); DEQ / DNE: identity unless both are strings or one is NaN (-0 is 0);
     DLEQ / DLNE (==, !=): that, with null == undefined and a boolean as 1 / 0, unless a string or one object is involved"""
+    if isdbl(x) or isdbl(y): return None                 # (a double: the library)
     if op in ('DLEQ', 'DLNE'):
         if isstr(x) or isstr(y) or (isarr(x) or isobj(x)) != (isarr(y) or isobj(y)): return None
         nul = lambda v: v in (NULL, UNDEF)
@@ -182,7 +203,122 @@ STRV_LO, STRV_HI = LAYOUT['data_base'] + SDATA - STRTAG, HEAP_HI - STRTAG     # 
 def isstr(v): return STRV_LO <= v < STRV_HI
 def isarr(v): return HEAP0 <= v - ARRTAG < HEAP_HI
 def isobj(v): return HEAP0 <= v + OBJTAG < HEAP_HI
-def isref(v): return isstr(v) or isarr(v) or isobj(v)
+DBLTAG = 425984                         # a boxed double is its number line's address - DBLTAG (slot -13)
+def isdbl(v): return -DBLTAG <= v < -DBLTAG + 32768
+def isnum(v): return issmi(v) or v in (INF, NINF, NAN, MZERO) or isdbl(v)
+def isref(v): return isstr(v) or isarr(v) or isobj(v) or isdbl(v)
+
+# ---- the FPU's numbers (Python floats are the same IEEE doubles as Chrome's calc())
+import math, struct
+def fenc(x):
+    """a double's number line (FLOPS' comment)"""
+    if x != x: return [4000, 0, 0, 0]
+    sg = -1 if math.copysign(1.0, x) < 0 else 1
+    if math.isinf(x): return [sg * 3000, 0, 0, 0]
+    if x == 0: return [sg, 0, 0, 0]
+    a = abs(x); E = max(math.frexp(a)[1] - 1, -1022); M = int(fscale(a, 52 - E))
+    return [sg * (E + 1100), M >> 36, (M >> 18) & 0x3FFFF, M & 0x3FFFF]
+def fdec(w):
+    w0 = w[0]
+    if w0 == 4000: return math.nan
+    if abs(w0) == 3000: return math.copysign(math.inf, w0)
+    if abs(w0) == 1: return math.copysign(0.0, w0)
+    return math.copysign(fscale(float((w[1] << 36) + (w[2] << 18) + w[3]), abs(w0) - 1152), w0)
+def fscale(x, n):
+    """x * 2^n as the CSS computes it: x * 2^k1 * 2^(n - k1), k1 = floor(n / 2) (each factor finite)"""
+    k1 = n // 2; return x * 2.0 ** k1 * 2.0 ** (n - k1)
+def fval(v, rd):
+    """the double a number is (rd: memory, for a boxed double's line); anything else is NaN"""
+    if issmi(v): return float(v)
+    if isdbl(v): a = (v + DBLTAG) & AMASK; return fdec([rd(a + j) for j in range(4)])
+    return {INF: math.inf, NINF: -math.inf, MZERO: -0.0}.get(v, math.nan)
+def fnorm(x, v):
+    """FNORM: the machine's value for the double x: an integer in range (not -0), a special, else v (the double itself)"""
+    if x != x: return NAN
+    if math.isinf(x): return INF if x > 0 else NINF
+    if x == 0 and math.copysign(1.0, x) < 0: return MZERO
+    if x == math.floor(x) and SMI_LO <= x <= SMI_HI: return int(x)
+    return v
+def _split(a):
+    c = 134217729.0 * a; h = c - (c - a); return h, a - h
+def ftplo(a, b):
+    """the exact error of a * b (Dekker's two-product, as the CSS computes it)"""
+    p = a * b; ah, al = _split(a); bh, bl = _split(b)
+    return ((ah * bh - p) + ah * bl + al * bh) + al * bl
+def cpow(x, y):
+    """C's pow (CSS pow()): pow(x, +-0) = 1, pow(1, y) = 1, overflow +-Infinity, a negative x to a non-integer NaN"""
+    try: return math.pow(x, y)
+    except OverflowError:
+        neg = x < 0 and float(y).is_integer() and int(y) % 2 == 1
+        return -math.inf if neg else math.inf
+    except ValueError:
+        if x == 0 and y < 0:
+            neg = math.copysign(1.0, x) < 0 and float(y).is_integer() and int(y) % 2 == 1
+            return -math.inf if neg else math.inf
+        return math.nan
+def _f1(fn, x):
+    try: return fn(x)
+    except OverflowError: return math.inf
+    except ValueError: return math.nan
+def flog(x):
+    if x != x or x < 0: return math.nan
+    if x == 0: return -math.inf
+    return math.log(x) if not math.isinf(x) else math.inf
+def jround(x):
+    """JavaScript's Math.round (CSS round(nearest): ties toward +Infinity; -0 kept)"""
+    if not math.isfinite(x) or x == 0: return x
+    f = math.floor(x); r = float(f + 1 if x - f >= 0.5 else f)
+    return -0.0 if r == 0 and x < 0 else r
+def zkeep(fn, x):
+    """floor / ceil / trunc with -0 and specials as the CSS's round()"""
+    if not math.isfinite(x) or x == 0: return x
+    r = float(fn(x)); return -0.0 if r == 0 and x < 0 else r
+def fmod(x, y):
+    if x != x or y != y or math.isinf(x) or y == 0: return math.nan
+    if math.isinf(y): return x
+    return math.fmod(x, y)
+def fdiv(x, y):
+    if y == 0:
+        if x == 0 or x != x: return math.nan
+        return math.copysign(math.inf, x) * math.copysign(1.0, y)
+    return x / y
+FCONSTV = {'pi': math.pi, 'e': math.e, 'ln2': math.log(2), 'ln10': math.log(10), 'log2e': math.log(math.e) / math.log(2),
+           'log10e': math.log(math.e) / math.log(10), 'sqrt2': math.sqrt(2), 'sqrt1_2': math.sqrt(0.5)}
+def fline_op(op, x, y):
+    """FLOPS op on the doubles x, y (y: an integer for FSCALE, FP10, FCONST)"""
+    if op == 'FLD': return x
+    if op == 'FADD': return x + y
+    if op == 'FSUB': return x - y
+    if op == 'FMUL': return x * y
+    if op == 'FDIV': return fdiv(x, y)
+    if op == 'FMOD': return fmod(x, y)
+    if op == 'FPOW': return cpow(x, y)
+    if op == 'FSQRT': return math.nan if x < 0 else math.sqrt(x) if x == x else x
+    if op == 'FFLOOR': return zkeep(math.floor, x)
+    if op == 'FCEIL': return zkeep(math.ceil, x)
+    if op == 'FROUND': return jround(x)
+    if op == 'FTRUNC': return zkeep(math.trunc, x)
+    if op == 'FABS': return abs(x)
+    if op == 'FTPLO': return ftplo(x, y)
+    if op == 'FSCALE': return fscale(x, int(y))
+    if op == 'FP10': return cpow(10.0, y)
+    if op == 'FCONST': return FCONSTV[FCONSTS[int(y)]]
+    if op == 'FEXP': return _f1(math.exp, x)
+    if op == 'FLOG': return flog(x)
+    if op in ('FSIN', 'FCOS', 'FTAN'): return math.nan if math.isinf(x) else getattr(math, op[1:].lower())(x)
+    raise ValueError(op)
+def fval_op(op, x, y, v):
+    """FVOPS op on the doubles x, y (v: the value B, for FNORM's double)"""
+    if op == 'FNORM': return fnorm(x, v)
+    if op == 'FINT': return int(math.trunc(x)) if math.isfinite(x) else 0
+    if op == 'FCMP': return 2 if x != x or y != y else (x > y) - (x < y)
+    if op == 'FEXPO': return max(math.frexp(abs(x))[1] - 1, -1022) if math.isfinite(x) and x != 0 else 0
+    if op == 'FLOG10':
+        if not (math.isfinite(x) and x != 0): return 0
+        a = abs(x); k = math.floor(math.log(a) / math.log(10))
+        return k + (a >= cpow(10.0, k + 1)) - (a < cpow(10.0, k))
+    if op == 'FDIGIT': j = int(y); return int((fmod(x, cpow(10.0, j + 1)) - fmod(x, cpow(10.0, j))) / cpow(10.0, j))
+    raise ValueError(op)
 def truthy(mem, v, user=True):
     """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address); in user
     code also FALSE, null, undefined, NaN and -0"""
@@ -192,7 +328,7 @@ def catv(v):
     return BSTRV(BS_ZERO if v == MZERO else v - SPV0) if isspecial(v) else v
 def catok(x, y):
     """a string's + the machine joins (the cat class): a string with a string, an integer or a special"""
-    return (isstr(x) or isstr(y)) and not any(isarr(v) or isobj(v) for v in (x, y))
+    return (isstr(x) or isstr(y)) and not any(isarr(v) or isobj(v) or isdbl(v) for v in (x, y))
 def notown(v):
     """a string that isn't the program's own (a heap string, or a built-in one): run-time keys look these up by their characters"""
     return isstr(v) and not (STRP0 <= v + STRTAG < SEND)
@@ -207,12 +343,12 @@ def kind(k, v):
     """KIND's tests (KINDS[k])"""
     return [isstr(v) + 2 * isarr(v) + 3 * isobj(v), int(isstr(v)), int(isarr(v)), int(isobj(v)), int(isarr(v) or isobj(v)),
             int(notown(v)), len(str(v)), int(isref(v)), int(isstr(v) and v + STRTAG >= HEAP0), BSTRV(BS_TYPE + typecode(v)),
-            int(isspecial(v)), int(issmi(v))][k]
+            int(isspecial(v)), int(issmi(v)), int(isdbl(v)), int(isnum(v))][k]
 def rnd8(n): return -(-n // 8) * 8
 def allocw(k, n):
     """an ALLOC's block, in words: a string of n bytes ([hdr][len][bytes][0]), an array of capacity n ([hdr][cap][len][ptr]
-    [elements]), n raw words, an object chunk of n words"""
-    return rnd8(n + (3, 4, 0, 0)[k])
+    [elements]), n raw words, an object chunk of n words, a boxed double (8)"""
+    return rnd8(n + (3, 4, 0, 0, 8)[k])
 # ALLOC's executions on the CSS CPU (csssim.py, gen_css.py), --pst the phase: HP (or the trap), the header's line (a string's
 # [hdr][len][0][0], an array's [hdr][cap][0][ptr]), a string's NUL past that line, the map's bit, A
 AP_HP, AP_HDR, AP_NUL, AP_MAP, AP_RES = range(5)
@@ -220,13 +356,16 @@ def allocnext(ph, k, n):
     """the phase after ph for an ALLOC of kind k, n"""
     while True:
         ph += 1
-        if ph == AP_HDR and k >= 2: continue
+        if ph == AP_HDR and k in (2, 3): continue
         if ph == AP_NUL and (k != 0 or n < 2): continue
         if ph == AP_MAP and k == 2: continue
         return ph
 def allochdr(k, n, nw, base):
-    """the header line ALLOC writes (kinds 0, 1)"""
-    return [-2 - nw, n, 0, 0] if k == 0 else [-3 - nw, n, 0, base + 4]
+    """the header line ALLOC writes (kinds 0, 1, 4: the block kinds 0 string, 1 array, 2 double)"""
+    return [-2 - nw, n, 0, 0] if k == 0 else [-3 - nw, n, 0, base + 4] if k == 1 else [-4 - nw, 0, 0, 0]
+def allocres(k, base):
+    """ALLOC's value for the block at base"""
+    return (base + 2 - STRTAG, base + 3 + ARRTAG, base, base, base + 4 - DBLTAG)[k]
 # The collector's map of block starts (a bit per 8 heap words, 16 to a word, both semi-spaces: MAPN words from MAP), kept as
 # blocks are made (ALLOC, NEW, a string's +, the collector's copies): a stack word is a reference only if its block is marked
 MAP = LAYOUT['map_base']; MAPN = 2 * LAYOUT['heap_size'] // 128
@@ -236,7 +375,8 @@ def mapbit(b):
 def isfref(w, flo):
     """MFREF's test: w refers to a block in the from-space at flo (an object, a string, an array)"""
     H = LAYOUT['heap_size']
-    return flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
+    return (flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
+            or flo + 4 <= w + DBLTAG < flo + H)
 def mcase(op, c):
     """MCPY's letters: MUPPER a-z to A-Z, MLOWER A-Z to a-z"""
     lo = 97 if op == 'MUPPER' else 65
@@ -261,9 +401,10 @@ CNDOPS = CMPS + (NOT,)
 
 # (__dadd: the dynamic + instruction, a string built in CSS; the rest: the runtime's primitives, OPN's comment)
 INTR = ['peek', 'poke', '__fp', 'prn', 'halt', '__dadd', '__kind', '__alloc', '__mcpy', '__mupper', '__mlower', '__mfill', '__nput',
-        '__mcmp', '__mfeq', '__mfref', '__mwalk', '__apush', '__net']
-INTRN = (1, 2, 0, 1, 0, 2, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2, 1)      # their arguments
-INTRV = ('peek', '__fp', '__dadd', '__kind', '__alloc', '__mcmp', '__mfeq', '__mfref', '__mwalk', '__net')    # those with a value
+        '__mcmp', '__mfeq', '__mfref', '__mwalk', '__apush', '__net', '__fl', '__fv']
+INTRN = (1, 2, 0, 1, 0, 2, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2, 1, 4, 3)      # their arguments
+INTRV = ('peek', '__fp', '__dadd', '__kind', '__alloc', '__mcmp', '__mfeq', '__mfref', '__mwalk', '__net', '__fv')    # those with a value
+# __fl(k, d, a, b): FLOPS[k] d, a, b (the line d := op of a and b); __fv(k, a, b): FVOPS[k] T, a, b (k: a constant)
 def h1h2(s):
     a = b = 0
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
@@ -278,8 +419,8 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('startsWith', {1: 'startswith'}, 1), ('endsWith', {1: 'endswith'}, 1), ('repeat', {1: 'repeat'}, 2),
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
            ('toString', {0: 'tostring0'}, 2)]
-# functions called like methods on a dummy receiver (0): parseInt(s), Number(s), String(x); their names are reserved
-GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'parseint'}, 3), ('String', {1: 'tostring'}, 2),
+# functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
+GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
            ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
 ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
@@ -615,6 +756,15 @@ class Compiler:
             else: self.emit('PRINT', (flags, 0), self.src(i))
         self.nd = d0
 
+    def numlit(self, v):
+        """a double's literal (its string at v[0], v[1] characters): NUMLIT into a global of its own, its cache"""
+        a, n = v
+        if a >= NOROOM: return self.fail(26)
+        self.datum(a - 1, n)
+        if self.dp >= SDATA: return self.fail(25)
+        g = self.dp; self.dp += 1
+        self.emit('NUMLIT', (g, 0), w1=a - STRTAG); self.push_od(g, 3); self.mode = S_OPER
+
     def key_name(self, h):
         """a property name (identifier token): its key, the interned address (-1: failed)"""
         if self.tid >= NOROOM: self.fail(26); return -1
@@ -722,6 +872,7 @@ class Compiler:
         if len(a) != INTRN[n]: return self.fail(77)
         name = INTR[n]; t = self.tmp(d0)
         if name in ('__kind', '__alloc') and not isK(a[1][0]): return self.fail(77)       # (the test or kind: a constant)
+        if name in ('__fl', '__fv') and not isK(a[0][0]): return self.fail(77)
         if name == 'peek': self.emit('LDI', t, a[0], (K(0), 0))
         elif name == 'poke': self.emit('STI', a[0], (K(0), 0), a[1])
         elif name == '__fp': self.emit('GETFP', t)
@@ -732,6 +883,8 @@ class Compiler:
         elif name == '__nput': self.emit('NPUT', a[0], a[1], (K(0), 0))
         elif name == '__apush': self.emit('APUSH', (K(0), 0), a[0], a[1])
         elif name == '__net': self.emit('NET', t, a[0])
+        elif name == '__fl': self.emit(FLOPS[kval(a[0][0])], a[1], a[2], a[3])
+        elif name == '__fv': self.emit(FVOPS[kval(a[0][0])], t, a[1], a[2])
         elif name in ('__mcmp', '__mfeq', '__mfref', '__mwalk'): self.emit('MOV', t, a[2]); self.emit(name[2:].upper(), t, a[0], a[1])
         elif name != 'halt': self.emit(name[2:].upper(), a[0], a[1], a[2])         # (MCPY, MUPPER, MLOWER, MFILL)
         else: self.emit('HALT')
@@ -820,6 +973,20 @@ class Compiler:
         elif c in (34, 39):                               # a string: its length word (the parser writes it), then its bytes (hashed)
             self.lx = 1; self.q = c; self.sdp += 1; self.sstart = self.sdp
             self.h1 = self.h2 = 0
+        elif self.tkc >= 2 or (isdg(c) and self.tkc != 1):  # a number: digits [. digits] [e [+-] digits] (tkc 2 3 4 5: the part)
+            if self.tkc < 2: self.tkc = 2; self.acc = 0; self.h1 = self.h2 = 0     # acc: its integer value; h1: its characters; h2: a double
+            if isdg(c) and self.tkc == 2: self.acc = self.acc * 10 + c - 48
+            elif c == 46: self.tkc = 3; self.h2 = 1
+            elif c in (69, 101): self.tkc = 4; self.h2 = 1
+            elif self.tkc == 4: self.tkc = 5
+            self.sbyte(self.sdp + 1 + self.h1, c); self.h1 += 1                     # (a double's characters: a string the parser commits)
+            st = self.tkc
+            if not (isdg(cn) or (st == 2 and cn in (46, 69, 101)) or (st == 3 and cn in (69, 101)) or (st == 4 and cn in (43, 45))):
+                if (self.h2 or self.acc > SMI_HI) and not self.rom:     # a double: its string [len][characters][0] at sdp (the ROM's are raw words)
+                    tok = ('NUM', (self.sdp + 1 + NOROOM * int(self.sdp + 2 + self.h1 > SEND), self.h1))
+                    self.inul = self.sdp + 1 + self.h1; self.sdp += self.h1 + 2
+                else: tok = ('NUM', self.acc)
+                self.tkc = 0
         elif isal(c) or (isdg(c) and self.tkc == 1):      # an identifier: hashed; its bytes at sdp (acc: its length so far)
             if self.tkc != 1: self.h1 = self.h2 = 0; self.acc = 0
             self.shash(c); self.tkc = 1
@@ -831,9 +998,6 @@ class Compiler:
                 if self.kpos: self.inul = self.sdp + 1 + self.acc
                 if self.kpos == 2: self.sdp += self.acc + 2
                 self.icm = self.acc + 2 if self.kpos == 1 else 0
-        elif isdg(c):
-            self.acc = (self.acc * 10 if self.tkc == 2 else 0) + c - 48; self.tkc = 2
-            if not isdg(cn): tok = ('NUM', self.acc); self.tkc = 0
         elif (c, cn) in TWO: self.p2 = TWO[(c, cn)]
         else: tok = ('P', c)
         if self.pnl:                                      # the pending newline: decide on the next significant character
@@ -1052,7 +1216,7 @@ class Compiler:
             elif kind == 'STR':
                 if v[0] >= NOROOM: return self.fail(26)
                 ks = self.intern((v[1], v[2]), v[0], v[3])
-            elif kind == 'NUM': ks = 0; self.push_num(v)       # a number key: as o[n] = v
+            elif kind == 'NUM' and not isinstance(v, tuple): ks = 0; self.push_num(v)       # a number key: as o[n] = v
             else: return self.fail(71)
             if ks < 0: return
             self.push_op(M_OKEY, ks - self.db if ks else 0); self.mode = S_OCOLON; return
@@ -1060,6 +1224,7 @@ class Compiler:
             if not isP(58): return self.fail(72)
             self.mode = S_STMT if self.top_cs()[0] == C_SWITCH else S_OPND; return      # (default's ':')
         if m == S_OPND:
+            if kind == 'NUM' and isinstance(v, tuple): return self.numlit(v)
             if kind == 'NUM': self.push_num(v); self.mode = S_OPER; return
             if kind == 'STR':
                 if v[0] >= NOROOM: return self.fail(26)
@@ -1346,6 +1511,10 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         a &= AMASK
         if a >= ROMN: mem[a] = s20(v)
     CB = LAYOUT['code_base']
+    def fopnd(o):
+        """an FPU operand's double: a scratch line, or the number val(o)"""
+        f = fscr(o)
+        return fdec([rd(f + j) for j in range(4)]) if f else fval(val(o), rd)
     def trap(name, base, args, ret):
         """a call into the runtime library: the frame at fp + base (the arguments above its return word)"""
         nonlocal fp, pc
@@ -1422,7 +1591,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
                 elif (r == TRUE) != ng: pc = 2 * a
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
         elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = 2 * (r % 8192); pst = WBACK * int(r // 8192 == TRAPDEF)
-        elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's one-line form)
+        elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b)) or isdbl(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's form)
         elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + (pst + 2) // 2); fp += TRAPOFF; pc = 2 * a; pst = 0
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1; sep = (0, 32, 10)[a // 2 % 4]
@@ -1433,6 +1602,13 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             else: text = [ord(ch) for ch in str(v)]
             for ch in text + ([sep] if sep else []): emit(ch)
         elif op == 'PUTC': emit(val(b))
+        elif op == 'NUMLIT':                            # a number literal: its cache, or the library parses it (once)
+            if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
+            elif rd(addr(a)) == 0: trap('numlit', TRAPDEF, [w1, 0], pc - 2)
+        elif op in FLOPS:                               # the line at A's value (or scratch line A) := op of B and C
+            x, y = fopnd(b), fopnd(c); d = fscr(a) or val(a)
+            for j, w in enumerate(fenc(fline_op(op, x, y))): wr(d + j, w)
+        elif op in FVOPS: wr(addr(a), fval_op(op, fopnd(b), fopnd(c), val(b)))
         elif op in DYNOPS:                              # (pst WBACK: the library's value, after its trap)
             x, y = val(b), val(c); r = dyn_fast(op, x, y) if not pst else None
             if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
@@ -1465,10 +1641,11 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             n, k = val(b), c - 896; nw = allocw(k, n); hp = rd(HP); base = HEAP0 + hp
             if hp + nw > rd(GCLIM) + LAYOUT['heap_size']: trap('galloc', a - 256, [nw], pc - 2)
             else:
-                if k == 0: wr(base, -2 - nw); wr(base + 1, n); wr(base + 2 + n, 0)
-                elif k == 1: wr(base, -3 - nw); wr(base + 1, n); wr(base + 2, 0); wr(base + 3, base + 4)
+                if k in (0, 1, 4):
+                    for j, w in enumerate(allochdr(k, n, nw, base)): wr(base + j, w)
+                if k == 0: wr(base + 2 + n, 0)
                 if k != 2: mark(base)
-                wr(HP, hp + nw); wr(addr(a), (base + 2 - STRTAG, base + 3 + ARRTAG, base, base)[k])
+                wr(HP, hp + nw); wr(addr(a), allocres(k, base))
         elif op in ('MCPY', 'MUPPER', 'MLOWER'):
             d, s_, n = val(a), val(b), val(c)
             for i in range(n): wr(d + i, mcase(op, rd(s_ + i)))

@@ -109,12 +109,16 @@ function fwd(w) {
   if (a >= flo + 2) { if (a < flo + __H__) { return fwdblk(w, a - 2, 0); } }
   a = w - __ARRTAG__;
   if (a >= flo + 3) { if (a < flo + __H__) { return fwdblk(w, a - 3, 1); } }
+  a = w + __DBLTAG__;
+  if (a >= flo + 4) { if (a < flo + __H__) { return fwdblk(w, a - 4, 2); } }
   return w;
 }
 // a stack word: a reference only if it starts a block in the map (MFREF found it in a from-space tag range)
 function fwdc(w, flo) {
   var b = w + __OBJTAG__;
-  if (b >= flo + __H__) { b = w + __STRTAG__ - 2; if (b >= flo + __H__) { b = w - __ARRTAG__ - 3; } }
+  if ((b < flo) + (b >= flo + __H__)) { b = w + __STRTAG__ - 2; }
+  if ((b < flo) + (b >= flo + __H__)) { b = w - __ARRTAG__ - 3; }
+  if ((b < flo) + (b >= flo + __H__)) { b = w + __DBLTAG__ - 4; }
   if ((b - flo) % 8) { return w; }
   if (marked(b) == 0) { return w; }
   return fwd(w);
@@ -139,6 +143,7 @@ function fwdblk(w, b, kind) {
   if (x % 8 != kind) { return w; }
   n = peek(__G_FREE__);
   if (kind == 0) { __mcpy(n, b, peek(b + 1) + 3); }
+  else if (kind == 2) { __mcpy(n, b, 8); nw = 8; }
   else {
     cap = peek(b + 1); len = peek(b + 2); nw = rnd8(cap + 4);
     poke(n, 0 - 3 - nw); poke(n + 1, cap); poke(n + 2, len); poke(n + 3, n + 4);
@@ -157,6 +162,7 @@ function tostr(v) {
   var r = 0;
   if (__kind(v, __K_STR__)) { return v; }
   if (__kind(v, __K_SPECIAL__)) { return catv(v); }
+  if (__kind(v, __K_DBL__)) { return numstr(v); }
   if (__kind(v, __K_ARR__)) { return join(v, 0); }
   if (__kind(v, __K_OBJ__)) {
     r = newstr(15);
@@ -184,7 +190,11 @@ function scmp(a, b) {
 // (ToNumber: true 1, false and null 0, undefined NaN, a string's integer)
 function dadd(a, b) {
   a = prim(a); b = prim(b);
-  if (__kind(a, __K_STR__) + __kind(b, __K_STR__)) { return __dadd(a, b); }
+  if (__kind(a, __K_STR__) + __kind(b, __K_STR__)) {
+    if (__kind(a, __K_DBL__)) { a = numstr(a); }                // (the cat class joins strings, integers and specials)
+    if (__kind(b, __K_DBL__)) { b = numstr(b); }
+    return __dadd(a, b);
+  }
   return arith(0, a, b);
 }
 function dsub(a, b) { return arith(1, a, b); }
@@ -192,56 +202,255 @@ function dmul(a, b) { return arith(2, a, b); }
 function ddiv(a, b) { return arith(3, a, b); }
 function dmod(a, b) { return arith(4, a, b); }
 function dneg(a, b) { return arith(5, a, 0); }
-// ToNumber for the operators: an integer, NaN, +-Infinity or -0
+// ToNumber for the operators: a number (an integer of the machine's range, NaN, +-Infinity, -0 or a double); objects as their
+// strings, booleans 1 / 0, null 0, undefined NaN
 function tonum(v) {
   v = prim(v);
   if (__kind(v, __K_STR__)) { return strnum(v); }
-  if (__kind(v, __K_SPECIAL__) == 0) { return v; }
+  if (__kind(v, __K_NUM__)) { return v; }
   if (v == __TRUE__) { return 1; }
   if ((v == __FALSE__) + (v == __NULL__)) { return 0; }
-  if (v == __UNDEF__) { return __NAN__; }
-  return v;
+  return __NAN__;
 }
-// a string as a number: blanks around a decimal integer ("" is 0), else NaN
-function strnum(s) {
-  var n = peek(s - 1); var i = 0; var r = 0;
-  while (i < n) { if (isblank(peek(s + i))) { i++; } else { n = 0 - n; } }
-  if (n < 0) { n = 0 - n; }
-  if (i == n) { return 0; }
-  r = parseint(0, s);
-  if (r == __NAN__) { return r; }
-  return r;
-}
-// op 0 + 1 - 2 * 3 / 4 % 5 unary - on two values as numbers. (Integers only for now: a quotient truncates, an integer outside
-// the machine's range wraps; Infinity is NaN)
+// op 0 + 1 - 2 * 3 / 4 % 5 unary - of two values as numbers, in the FPU (IEEE doubles, as JavaScript computes)
 function arith(op, a, b) {
-  var r = 0; var neg = 0;
   a = tonum(a); b = tonum(b);
-  if (a == __MZERO__) { a = 0; neg = 1; }
-  if (b == __MZERO__) { b = 0; neg = neg + 2; }
-  if (op == 5) { if (a == __INF__) { return __NINF__; } if (a == __NINF__) { return __INF__; } }
-  if (__kind(a, __K_SPECIAL__) + __kind(b, __K_SPECIAL__)) { return __NAN__; }
-  if (op == 0) { r = a + b; if (r == 0) { if (neg == 3) { return __MZERO__; } } return r; }
-  if (op == 1) { r = a - b; if (r == 0) { if (neg == 1) { return __MZERO__; } } return r; }
-  if (op == 2) { r = a * b; if (r == 0) { if ((a < 0) + (b < 0) + neg % 2 + neg / 2 == 1) { return __MZERO__; } } return r; }
-  if (op == 5) { if (a == 0) { if (neg) { return 0; } return __MZERO__; } return 0 - a; }
-  if (b == 0) { if (op == 4) { return __NAN__; } if (a == 0) { return __NAN__; } if ((a < 0) + neg / 2 == 1) { return __NINF__; } return __INF__; }
-  if (op == 3) { r = a / b; if (r == 0) { if ((a < 0) + (b < 0) + neg % 2 == 1) { return __MZERO__; } } return r; }
-  r = a % b; if (r == 0) { if ((a < 0) + neg % 2) { return __MZERO__; } } return r;
+  if (op == 0) { __fl(__FL_FADD__, __F0__, a, b); }
+  else if (op == 1) { __fl(__FL_FSUB__, __F0__, a, b); }
+  else if (op == 2) { __fl(__FL_FMUL__, __F0__, a, b); }
+  else if (op == 3) { __fl(__FL_FDIV__, __F0__, a, b); }
+  else if (op == 4) { __fl(__FL_FMOD__, __F0__, a, b); }
+  else { __fl(__FL_FMUL__, __F0__, a, 0 - 1); }
+  return fbox();
+}
+
+// ---------------- numbers. The FPU (cc_ref FLOPS / FVOPS): __fl(K, d, a, b) makes the number line d (an address, or a double's
+// value) op K of the numbers a and b (an integer of the machine's range, NaN, +-Infinity, -0, or a double: a number line's
+// address - DBLTAG); __fv(K, a, b) is a value. A boxed double is an 8-word heap block whose second line is its number line.
+// F0 ... F13: the scratch lines (in an FPU instruction the constants 100 ... 113: FSCR + i, at FPU + 4 i; F0 arith's, F1 numscan's,
+// F2 ... numstr's); DIGS: a digit buffer
+// the number in scratch line F0 as a value: an integer of the machine's range, a special, or a new boxed double. (A scratch line
+// is an FPU operand only as that constant: a routine names its lines, it can't be handed one)
+function fbox() {
+  var v = __fv(__FV_FNORM__, __F0__, 0); var r = 0;
+  if (v != __F0__) { return v; }
+  r = __alloc(0, __A_DBL__); __mcpy(r, __FPU__, 4);
+  return r;
 }
 // a and b compared: -1, 0, 1, or 2 (unordered: NaN). Arrays and objects as their strings; two strings by their characters,
 // otherwise as numbers
 function dcmp(a, b) {
   a = prim(a); b = prim(b);
   if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return scmp(a, b); }
-  a = tonum(a); b = tonum(b);
-  if (a == __MZERO__) { a = 0; }
-  if (b == __MZERO__) { b = 0; }
-  if ((a == __NAN__) + (b == __NAN__)) { return 2; }
-  if (a == b) { return 0; }
-  if ((a == __NINF__) + (b == __INF__)) { return 0 - 1; }
-  if ((a == __INF__) + (b == __NINF__)) { return 1; }
-  return (a > b) - (a < b);
+  return __fv(__FV_FCMP__, tonum(a), tonum(b));
+}
+// a string as a number (JavaScript's Number(s)): a decimal literal or Infinity, with blanks around it ("" is 0); else NaN
+function strnum(s) {
+  var n = peek(s - 1); var i = skipbl(s, 0, n); var e = n; var r = 0;
+  while (e > i) { if (isblank(peek(s + e - 1))) { e = e - 1; } else { n = 0 - 1; e = 0 - e; } }
+  if (e < 0) { e = 0 - e; }
+  if (i == e) { return 0; }
+  r = numscan(s, i, e);
+  if (peek(__NEND__) != e) { return __NAN__; }
+  return r;
+}
+// the index of the first character of s from i on that isn't blank (n: s's length)
+function skipbl(s, i, n) {
+  var go = 1;
+  while (go) { go = 0; if (i < n) { if (isblank(peek(s + i))) { i++; go = 1; } } }
+  return i;
+}
+// the number the decimal literal at s + i reads as (up to e: a sign, digits, a fraction, an exponent, or Infinity); NEND := the
+// index after it (i: none). The first 17 significant digits count (exact while their integer is below 2^53), scaled by a power
+// of ten (one rounding up to 10^22)
+function numscan(s, i, e) {
+  var i0 = i; var neg = 0; var c = 0; var nd = 0; var ex = 0; var any = 0; var es = 1; var ev = 0; var go = 1; var dot = 0;
+  c = peek(s + i);
+  if (i < e) { if (c == 45) { neg = 1; i++; } else if (c == 43) { i++; } }
+  if (i + 8 <= e) {
+    if (__mcmp(s + i, __BSTRV0__, 8) == 8) { poke(__NEND__, i + 8); if (neg) { return __NINF__; } return __INF__; }
+  }
+  __fl(__FL_FLD__, __F1__, 0, 0);
+  while (go) {
+    go = 0;
+    if (i < e) {
+      c = peek(s + i);
+      if ((c >= 48) * (c <= 57)) {
+        any = 1; go = 1; i++;
+        if (nd < 17) {
+          if (nd + (c != 48)) { __fl(__FL_FMUL__, __F1__, __F1__, 10); __fl(__FL_FADD__, __F1__, __F1__, c - 48); nd++; }
+          ex = ex - dot;
+        } else { ex = ex + 1 - dot; }
+      } else if ((c == 46) * (dot == 0)) { dot = 1; go = 1; i++; }
+    }
+  }
+  if (any == 0) { poke(__NEND__, i0); return __NAN__; }
+  if (i < e) {
+    c = peek(s + i);
+    if ((c == 101) + (c == 69)) {
+      c = i + 1; go = 0;
+      if (c < e) { if (peek(s + c) == 45) { es = 0 - 1; c++; } else if (peek(s + c) == 43) { c++; } }
+      while (c < e) { if ((peek(s + c) >= 48) * (peek(s + c) <= 57)) { if (ev < 10000) { ev = ev * 10 + peek(s + c) - 48; } c++; go = 1; } else { e = 0 - e; } }
+      if (e < 0) { e = 0 - e; }
+      if (go) { i = c; ex = ex + es * ev; }
+    }
+  }
+  poke(__NEND__, i);
+  if (ex > 22) { __fl(__FL_FP10__, __F2__, 0, 22); __fl(__FL_FMUL__, __F1__, __F1__, __F2__); ex = ex - 22; }
+  if (ex > 0) { __fl(__FL_FP10__, __F2__, 0, ex); __fl(__FL_FMUL__, __F1__, __F1__, __F2__); }
+  if (ex < 0 - 22) { __fl(__FL_FP10__, __F2__, 0, 22); __fl(__FL_FDIV__, __F1__, __F1__, __F2__); ex = ex + 22; }
+  if (ex < 0) { __fl(__FL_FP10__, __F2__, 0, 0 - ex); __fl(__FL_FDIV__, __F1__, __F1__, __F2__); }
+  if (neg) { __fl(__FL_FMUL__, __F0__, __F1__, 0 - 1); } else { __fl(__FL_FLD__, __F0__, __F1__, 0); }
+  return fbox();
+}
+// a number literal (NUMLIT, the first time it is read): its string's number
+function numlit(s, d) { return numscan(s, 0, peek(s - 1)); }
+
+// ---------------- a double as a string (JavaScript's Number::toString): the shortest digits that read back as the number, the
+// closest of those (ties to even). Each candidate is tested exactly with the FPU (the two-product's low part makes M * 5^n
+// exact; a test is an exact comparison): an integer below 2^53 is its own digits; a fraction's candidates are the integers
+// nearest |v| * 10^n (n = 0 ... 22), an integer's from 2^53 on c * 10^m (m = 0 ... 22), the shortest found by halving (a
+// shorter candidate reads back only if every longer one does). Outside those (below about 1e-6, or past 1e22 with many digits)
+// 17 digits, rounded once
+function numstr(v) {
+  var neg = __fv(__FV_FCMP__, v, 0) < 0; var E = 0; var q = 0; var k = 0; var lo = 0; var hi = 0; var mid = 0; var nd = 0; var n = 0;
+  __fl(__FL_FABS__, __F2__, v, 0);
+  E = __fv(__FV_FEXPO__, __F2__, 0); q = E - 52;
+  __fl(__FL_FSCALE__, __F3__, __F2__, 0 - q); __fl(__FL_FSCALE__, __F11__, 1, 52);         // M (|v| = M * 2^q); 2^52
+  __fl(__FL_FFLOOR__, __F4__, __F2__, 0);
+  if (E < 53) { if (__fv(__FV_FCMP__, __F4__, __F2__) == 0) { __fl(__FL_FLD__, __F7__, __F2__, 0); nd = putdig(0); return numfmt(neg, nd, nd); } }
+  k = __fv(__FV_FLOG10__, __F2__, 0);
+  if (E < 53) {                                                  // a fraction: p digits at scale n = p - 1 - k
+    lo = k + 1; if (lo < 1) { lo = 1; } hi = 23 + k; if (hi > 17) { hi = 17; }
+    if (lo > hi) { return numapx(neg, k); }
+    if (cand(q, hi - 1 - k) == 0) { return numapx(neg, k); }
+    while (lo < hi) { mid = (lo + hi) / 2; if (cand(q, mid - 1 - k)) { hi = mid; } else { lo = mid + 1; } }
+    n = lo - 1 - k; cand(q, n); nd = putdig(peek(__CLO__));
+    return numfmt(neg, nd, nd - n);
+  }
+  lo = 1; hi = 17;                                               // an integer from 2^53: c * 10^m, m = k - p + 1
+  if (lo < k - 21) { lo = k - 21; }
+  if (lo > hi) { return numapx(neg, k); }
+  if (nearok(q, k - hi + 1) == 0) { return numapx(neg, k); }
+  while (lo < hi) { mid = (lo + hi) / 2; if (nearok(q, k - mid + 1)) { hi = mid; } else { lo = mid + 1; } }
+  n = k - lo + 1; nearok(q, n); nd = putdig(peek(__CLO__));
+  return numfmt(neg, nd, nd + n);
+}
+// a fraction's candidate at scale n (0 ... 22): c, the integer nearest M * 2^q * 10^n (ties even), as F7 + CLO (a small integer);
+// -> 1 if c * 10^-n reads back as the number (F2 = |v|, F3 = M, F11 = 2^52): |c * 2^(t + 1) - 2 M 5^n| < 5^n, t = -(q + n)
+function cand(q, n) {
+  var s = q + n; var t = 0 - s; var clo = 0; var r = 0;
+  __fl(__FL_FP10__, __F4__, 0, n); __fl(__FL_FSCALE__, __F4__, __F4__, 0 - n);              // 5^n
+  __fl(__FL_FMUL__, __F5__, __F3__, __F4__); __fl(__FL_FTPLO__, __F6__, __F3__, __F4__);      // M * 5^n = Nh + Nl
+  __fl(__FL_FSCALE__, __F7__, __F5__, s); __fl(__FL_FSCALE__, __F8__, __F6__, s);            // X = xh + xl
+  if (s >= 0) { poke(__CLO__, __fv(__FV_FINT__, __F8__, 0)); return 1; }                    // an integer: c is X
+  if (__fv(__FV_FCMP__, __F7__, __F11__) >= 0) { clo = rhe(); }                            // xh an integer: round xl (F8)
+  else {
+    __fl(__FL_FFLOOR__, __F9__, __F7__, 0); __fl(__FL_FSUB__, __F10__, __F7__, __F9__);       // f, xh - f
+    __fl(__FL_FSCALE__, __F12__, 1, 0 - 1); __fl(__FL_FSUB__, __F10__, __F12__, __F10__);     // 0.5 - (xh - f)
+    r = __fv(__FV_FCMP__, __F8__, __F10__);
+    if (r == 0) { __fl(__FL_FMOD__, __F13__, __F9__, 2); r = 2 * (__fv(__FV_FCMP__, __F13__, 0) != 0) - 1; }    // a tie: the even one
+    if (r > 0) { __fl(__FL_FADD__, __F7__, __F9__, 1); } else { __fl(__FL_FLD__, __F7__, __F9__, 0); }
+  }
+  poke(__CLO__, clo);
+  __fl(__FL_FSCALE__, __F9__, __F7__, t + 1); __fl(__FL_FSCALE__, __F10__, __F5__, 1); __fl(__FL_FSUB__, __F9__, __F9__, __F10__);
+  if (clo) { __fl(__FL_FSCALE__, __F10__, clo, t + 1); __fl(__FL_FADD__, __F9__, __F9__, __F10__); }
+  __fl(__FL_FSCALE__, __F10__, __F6__, 1); __fl(__FL_FSUB__, __F9__, __F9__, __F10__);     // D = (c - X) * 2^(t + 1)
+  if (__fv(__FV_FCMP__, __F9__, 0) < 0) {                                                 // c below: at a power of two the gap is half
+    if (__fv(__FV_FCMP__, __F3__, __F11__) == 0) { if (q > 0 - 1074) { __fl(__FL_FSCALE__, __F4__, __F4__, 0 - 1); } }
+  }
+  __fl(__FL_FABS__, __F9__, __F9__, 0); r = __fv(__FV_FCMP__, __F9__, __F4__);
+  __fl(__FL_FMOD__, __F13__, __F3__, 2);
+  return (r == 0 - 1) + (r == 0) * (__fv(__FV_FCMP__, __F13__, 0) == 0);
+}
+// an integer's (from 2^53: F2, M = F3, q > 0) closest c with c * 10^m inside its rounding interval (gaps 2^q, below a power of
+// two 2^(q - 1)), as F7 + CLO; -> 0 if there is none. ch = round(v / 10^m) is a double; the exact remainder corrects it
+function nearok(q, m) {
+  var d0 = 0; var d = 0; var j = 0; var bd = 0; var found = 0; var r = 0; var p2 = __fv(__FV_FCMP__, __F3__, __F11__) == 0; var me = 0; var co = 0;
+  __fl(__FL_FMOD__, __F13__, __F3__, 2); me = __fv(__FV_FCMP__, __F13__, 0) == 0;          // M even
+  __fl(__FL_FP10__, __F4__, 0, m);
+  __fl(__FL_FDIV__, __F7__, __F2__, __F4__); __fl(__FL_FROUND__, __F7__, __F7__, 0);                  // ch
+  __fl(__FL_FMOD__, __F13__, __F7__, 2); co = __fv(__FV_FCMP__, __F13__, 0) != 0;                    // ch odd
+  __fl(__FL_FMUL__, __F5__, __F7__, __F4__); __fl(__FL_FTPLO__, __F6__, __F7__, __F4__);
+  __fl(__FL_FSUB__, __F8__, __F2__, __F5__); __fl(__FL_FSUB__, __F8__, __F8__, __F6__);              // base = v - ch * 10^m
+  __fl(__FL_FDIV__, __F9__, __F8__, __F4__); __fl(__FL_FROUND__, __F9__, __F9__, 0); d0 = __fv(__FV_FINT__, __F9__, 0);
+  j = 0 - 1;
+  while (j < 2) {
+    d = d0 + j;
+    __fl(__FL_FMUL__, __F10__, d, __F4__); __fl(__FL_FSUB__, __F10__, __F8__, __F10__);              // D = v - (ch + d) * 10^m
+    __fl(__FL_FSCALE__, __F12__, 1, q - 1 - p2 * (__fv(__FV_FCMP__, __F10__, 0) > 0));             // the half gap on its side
+    __fl(__FL_FABS__, __F10__, __F10__, 0); r = __fv(__FV_FCMP__, __F10__, __F12__);
+    if ((r == 0 - 1) + (r == 0) * me) {
+      if (found == 0) { found = 1; bd = d; __fl(__FL_FLD__, __F9__, __F10__, 0); }
+      else {
+        r = __fv(__FV_FCMP__, __F10__, __F9__);
+        if (r == 0 - 1) { bd = d; __fl(__FL_FLD__, __F9__, __F10__, 0); }
+        if (r == 0) { if ((co + bd) % 2 != 0) { bd = d; } }                                       // a tie: the even c
+      }
+    }
+    j++;
+  }
+  poke(__CLO__, bd);
+  return found;
+}
+// 17 digits, rounded once (the numbers outside the exact search)
+function numapx(neg, k) {
+  var n = 16 - k; var nd = 0;
+  __fl(__FL_FLD__, __F7__, __F2__, 0);
+  if (n > 300) { __fl(__FL_FP10__, __F4__, 0, 300); __fl(__FL_FMUL__, __F7__, __F7__, __F4__); n = n - 300; }
+  if (n > 0) { __fl(__FL_FP10__, __F4__, 0, n); __fl(__FL_FMUL__, __F7__, __F7__, __F4__); }
+  else { __fl(__FL_FP10__, __F4__, 0, 0 - n); __fl(__FL_FDIV__, __F7__, __F7__, __F4__); }
+  __fl(__FL_FROUND__, __F7__, __F7__, 0);
+  nd = putdig(0);
+  return numfmt(neg, nd, nd - (16 - k));
+}
+// F8 rounded half to even (a small integer)
+function rhe() {
+  var f = 0; var r = 0;
+  __fl(__FL_FFLOOR__, __F12__, __F8__, 0); __fl(__FL_FSUB__, __F13__, __F8__, __F12__); __fl(__FL_FSCALE__, __F10__, 1, 0 - 1);
+  r = __fv(__FV_FCMP__, __F13__, __F10__); f = __fv(__FV_FINT__, __F12__, 0);
+  if (r > 0) { return f + 1; }
+  if (r == 0) { if (f % 2 != 0) { return f + 1; } }
+  return f;
+}
+// the decimal digits of the integer in F7, plus clo (a small integer), at DIGS (characters) -> their count
+function putdig(clo) {
+  var n = __fv(__FV_FLOG10__, __F7__, 0) + 1; var j = 0; var c = clo; var d = 0;
+  while (j < n) { poke(__DIGS__ + j, 48 + __fv(__FV_FDIGIT__, __F7__, n - 1 - j)); j++; }
+  j = n - 1;
+  while (c != 0) {
+    if (j < 0) { __mcpy(__DIGS__ + 1, __DIGS__, n); poke(__DIGS__, 48 + c); n++; c = 0; }       // a carry past the first digit
+    else {
+      d = peek(__DIGS__ + j) - 48 + c; c = 0;
+      while (d < 0) { d = d + 10; c = c - 1; }
+      while (d > 9) { d = d - 10; c = c + 1; }
+      poke(__DIGS__ + j, 48 + d); j = j - 1;
+    }
+  }
+  return n;
+}
+// DIGS' nd digits (trailing zeros dropped) with the decimal point at pt (0.d1 d2 ... * 10^pt), as JavaScript writes them: fixed
+// for -6 < pt <= 21, else d1.d2...e+-x
+function numfmt(neg, nd, pt) {
+  var len = 0; var r = 0; var p = 0; var ex = pt - 1; var ae = ex;
+  while ((nd > 1) * (peek(__DIGS__ + nd - 1) == 48)) { nd = nd - 1; }
+  if (ae < 0) { ae = 0 - ae; }
+  if ((pt >= nd) * (pt <= 21)) { len = pt; }
+  else if ((pt > 0) * (pt <= 21)) { len = nd + 1; }
+  else if ((pt > 0 - 6) * (pt <= 0)) { len = nd + 2 - pt; }
+  else { len = nd + (nd > 1) + 2 + __kind(ae, __K_NLEN__); }
+  r = newstr(len + neg); p = r;
+  if (neg) { poke(p, 45); p++; }
+  if ((pt >= nd) * (pt <= 21)) { __mcpy(p, __DIGS__, nd); __mfill(p + nd, 48, pt - nd); }
+  else if ((pt > 0) * (pt <= 21)) { __mcpy(p, __DIGS__, pt); poke(p + pt, 46); __mcpy(p + pt + 1, __DIGS__ + pt, nd - pt); }
+  else if ((pt > 0 - 6) * (pt <= 0)) { poke(p, 48); poke(p + 1, 46); __mfill(p + 2, 48, 0 - pt); __mcpy(p + 2 - pt, __DIGS__, nd); }
+  else {
+    poke(p, peek(__DIGS__)); p++;
+    if (nd > 1) { poke(p, 46); __mcpy(p + 1, __DIGS__ + 1, nd - 1); p = p + nd; }
+    poke(p, 101); if (ex < 0) { poke(p + 1, 45); } else { poke(p + 1, 43); }
+    __nput(p + 2, ae);
+  }
+  return r;
 }
 function dlt(a, b) { return jsb(dcmp(a, b) == 0 - 1); }
 function dgt(a, b) { return jsb(dcmp(a, b) == 1); }
@@ -256,9 +465,7 @@ function deqr(a, b) {
     if (peek(b - 1) != n) { return 0; }
     return __mcmp(a, b, n) == n;
   }
-  if (a == __NAN__) { return 0; }
-  if (a == __MZERO__) { a = 0; }
-  if (b == __MZERO__) { b = 0; }
+  if (__kind(a, __K_NUM__) * __kind(b, __K_NUM__)) { return __fv(__FV_FCMP__, a, b) == 0; }
   return a == b;
 }
 function deq(a, b) { return jsb(deqr(a, b)); }
@@ -367,7 +574,7 @@ function join(x, sep) {
   if (sep != 0) { ls = clen(sep); }
   while (i < n) {
     e = peek(peek(t) + i);
-    if (__kind(e, __K_AO__) + __kind(e, __K_SPECIAL__)) {
+    if (__kind(e, __K_AO__) + __kind(e, __K_SPECIAL__) + __kind(e, __K_DBL__)) {
       if (t == x) { t = newarr(n, n); __mcpy(peek(t), peek(x), n); }
       if ((e == __NULL__) + (e == __UNDEF__)) { e = __S_EMPTY__; } else { e = tostr(e); }
       poke(peek(t) + i, e);
@@ -583,18 +790,23 @@ function split(s, sep) {
 }
 function tostring(d, v) { return tostr(v); }
 function tostring0(v) { return tostr(v); }
-// parseInt(s) / Number(s): the decimal integer s starts with (after blanks, a sign); NaN if none
+// Number(x): x as a number (tonum); parseInt(s): the decimal integer s's string starts with (after blanks, a sign), NaN if none;
+// parseFloat(s): the decimal literal it starts with
+function number(d, x) { return tonum(x); }
 function parseint(d, s) {
-  var n = 0; var m = 0; var i = 0; var g = 1; var neg = 0; var c = 0; var any = 0;
-  if (__kind(s, __K_STR__) == 0) { return s; }
-  m = peek(s - 1);
-  while (i < m) { if (isblank(peek(s + i))) { i++; } else { m = 0 - m; } }
-  if (m < 0) { m = 0 - m; }
-  if (i < m) { c = peek(s + i); if (c == 45) { neg = 1; i++; } else if (c == 43) { i++; } }
-  while (g) { g = 0; if (i < m) { c = peek(s + i); if (c >= 48) { if (c <= 57) { n = n * 10 + c - 48; i++; g = 1; any = 1; } } } }
+  var n = 0; var i = 0; var j = 0; var c = 0; var go = 1; var any = 0;
+  s = tostr(s); n = peek(s - 1); i = skipbl(s, 0, n); j = i;
+  if (j < n) { c = peek(s + j); if ((c == 45) + (c == 43)) { j++; } }
+  while (go) { go = 0; if (j < n) { c = peek(s + j); if ((c >= 48) * (c <= 57)) { j++; go = 1; any = 1; } } }
   if (any == 0) { return __NAN__; }
-  if (neg) { if (n == 0) { return __MZERO__; } return 0 - n; }
-  return n;
+  return numscan(s, i, j);
+}
+function parsefloat(d, s) {
+  var n = 0; var i = 0; var r = 0;
+  s = tostr(s); n = peek(s - 1); i = skipbl(s, 0, n);
+  r = numscan(s, i, n);
+  if (peek(__NEND__) == i) { return __NAN__; }
+  return r;
 }
 
 // ---------------- console.log of an array or object (PRINT traps into pval): Node's one-line form [ 1, 'a', [ 2 ] ],
@@ -649,6 +861,7 @@ function ins(v, d) {
     putc(32); putc(93); return 0;
   }
   if (__kind(v, __K_OBJ__)) { return insobj(v, d); }
+  if (__kind(v, __K_DBL__)) { prn(numstr(v)); return 0; }
   prn(v);
   return 0;
 }

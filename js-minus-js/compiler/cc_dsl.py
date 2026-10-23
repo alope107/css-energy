@@ -390,8 +390,8 @@ class Prog(Base):
                 cB = self.m(and_(not_(cE), not_(sp), ceq(47), eq(cn, 42)), 'cB')
                 cH = self.m(and_(not_(cE), not_(sp), or_(ceq(34), ceq(39))), 'cH')
                 rest = self.m(and_(not_(cE), not_(sp), not_(cG), not_(cB), not_(cH)), 'rest')
-                cI = self.m(and_(rest, or_(alc, and_(dgc, eq(tkc, 1)))), 'cI')
-                cJ = self.m(and_(rest, not_(cI), dgc), 'cJ')
+                cJ = self.m(and_(rest, or_(ge(tkc, 2), and_(dgc, ne(tkc, 1)))), 'cJ')      # a number (cc_ref.char: tkc 2 3 4 5)
+                cI = self.m(and_(rest, not_(cJ), or_(alc, and_(dgc, eq(tkc, 1)))), 'cI')
                 cK = self.m(and_(rest, not_(cI), not_(cJ), ne(two, 0)), 'cK')
                 cL = self.m(and_(rest, not_(cI), not_(cJ), eq(two, 0)), 'cL')
                 with self.when(cE): tok(5)
@@ -415,10 +415,25 @@ class Prog(Base):
                         with self.when(ne(kp, 0)): self.set('inul', add(sdp, ln + 2))
                         with self.when(eq(kp, 2)): self.set('sdp', add(sdp, ln + 3))
                         self.set('icm', mul(eq(kp, 1), ln + 3))
-                with self.when(cJ):
-                    nacc = self.m(add(mul(mul(eq(tkc, 2), self.v('acc')), 10), sub(c, 48)), 'nacc')
-                    self.set('acc', nacc); self.set('tkc', 2)
-                    with self.when(not_(dgcn)): tok(1, nacc); self.set('tkc', 0)
+                with self.when(cJ):                         # its characters at sdp (a double's string), its integer value (acc)
+                    fr = self.m(lt(tkc, 2), 'nfr'); st0 = self.m(ite(fr, 2, tkc), 'nst0')
+                    acc0 = self.m(mul(not_(fr), self.v('acc')), 'nac0'); h10 = self.m(mul(not_(fr), self.v('h1')), 'nh10')
+                    dg2 = self.m(and_(dgc, eq(st0, 2)), 'ndg2'); dot = self.m(ceq(46), 'ndot'); ee = self.m(or_(ceq(69), ceq(101)), 'nee')
+                    nst = self.m(ite(dg2, 2, ite(dot, 3, ite(ee, 4, ite(eq(st0, 4), 5, st0)))), 'nst')
+                    nacc = self.m(ite(dg2, add(mul(acc0, 10), sub(c, 48)), acc0), 'nacc')
+                    nh2 = self.m(or_(and_(not_(fr), self.v('h2')), dot, ee), 'nh2'); nh1 = self.m(h10 + 1, 'nh1')
+                    sdp = self.m(self.v('sdp'), 'sdp2')
+                    with self.when(lt(add(sdp, h10 + 1), SEND)): self.datum(add(sdp, h10 + 1), c)
+                    self.set('tkc', nst); self.set('acc', nacc); self.set('h1', nh1); self.set('h2', nh2)
+                    more = self.m(or_(dgcn, and_(eq(nst, 2), anyeq(cn, (46, 69, 101))), and_(eq(nst, 3), anyeq(cn, (69, 101))),
+                                      and_(eq(nst, 4), anyeq(cn, (43, 45)))), 'nmore')
+                    with self.when(not_(more)):
+                        isd = self.m(or_(nh2, gt(nacc, R.SMI_HI)), 'nisd')      # a double: its string, committed
+                        with self.when(isd):
+                            tok(1, strtok(gt(add(sdp, nh1 + 2), SEND), sdp + 1, nh1), 0, 1)
+                            self.set('inul', add(sdp, nh1 + 1)); self.set('sdp', add(sdp, nh1 + 2))
+                        with self.when(not_(isd)): tok(1, nacc)
+                        self.set('tkc', 0)
                 with self.when(cK): self.set('p2', two)
                 with self.when(cL): tok(4, c)
         # the pending newline (cc_ref.char): decided at the blank before the next significant character, or on it (+ - /)
@@ -939,7 +954,7 @@ class Prog(Base):
         with block(R.S_OKEY):
             with self.when(P(125)): self.set('osp', self.v('osp') - 1); self.set('mode', R.S_OPER); self.done()     # {} or a trailing comma
             nk = self.m(not_(P(125)), 'onk')
-            with self.when(and_(nk, not_(or_(isID, isSTR, isNUM)))): self.fail(71)
+            with self.when(and_(nk, not_(or_(isID, isSTR, and_(isNUM, eq(th2, 0)))))): self.fail(71)     # (a double's literal: no key)
             if self.spec_tk in (None, 2):
                 with self.when(and_(nk, isID)): ksI, okI = self.key_name(tv, th1, th2)
             else: ksI, okI = K(0), K(0)
@@ -949,10 +964,11 @@ class Prog(Base):
                 with self.when(and_(nk, isSTR, not_(bigS))): eS, okS = self.intern(th1, th2, add(tsa, self.db), fdiv(tv, 2048))
                 ksS = self.m(eS, 'oks'); okS = self.m(and_(not_(bigS), okS), 'okS')
             else: ksS, okS = K(0), K(0)
-            with self.when(and_(nk, isNUM)):                  # a number key: as o[n] = v
+            nkey = self.m(and_(nk, isNUM, eq(th2, 0)), 'onkey')
+            with self.when(nkey):                              # a number key: as o[n] = v
                 v20 = self.m(sub(mod(add(tv, 1 << 19), 1 << 20), 1 << 19), 'kn20'); small = self.m(and_(ge(v20, -128), lt(v20, R.KLIM)), 'knsm')
                 self.push_od(ite(small, add(v20, 896), KBIG), 3, v20)
-            okk = self.m(or_(and_(isID, okI), and_(isSTR, okS), and_(isNUM, eq(self.v('err'), 0))), 'okk')
+            okk = self.m(or_(and_(isID, okI), and_(isSTR, okS), and_(isNUM, eq(th2, 0), eq(self.v('err'), 0))), 'okk')
             with self.when(and_(nk, okk)):
                 self.push_op(R.M_OKEY, mul(not_(isNUM), sub(add(mul(isID, ksI), mul(isSTR, ksS)), self.db))); self.set('mode', R.S_OCOLON); self.done()
         with block(R.S_OCOLON):
@@ -960,7 +976,17 @@ class Prog(Base):
             with self.when(not_(P(58))): self.fail(72)
         # ---- S_OPND
         with block(R.S_OPND):
-            with self.when(isNUM):
+            dbl = self.m(and_(isNUM, eq(th2, 1)), 'ndbl')
+            with self.when(dbl):                               # cc_ref.numlit
+                tsa = self.m(mod(tv, 2048), 'ntsa'); gfull = self.m(ge(self.v('dp'), R.SDATA), 'ngf')
+                with self.when(ge(tsa, 1024)): self.fail(26)
+                with self.when(lt(tsa, 1024)):
+                    self.datum(add(tsa, self.db - 1), fdiv(tv, 2048))
+                    with self.when(gfull): self.fail(25)
+                    with self.when(not_(gfull)):
+                        g = self.m(self.v('dp'), 'ng'); self.set('dp', g + 1)
+                        self.emit(OP['NUMLIT'], (g, 0), w1=add(tsa, self.db - R.STRTAG)); self.push_od(g, 3); self.set('mode', R.S_OPER); self.done()
+            with self.when(and_(isNUM, not_(dbl))):
                 v20 = self.m(sub(mod(add(tv, 1 << 19), 1 << 20), 1 << 19), 'n20')
                 small = self.m(and_(ge(v20, -128), lt(v20, R.KLIM)), 'nsm')
                 self.push_od(ite(small, add(v20, 896), KBIG), 3, v20); self.set('mode', R.S_OPER); self.done()

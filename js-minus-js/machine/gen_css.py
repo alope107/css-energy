@@ -217,7 +217,8 @@ BINOPS = ['MOD', 'ADD', 'SUB', 'MUL', 'LT', 'EQ', 'LE', 'GT', 'GE', 'NE', 'DIV']
 def isstr_v(x): return f"calc(clamp(0, {x} - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - {x}, 1))"
 def isarr_v(x): return f"calc(clamp(0, {x} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {x}, 1))"
 def isobj_v(x): return f"calc(clamp(0, {x} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {x}, 1))"
-def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)})"
+def isdbl_v(x): return f"calc(clamp(0, {x} + {R.DBLTAG + 1}, 1) * clamp(0, {32768 - R.DBLTAG} - {x}, 1))"     # (cc_ref.isdbl)
+def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)} + {isdbl_v(x)})"
 def own_v(x): return f"calc(clamp(0, {x} + {STRTAG - R.STRP0 + 1}, 1) * clamp(0, {R.SEND - STRTAG} - {x}, 1))"     # (a string: the program's own)
 def special_v(x): return f"clamp(0, {x} - {R.SPV0 - 1}, 1)"
 def smi_v(x): return f"calc(clamp(0, {x} - {R.SMI_LO - 1}, 1) * clamp(0, {R.SMI_HI + 1} - {x}, 1))"
@@ -243,10 +244,11 @@ def trap(tr, s, n, F, args, retw):
 DYNOPS = list(R.DYNOPS)
 TRAPDEF, WBACK = R.TRAPDEF, R.WBACK
 bothstr = f"calc({isstr_v(xB)} * {isstr_v(yC)})"
+anydbl = f"min(1, calc({isdbl_v(xB)} + {isdbl_v(yC)}))"
 # A string's + (no array or object, pst 0) goes to the cat class: pst CAT0 from the next execution (dcat)
 CATT, CAT0 = 1024, 2048
 NOCAT = os.environ.get('NOCAT') == '1'     # (measurement only: a string's + traps to the ROM's cat, as before the cat class)
-anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)}))"
+anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)} + {anydbl}))"     # (a double too: the library)
 def neg_v(x): return f"clamp(0, -1 * {x}, 1)"
 def nz_v(x): return f"calc({x} * (1 - {eq(x, R.MZERO)}))"                    # -0 as 0
 def nul_v(x): return f"calc({eq(x, R.NULL)} + {eq(x, R.UNDEF)})"
@@ -257,13 +259,14 @@ CMP_SUFFIX = ['LT', 'GT', 'LE', 'GE', 'EQ', 'NE', 'LEQ', 'LNE']
 _ceq = f"calc((1 - {eq(xB, R.NAN)}) * {eq(nz_v(xB), nz_v(yC))})"
 _cleq = (f"calc(min(1, calc({nul_v(xB)} + {nul_v(yC)})) * {nul_v(xB)} * {nul_v(yC)} + (1 - min(1, calc({nul_v(xB)} + {nul_v(yC)})))"
          f" * (1 - {eq(xB, R.NAN)}) * {eq(norm_v(xB), norm_v(yC))})")
-CMP_FAST = {**{o: "calc(var(--dix) * var(--diy))" for o in ('LT', 'GT', 'LE', 'GE')}, 'EQ': f"calc(1 - {bothstr})", 'NE': f"calc(1 - {bothstr})",
-            'LEQ': "calc((1 - var(--cqs)) * (1 - var(--cao)))", 'LNE': "calc((1 - var(--cqs)) * (1 - var(--cao)))"}
+CMP_FAST = {**{o: "calc(var(--dix) * var(--diy))" for o in ('LT', 'GT', 'LE', 'GE')}, 'EQ': "calc((1 - var(--cbs)) * (1 - var(--cdb)))",
+            'NE': "calc((1 - var(--cbs)) * (1 - var(--cdb)))",
+            'LEQ': "calc((1 - var(--cqs)) * (1 - var(--cao)) * (1 - var(--cdb)))", 'LNE': "calc((1 - var(--cqs)) * (1 - var(--cao)) * (1 - var(--cdb)))"}
 CMP_COND = {**{o: BINE[o] for o in ('LT', 'GT', 'LE', 'GE')}, 'EQ': _ceq, 'NE': f"calc(1 - {_ceq})", 'LEQ': _cleq, 'LNE': f"calc(1 - {_cleq})"}
 # the jumps: J<suffix>, and JN<relation>, the relation's negation (NaN: false either way)
 JFAST = {**{'J' + o: CMP_FAST[o] for o in CMP_SUFFIX}, **{'JN' + o: CMP_FAST[o] for o in ('LT', 'GT', 'LE', 'GE')}}
 JCOND = {**{'J' + o: CMP_COND[o] for o in CMP_SUFFIX}, **{'JN' + o: f"calc(1 - {CMP_COND[o]})" for o in ('LT', 'GT', 'LE', 'GE')}}
-CMP_PRE = [f"--dix: {smi_v(xB)};", f"--diy: {smi_v(yC)};", f"--cqs: min(1, calc({isstr_v(xB)} + {isstr_v(yC)}));",
+CMP_PRE = [f"--dix: {smi_v(xB)};", f"--diy: {smi_v(yC)};", f"--cbs: {bothstr};", f"--cdb: {anydbl};", f"--cqs: min(1, calc({isstr_v(xB)} + {isstr_v(yC)}));",
            f"--cao: max(calc({isarr_v(xB)} + {isobj_v(xB)} - {isarr_v(yC)} - {isobj_v(yC)}), calc({isarr_v(yC)} + {isobj_v(yC)} - {isarr_v(xB)} - {isobj_v(xB)}));"]
 zy = eq(yC, 0)
 _dr = {'DADD': f"calc({xB} + {yC})", 'DSUB': f"calc({xB} - {yC})", 'DMUL': f"calc({xB} * {yC})",
@@ -275,13 +278,18 @@ _dok = {'DADD': f"calc({_dsb} * {smi_v('var(--dr)')})", 'DSUB': f"calc({_dsb} * 
         'DMOD': f"calc({_dsb} * (1 - {zy}) * (1 - {eq('var(--dr)', 0)} * {neg_v(xB)}))",
         'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", **{'D' + o: CMP_FAST[o] for o in CMP_SUFFIX}}
 _dval = {**{o: "var(--dr)" for o in _dr}, **{'D' + o: f"calc({R.FALSE} - {CMP_COND[o]})" for o in CMP_SUFFIX}}
-DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('var(--A)')};", f"--dwb: {eq('var(--pst)', WBACK)};",
-                   f"--dr: {by_op({o: _dr[o] for o in list(_dr)[:-1]}, _dr['DNEG'])};", f"--dok: {by_op({o: _dok[o] for o in DYNOPS[:-1]}, _dok[DYNOPS[-1]])};",
+# NUMLIT A, word1 (a number literal: A its cache, a global): A read as x; nonzero, it stays (written back as it is); 0, the library's
+# numlit parses the string word1 (the trap's arguments: word1, 0) and the instruction moves its value into A
+DYNC = DYNOPS + ['NUMLIT']
+_dok['NUMLIT'] = "calc(1 - " + eq('var(--vx)', 0) + ")"; _dval['NUMLIT'] = "var(--vx)"
+DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('var(--A)')};", f"--dwb: {eq('var(--pst)', WBACK)};", f"--dnl: {eq('var(--op)', OP['NUMLIT'])};",
+                   f"--dr: {by_op({o: _dr[o] for o in list(_dr)[:-1]}, _dr['DNEG'])};", f"--dok: {by_op({o: _dok[o] for o in DYNC[:-1]}, _dok[DYNC[-1]])};",
                    f"--dcat: calc({eq('var(--op)', OP['DADD'])} * (1 - min(1, var(--pst))) * (1 - var(--dok)) * var(--cqs) * (1 - {anyao}) * {0 if NOCAT else 1});",
-                   f"--dval: {by_op({o: _dval[o] for o in DYNOPS[:-1]}, _dval[DYNOPS[-1]])};"] +
+                   f"--dval: {by_op({o: _dval[o] for o in DYNC[:-1]}, _dval[DYNC[-1]])};"] +
            trap("calc((1 - var(--dwb)) * min(1, calc(var(--pst) + (1 - var(--dok)) * (1 - var(--dcat)))))", "var(--pst)", 2,
-                f"mod({fp} + {TRAPDEF}, 32768)", f"if(style(--pst: 0): {yC}; else: {xB})", f"calc({TRAPDEF * 8192} + {pc} / 2)"))
-DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
+                f"mod({fp} + {TRAPDEF}, 32768)", f"if(style(--dnl: 1): if(style(--pst: 0): 0; else: var(--vg)); style(--pst: 0): {yC}; else: {xB})",
+                f"calc({TRAPDEF * 8192} + {pc} / 2)"))
+DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({**{o: ENT[R.TRAPS[o]] for o in DYNOPS}, 'NUMLIT': ENT['numlit']}, 0)}; else: {pc})",
           'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--dcat))",
           'pst': f"if(style(--dcat: 1): {CAT0}; style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"}
 # the collector's map of block starts (cc_ref.MAP): a block's word and bit, and the word with the bit set
@@ -402,8 +410,9 @@ KINDE = ("if(" + " ".join(f"style(--kk: {i}): {e};" for i, e in enumerate([
     f"calc({isstr_v(xB)} * (1 - {_own}))", ndig(xB), isref_v(xB), f"calc({isstr_v(xB)} * clamp(0, {xB} + {STRTAG - HEAP0 + 1}, 1))",
     # typeof: its name, BSTRS[BS_TYPE + type code] (cc_ref.typecode)
     f"calc({R.BSTRV(R.BS_TYPE)} + 12 * (4 * {isstr_v(xB)} + {isarr_v(xB)} + {isobj_v(xB)} + {eq(xB, R.NULL)} + 2 * ({eq(xB, R.TRUE)} + {eq(xB, R.FALSE)})"
-    f" + 3 * (1 - {isref_v(xB)} - {eq(xB, R.NULL)} - {eq(xB, R.UNDEF)} - {eq(xB, R.TRUE)} - {eq(xB, R.FALSE)})))",
-    special_v(xB)])) + f" else: {smi_v(xB)})")
+    f" + 3 * (1 - {isstr_v(xB)} - {isarr_v(xB)} - {isobj_v(xB)} - {eq(xB, R.NULL)} - {eq(xB, R.UNDEF)} - {eq(xB, R.TRUE)} - {eq(xB, R.FALSE)})))",
+    special_v(xB), smi_v(xB), isdbl_v(xB)])) +
+    f" else: calc({smi_v(xB)} + {eq(xB, R.INF)} + {eq(xB, R.NINF)} + {eq(xB, R.NAN)} + {eq(xB, R.MZERO)} + {isdbl_v(xB)}))")     # (num)
 # JZ / JNZ / NOT: 0 and the empty string are false (a string's length, the word before its address: read z, only for a string);
 # in user code also false, null, undefined, NaN and -0 (the specials from FALSE on)
 FALSY = ["--tz: calc(var(--tstr) * " + eq("var(--vz)", 0) + f" + (1 - var(--tstr)) * ({eq(xB, 0)} + {user} * clamp(0, {xB} - {R.FALSE - 1}, 1)));"]
@@ -453,7 +462,8 @@ CLASSES = {
                        ("z", by_op({'LDI': f"mod({xB} + {yC}, 32768)"}, "var(--aA)"), by_op({'LDI': 1}, "calc(1 - var(--kA))"))],
                 write=(by_op({'LDI': "var(--aA)"}, f"mod(var(--zA) + {xB}, 32768)"), by_op({'LDI': "var(--vz)"}, yC), None, "1"),
                 nx={'pc': f"calc({pc} + 2)"}, deps={'z': [('x', ['LDI']), ('y', ['LDI'])]}),
-    'dyn': dict(ops=DYNOPS, pre=DYN_PRE, reads=[("x", "var(--aB)", "(1 - var(--kB)) * (1 - var(--dwb))"), ("y", "var(--aC)", "(1 - var(--kC)) * (1 - var(--dwb))"),
+    'dyn': dict(ops=DYNC, pre=DYN_PRE, reads=[("x", "if(style(--dnl: 1): var(--aA); else: var(--aB))", "(1 - (1 - var(--dnl)) * var(--kB)) * (1 - var(--dwb))"),
+                                              ("y", "var(--aC)", "(1 - var(--kC)) * (1 - var(--dwb)) * (1 - var(--dnl))"),
                                               ("z", f"mod({fp} + {TRAPDEF}, 32768)", "var(--dwb)")],
                 write=("if(style(--tr: 1): var(--taddr); else: var(--aA))", "if(style(--tr: 1): var(--tval); style(--dwb: 1): var(--vz); else: var(--dval))", None,
                        "calc(1 - var(--dcat))"),                 # (the hand-off to the cat class writes nothing)
@@ -536,7 +546,7 @@ pr = OPND + read("x", "var(--aB)") + [
     f"--mx: calc((1 - var(--kB)) * (1 - {eq('var(--op)', OP['PRINTK'])}) * {miss('x')});",
     f"--pv: {by_op({'PRINTK': 'var(--vg)'}, xB)};",
     f"--prLN: {eq('round(down, mod(var(--A), 8) / 2)', 2)};", f"--prSP: {eq('round(down, mod(var(--A), 8) / 2)', 1)};",
-    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)}));",
+    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)} + {isdbl_v(pv)}));",
     f"--pp: calc({pv} + {STRTAG} + {special_v(pv)} * ({R.BSTR + 1 - 12 * R.SPV0 - STRTAG} + 11 * {pv}"
     f" + 12 * clamp(0, mod(var(--A), 16) - 7, 1) * {eq(pv, R.MZERO)}));",       # (a special: its name; a + chain's piece's -0: "0")
     f"--isStr: calc((1 - {isputc}) * clamp(0, var(--pp) - {STR_LO - 1}, 1) * clamp(0, {STRP_HI} - var(--pp), 1));",
@@ -605,11 +615,12 @@ cls_rules['out'] = (['PRINT', 'PRINTK', 'PUTC'], pr)
 # ALLOC again), 1 the header's line, 2 a string's NUL past it, 3 the map's bit, 4 A. Each phase re-derives the block from HP
 AL_PRE = OPND + OPNDA + [
     "--ak: calc(var(--C) - 896);",
-    f"--anw: calc(8 * round(up, ({xB} + if(style(--ak: 0): 3; style(--ak: 1): 4; else: 0)) / 8));",
+    f"--anw: calc(8 * round(up, ({xB} + if(style(--ak: 0): 3; style(--ak: 1): 4; style(--ak: 4): 8; else: 0)) / 8));",
     f"--afull: calc({eq(pst, 0)} * clamp(0, var(--vk) + var(--anw) - var(--vj) - {HS}, 1));",
     f"--abase: calc({HEAP0} + var(--vk) - clamp(0, {pst}, 1) * var(--anw));",
     f"--amw: {mapword('var(--abase)')};", f"--amb: {mapbitv('var(--abase)')};", f"--amap: {mapset('var(--vr)', 'var(--amb)')};",
-    f"--ares: if(style(--ak: 0): calc(var(--abase) + {2 - STRTAG}); style(--ak: 1): calc(var(--abase) + {3 + ARRTAG}); else: var(--abase));",
+    f"--ares: if(style(--ak: 0): calc(var(--abase) + {2 - STRTAG}); style(--ak: 1): calc(var(--abase) + {3 + ARRTAG});"
+    f" style(--ak: 4): calc(var(--abase) + {4 - R.DBLTAG}); else: var(--abase));",
     f"--anext: if(style(--pst: 0): if(style(--ak: 2): 4; style(--ak: 3): 3; else: 1); style(--pst: 1): calc(3 - {eq('var(--ak)', 0)} * clamp(0, {xB} - 1, 1));"
     " style(--pst: 2): 3; else: 4);"] + \
     trap(f"calc(clamp(0, {pst} - {CATT - 1}, 1) + var(--afull))", f"calc(clamp(0, {pst} - {CATT - 1}, 1) * ({pst} - {CATT}))", 1, "var(--aA)",
@@ -619,7 +630,7 @@ AL_PRE = OPND + OPNDA + [
     " style(--pst: 3): var(--amw); else: var(--aA));",
     f"--akk: calc(1 + 3 * (1 - var(--tr)) * {eq(pst, 1)});"]
 def alloc_val(j):
-    hdr = [f"calc(-2 - var(--anw) - {eq('var(--ak)', 1)})", xB, "0", f"calc({eq('var(--ak)', 1)} * (var(--abase) + 4))"][j]
+    hdr = [f"calc(-2 - var(--anw) - {eq('var(--ak)', 1)} - 2 * {eq('var(--ak)', 4)})", xB, "0", f"calc({eq('var(--ak)', 1)} * (var(--abase) + 4))"][j]
     return (f"if(style(--tr: 1): var(--tval); style(--pst: 0): calc(var(--vk) + var(--anw)); style(--pst: 1): {hdr}; style(--pst: 2): 0;"
             " style(--pst: 3): var(--amap); else: var(--ares))")
 TRAP_NX = lambda routine, done: {'pc': f"if(style(--tlast: 1): {routine}; style(--{done}: 1): calc({pc} + 2); else: {pc})",
@@ -676,7 +687,8 @@ H_ = HS
 def isfref_v(w, flo):
     return (f"min(1, calc(clamp(0, {w} + {OBJTAG + 1} - {flo}, 1) * clamp(0, {flo} + {H_ - OBJTAG} - {w}, 1)"
             f" + clamp(0, {w} + {STRTAG - 1} - {flo}, 1) * clamp(0, {flo} + {H_ - STRTAG} - {w}, 1)"
-            f" + clamp(0, {w} - {ARRTAG + 2} - {flo}, 1) * clamp(0, {flo} + {H_ + ARRTAG} - {w}, 1)))")
+            f" + clamp(0, {w} - {ARRTAG + 2} - {flo}, 1) * clamp(0, {flo} + {H_ + ARRTAG} - {w}, 1)"
+            f" + clamp(0, {w} + {R.DBLTAG - 3} - {flo}, 1) * clamp(0, {flo} + {H_ - R.DBLTAG} - {w}, 1)))")
 isw = eq('var(--op)', OP['MWALK'])
 NEWCLASSES['mcmp'] = dict(ops=['MCMP', 'MFEQ', 'MFREF', 'MWALK'], pre=OPND + OPNDA + [f"--zA: {kv('A', 'z')};", f"--mo: {pst};",
     f"--mk: max(0, min(var(--zA) - var(--mo), 4 - var(--up), 4 - {eq('var(--op)', OP['MCMP'])} * var(--ul)));"] +
@@ -726,6 +738,89 @@ NET_PRE += ["--nmatch: calc(" + " * ".join(f"var(--nm{j})" for j in range(NP)) +
 NEWCLASSES['net'] = dict(ops=['NET'], pre=NET_PRE, reads=[("x", "var(--aB)", "1 - var(--kB)")],
                          write=(f"calc(var(--nfin) * var(--aA) + (1 - var(--nfin)) * ({R.RBUF0} + {pst}))", "var(--nval)", None, "1"),
                          nx={'pc': f"calc({pc} + 2 * var(--nfin))", 'steps': "calc(var(--steps) + var(--nfin))", 'pst': f"calc((1 - var(--nfin)) * ({pst} + 1))"})
+# The FPU (cc_ref FLOPS / FVOPS; the runtime library's only): calc() computes in IEEE doubles within one declaration, so the
+# operands' doubles and the result are written out inline in each declaration that needs them (a registered <integer> keeps 6
+# digits across var(): only the words and small integers cross). B and C: a scratch line (the constants FSCR ...: their line at
+# fpu_base), a boxed double (its number line: lines p and l), or the number itself (an integer, or the specials NaN, +-Infinity,
+# -0). FLOPS write the line at A (a scratch line, or A's value: z) from the result's flags, exponent and mantissa; FVOPS write A
+FB_ = R.LAYOUT['fpu_base']
+def fopnd(o, val, ln):
+    """operand o's (B / C) line flag, line address and kind/sign declarations: --f<ln>l (a line), --f<ln>a, --f<ln>k (0 finite from
+    the line, 1 zero, 2 infinite, 3 NaN, 4 the integer itself), --f<ln>s (the sign)"""
+    w = [f"var(--{ln}w{j})" for j in range(4)]
+    sc = f"calc(var(--k{o}) * clamp(0, var(--{o}) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--{o}), 1))"
+    return [f"--f{ln}c: {sc};", f"--f{ln}l: min(1, calc(var(--f{ln}c) + {isdbl_v(val)}));",
+            f"--f{ln}a: if(style(--f{ln}c: 1): calc({FB_} + 4 * (var(--{o}) - {896 + R.FSCR})); else: mod({val} + {R.DBLTAG}, 32768));",
+            f"--f{ln}k: if(style(--f{ln}l: 1): calc({eq(f'abs({w[0]})', 1)} + 2 * {eq(f'abs({w[0]})', 3000)} + 3 * {eq(w[0], 4000)});"
+            f" else: calc(4 - 3 * {eq(val, R.MZERO)} - 2 * ({eq(val, R.INF)} + {eq(val, R.NINF)}) - {eq(val, R.NAN)}));",
+            f"--f{ln}s: if(style(--f{ln}l: 1): sign({w[0]}); else: calc(1 - 2 * ({eq(val, R.MZERO)} + {eq(val, R.NINF)})));"]
+def fdouble(ln, val):
+    """the operand's double, inline (from its line's words, or the integer / special)"""
+    w = [f"var(--{ln}w{j})" for j in range(4)]
+    fin = f"calc(var(--f{ln}s) * ({w[1]} * pow(2, 36) + {w[2]} * pow(2, 18) + {w[3]}) * pow(2, abs({w[0]}) - 1152))"
+    return (f"if(style(--f{ln}k: 4): {val}; style(--f{ln}k: 0): {fin}; style(--f{ln}k: 1): calc(var(--f{ln}s) * 0);"
+            f" style(--f{ln}k: 2): calc(var(--f{ln}s) * infinity); else: NaN)")
+FX, FY = fdouble('p', xB), fdouble('l', yC)
+def _split(a): return f"calc((134217729 * ({a})) - ((134217729 * ({a})) - ({a})))"
+def _tplo(a, b):
+    ah, bh = _split(a), _split(b); al, bl = f"calc(({a}) - {ah})", f"calc(({b}) - {bh})"
+    return f"calc(((({ah}) * ({bh}) - ({a}) * ({b})) + ({ah}) * ({bl}) + ({al}) * ({bh})) + ({al}) * ({bl}))"
+_FCV = {'pi': 'pi', 'e': 'e', 'ln2': 'log(2)', 'ln10': 'log(10)', 'log2e': 'calc(log(e) / log(2))', 'log10e': 'calc(log(e) / log(10))',
+        'sqrt2': 'sqrt(2)', 'sqrt1_2': 'sqrt(0.5)'}
+FLR = {'FLD': f"calc({FX})", 'FADD': f"calc(({FX}) + ({FY}))", 'FSUB': f"calc(({FX}) - ({FY}))", 'FMUL': f"calc(({FX}) * ({FY}))",
+       'FDIV': f"calc(({FX}) / ({FY}))", 'FMOD': f"rem({FX}, {FY})", 'FPOW': f"pow({FX}, {FY})", 'FSQRT': f"sqrt({FX})",
+       'FFLOOR': f"round(down, {FX})", 'FCEIL': f"round(up, {FX})", 'FROUND': f"round(nearest, {FX})", 'FTRUNC': f"round(to-zero, {FX})",
+       'FABS': f"abs({FX})", 'FTPLO': _tplo(FX, FY),
+       'FSCALE': f"calc(({FX}) * pow(2, round(down, {yC} / 2)) * pow(2, {yC} - round(down, {yC} / 2)))",
+       'FP10': f"pow(10, {yC})", 'FCONST': "if(" + " ".join(f"style(--yC: {i}): {_FCV[n]};" for i, n in enumerate(R.FCONSTS)) + " else: 0)",
+       'FEXP': f"exp({FX})", 'FLOG': f"log({FX})", 'FSIN': f"sin({FX})", 'FCOS': f"cos({FX})", 'FTAN': f"tan({FX})"}
+assert list(FLR) == R.FLOPS
+FR = by_op({o: FLR[o] for o in R.FLOPS[:-1]}, FLR[R.FLOPS[-1]])
+def fenc_decls(R_, p):
+    """a double's number line from its value R_ (inline): --<p>f finite, --<p>i (not finite) infinite, --<p>z zero, --<p>s the sign,
+    --<p>e the exponent, --<p>m1 ... 3 the mantissa's words, --<p>w0 ... 3 the line"""
+    aR = f"abs({R_})"
+    d = [f"--{p}f: calc(({R_}) * 0 + 1);", f"--{p}i: calc(1 / ({R_}) * 0 + 1);",
+         f"--{p}z: calc(1 - min(1, {aR} * pow(2, 537) * pow(2, 537)));",
+         f"--{p}s: if(style(--{p}f: 1): sign(1 / ({R_})); else: sign({R_}));",
+         f"--{p}e0: round(down, log({aR}, 2));",
+         f"--{p}e: clamp(-1022, var(--{p}e0) + clamp(0, sign({aR} - pow(2, var(--{p}e0) + 1)) + 1, 1) - clamp(0, sign(pow(2, var(--{p}e0)) - {aR}), 1), 1023);",
+         f"--{p}k1: round(down, (52 - var(--{p}e)) / 2);"]
+    M = f"({aR} * pow(2, var(--{p}k1)) * pow(2, 52 - var(--{p}e) - var(--{p}k1)))"
+    d += [f"--{p}m1: round(down, {M} / pow(2, 36));", f"--{p}m2: mod(round(down, {M} / pow(2, 18)), pow(2, 18));", f"--{p}m3: mod({M}, pow(2, 18));",
+          f"--{p}w0: if(style(--{p}f: 1) and style(--{p}z: 1): var(--{p}s); style(--{p}f: 1): calc(var(--{p}s) * (var(--{p}e) + 1100));"
+          f" style(--{p}i: 1): calc(var(--{p}s) * 3000); else: 4000);"]
+    d += [f"--{p}w{j}: if(style(--{p}f: 1) and style(--{p}z: 0): var(--{p}m{j}); else: 0);" for j in (1, 2, 3)]
+    return d
+FPU_LINE = f"clamp(0, {OP['FNORM']} - var(--op), 1)"      # an FLOPS op (they precede FVOPS)
+# the value ops (cc_ref.fval_op)
+_fkx = "var(--fpk)"
+_fint = f"calc(1 - clamp(0, sign(abs(rem({FX}, 1))), 1))"
+_finr = f"calc(clamp(0, sign(({FX}) - {R.SMI_LO}) + 1, 1) * clamp(0, sign({R.SMI_HI} - ({FX})) + 1, 1))"
+FVAL = {'FNORM': (f"if(style(--fpk: 3): {R.NAN}; style(--fpk: 2): if(style(--fps: 1): {R.INF}; else: {R.NINF}); style(--fpk: 1): if(style(--fps: 1): 0; else: {R.MZERO});"
+                  f" style(--fpk: 4): {xB}; else: if(style(--fni: 1): round(to-zero, {FX}); else: {xB}))"),
+        'FINT': f"if(style(--fpk: 0) or style(--fpk: 4): round(to-zero, {FX}); else: 0)",
+        'FCMP': f"if(style(--fpk: 3) or style(--flk: 3): 2; else: sign(({FX}) - ({FY})))",
+        'FEXPO': "var(--fve)",
+        'FLOG10': (f"calc(round(down, log(abs({FX}), 10)) + clamp(0, sign(abs({FX}) - pow(10, round(down, log(abs({FX}), 10)) + 1)) + 1, 1)"
+                   f" - clamp(0, sign(pow(10, round(down, log(abs({FX}), 10))) - abs({FX})), 1))"),
+        'FDIGIT': f"calc((rem({FX}, pow(10, {yC} + 1)) - rem({FX}, pow(10, {yC}))) / pow(10, {yC}))"}
+assert list(FVAL) == R.FVOPS
+FPU_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') + fopnd('C', yC, 'l') +
+           [f"--fdl: {FPU_LINE};", f"--fac: calc(var(--kA) * clamp(0, var(--A) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--A), 1));",
+            f"--fda: if(style(--fac: 1): calc({FB_} + 4 * (var(--A) - {896 + R.FSCR})); else: mod(var(--zA) + {R.DBLTAG}, 32768));",
+            f"--fni: calc({_fint} * {_finr});"] +
+           fenc_decls(FR, 'fr') +
+           [f"--fve: var(--fxe);"] + fenc_decls(FX, 'fx')[4:6] +
+           [f"--fval: {by_op({o: FVAL[o] for o in R.FVOPS[:-1]}, FVAL[R.FVOPS[-1]])};"])
+NEWCLASSES['fpu'] = dict(ops=R.FLOPS + R.FVOPS, pre=FPU_PRE,
+    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(var(--fdl) * (1 - var(--kA)))")],
+    lines=[("p", "var(--fpa)", "var(--fpl)"), ("l", "var(--fla)", "var(--fll)")],
+    write=("if(style(--fdl: 1): var(--fda); else: var(--aA))", None, None, "1"),
+    wline=("calc(1 + 3 * var(--fdl))", lambda j: f"if(style(--fdl: 1): var(--frw{j}); else: var(--fval))"),
+    nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)], 'l': [('y', None)]})
+FPU_NAMES = (["fpc", "fpl", "fpa", "fpk", "fps", "flc", "fll", "fla", "flk", "fls", "fdl", "fac", "fda", "fni", "fve", "fval"] +
+             [f"fr{x}" for x in ("f", "i", "z", "s", "e0", "e", "k1", "m1", "m2", "m3", "w0", "w1", "w2", "w3")] + ["fxe0", "fxe"])
 for c_, k_ in NEWCLASSES.items(): build_class(c_, k_)
 build_class('alu', CLASSES['alu'])
 build_class('cat', CAT_CLASS)                 # (no opcode of its own: a DADD's pst picks it, cls_of)
@@ -761,7 +856,7 @@ P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "
      "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pf", "pcut", "pn0", "pblk", "pfr0", "pfr1", "pfr2", "pfr3", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
      "wval2", "vh", "vj"]
 # the new classes' scratch (.x only)
-XNEW = ["kA", "aA", "zA", "dcat", "dwb", "dr", "dok", "dval", "dix", "diy", "cqs", "cao", "juser", "jcr", "jok", "jcu", "jho",
+XNEW = FPU_NAMES + ["kA", "aA", "zA", "dcat", "dwb", "dnl", "dr", "dok", "dval", "dix", "diy", "cqs", "cao", "cbs", "cdb", "juser", "jcr", "jok", "jcu", "jho",
         "cX", "cY", "csx", "csy", "cla", "clb", "ctn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
         "cvv", "cvs", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
         "oroom", "oq", "ohit", "oend", "onext", "oc", "V", "oaddr", "oval", "oen", "w2", "odone", "ojump"]

@@ -211,6 +211,21 @@ class Sim:
         elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + (ps + 2) // 2); fp += TRAPOFF; pc = 2 * a
         elif op == 'DADD' and ps >= CATT:               # the cat class (a string's +, below)
             x, y = val(b), val(c); pc = self.cat(op, a, x, y, ps, pc, trap, wr, addr); npst, done = self.npst, self.cdone
+        elif op == 'NUMLIT' and ps == WBACK: wr(addr(a), rd(fp + TRAPDEF))
+        elif op == 'NUMLIT':                            # a number literal: its cache (A), or numlit parses its string (word1) once
+            if ps or rd(addr(a)) == 0: pc = trap((fp + TRAPDEF) & AMASK, [w1, 0], TRAPDEF * 8192 + (pc - 2) // 2, 'numlit', ps)
+        elif op in R.FLOPS or op in R.FVOPS:            # the FPU: B and C (a scratch line, or a number: a double's line), then
+            def fop(o):                                 # A's line (FLOPS: 4 words) or A (FVOPS)
+                f = R.fscr(o)
+                if f is not None: return R.fdec([rd(f + j) for j in range(4)])
+                v = val(o)
+                if R.isdbl(v): q = (v + R.DBLTAG) & AMASK; return R.fdec([rd(q + j) for j in range(4)])
+                return R.fval(v, rd)
+            x, y = fop(b), fop(c)
+            if op in R.FLOPS:
+                d = R.fscr(a) or val(a)
+                for j, w in enumerate(R.fenc(R.fline_op(op, x, y))): wr(d + j, w)
+            else: wr(addr(a), R.fval_op(op, x, y, val(b)))
         elif op in R.DYNOPS and ps == WBACK:            # after the library's trap: its value (the frame's first word) into A
             wr(addr(a), rd(fp + TRAPDEF))
         elif op in R.DYNOPS:                            # two integers (cc_ref.dyn_fast) here; a string's + to the cat class; else
@@ -285,7 +300,7 @@ class Sim:
                 elif (r == R.TRUE) != ng: pc = 2 * a
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
         elif op == 'RET': r = rd(fp); v = val(b); wr(fp, v); fp -= r // 8192; pc = 2 * (r % 8192); npst = WBACK * (r // 8192 == TRAPDEF)
-        elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b))): npst = pc - 2; pc = st['ent']['pstub']
+        elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b)) or R.isdbl(val(b))): npst = pc - 2; pc = st['ent']['pstub']
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1
             f = self.free(cw)
@@ -310,7 +325,7 @@ class Sim:
                     for j, w in enumerate(R.allochdr(k, n, nw, base)): wr(base + j, w)
                 elif ps == R.AP_NUL: wr(base + 2 + n, 0)
                 elif ps == R.AP_MAP: mw, bit = R.mapbit(base); wr(mw, self.rdu(mw) | 1 << bit)
-                else: wr(addr(a), (base + 2 - STRTAG, base + 3 + ARRTAG, base, base)[k])
+                else: wr(addr(a), R.allocres(k, base))
                 if ps != R.AP_RES: npst = R.allocnext(ps, k, n); done = False; pc -= 2
         elif op in ('MCPY', 'MUPPER', 'MLOWER', 'MFILL', 'NPUT'):     # a line per execution (pst: the words done)
             sv = val(b); n = val(c) if op != 'NPUT' else None; d_ = val(a); o = ps

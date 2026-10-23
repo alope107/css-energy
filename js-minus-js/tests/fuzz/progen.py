@@ -3,9 +3,7 @@
 A program is generated once as a tree and rendered twice from the same tree, with the same layout (line breaks,
 optional semicolons, comments):
 - for our compiler ('o'), as written;
-- for Node ('n'), with the machine's integer semantics spelled out: + - * and unary - wrap to 20 bits (W; -0, NaN and the
-  infinities stay), / truncates (D; a zero divisor gives JavaScript's Infinity or NaN), % is JavaScript's (M). PRELUDE
-  defines them.
+- for Node ('n'), the same (the machine's numbers are JavaScript's: integers in range, doubles beyond; PRELUDE is empty).
 So Node's output is what the program must print on our machine.
 
 The generator stays inside the documented language (README "The language" and "Limits"), so any difference is a bug:
@@ -28,8 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import cc_ref as _R
 TAGGED = [(_R.STRV_LO, _R.STRV_HI), (_R.HEAP0 - _R.OBJTAG, _R.HEAP_HI - _R.OBJTAG), (_R.HEAP0 + _R.ARRTAG, _R.HEAP_HI + _R.ARRTAG)]
 
-PRELUDE = ('function W(x){if(x===0||x!==x||x===1/0||x===-1/0)return x;x=((x%1048576)+1048576)%1048576;return x>=524288?x-1048576:x}'
-           'function D(a,b){return b===0?a/b:W(Math.trunc(a/b))}function M(a,b){return a%b}')
+PRELUDE = ''
 
 STRS = ['"a"', '"hi"', "'x y'", '""', '"Fizz"', '"it\'s"', "'q\\\"t'", '"t\\tx"', '"n\\\\m"', "'ok!'", '"A\\nB"']
 NAMES = ['a', 'b', 'c', 'd', 'e', 'g', 'h', 'x', 'y', 'z', 'u', 'v', 'w', 'p', 'q', 'r', 's', 't', 'k', 'm', 'n2', 'val',
@@ -49,7 +46,6 @@ def rend(e, t):
     if k == 'raw': return e[1], 9                     # a name, a string literal, a call already rendered
     if k == 'neg':
         s, p = rend(e[1], t)
-        if t == 'n': return f'W(-{paren(s, p < 9)})', 9
         return '-' + (f'({s})' if p < 9 or s.startswith('-') else s), 8
     if k == 'not':
         s, p = rend(e[1], t)
@@ -57,9 +53,6 @@ def rend(e, t):
     if k == 'bin':
         op, a, b = e[1], e[2], e[3]
         sa, pa = rend(a, t); sb, pb = rend(b, t)
-        if t == 'n' and op in '+-*': return f'W({paren(sa, pa < 9)} {op} {paren(sb, pb < 9)})', 9
-        if t == 'n' and op == '/': return f'D({sa}, {sb})', 9
-        if t == 'n' and op == '%': return f'M({sa}, {sb})', 9
         p = PREC[op]
         return f'{paren(sa, pa < p)} {op} {paren(sb, pb <= p)}', p
     if k == 'tern':
@@ -128,7 +121,8 @@ class Gen:
         if k == 'lit':
             x = r.random()
             v = r.randint(0, 9) if x < .5 else r.randint(10, 999) if x < .8 else r.randint(1000, 9000) if x < .95 else r.randint(8192, 300000)
-            return lit(v if not any(lo <= v < hi for lo, hi in TAGGED) else 8192)       # (numbers there are arrays to our machine)
+            if x > 0.97: return lit(r.choice(['0.5', '1.5', '0.1', '2.25', '3.14', '1e3', '2.5e-3', '1e21', '0.125', '7.5']))
+            return lit(v)
         if k == 'var':
             vs = self.vars(lambda v: v.ty == 'num')
             return ('raw', r.choice(vs).name) if vs else lit(r.randint(0, 20))
@@ -582,7 +576,6 @@ class Layout:
             elif k == 'ASET': _, n, i, op, e = s; tgt = f'{n}[{self.e(i)}]'
             else: _, t_, op, e = s; tgt = self.e(t_)
             end = self.end()
-            if self.t == 'n' and op != '=': return [f'{p}{tgt} = {self.e(("bin", op[0], ("raw", tgt), e))}{end}']
             return [f'{p}{tgt} {op} {self.e(e)}{end}']
         if k == 'LOG':
             parts = []

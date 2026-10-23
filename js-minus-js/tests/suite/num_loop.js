@@ -1,0 +1,16 @@
+var t = 0;
+for (var i = 0; i < 10; i++) t += 0.1;
+console.log(t, t === 1, t > 0.99);
+var f = 1;
+for (var j = 1; j <= 20; j++) f *= j;
+console.log(f, f / 1e18);
+var h = 0;
+for (var k = 1; k < 50; k++) h = h + 1 / k;
+console.log(h);
+var a = [0.5, 0.25, 0.125];
+var s = 0;
+for (var m = 0; m < a.length; m++) s += a[m];
+console.log(s, s * 8, 7 / 8 === s);
+var n = 2;
+while (n < 1e10) n = n * n;
+console.log(n, n - 1, n % 1000);
