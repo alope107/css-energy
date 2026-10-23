@@ -389,7 +389,8 @@ OBJ_PRE = OPND + OPNDA + [
     f"--okey: {by_op({'GETX': s20(kv('C', 'y') + f' + {STRTAG}'), 'SETX': s20(kv('B', 'y') + f' + {STRTAG}')}, f'calc({DB} + var(--C))')};",
     f"--sst: calc({eq('var(--op)', OP['SETP'])} * min(1, var(--pst)) * clamp(0, {HEAP0} - var(--pst), 1));",
     f"--oq: {by_op({'NEW': HP}, f'calc(min(1, var(--pst)) * (var(--pst) - mod(var(--pst), 2)) + (1 - min(1, var(--pst))) * mod(var(--O) + {OBJTAG}, 32768))')};",
-    f"--ohit: {eq('var(--vz)', 'var(--okey)')};", f"--oend: {eq('var(--vz)', 0)};",
+    f"--ohit: {eq('var(--vz)', 'var(--okey)')};",
+    f"--oend: calc({eq('var(--vz)', 0)} + {by_op({'SETP': 1, 'SETX': 1}, 0)} * clamp(0, {-OBJTAG} - var(--vz), 1));",     # (SETP / SETX: a prototype's link ends the keys too)
     f"--onext: calc(clamp(0, -1 * var(--vz), 1) * mod(var(--vz) + {OBJTAG}, 32768) + (1 - clamp(0, -1 * var(--vz), 1)) * ({oq} + 2));",
     "--oc: " + by_op({'GETP': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))", 'GETX': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))",
                       'NEW': f"calc(10 - {eq('var(--pst)', 0)} * clamp(0, var(--vz) - var(--vh) - {HS - 8}, 1))"},
@@ -404,7 +405,7 @@ OBJ_PRE = OPND + OPNDA + [
     f" style(--oc: 7): calc({oq} + 2); style(--oc: 9) or style(--oc: 11): var(--aA); style(--pst: 0): calc({HEAP0} + var(--vz)); style(--pst: 1): var(--aA);"
     f" style(--pst: 2): var(--omw); else: {HP});",
     f"--oval: if(style(--oc: 1): calc(var(--ob) * var(--ohit) * var(--vh) + (1 - var(--ob) * var(--ohit)) * {R.UNDEF}); style(--oc: 3): var(--tval); style(--oc: 4): var(--okey);"
-    f" style(--oc: 6): var(--V); style(--oc: 7): 0; style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc} / 2); style(--pst: 0): 0;"
+    f" style(--oc: 6): var(--V); style(--oc: 7): var(--vz); style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc} / 2); style(--pst: 0): 0;"
     f" style(--pst: 1): calc(var(--vz) + {HEAP0 - OBJTAG}); style(--pst: 2): {mapset('var(--vr)', mapbitv(f'({HEAP0} + var(--vz))'))}; else: calc(var(--vz) + 8));",
     "--oen: if(style(--oc: 2) or style(--oc: 5) or style(--oc: 8) or style(--oc: 11): 0; else: 1);", f"--w2: {eq('var(--oc)', 4)};",
     f"--odone: calc({eq('var(--oc)', 1)} + {eq('var(--oc)', 4)} + {eq('var(--oc)', 5)} + {eq('var(--oc)', 6)} + {eq('var(--oc)', 10)} * {eq('var(--pst)', 3)});",

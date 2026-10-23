@@ -325,7 +325,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this', 'proto']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -354,6 +354,28 @@ class Gen:
             out.append('console.log(' + r.choice([f'{n}.f({i()}), {n}.g()', f'{n}["f"]({i()}), {n}.' + ('h()' if top else 'a'), f'{n}.f.call({{a: {i()}}}, {i()})',
                                                     f'{n}.f.apply({n}, [{i()}])', f'{n}.f.bind({{a: {i()}}})({i()})', f'{n}.f.bind({n}, {i()})()',
                                                     f'{n}.g.call({n}), {n}.a']) + ')' + self.semi())
+        return out
+    def s_proto(self):
+        """a constructor with a method on its prototype, an object made by Object.create and given another prototype, read through
+        the chain, hasOwnProperty, for (k in o) over the chain (its own statements, as s_this)"""
+        r = self.r
+        if self.inswitch: return None
+        ns = [self.fresh() for _ in range(4)]
+        if None in ns or len(set(ns)) < 4: return None
+        C, c, b, d = ns
+        kw = 'var' if len(self.scopes) == (2 if self.cur is not None else 1) else 'let'
+        for n in ns: self.scopes[-1][n] = Var(n, 'fobj')
+        if self.cur is not None: self.cur.prints = True
+        i = lambda: str(r.randint(-9, 99))
+        out = ['\n'.join([f'{kw} {C} = function (v) {{ this.v = v; }};', f'{C}.prototype.dbl = function () {{ return this.v * 2; }};',
+                          f'{kw} {c} = new {C}({i()}), {b} = {{base: {i()}, f: function () {{ return this.base + 1; }}}};',
+                          f'{kw} {d} = Object.create({b});', f'{d}.own = {i()};'])]
+        for _ in range(r.randint(1, 3)):
+            out.append(r.choice([f'console.log({c}.dbl(), {c}.v, {c}.hasOwnProperty("v"), {c}.hasOwnProperty("dbl"))',
+                                 f'console.log({d}.f(), {d}.base, {d}.own, {d}.hasOwnProperty("base"))',
+                                 f'for (var {C}k in {d}) console.log({C}k, typeof {d}[{C}k])',
+                                 f'{d}.__proto__ = Object.create({b}); {d}.__proto__.z = {i()}; console.log({d}.z, {d}.base, {d}.f())',
+                                 f'{b}.base = {i()}; console.log({d}.base, {d}.f())']) + self.semi())
         return out
     def s_decl(self):
         r = self.r

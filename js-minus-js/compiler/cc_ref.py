@@ -217,6 +217,13 @@ HEAP0 = LAYOUT['heap_lo']
 # the global object (this outside a function, or in one called without a receiver): an object made the first time, in global 1
 # (NUMLIT G1 with word1 GLOBK: the library's numlit makes it)
 GCELL, GLOBK = 1, -1
+# Prototypes: an object's own keys end with 0 or with a link to its prototype's first chunk (its address - PROTAG: tag -16), which
+# GETP / GETX probes follow as they follow a chunk's link (to read inherited properties) and SETP / SETX treat as the end (a new
+# pair carries it on). x.__proto__ / x.prototype are x[PKPROTO] / x[PKPT]: keys no probe takes, so the library's getx / setx
+# handle them (an object's link; a function's prototype object, made the first time)
+PROTAG = 16 * 32768
+def isplink(k): return k < -OBJTAG
+PKPROTO, PKPT = SPV0 - 1, SPV0 - 2
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)
 RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
 def netw(ans):
@@ -479,7 +486,8 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('toUpperCase', {0: 'upper'}, 2), ('toLowerCase', {0: 'lower'}, 2), ('split', {1: 'split'}, 0), ('trim', {0: 'trim'}, 2),
            ('startsWith', {1: 'startswith'}, 1), ('endsWith', {1: 'endswith'}, 1), ('repeat', {1: 'repeat'}, 2),
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
-           ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0), ('bind', {1: 'bind1', 2: 'bind2', 3: 'bind3'}, 0)]
+           ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0), ('bind', {1: 'bind1', 2: 'bind2', 3: 'bind3'}, 0),
+           ('hasOwnProperty', {1: 'hasown'}, 1), ('create', {1: 'ocreate'}, 0)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
 GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
            ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
@@ -487,7 +495,7 @@ ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
-                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply']
+                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply', '__proto__', 'prototype', 'Object']
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 # f.call( / f.apply( (pm PMFN + 0 / 1): f is called with this = the first argument (apply: the second's elements as arguments)
@@ -518,7 +526,8 @@ RESERVED = tuple(KW[w] for w in ('var', 'let', 'const', 'if', 'else', 'while', '
                                  'do', 'switch', 'case', 'default', 'typeof', 'true', 'false', 'null'))
 # punctuation that can start an expression statement (not a statement): ( [ ! - ~; at a statement's start the CSS compiler's
 T_THIS, T_NEW = 25, 26                  # this, new: the lexer makes them punctuation (variants of their own: no cost to other names)
-PKW = {KW['this']: T_THIS, KW['new']: T_NEW}
+T_PROTO, T_PTYPE = 27, 28               # __proto__, prototype (after '.': x[a hidden key], so GETX / SETX trap to the library)
+PKW = {KW['this']: T_THIS, KW['new']: T_NEW, KW['__proto__']: T_PROTO, KW['prototype']: T_PTYPE}
 # variants don't tell them apart (cc_dsl.variant_key: STMTM)
 XSTART = (40, 91, 33, 45, 126, T_THIS, T_NEW)
 
@@ -606,7 +615,8 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
 # (ca: the step ends there), where a token that ends the body ends the function first (arrow_close): separate modes, so
 # that only those variants carry that code (the others are S_OPER's / S_NAMEE's: ccpage5 shares their rules)
 S_APAR1, S_AARROW0, S_AARROW, S_ABODY, S_OPERC, S_NAMEEC = range(29, 35)
-NMODES = 35
+S_NEW, S_NEWN = 35, 36                    # new F( : after new, after its name
+NMODES = 37
 CMODES = {S_OPERC: S_OPER, S_NAMEEC: S_NAMEE}
 ACLOSE = (41, 44, 59, 125, T_NL)          # the tokens that can end an expression body (not ']' or ':': [x => x] and c ? x => 1 : 2
                                           # need parentheses; four rules fewer, ccpage5)
@@ -1143,8 +1153,10 @@ class Compiler:
         if last: self.arg_end()
         if fl & 4 and argc != 2: return self.fail(77)
         self.tb -= argc + int(not fl & 6); d0 = self.nd - 1; f = self.tmp(d0)
-        a = 63 if fl & 4 else (argc + 31 if argc else 0) if fl & 2 else argc + 32 * (fl & 1)
-        self.emit('CALLV', (a, 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0); self.mode = S_OPER
+        a = 63 if fl & 4 else (argc + 31 if argc else 0) if fl & 2 else argc + 32 * int(fl in (1, 8))
+        self.emit('CALLV', (a, 0), w1=(f[0] - 256, f[1]))
+        if fl & 8: self.emit('MOV', f, self.tmp(d0 + 1))       # (new: the object)
+        self.set_od(d0, TMP, 0); self.mode = S_OPER
 
     def meth_call(self, dyn, key):
         """o.f( / o[k]( : the callee into o's slot, o above it as its this (CALLV's method flag)"""
@@ -1155,6 +1167,21 @@ class Compiler:
         else: self.put(self.tmp(i + 1), i); self.emit('GETP', self.tmp(i), self.tmp(i + 1), (key - self.db, 0))
         self.nd = i + 1; self.set_od(i, TMP, 0); self.snapshot(lambda q: q < 256); self.tb += 1
         self.push_op(M_CALLV, 1); self.mode = S_OPND
+
+    def new_call(self, h):
+        """new F(: F's value in T(d0) (a variable's, or a declared function's), mknew(F) into its this T(d0 + 1) (a call of the
+        library's: its frame there, F copied above it), then the arguments; callv_end makes the object the value (M_CALLV's 8)"""
+        j = self.lookup(h); k = self.fnlook(h) if j < 0 else -1
+        if j < 0 and k < 0: return self.fail(4)
+        if j >= 0 and self.captured(j): self.cread(j)
+        elif j >= 0: self.push_od(self.var(j), 0)
+        else: self.emit('NUMLIT', (FCACHE + k, 0), w1=k); self.push_od(FCACHE + k, 0)
+        if self.err: return
+        d0 = self.nd - 1; self.to_temp(d0); self.snapshot(lambda q: q < 256)
+        if self.nd + self.tb + 2 > TBMAX: return self.fail(22)
+        self.emit('MOV', self.tmp(d0 + 2), self.tmp(d0)); f = self.tmp(d0 + 1)
+        self.emit('CALL', (self.ent.get('mknew', 0) // 2, 0), w1=(f[0] - 256, f[1]))
+        self.tb += 1; self.push_op(M_CALLV, 8); self.mode = S_OPND
 
     def this_val(self):
         """this: a function's own (frame slot 1; its entry's d |= 2: uthis); an arrow's is its outer function's (through the env,
@@ -1369,7 +1396,7 @@ class Compiler:
             if isP(7) or isP(8): return self.incdec(h, v, 2)
             if h in WGLOB and isP(46): self.pn = (0, 0); self.mode = S_WDOT; return     # window.x: x
             j = self.lookup(h)
-            if j < 0 and h == KW['String'] and isP(46):          # String.fromCharCode(...): a method on a dummy receiver
+            if j < 0 and h in (KW['String'], KW['Object']) and isP(46):     # String.fromCharCode(...), Object.create(p): a method on a dummy receiver
                 self.push_od(K(0), 0); self.mode = S_DOT; return
             tyo = self.top_op()[0] == TYPEOF
             k = self.fnlook(h) if j < 0 and not self.rom else -1
@@ -1550,6 +1577,12 @@ class Compiler:
         if m == S_APAR1:                                       # (a, b: an arrow's (a in pn)
             if kind != 'ID' or v in RESERVED: return self.fail(36)
             self.arrow_start(self.pn); self.pn = v; self.mode = S_FPSEP; return
+        if m == S_NEW:                                         # new F(...): F's name
+            if kind != 'ID' or v in RESERVED: return self.fail(3)
+            self.pn = v; self.mode = S_NEWN; return
+        if m == S_NEWN:                                        # new F( : F's value, a new object (its prototype F's) as its this
+            if not isP(40): return self.fail(35)
+            return self.new_call(self.pn)
         if m in (S_AARROW0, S_AARROW):                         # () => / (a, b) =>
             if not isP(T_ARROW): return self.fail(35)
             if m == S_AARROW0:
@@ -1569,6 +1602,8 @@ class Compiler:
             self.opv[self.osp - 1] = 0
             m = self.mode = S_OPND
         if m == S_DOT:                                         # o . name
+            if isP(T_PROTO) or isP(T_PTYPE):                   # o.__proto__ / f.prototype: x[a hidden key]
+                self.push_od(KBIG, 0, PKPROTO if isP(T_PROTO) else PKPT); self.pm = 2; self.mode = S_OPER; return
             if kind != 'ID': return self.fail(69)
             if v == KW['length'] or (v in METHOD_INDEX and self.tparen): self.datum(self.tid - 1, self.tlen)   # (its committed bytes' length word)
             if v == KW['length']:                              # a string's or an array's length: the word before its value's address
@@ -1608,6 +1643,7 @@ class Compiler:
             if kind == 'ID' and v in LITK: self.push_od(*LITK[v]); self.mode = S_OPER; return
             if isK_('typeof'): self.push_op(TYPEOF); return
             if isP(T_THIS) and not self.rom: return self.this_val()
+            if isP(T_NEW) and not self.rom: self.mode = S_NEW; return
             if isK_('function') and not self.rom:             # a function expression: its value (its name from a key it is the value of)
                 if self.curf >= 2: return self.fail(41)
                 t, tv = self.top_op()
@@ -1980,19 +2016,19 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
     def mark(b):
         """the block at b in the collector's map"""
         w, k = mapbit(b); wr(w, rd(w) | 1 << k)
-    def probe(o, key):
-        """GETP / SETP: the address of key's word in object o's chunks, or of the word that ends its keys (0)"""
+    def probe(o, key, own=False):
+        """GETP / SETP: the address of key's word in object o's chunks (own: not its prototypes'), or of the word that ends them"""
         cur = (o + OBJTAG) & AMASK
         while True:
             k = rd(cur)
-            if k == key or k == 0: return cur
+            if k == key or k == 0 or (own and isplink(k)): return cur
             cur = (k + OBJTAG) & AMASK if k < 0 else cur + 2
     def setp(o, key, v, full=None):
         """SETP / SETX of an object: the key's pair, else a free pair in place, else the library (a full chunk: setp, or for
         SETX setx with its own operands, as the CSS CPU hands it back)"""
-        q = probe(o, key)
-        if rd(q): wr(q + 1, v)
-        elif (q - HEAP0) % 8 < 6: wr(q, key); wr(q + 1, v); wr(q + 2, 0)
+        q = probe(o, key, True); e = rd(q)
+        if e == key: wr(q + 1, v)
+        elif (q - HEAP0) % 8 < 6: wr(q, key); wr(q + 1, v); wr(q + 2, e)     # (the end carried on: 0 or the prototype's link)
         else: name, args = full or ('setp', [o, key, v]); trap(name, TRAPOFF, args, pc)
     def emit(c):
         nonlocal optr

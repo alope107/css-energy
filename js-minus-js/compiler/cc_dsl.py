@@ -51,7 +51,7 @@ def initial_parse(data_base):
 # punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant.
 # '?' and ':' are not among them: every variant costs some time on every token level, whether it applies or not, and
 # only S_OPER (and the modes that fall into it) accepts them, so they share the 'other punctuation' variant there
-PUNCT = sorted(({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL, R.T_ARROW, R.T_THIS, R.T_NEW} | set(R.BIN) | set(R.COMPOUND)) - set(R.BITTOK))     # (cc_ref.BITTOK)
+PUNCT = sorted(({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL, R.T_ARROW, R.T_THIS, R.T_NEW, R.T_PROTO, R.T_PTYPE} | set(R.BIN) | set(R.COMPOUND)) - set(R.BITTOK))     # (cc_ref.BITTOK)
 import os
 SPEC_LEVEL = os.environ.get('SPECK', 'mtv')     # m: mode only; mt: + token kind; mtv: + punctuation value
 # at a statement's start ( [ ! - (cc_ref.XSTART) begin an expression statement: there they share the 'other punctuation'
@@ -506,8 +506,7 @@ class Prog(Base):
                     with self.when(and_(ne(kp, 0), lt(add(sdp, ln + 1), SEND))): self.datum(add(sdp, ln + 1), c)     # (sdp: the length word)
                     self.set('acc', ln + 1)
                     with self.when(not_(or_(alcn, dgcn))):     # tv: strtok()
-                        hc = self.m(add(mul(nh1, H2M), nh2), 'nhc')     # (this / new: punctuation, cc_ref.PKW)
-                        pk = self.m(add(*[mul(eq(hc, h1 * H2M + h2), code) for (h1, h2), code in R.PKW.items()]), 'npk')
+                        pk = self.m(add(*[mul(and_(eq(nh1, h1), eq(nh2, h2)), code) for (h1, h2), code in R.PKW.items()]), 'npk')     # (this / new ...: punctuation, cc_ref.PKW)
                         tok(ite(ne(pk, 0), 4, 2), ite(ne(pk, 0), pk, add(strtok(ge(add(sdp, ln + 2), SEND), sdp + 1, ln + 1), mul(eq(cn, 40), 262144))), nh1, nh2)
                         self.set('tkc', 0)
                         with self.when(ne(kp, 0)): self.set('inul', add(sdp, ln + 2))
@@ -786,8 +785,29 @@ class Prog(Base):
         if last: self.arg_end()
         with self.when(and_(isap, ne(argc, 2))): self.fail(77)
         self.set('tb', sub(self.v('tb'), add(argc, not_(or_(isap, isca))))); d0 = self.m(self.v('nd') - 1, 'cvd'); f = self.tmp(d0)
-        a = ite(isap, 63, ite(isca, mul(gt(argc, 0), add(argc, 31)), add(argc, mul(fl, 32))))
-        self.emit(OP['CALLV'], (a, 0), w1=(sub(f[0], 256), f[1])); self.set_od(d0, TMP, 0); self.set('mode', R.S_OPER); self.done()
+        isnew = self.m(eq(fl, 8), 'cvnew')
+        a = ite(isap, 63, ite(isca, mul(gt(argc, 0), add(argc, 31)), add(argc, mul(or_(eq(fl, 1), isnew), 32))))
+        self.emit(OP['CALLV'], (a, 0), w1=(sub(f[0], 256), f[1]))
+        with self.when(isnew): self.emit(OP['MOV'], f, self.tmp(add(d0, 1)))     # (new: the object)
+        self.set_od(d0, TMP, 0); self.set('mode', R.S_OPER); self.done()
+    def new_call(self, h1, h2):
+        """cc_ref.new_call"""
+        j = self.lookup(h1, h2); k, o, b, _ = self.symkind_addr(j); fk = self.fnlook(h1, h2)
+        isv = self.m(ge(j, 0), 'nwv'); isf = self.m(and_(not_(isv), ge(fk, 0)), 'nwf'); ok = self.m(or_(isv, isf), 'nwok')
+        with self.when(not_(ok)): self.fail(4)
+        cap = self.m(and_(isv, self.captured(j, k)), 'nwcap')
+        with self.when(cap): self.cread(o, self.tmp(self.v('nd')))
+        with self.when(isf): self.emit(OP['NUMLIT'], (add(fk, R.FCACHE), 0), w1=fk)
+        with self.when(ok): self.push_od(ite(cap, TMP, ite(isv, o, add(fk, R.FCACHE))), mul(cap, b))
+        go = self.m(and_(ok, eq(self.v('err'), 0)), 'nwgo')
+        with self.when(go):
+            d0 = self.m(self.v('nd') - 1, 'nwd'); self.to_temp(d0); self.snapshot(lambda d: lt(d, 256))
+            full = self.m(gt(add(self.v('nd'), self.v('tb'), 2), TBMAX), 'nwfull')
+            with self.when(full): self.fail(22)
+            with self.when(not_(full)):
+                self.emit(OP['MOV'], self.tmp(add(d0, 2)), self.tmp(d0)); f = self.tmp(add(d0, 1))
+                self.emit(OP['CALL'], (self.ent.get('mknew', 0) // 2, 0), w1=(sub(f[0], 256), f[1]))
+                self.set('tb', self.v('tb') + 1); self.push_op(R.M_CALLV, 8); self.set('mode', R.S_OPND); self.done()
     def meth_call(self, dyn, key):
         """cc_ref.meth_call: o.f( / o[k]( : the callee into o's slot, o above it as its this"""
         nd = self.m(self.v('nd'), 'mcd'); i = self.m(sub(nd, add(1, dyn)), 'mci3')
@@ -1000,7 +1020,7 @@ class Prog(Base):
                 j = self.lookup(pn1, pn2)
                 k, o, b, cst = self.symkind_addr(j)
                 with self.when(p78n): self.incdec(pn1, pn2, tv, 2, (j, k, o, b, cst))     # x++ in an expression
-                sdot = self.m(and_(not_(p78n), lt(j, 0), eq(pn1, KW['String'][0]), eq(pn2, KW['String'][1]), P(46)), 'sdot')
+                sdot = self.m(and_(not_(p78n), lt(j, 0), or_(*[and_(eq(pn1, KW[w][0]), eq(pn2, KW[w][1])) for w in ('String', 'Object')]), P(46)), 'sdot')
                 with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', R.S_DOT); self.done()     # String.fromCharCode
                 tyo = self.m(eq(self.top_op()[0], R.TYPEOF), 'ntyo')       # typeof x, x undeclared: "undefined"
                 undef = self.m(lt(j, 0), 'nund')
@@ -1233,6 +1253,13 @@ class Prog(Base):
             with self.when(pres): self.fail(36)
             with self.when(not_(pres)):
                 self.arrow_start(self.v('pn1'), self.v('pn2')); self.set('pn1', th1); self.set('pn2', th2); self.set('mode', R.S_FPSEP); self.done()
+        with block(R.S_NEW):                               # new F(...): F's name (cc_ref)
+            nbad = self.m(or_(not_(isID), self.isres(th1, th2)), 'nbad')
+            with self.when(nbad): self.fail(3)
+            with self.when(not_(nbad)): self.set('pn1', th1); self.set('pn2', th2); self.set('mode', R.S_NEWN); self.done()
+        with block(R.S_NEWN):
+            with self.when(not_(P(40))): self.fail(35)
+            with self.when(P(40)): self.new_call(self.v('pn1'), self.v('pn2'))
         for am in (R.S_AARROW0, R.S_AARROW):              # () => / (a, b) =>
             with block(am):
                 with self.when(not_(P(R.T_ARROW))): self.fail(35)
@@ -1256,7 +1283,9 @@ class Prog(Base):
                 self.set_top_op(R.M_PRINT, 0); self.set('mode', R.S_OPND)
         # ---- objects (cc_ref)
         with block(R.S_DOT):
-            with self.when(not_(isID)): self.fail(69)
+            dpt = self.m(or_(P(R.T_PROTO), P(R.T_PTYPE)), 'dpt')     # o.__proto__ / f.prototype: x[a hidden key] (cc_ref)
+            with self.when(dpt): self.push_od(KBIG, 0, ite(P(R.T_PROTO), R.PKPROTO, R.PKPT)); self.set('pm', 2); self.set('mode', R.S_OPER); self.done()
+            with self.when(and_(not_(isID), not_(dpt))): self.fail(69)
             isl = self.m(and_(isID, eq(th1, KW['length'][0]), eq(th2, KW['length'][1])), 'islen')
             mi = self.m(add(*[mul(and_(eq(th1, KW[m[0]][0]), eq(th2, KW[m[0]][1])), i + 1) for i, m in enumerate(R.METHODS)]), 'mi')
             fm = self.m(add(*[mul(and_(eq(th1, h[0]), eq(th2, h[1])), j + 1) for h, j in R.FMETH.items()]), 'fm')
@@ -1333,6 +1362,7 @@ class Prog(Base):
             tyo = KWc('typeof')
             with self.when(tyo): self.push_op(R.TYPEOF); self.done()
             with self.when(P(R.T_THIS)): self.this_val()
+            with self.when(P(R.T_NEW)): self.set('mode', R.S_NEW); self.done()
             with self.when(P(123)):                            # an object literal: NEW, then each pair as o.key = v
                 i = self.m(self.v('nd'), 'obi'); self.push_od(TMP, 0)
                 with self.when(eq(self.v('err'), 0)): self.emit(OP['NEW'], self.tmp(i)); self.push_op(R.M_OBJ); self.set('mode', R.S_OKEY); self.done()

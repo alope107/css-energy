@@ -252,11 +252,11 @@ class Sim:
             else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
         elif op == 'SETX' and ps >= CATT:                # as SETP's, the key from B, the value C; a full chunk: back to the
             o, key, v = val(a), s20(val(b) + STRTAG), val(c)     # arr class, whose trap's setx makes a new chunk (pst XBACK)
-            q = ps - ps % 2; k = rd(q); rd(q + 1)
+            q = ps - ps % 2; k = rd(q); rd(q + 1); end = k == 0 or R.isplink(k)
             if ps % 2: wr(q, key); wr(q + 1, v)
             elif k == key: wr(q + 1, v)
-            elif k == 0 and (q - HEAP0) % 8 < 6: wr(q + 2, 0); npst = q + 1; done = False; pc -= 2
-            elif k == 0: npst = XBACK; done = False; pc -= 2
+            elif end and (q - HEAP0) % 8 < 6: wr(q + 2, k); npst = q + 1; done = False; pc -= 2
+            elif end: npst = XBACK; done = False; pc -= 2
             else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
         elif op in ('GETX', 'SETX'):                     # x: the array (B / A), y: the index (C / B), z: its len and ptr, e: the
             g = op == 'GETX'                             # element (GETX, inside the length) or C (SETX)
@@ -286,11 +286,11 @@ class Sim:
             o, v = val(a), val(b); key = DB + c
             if 0 < ps < HEAP0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc // 2, 'setp', ps)
             elif R.isobj(o):
-                q = (ps - ps % 2) or (o + OBJTAG) & AMASK; k = rd(q); rd(q + 1)
+                q = (ps - ps % 2) or (o + OBJTAG) & AMASK; k = rd(q); rd(q + 1); end = k == 0 or R.isplink(k)
                 if ps % 2: wr(q, key); wr(q + 1, v)
                 elif k == key: wr(q + 1, v)
-                elif k == 0 and (q - HEAP0) % 8 < 6: wr(q + 2, 0); npst = q + 1; done = False; pc -= 2
-                elif k == 0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc // 2, 'setp', 0)
+                elif end and (q - HEAP0) % 8 < 6: wr(q + 2, k); npst = q + 1; done = False; pc -= 2
+                elif end: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc // 2, 'setp', 0)
                 else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
         elif op == 'NEW':                                # the chunk's first key, the value, then HP; full: the collector (NEW again)
             hp, gl = rd(HP), rd(GCLIM)

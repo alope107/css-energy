@@ -96,12 +96,13 @@ function fwdrange(p, e, stk) {
 // array's elements up to its length. -> the block's size
 function scan(s) {
   var h = peek(s); var i = 0; var go = 1; var x = 0;
-  if (h >= 0) {
+  if ((h >= 0) + (h < 0 - __OBJTAG__)) {                 // (an object's chunk: a key, the end, or its prototype's link first)
     while (go) {
       if (peek(s + i) == 0) { go = 0; }
+      else if (peek(s + i) < 0 - __OBJTAG__) { poke(s + i, fwd(peek(s + i) + 32768) - 32768); go = 0; }     // (a prototype's link)
       else {
         poke(s + i, fwdkey(peek(s + i))); poke(s + i + 1, fwd(peek(s + i + 1))); i = i + 2;
-        if (i == 6) { poke(s + 6, fwd(peek(s + 6))); go = 0; }
+        if (i == 6) { if (peek(s + 6) < 0 - __OBJTAG__) { poke(s + 6, fwd(peek(s + 6) + 32768) - 32768); } else { poke(s + 6, fwd(peek(s + 6))); } go = 0; }
       }
     }
     return 8;
@@ -146,7 +147,7 @@ function fwdkey(k) { if (__kind(k - __STRTAG__, __K_HEAP__)) { return fwd(k - __
 function fwdobj(w, b) {
   var n = 0;
   if (peek(b) == 0 - 1) { return peek(b + 1) - __OBJTAG__; }
-  if (peek(b) < 0) { return w; }
+  if ((peek(b) < 0) * (peek(b) > 0 - 32768)) { return w; }      // (a block's header; a chunk may start with a prototype's link)
   n = peek(__G_FREE__); poke(__G_FREE__, n + 8);
   __mcpy(n, b, 8); mark(n);
   poke(b, 0 - 1); poke(b + 1, n);
@@ -765,6 +766,8 @@ function canint(s) {
   return s;
 }
 function getx(x, k) {
+  if (k == __PKPROTO__) { return getdp(x); }
+  if (k == __PKPT__) { return getpt(x); }
   k = xkey(x, k);
   if (__kind(x, __K_STR__)) { return charat(x, k); }
   if (__kind(x, __K_ARR__)) {
@@ -775,6 +778,8 @@ function getx(x, k) {
   return __UNDEF__;
 }
 function setx(x, k, v) {
+  if (k == __PKPROTO__) { return setdp(x, v); }
+  if (k == __PKPT__) { return setpt(x, v); }
   k = xkey(x, k);
   if (__kind(x, __K_ARR__)) { if (__kind(k, __K_SMI__)) { aset(x, k, v); } return 0; }
   if (__kind(x, __K_OBJ__)) { pset(x, okey(x, k, 1) + __STRTAG__, v); }
@@ -814,11 +819,17 @@ function okeyn(o, pass, d) {
     if (k == 0) { go = 0; }
     else if (k < 0) { c = k + __OBJTAG__; }
     else {
-      if (__kind(k - __STRTAG__, __K_STR__) == pass) { if (d) { poke(d + n, k - __STRTAG__); } n++; }
+      if (__kind(k - __STRTAG__, __K_STR__) == pass) { if (seen(o, c, k) == 0) { if (d) { poke(d + n, k - __STRTAG__); } n++; } }
       c = c + 2;
     }
   }
   return n;
+}
+// key k (at e) is in o's chain before e (an inherited key its object or a nearer prototype shadows)
+function seen(o, e, k) {
+  var c = o + __OBJTAG__;
+  while (c != e) { if (peek(c) == k) { return 1; } if (peek(c) < 0) { c = peek(c) + __OBJTAG__; } else { c = c + 2; } }
+  return 0;
 }
 // o's value for key (undefined if it has none)
 function pget(o, key) {
@@ -837,16 +848,68 @@ function pset(o, key, v) {
   while (1) {
     k = peek(c);
     if (k == key) { poke(c + 1, v); return 0; }
-    if (k < 0) { c = k + __OBJTAG__; }
-    else if (k == 0) {
-      if ((c - __HEAP0__) % 8 < 6) { poke(c, key); poke(c + 1, v); poke(c + 2, 0); return 0; }     // (the third pair: L := 0)
-      n = __alloc(8, __A_CHUNK__); c = o + __OBJTAG__;
-      poke(n, key); poke(n + 1, v); poke(n + 2, 0);
-      while (peek(c + 6) < 0) { c = peek(c + 6) + __OBJTAG__; }
+    if ((k == 0) + (k < 0 - __OBJTAG__)) {                // its keys' end: 0, or its prototype's link (carried on)
+      if ((c - __HEAP0__) % 8 < 6) { poke(c, key); poke(c + 1, v); poke(c + 2, k); return 0; }     // (the third pair: L := the end)
+      n = __alloc(8, __A_CHUNK__); c = o + __OBJTAG__;     // (the collector may have moved everything: the end read again)
+      while (ischunk(peek(c + 6))) { c = peek(c + 6) + __OBJTAG__; }
+      poke(n, key); poke(n + 1, v); poke(n + 2, peek(c + 6));
       poke(c + 6, n - __OBJTAG__);
       return 0;
     }
-    else { c = c + 2; }
+    if (k < 0) { c = k + __OBJTAG__; } else { c = c + 2; }
+  }
+  return 0;
+}
+// w links an object's chunk to the next (a prototype's link is below: tag -16, cc_ref.PROTAG)
+function ischunk(w) { return (w < 0) * (w >= 0 - __OBJTAG__); }
+// the word that ends o's own keys (0, or its prototype's link)
+function oend(o) {
+  var c = o + __OBJTAG__; var k = peek(c);
+  while ((k != 0) * (k >= 0 - __OBJTAG__)) { if (k < 0) { c = k + __OBJTAG__; } else { c = c + 2; } k = peek(c); }
+  return c;
+}
+// x.__proto__: an object's prototype (null if it has none); x.__proto__ = p
+function getdp(x) {
+  var k = 0;
+  if (__kind(x, __K_OBJ__) == 0) { return __NULL__; }
+  k = peek(oend(x));
+  if (k) { return k + 32768; }
+  return __NULL__;
+}
+function setdp(x, p) {
+  if (__kind(x, __K_OBJ__) == 0) { return 0; }
+  if (__kind(p, __K_OBJ__)) { poke(oend(x), p - 32768); } else { poke(oend(x), 0); }
+  return 0;
+}
+// f.prototype: a function's (word 4), an object made the first time; f.prototype = p
+function getpt(f) {
+  var o = 0;
+  if (__kind(f, __K_FUN__) == 0) { return __UNDEF__; }
+  if (peek(f + 4) == 0) { o = __alloc(8, __A_CHUNK__); poke(o, 0); poke(f + 4, o - __OBJTAG__); }
+  return peek(f + 4);
+}
+function setpt(f, p) { if (__kind(f, __K_FUN__)) { poke(f + 4, p); } return 0; }
+// new F: an object whose prototype is F's
+function mknew(f) {
+  var p = getpt(f); var o = __alloc(8, __A_CHUNK__);
+  if (__kind(p, __K_OBJ__)) { poke(o, p - 32768); } else { poke(o, 0); }
+  return o - __OBJTAG__;
+}
+// Object.create(p) (on a dummy receiver)
+function ocreate(d, p) {
+  var o = __alloc(8, __A_CHUNK__);
+  if (__kind(p, __K_OBJ__)) { poke(o, p - 32768); } else { poke(o, 0); }
+  return o - __OBJTAG__;
+}
+// o.hasOwnProperty(k)
+function hasown(o, k) {
+  var c = 0; var key = 0;
+  if (__kind(o, __K_OBJ__) == 0) { return jsb(0); }
+  k = xkey(o, k); key = okey(o, k, 0) + __STRTAG__; c = o + __OBJTAG__;
+  while (1) {
+    if (peek(c) == key) { return jsb(1); }
+    if ((peek(c) == 0) + (peek(c) < 0 - __OBJTAG__)) { return jsb(0); }
+    if (peek(c) < 0) { c = peek(c) + __OBJTAG__; } else { c = c + 2; }
   }
   return 0;
 }
@@ -1118,14 +1181,14 @@ function ins(v, d) {
 // an object's keys: number keys first, then the names (bare if they are identifiers, else quoted), in insertion order
 function insobj(v, d) {
   var c = v + __OBJTAG__; var k = 0; var pass = 0; var first = 1; var go = 1;
-  if (peek(c) == 0) { putc(123); putc(125); return 0; }
+  if ((peek(c) == 0) + (peek(c) < 0 - __OBJTAG__)) { putc(123); putc(125); return 0; }
   if (d > 2) { putc(91); putc(79); putc(98); putc(106); putc(101); putc(99); putc(116); putc(93); return 0; }
   putc(123); putc(32);
   while (pass < 2) {
     c = v + __OBJTAG__; go = 1;
     while (go) {
       k = peek(c);
-      if (k == 0) { go = 0; }
+      if ((k == 0) + (k < 0 - __OBJTAG__)) { go = 0; }          // (its own keys only)
       else if (k < 0) { c = k + __OBJTAG__; }
       else {
         if (__kind(k - __STRTAG__, __K_STR__) == pass) {
