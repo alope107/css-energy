@@ -1866,6 +1866,7 @@ class Compiler:
                 self.settype(t[1], self.compound(t[2], i - 1, o)); self.nd -= 1
             else: self.put(o, i); self.settype(t[1], self.otype(i))
             self.nd -= 1
+            if self.err: return                                # (settype's 61: the statement goes no further, as in cc_dsl)
             if isP(44) and t[3]: self.pn = (t[3] - 1, 0); self.mode = S_VAR; return     # var a = 1, b ...
             return self.end_simple_stmt(kind, v)
         if k == C_PSET:                                        # t: dynamic (x[k]), compound op, the key's offset (o.key: 64 * t[3] + t[4]).

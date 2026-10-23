@@ -158,7 +158,8 @@ class Prog(Base):
         n = self.m(self.v('nfn'), 'fnn')
         with self.when(ge(n, NF)): self.fail(23)
         with self.when(lt(n, NF)):
-            l = self.newlab(); self.fnw.append((self.x.g, n, K(0), add(n, R.H2M), add(l, argc * 256))); self.set('nfn', n + 1); self.set('nfdef', self.v('nfdef') + 1)
+            l = self.newlab()                          # (the count only if no label ran out: cc_ref skips end_params then)
+            self.fnw.append((self.x.g, n, K(0), add(n, R.H2M), add(l, mul(argc * 256, eq(self.v('err'), 0))))); self.set('nfn', n + 1); self.set('nfdef', self.v('nfdef') + 1)
         return n
     def emit(self, op, a=NOP0, b=BOP0, c=NOP0, label=None, w1=None):
         """cc_ref.emit: op A, B, C with operands (field, temp?), or A and word1 whole (w1: a value, or (field, temp?)); label:
@@ -783,13 +784,15 @@ class Prog(Base):
         argc = self.m(add(fdiv(tv, 64), last), 'cvc'); fl = self.m(mod(tv, 64), 'cvf')
         isap, isca = self.m(eq(fl, 4), 'cvap'), self.m(eq(fl, 2), 'cvca')
         if last: self.arg_end()
-        with self.when(and_(isap, ne(argc, 2))): self.fail(77)
-        self.set('tb', sub(self.v('tb'), add(argc, not_(or_(isap, isca))))); d0 = self.m(self.v('nd') - 1, 'cvd'); f = self.tmp(d0)
-        isnew = self.m(eq(fl, 8), 'cvnew')
-        a = ite(isap, 63, ite(isca, mul(gt(argc, 0), add(argc, 31)), add(argc, mul(or_(eq(fl, 1), isnew), 32))))
-        self.emit(OP['CALLV'], (a, 0), w1=(sub(f[0], 256), f[1]))
-        with self.when(isnew): self.emit(OP['MOV'], f, self.tmp(add(d0, 1)))     # (new: the object)
-        self.set_od(d0, TMP, 0); self.set('mode', R.S_OPER); self.done()
+        bad = self.m(and_(isap, ne(argc, 2)), 'cvbad')
+        with self.when(bad): self.fail(77)
+        with self.when(not_(bad)):
+            self.set('tb', sub(self.v('tb'), add(argc, not_(or_(isap, isca))))); d0 = self.m(self.v('nd') - 1, 'cvd'); f = self.tmp(d0)
+            isnew = self.m(eq(fl, 8), 'cvnew')
+            a = ite(isap, 63, ite(isca, mul(gt(argc, 0), add(argc, 31)), add(argc, mul(or_(eq(fl, 1), isnew), 32))))
+            self.emit(OP['CALLV'], (a, 0), w1=(sub(f[0], 256), f[1]))
+            with self.when(isnew): self.emit(OP['MOV'], f, self.tmp(add(d0, 1)))     # (new: the object)
+            self.set_od(d0, TMP, 0); self.set('mode', R.S_OPER); self.done()
     def new_call(self, h1, h2):
         """cc_ref.new_call"""
         j = self.lookup(h1, h2); k, o, b, _ = self.symkind_addr(j); fk = self.fnlook(h1, h2)
