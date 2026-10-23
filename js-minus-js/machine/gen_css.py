@@ -653,19 +653,22 @@ TRAP_NX = lambda routine, done: {'pc': f"if(style(--tlast: 1): {routine}; style(
                                  'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': f"calc(var(--steps) + var(--tlast) + var(--{done}))"}
 NEWCLASSES = {}
 # CALLV A, off: x the callee (fp + off), l its block's first line [hdr code meta env] when it is a function: one whose meta is A
-# (or A - 32: a this given to one that doesn't use it; cc_ref callv_end) is entered (the return word over x); anything else
-# traps to callv (frame at TRAPOFF, its argument x)
-# (cvf, cvok: pooled names, the fdig class's gdl, gdc)
-CV_PRE = [f"--gdl: {isfun_v('var(--vx)')};", f"--gdc: calc(var(--gdl) * ({eq('var(--lw2)', 'var(--A)')} + {eq('var(--lw2) + 32', 'var(--A)')}) * (1 - min(1, var(--pst))));"] + \
+# (or A - 32: a this given to one that doesn't use it; cc_ref callv_end) is entered (the return word over x); an inner one's
+# (meta + 16) first takes an execution (pst 0 -> 2) to put its env (lw3) in its local 1, past the A % 32 parameters; anything
+# else traps to callv (frame at TRAPOFF, its argument x)
+# (gdl, gdc, gs (inner), gb (the env's execution): pooled names, the fdig class's)
+CV_PRE = [f"--gdl: {isfun_v('var(--vx)')};", f"--gs: calc(var(--gdl) * clamp(0, 64 - var(--lw2), 1) * clamp(0, mod(var(--lw2), 32) - 15, 1));",
+          f"--gdc: calc(var(--gdl) * ({eq('var(--lw2) - 16 * var(--gs)', 'var(--A)')} + {eq('var(--lw2) - 16 * var(--gs) + 32', 'var(--A)')})"
+          f" * ({eq(pst, 0)} + {eq(pst, 2)}));", f"--gb: calc(var(--gdc) * var(--gs) * {eq(pst, 0)});"] + \
     trap("calc(1 - var(--gdc))", "var(--pst)", 1, f"mod({fp} + {TRAPOFF}, 32768)", "var(--vx)", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)")
 NEWCLASSES['callv'] = dict(ops=['CALLV'], pre=CV_PRE,
     reads=[("x", f"mod({fp} + var(--vg), 32768)", "1")], lines=[("l", f"mod(var(--vx) + {R.FUNTAG - 1}, 32768)", "var(--gdl)")],
-    write=("if(style(--tr: 1): var(--taddr); else: mod(" + fp + " + var(--vg), 32768))",
-           f"if(style(--tr: 1): var(--tval); else: calc(var(--vg) * 8192 + ({pc} + 2) / 2))", None, "1"),
-    nx={'pc': f"if(style(--tr: 0): calc(2 * var(--lw1)); style(--tlast: 1): {ENT['callv']}; else: {pc})",
-        'fp': f"if(style(--tr: 0): calc({fp} + var(--vg)); style(--tlast: 1): var(--tF); else: {fp})",
-        'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast))",
-        'pst': "if(style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"},
+    write=("if(style(--tr: 1): var(--taddr); style(--gb: 1): mod(" + fp + " + var(--vg) + 2 + mod(var(--A), 32), 32768); else: mod(" + fp + " + var(--vg), 32768))",
+           f"if(style(--tr: 1): var(--tval); style(--gb: 1): var(--lw3); else: calc(var(--vg) * 8192 + ({pc} + 2) / 2))", None, "1"),
+    nx={'pc': f"if(style(--tr: 0) and style(--gb: 0): calc(2 * var(--lw1)); style(--tlast: 1): {ENT['callv']}; else: {pc})",
+        'fp': f"if(style(--tr: 0) and style(--gb: 0): calc({fp} + var(--vg)); style(--tlast: 1): var(--tF); else: {fp})",
+        'steps': "calc(var(--steps) + (1 - var(--tr)) * (1 - var(--gb)) + var(--tlast))",
+        'pst': "if(style(--tr: 0): calc(2 * var(--gb)); style(--tlast: 1): 0; else: calc(var(--pst) + 1))"},
     deps={'l': [('x', None)]})
 NEWCLASSES['alloc'] = dict(ops=['ALLOC'], pre=AL_PRE,
     reads=[("x", "var(--aB)", "1 - var(--kB)"), ("k", HP, "1"), ("r", "var(--amw)", f"calc((1 - var(--tr)) * {eq(pst, 3)})")], pair={'k': 'j'},
@@ -1121,7 +1124,8 @@ if UI:
     # the picker's sample programs (samples/<file>.js): (file, label, icon); #ed (the page's program) comes first
     SAMPLES = [('fizzbuzz', 'FizzBuzz', '\U0001F41D'), ('primes', 'primes', '\U0001F9EE'), ('fib', 'Fibonacci', '\U0001F41A'),
                ('stars', 'stars', '\u2728'), ('hanoi', 'Hanoi', '\U0001F5FC'), ('sort', 'sort', '\U0001F4CA'), ('tree', 'tree', '\U0001F333'),
-               ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6')]
+               ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6'),
+               ('counter', 'closures', '\u23F2'), ('animals', 'prototypes', '\U0001F43E')]
     if os.environ.get('NOPICK') == '1': SAMPLES = []     # (measurement: the page without the picker)
     SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
     # (an editor's initial text starts at its line 1, so UIL - 1 lines of it are read)

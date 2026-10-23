@@ -1155,8 +1155,10 @@ class Compiler:
 
     def print_end(self):
         """console.log(...) ended. Its PRINTs printed every argument, so it leaves no value: it must be a statement of its own
-        (C_EXPR, nothing else open)"""
-        if self.osp > self.obase or self.top_cs()[0] != C_EXPR: return self.fail(30)
+        (C_EXPR, nothing else open), or what a return or an arrow's expression body returns (C_RETURN: undefined)"""
+        t = self.top_cs()[0]
+        if self.osp > self.obase or t not in (C_EXPR, C_RETURN): return self.fail(30)
+        if t == C_RETURN: self.push_od(K(UNDEF), 0); self.mode = S_OPER; return
         self.pop_cs(); self.mode = S_INC
 
     def call_end(self, tv, last):
@@ -1577,6 +1579,7 @@ class Compiler:
             if fk == C_FUNCE and isP(40):                      # an anonymous function expression
                 nm = self.ops[self.osp - 1] == M_FN and self.opv[self.osp - 1]
                 self.emit('MOV', w1=self.db + nm - STRTAG if nm else 0); self.fn_enter(self.fnnew()); m = self.mode = S_FPAREN
+                if self.err: return                            # (a label ran out: as cc_dsl, whose S_FPAREN block doesn't run then)
             else:
                 if kind != 'ID' or v in RESERVED: return self.fail(34)
                 if not self.rom:                               # its value's descriptor (FTAB): [MOV][its name], the name committed
@@ -2118,7 +2121,10 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
         elif op == 'CALLV':                             # the callee in the frame's slot fp + off: a function with A parameters (as many
             f = rd(fp + w1); q = (f + FUNTAG) & AMASK   # as the arguments) is called; anything else goes to the library's callv
-            if isfun(f) and a in (rd(q + 1), rd(q + 1) + 32): wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * rd(q)
+            m = rd(q + 1) if isfun(f) else -1; inr = 16 * (0 <= m < 64 and m % 32 >= 16)     # (an inner function: its env into its local 1)
+            if isfun(f) and a in (m - inr, m - inr + 32):
+                if inr: wr(fp + w1 + 2 + a % 32, rd(q + 2))
+                wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * rd(q)
             else: trap('callv', TRAPOFF, [f], pc)
         elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = 2 * (r % 8192); pst = WBACK * int(r // 8192 == TRAPDEF)
         elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b)) or isdbl(val(b)) or isfun(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's form)

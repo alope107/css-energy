@@ -1,7 +1,7 @@
 # JavaScript, compiled and run by a stylesheet
 
 `dist/js_in_css.xhtml` is one static XHTML page, and no script runs on it. You type a JavaScript program into its
-editor (or pick one of ten samples) and press Run. The program then goes through four stages:
+editor (or pick one of twelve samples) and press Run. The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
@@ -149,7 +149,8 @@ machine too; a key built at run time is first matched by its characters. Details
   so `1.x` and `12.length` are error 48).
 - **`console.log`** prints each argument as soon as it is computed, where JavaScript computes them all first:
   `console.log("a", f())` prints what `f` prints after `a `. It is a statement, or what a `return` or an arrow's
-  expression body gives (`undefined`: `x => console.log(x)`), not a value elsewhere (`var x = console.log(1)`: error 30). Node breaks a long array or object over several lines; the machine prints one line. Node lists
+  expression body gives (`undefined`: `x => console.log(x)`), not a value elsewhere (`var x = console.log(1)`: error
+  30). Node breaks a long array or object over several lines; the machine prints one line. Node lists
   an object's integer keys first in ascending order; the machine prints its number keys first in the order they were
   added.
 - **Printing functions**: a function's name is its declaration's or its object key's; Node also names a function after

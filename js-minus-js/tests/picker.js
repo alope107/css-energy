@@ -5,7 +5,7 @@ const { launch, fileUrl } = require(require('path').join(__dirname, '..', 'tools
 const { consoleCodes, gridText } = require(require('path').join(__dirname, '..', 'tools', 'page.js'));
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
 const LA = require(path.join(__dirname, '..', 'compiler', 'layout.json'));
-const SAMPLES = ['fizzbuzz', 'primes', 'fib', 'stars', 'hanoi', 'sort', 'tree', 'caesar', 'collatz', 'bank'];   // gen_css.py's order
+const SAMPLES = ['fizzbuzz', 'primes', 'fib', 'stars', 'hanoi', 'sort', 'tree', 'caesar', 'collatz', 'bank', 'counter', 'animals'];   // gen_css.py's order
 const grid = text => { const cols = LA.cols, rows = LA.rows, cells = new Array(cols * rows).fill(32); let q = 0;
   for (const ch of text) { if (ch === '\n') q = (Math.floor(q / cols) + 1) * cols % (cols * rows); else { cells[q] = ch.charCodeAt(0); q = (q + 1) % (cols * rows); } }
   return gridText(cells, rows, cols); };

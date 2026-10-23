@@ -212,7 +212,10 @@ class Sim:
         elif op == 'CALLV':                             # x: the callee (fp + off), l: its block's first line if it is a function
             x = rd((fp + w1) & AMASK); q = (x + R.FUNTAG - 1) & AMASK
             ln = [rd(q + j) for j in range(4)] if R.isfun(x) else [0] * 4
-            if not ps and R.isfun(x) and a in (ln[2], ln[2] + 32): wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * ln[1]
+            inr = 16 * (R.isfun(x) and ln[2] < 64 and ln[2] % 32 >= 16)     # (an inner function: its env into its local 1 first, pst 2)
+            fast = ps in (0, 2) and R.isfun(x) and a in (ln[2] - inr, ln[2] - inr + 32)
+            if fast and inr and not ps: wr((fp + w1 + 2 + a % 32) & AMASK, ln[3]); npst = 2; done = False; pc -= 2
+            elif fast: wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * ln[1]
             else: pc = trap((fp + TRAPOFF) & AMASK, [x], TRAPOFF * 8192 + pc // 2, 'callv', ps)
         elif op == 'DADD' and ps >= CATT:               # the cat class (a string's +, below)
             x, y = val(b), val(c); pc = self.cat(op, a, x, y, ps, pc, trap, wr, addr); npst, done = self.npst, self.cdone

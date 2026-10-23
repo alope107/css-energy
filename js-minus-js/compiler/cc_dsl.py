@@ -856,10 +856,13 @@ class Prog(Base):
             self.done()
 
     def print_end(self):
-        """cc_ref.print_end: console.log(...) leaves no value; it ends its statement (C_EXPR)"""
-        ok = self.m(and_(eq(self.v('osp'), self.v('obase')), eq(self.top()[0], R.C_EXPR)), 'pend')
+        """cc_ref.print_end: console.log(...) leaves no value; it ends its statement (C_EXPR), or a return's value is undefined
+        (C_RETURN)"""
+        t = self.top()[0]; isr = self.m(eq(t, R.C_RETURN), 'pret')
+        ok = self.m(and_(eq(self.v('osp'), self.v('obase')), or_(eq(t, R.C_EXPR), isr)), 'pend')
         with self.when(not_(ok)): self.fail(30)
-        with self.when(ok): self.pop_cs(); self.set('mode', R.S_INC); self.done()
+        with self.when(and_(ok, isr)): self.push_od(R.K(R.UNDEF), 0); self.set('mode', R.S_OPER); self.done()
+        with self.when(and_(ok, not_(isr))): self.pop_cs(); self.set('mode', R.S_INC); self.done()
 
     def incdec(self, h1, h2, op, x=0, pre=None):
         """cc_ref.incdec. x: 0 statement, 1 ++x / 2 x++ in an expression; pre: the symbol (j, k, o, b, cst) if looked up"""

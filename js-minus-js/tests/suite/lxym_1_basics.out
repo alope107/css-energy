@@ -1,0 +1,17 @@
+3 1.5 2 0.30000000000000004 7 20 7
+2.5 0 2 4.5 4
+8 Infinity -Infinity NaN
+Infinity -Infinity NaN
+true false abc Hello, world false true
+true false false true
+true false true true
+Hello world! 1, 2, 3
+Hello world,!
+14 13true true
+true true
+false false
+T
+Hello 5
+null undefined
+false false false false false false
+true true number string

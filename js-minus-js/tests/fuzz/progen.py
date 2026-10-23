@@ -326,7 +326,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this', 'proto']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this', 'proto', 'alog']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -355,6 +355,22 @@ class Gen:
             out.append('console.log(' + r.choice([f'{n}.f({i()}), {n}.g()', f'{n}["f"]({i()}), {n}.' + ('h()' if top else 'a'), f'{n}.f.call({{a: {i()}}}, {i()})',
                                                     f'{n}.f.apply({n}, [{i()}])', f'{n}.f.bind({{a: {i()}}})({i()})', f'{n}.f.bind({n}, {i()})()',
                                                     f'{n}.g.call({n}), {n}.a']) + ')' + self.semi())
+        return out
+    def s_alog(self):
+        """an arrow whose body is console.log (or a function returning it), called as a statement, as a value (undefined, alone
+        in a console.log: README) and as a timer's callback (its own statements, as s_this)"""
+        r = self.r
+        if self.inswitch or self.cur is not None: return None     # (the top level: functions nest two deep)
+        n = self.fresh()
+        if n is None: return None
+        kw = 'var' if len(self.scopes) == 1 else 'let'
+        self.scopes[-1][n] = Var(n, 'fobj')
+        i = lambda: str(r.randint(-9, 99))
+        out = [r.choice([f'{kw} {n} = (x) => console.log("{n}", x * 2)', f'{kw} {n} = x => console.log(x + {i()})',
+                         f'{kw} {n} = function (x) {{ return console.log(x, "{n}"); }}', f'{kw} {n} = (x) => {{ return console.log(-x) }}']) + self.semi()]
+        for _ in range(r.randint(1, 2)):
+            out.append(r.choice([f'{n}({i()})', f'console.log({n}({i()}))', f'console.log(typeof {n}({i()}))',
+                                 f'setTimeout(() => console.log({i()}), {r.randint(0, 3) * 10})', f'setTimeout(() => {n}({i()}))']) + self.semi())
         return out
     def s_proto(self):
         """a constructor with a method on its prototype, an object made by Object.create and given another prototype, read through
