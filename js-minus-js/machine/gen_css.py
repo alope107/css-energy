@@ -288,10 +288,11 @@ _dok = {'DADD': f"calc({_dsb} * {smi_v('var(--dr)')})", 'DSUB': f"calc({_dsb} * 
         'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", 'DBIT': f"calc({_dsb} * {smi_v('var(--dr)')} * clamp(0, 6 - {_dk}, 1))",
         **{'D' + o: CMP_FAST[o] for o in CMP_SUFFIX}}
 _dval = {**{o: "var(--dr)" for o in _dr}, **{'D' + o: f"calc({R.FALSE} - {CMP_COND[o]})" for o in CMP_SUFFIX}}
-# NUMLIT A, word1 (a number literal: A its cache, a global): A read as x; nonzero, it stays (written back as it is); 0, the library's
-# numlit parses the string word1 (the trap's arguments: word1, 0) and the instruction moves its value into A
+# NUMLIT A, word1 (a number literal: A its cache, a global): A read as x; defined, it stays (written back as it is); undefined, the library's
+# numlit parses the string word1 (the trap's arguments: word1, 0) and the instruction moves its value into A; word1 >= 16 (a function
+# expression's value) always traps
 DYNC = DYNOPS + ['NUMLIT']
-_dok['NUMLIT'] = "calc(1 - " + eq('var(--vx)', 0) + ")"; _dval['NUMLIT'] = "var(--vx)"
+_dok['NUMLIT'] = "calc((1 - " + eq('var(--vx)', R.UNDEF) + ") * clamp(0, 16 - var(--vg), 1))"; _dval['NUMLIT'] = "var(--vx)"     # (word1 >= 16: a function's value, always made)
 DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('mod(var(--A), 1024)')};", f"--dwb: {eq('var(--pst)', WBACK)};", f"--dnl: {eq('var(--op)', OP['NUMLIT'])};",
                    f"--dr: {by_op({o: _dr[o] for o in list(_dr)[:-1]}, _dr['DNEG'])};", f"--dok: {by_op({o: _dok[o] for o in DYNC[:-1]}, _dok[DYNC[-1]])};",
                    f"--dcat: calc({eq('var(--op)', OP['DADD'])} * (1 - min(1, var(--pst))) * (1 - var(--dok)) * var(--cqs) * (1 - {anyao}) * {0 if NOCAT else 1});",
@@ -1209,7 +1210,7 @@ if os.environ.get('BENCH'):
 MODEMS = "".join(f'<div class="nslot np{i}"><div class="nclip"><iframe class="modem" loading="lazy" src="/net/m0.html?part={i}&amp;n={NP}{"&amp;show" if NETSHOW else ""}#t"'
                  f' title="network modem {i}" aria-hidden="true"></iframe></div></div>' for i in range(NS))
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM)) | {R.LAYOUT['data_base'] - ROM}
-LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain's overlays hold code, strings and staging
+LIVE = (set() if UI else STATIC_CELLS) | {a - ROM for a in R.GINIT}     # on the editor page the compile chain's overlays hold code, strings and staging; the globals start undefined
 mem_html = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
 con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))

@@ -17,7 +17,9 @@ The generator stays inside the documented language (README "The language" and "L
   what Node prints on several lines), number keys never meet the string spelling of the same number;
 - loops terminate: counters are reserved names that only their loop changes, continue is used only where the counter
   still advances, calls form a DAG except self-recursion on a decreasing depth parameter;
-- every typed function ends with a return; a function's value is used only if it has a type.
+- every typed function ends with a return; a function's value is used only if it has a type. Some functions are
+  values: const f = (a, b) => { ... } (or a => e when the body is one return), var f = function (...) { ... }; those
+  aren't hoisted, so they come before every statement.
 Limits the compiler enforces with an error (labels, code size, nesting, strings) are not avoided: fuzz.py skips such
 programs and counts them.
 """
@@ -91,6 +93,7 @@ class Var:
 class Fn:
     def __init__(self, name, params, ret, depth):
         self.name, self.params, self.ret, self.depth = name, params, ret, depth     # params: [(name, ty)]
+        self.style = 'decl'                           # decl: function f() {}; arrow / expr: a value (Gen.program)
         self.prints = False                           # its body (or a function it calls) prints, or changes an array or object
                                                       # (an argument printed before the call would show it in Node)
 
@@ -562,6 +565,7 @@ class Gen:
             ps = [('dep', 'num')] if r.random() < 0.4 else []
             ps += [(pn, r.choice(['num', 'num', 'str', 'arr', 'objp'])) for pn in r.sample(['p1', 'p2', 'p3', 'pa'], r.randint(0, 3))]
             self.fns.append(Fn(f'f{i}', ps, r.choice(['num', 'num', 'str', None]), bool(ps and ps[0][0] == 'dep')))
+            x = r.random(); self.fns[-1].style = 'arrow' if x < 0.25 else 'expr' if x < 0.4 else 'decl'
         defs = []
         for f in self.fns:
             self.cur = f; self.selfcalls = 0
@@ -579,8 +583,10 @@ class Gen:
             defs.append(('FN', f, body))
         rest = []
         while self.budget > 0: rest += self.stmt()
-        for d in defs: rest.insert(r.randint(0, len(rest)), d)
-        return top + rest
+        vals = [d for d in defs if d[1].style != 'decl']            # (values: defined before any call, in order)
+        for d in defs:
+            if d[1].style == 'decl': rest.insert(r.randint(0, len(rest)), d)
+        return top + vals + rest
 
 # ---------------- layout: statements -> text (t: 'o' ours, 'n' Node)
 class Layout:
@@ -647,8 +653,14 @@ class Layout:
                 else: out += [head] + body
             return out + [p + '}']
         if k == 'FN':
-            _, f, body = s
-            return [f'{p}function {f.name}({", ".join(pn for pn, _ in f.params)}) {{'] + self.lines(body, ind + 1) + [p + '}']
+            _, f, body = s; ps = ", ".join(pn for pn, _ in f.params)
+            if f.style == 'decl': return [f'{p}function {f.name}({ps}) {{'] + self.lines(body, ind + 1) + [p + '}']
+            kw = r.choice(['const', 'let', 'var'])
+            if f.style == 'expr': return [f'{p}{kw} {f.name} = function ({ps}) {{'] + self.lines(body, ind + 1) + [p + '}' + self.end()]
+            head = f.params[0][0] if len(f.params) == 1 and r.random() < 0.5 else f'({ps})'
+            if len(body) == 1 and isinstance(body[0], tuple) and body[0][0] == 'RET':     # an expression body
+                return [f'{p}{kw} {f.name} = {head} => {self.e(body[0][1])}{self.end()}']
+            return [f'{p}{kw} {f.name} = {head} => {{'] + self.lines(body, ind + 1) + [p + '}' + self.end()]
         raise ValueError(k)
     def body(self, head, b, ind):
         p = '  ' * ind

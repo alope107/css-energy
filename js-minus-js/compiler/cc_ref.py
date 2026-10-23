@@ -55,7 +55,8 @@ OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNG
 # a double: its line); FVOPS A, B, C: A := a value (FNORM: B as the machine's value: an integer, a special, or B itself, a double; FINT:
 # B truncated, a plain integer of the machine's range (-0 is 0);
 # FCMP: -1 / 0 / 1, 2 unordered; FEXPO: B's binary exponent E; FLOG10: floor(log10 |B|); FDIGIT: B's decimal digit C, 0 the ones).
-# NUMLIT A, word1 (user code): A is a number literal's cache (a global); 0: the library's numlit parses the string word1 into it
+# NUMLIT A, word1 (user code): A is a number literal's cache (a global); undefined: the library's numlit parses the string word1 into it
+# (word1 >= 16: a function's value, made every time: numlit ignores the cache)
 FLOPS = OPN[OPN.index('FLD'):OPN.index('FNORM')]
 FVOPS = OPN[OPN.index('FNORM'):OPN.index('FDIGIT') + 1]
 # the shortest-digits search's (numstr) instructions, a class of their own: FCOK A, B, C: A = 1 if the candidate at decimal scale C
@@ -499,6 +500,10 @@ LITK = {KW[w]: v for w, v in LITERALS.items()}
 # ReferenceError at run time: its label stays undefined, and the page's undefined labels are 0, the library's refstub
 NIMP, IMPC = 4, 2
 FCACHE = IMPC + NIMP
+# every global starts undefined (a read before its var runs: hoisting; so var x without a value is no code at the top level),
+# the caches too (FCACHE's, a double literal's: NUMLIT's 'not made yet'). The images hold it (the page's RAM groups with these
+# cells are live from the start, gen_css.py); a cell the program writes can't be an overlay
+GINIT = {LAYOUT['data_base'] + a: UNDEF for a in range(IMPC, SDATA)}
 WGLOB = (KW['window'], KW['globalThis'])
 RETC = (OP['DBIT'] - OP['RET']) * 8192 + 7 * 1024     # RET + it: DBIT k 7 (cc_ref.ret)
 # JavaScript's reserved words among the keywords: no variable, parameter or function may be named so. A declaration checks at
@@ -514,9 +519,11 @@ XSTART = (40, 91, 33, 45, 126)
 # statement (identifier, number, string, ) ] } ++ --), for automatic semicolon insertion. (After a block's '}' the parser
 # is in a mode that ignores it; after an object literal's it ends the statement.)
 TWO = {(61, 61): 1, (33, 61): 2, (60, 61): 3, (62, 61): 4, (38, 38): 5, (124, 124): 6, (43, 43): 7, (45, 45): 8,
-       (43, 61): 9, (45, 61): 10, (42, 61): 11, (47, 61): 12, (37, 61): 13, (60, 60): 15, (62, 62): 16, (38, 61): 18, (124, 61): 19, (94, 61): 20}
+       (43, 61): 9, (45, 61): 10, (42, 61): 11, (47, 61): 12, (37, 61): 13, (60, 60): 15, (62, 62): 16, (38, 61): 18, (124, 61): 19, (94, 61): 20,
+       (61, 62): 24}
 # (the lexer makes three- and four-character ones of them: >>> 17 (>> and >); <<= 21, >>= 22, >>>= 23 (<< >> >>> and =: + 6))
 T_NL = 14
+T_ARROW = 24                            # =>
 # == and != are === and !== (1, 2) with the token's flag set (cc_ref: tflag; the page: its hash1 word), which the lexer knows from the
 # character after them: so they share the parser's variants
 BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE, 1: EQ, 2: NE, 5: AND, 6: OR,
@@ -586,6 +593,15 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
 (S_STMT, S_OPND, S_OPER, S_NAMES, S_NAMEE, S_VAR, S_VARAFTER, S_LPAREN, S_LBRACE, S_ELSE, S_FNAME, S_FPAREN, S_FPARAM,
  S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_INC, S_AFTERELSE, S_PREINC,
  S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_WDOT, S_BRK, S_ERR) = range(29)
+# arrow functions: S_APAR1 after '(a,' (a in pn), S_AARROW0 after '()', S_AARROW after an arrow's parameters, S_ABODY after
+# '=>' (a block, or else S_OPND: an expression body). S_OPERC / S_NAMEEC are S_OPER / S_NAMEE inside an expression body
+# (ca: the step ends there), where a token that ends the body ends the function first (arrow_close): separate modes, so
+# that only those variants carry that code (the others are S_OPER's / S_NAMEE's: ccpage5 shares their rules)
+S_APAR1, S_AARROW0, S_AARROW, S_ABODY, S_OPERC, S_NAMEEC = range(29, 35)
+NMODES = 35
+CMODES = {S_OPERC: S_OPER, S_NAMEEC: S_NAMEE}
+ACLOSE = (41, 44, 59, 125, T_NL)          # the tokens that can end an expression body (not ']' or ':': [x => x] and c ? x => 1 : 2
+                                          # need parentheses; four rules fewer, ccpage5)
 # pm = 3 after x++ / ++x in an expression, which no '.' or '[' may follow.
 
 def tmerge(a, b):
@@ -627,6 +643,7 @@ class Compiler:
         self.optlab = set()                 # labels that may stay undefined (0): the close labels
         self.fmark = 0                      # nlet when the current function started (its block-scoped names lie below NS - fmark)
         self.clab = 0                       # the top-level function's close label (cc_ref.closelab)
+        self.ca = 0                         # the current function is an arrow's expression body (S_OPERC)
         self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
         if not rom: self.nsym = NIMP; self.dp = FCACHE + NF
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
@@ -640,11 +657,11 @@ class Compiler:
         if self.curf >= 2: return self.fail(41)
         if self.curf == 0: self.sv0 = self.obase + 8 * self.dbase + 128 * self.tb
         else:
-            self.sv1 = self.nloc + 64 * self.npar + 1024 * self.obase
+            self.sv1 = self.nloc + 64 * self.npar + 1024 * self.obase + 8192 * self.ca
             self.sv2 = self.dbase + 16 * self.tb + 512 * self.fsym
             self.sv3 = self.cfn + 16 * self.flab + 1024 * self.fcsp
         if self.curf == 1 and not self.rom: self.deflab(self.clab, RETC)     # (it makes closures)
-        self.curf += 1; self.cfn = k; self.nloc = self.npar = self.tb = 0; self.fsym = self.nsym; self.fmark = self.nlet
+        self.curf += 1; self.cfn = k; self.nloc = self.npar = self.tb = self.ca = 0; self.fsym = self.nsym; self.fmark = self.nlet
         self.obase, self.dbase, self.fcsp = self.osp, self.nd, self.csp
         self.flab = self.newlab(); self.cs[self.csp - 1][2] = self.flab
         if self.curf == 1 and not self.rom: self.clab = self.newlab(); self.optlab.add(self.clab)     # (its RETs' label)
@@ -653,9 +670,9 @@ class Compiler:
         self.nsym = self.fsym; self.curf -= 1
         if self.curf == 0:
             v = self.sv0; self.obase, self.dbase, self.tb = v % 8, v // 8 % 16, v // 128
-            self.nloc = self.npar = self.fsym = self.cfn = self.flab = self.fcsp = 0
+            self.nloc = self.npar = self.fsym = self.cfn = self.flab = self.fcsp = self.ca = 0
         else:
-            self.nloc, self.npar, self.obase = self.sv1 % 64, self.sv1 // 64 % 16, self.sv1 // 1024
+            self.nloc, self.npar, self.obase, self.ca = self.sv1 % 64, self.sv1 // 64 % 16, self.sv1 // 1024 % 8, self.sv1 // 8192
             self.dbase, self.tb, self.fsym = self.sv2 % 16, self.sv2 // 16 % 32, self.sv2 // 512
             self.cfn, self.flab, self.fcsp = self.sv3 % 16, self.sv3 // 16 % 64, self.sv3 // 1024
     def closelab(self):
@@ -1241,11 +1258,16 @@ class Compiler:
 
     # ---------------- parser: one token
     def token(self, kind, v):
+        self.token_(kind, v)
+        if self.ca and not self.err: self.mode = {S_OPER: S_OPERC, S_NAMEE: S_NAMEEC}.get(self.mode, self.mode)     # (CMODES)
+    def token_(self, kind, v):
         if self.err: return
         isP = lambda c: kind == 'P' and v == c
         isK_ = lambda k: kind == 'ID' and v == KW[k]
         self.symstep = 0                                   # (this token wrote an implicit global's entry: settype)
         m = self.mode
+        cc = m in CMODES                                   # (an arrow's expression body: arrow_close)
+        if cc: m = self.mode = CMODES[m]
         fallin = m in (S_AFTERELSE, S_LBRACE)              # (a braceless body's statement: no expression statement there)
         if isP(T_NL) and m not in (S_NAMES, S_NAMEE, S_OPER, S_VARAFTER, S_INC, S_OPND, S_BRK): return
         if m == S_NAMES:
@@ -1278,6 +1300,14 @@ class Compiler:
             if self.err: return
         if m == S_NAMEE:
             h = self.pn
+            if isP(T_ARROW):                                   # x => / (x) =>
+                self.arrow_start(h)
+                if not self.err: self.end_params()
+                return self.err or self.arrow_body()
+            if (isP(41) or isP(44)) and self.top_op()[0] == M_PAREN:     # (x): x, still pending (x => ?); (x, : an arrow's parameters
+                self.osp -= 1
+                if isP(44): self.mode = S_APAR1
+                return
             if h == KW['console']:
                 if not isP(46): return self.fail(30)
                 self.mode = S_CONLOG; return
@@ -1413,7 +1443,8 @@ class Compiler:
             if isP(61):
                 self.push_cs(C_ASSIGN, j, 0, 1 + self.pn[0]); self.mode = S_OPND; return
             if self.pn[0] == 2: return self.fail(65)
-            if (self.curf or not self.rom) and not self.pn[1]: self.emit('MOV', (self.var(j), 0), (K(0 if self.rom else UNDEF), 0))      # a variable without a value: undefined
+            if (self.curf or (self.pn[0] and not self.rom)) and not self.pn[1]:     # a variable without a value: undefined (a global var
+                self.emit('MOV', (self.var(j), 0), (K(0 if self.rom else UNDEF), 0))     # is: GINIT; var x runs as nothing)
             if isP(44): self.mode = S_VAR; return
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
@@ -1462,11 +1493,22 @@ class Compiler:
         if m == S_FPARAM:
             if isP(41): return self.end_params()
             if kind != 'ID' or v in RESERVED: return self.fail(36)
-            self.declare(v, 2, PARAM0 + self.npar); self.npar += 1; self.mode = S_FPSEP; return
-        if m == S_FPSEP:
+            self.pn = v; self.mode = S_FPSEP; return
+        if m == S_FPSEP:                                       # (a parameter is declared at its ',' or ')': as an arrow's second)
+            if not (isP(44) or isP(41)): return self.fail(37)
+            self.declare(self.pn, 2, PARAM0 + self.npar); self.npar += 1
+            if self.err: return
             if isP(44): self.mode = S_FPARAM; return
-            if isP(41): return self.end_params()
-            return self.fail(37)
+            return self.end_params()
+        if m == S_APAR1:                                       # (a, b: an arrow's (a in pn)
+            if kind != 'ID' or v in RESERVED: return self.fail(36)
+            self.arrow_start(self.pn); self.pn = v; self.mode = S_FPSEP; return
+        if m in (S_AARROW0, S_AARROW):                         # () => / (a, b) =>
+            if not isP(T_ARROW): return self.fail(35)
+            if m == S_AARROW0:
+                self.arrow_start(None)
+                if not self.err: self.end_params()
+            return self.err or self.arrow_body()
         if m == S_CONLOG:
             if not isK_('log'): return self.fail(38)
             self.mode = S_CONLP; return
@@ -1502,6 +1544,10 @@ class Compiler:
         if m == S_OCOLON:
             if not isP(58): return self.fail(72)
             self.mode = S_STMT if self.top_cs()[0] == C_SWITCH else S_OPND; return      # (default's ':')
+        if m == S_ABODY:                                       # => {: a block body (the expression body's return goes)
+            if isP(123):                                       # (a frame label of its own, defined at its '}')
+                self.pop_cs(); self.ca = 0; self.flab = self.newlab(); self.cs[self.csp - 1][2] = self.flab; self.mode = S_STMT; return
+            m = self.mode = S_OPND
         if m == S_OPND:
             if kind == 'NUM' and isinstance(v, tuple): return self.numlit(v)
             if kind == 'NUM': self.push_num(v); self.mode = S_OPER; return
@@ -1528,6 +1574,7 @@ class Compiler:
             if isP(126): self.push_op(BNOT); return
             if isP(7) or isP(8): self.pn = (v, 1); self.mode = S_PREINC; return
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
+            if isP(41) and self.top_op()[0] == M_PAREN: self.osp -= 1; self.mode = S_AARROW0; return     # () =>
             if isP(41) and self.top_op()[0] == M_CALL:
                 self.osp -= 1; self.call_end(self.opv[self.osp], 0); self.mode = S_OPER; return
             if isP(41) and self.top_op()[0] == M_CALLV:
@@ -1576,6 +1623,10 @@ class Compiler:
                     self.mode = S_OPND; return
                 if dyn: self.index_read(self.nd - 2)
                 else: self.prop_read(self.nd - 1, key)
+            if cc and kind == 'P' and v in ACLOSE and not any(self.ops[k] >= 100 for k in range(self.obase, self.osp)):
+                self.popops(1)                                 # an arrow's expression body ends: the function first, then the
+                while not self.err and self.ca and self.osp == self.obase: self.arrow_close()     # token (x => y => x + y: both)
+                if self.err: return
             if isP(40) and not self.rom:                      # e(...): a call of e's value (CALLV: in its slot)
                 self.to_temp(self.nd - 1); self.snapshot(lambda q: q < 256); self.push_op(M_CALLV); self.mode = S_OPND; return
             if kind == 'P' and v in BIN:
@@ -1585,13 +1636,14 @@ class Compiler:
                 t, tv = self.top_op()
                 if op == ADD and t == M_PRINT and (tv >= 4 or self.otype(self.nd - 1) == 2) and tv < 4 * (PIECES - 1):   # "..." + x in console.log: a piece
                     self.opv[self.osp - 1] = tv + 4; self.mode = S_OPND; return
-                if op == ADD: self.push_op(M_CADD if t == M_PRINT else ADD, self.otype(self.nd - 1)); self.mode = S_OPND; return
+                full = op == ADD and t == M_PRINT and tv >= 4 * (PIECES - 1)     # (no piece left: the pieces joined, then +)
+                if op == ADD and not full: self.push_op(M_CADD if t == M_PRINT else ADD, self.otype(self.nd - 1)); self.mode = S_OPND; return
                 if prec(op) <= prec(ADD): self.join_pieces()   # (* / % bind tighter: they end no piece)
                 if op in (AND, OR):                           # a: tested in its temp; b joins it there (popops)
                     i = self.nd - 1; lt = self.otype(i); l = self.newlab(); self.to_temp(i); self.snapshot(lambda q: True, i)
                     self.emit('JZ' if op == AND else 'JNZ', b=self.tmp(i), label=l)
                     self.push_op(op, l + self.LM * lt); self.mode = S_OPND; return
-                self.push_op(op, self.otype(self.nd - 1)); self.mode = S_OPND; return
+                self.push_op(M_CADD if full else op, self.otype(self.nd - 1)); self.mode = S_OPND; return
             if isP(63):                                        # c ? a : b
                 self.popops(2, 'br')
                 if self.err: return
@@ -1749,18 +1801,43 @@ class Compiler:
             if t[4] & 2: self.emit('JMP', label=t[3])
             self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k in FUNCS:                                     # (still inside: the RET's frame label)
-            self.ret((K(0 if self.rom else UNDEF), 0)); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
-            fk = self.cfn; self.fn_exit()
-            # its value: NUMLIT k (an inner function's: + 64 * (its index + 16 * the env's slot), + the frame's size: npar + the
-            # frame label, which the linker adds: the library's mkfn makes the env cell)
-            w1 = (self.npar + 64 * fk + 1024 * (self.npar + 1), 1) if self.curf == 1 else fk
-            if k == C_FUNCN:                                   # its local's value
-                o = (self.var(t[3]), 0); self.emit('MOV', o, (K(0), 0)); self.emit('NUMLIT', o, w1=w1)
-            if k == C_FUNCE:                                   # its value: a new one each time (NUMLIT of a zeroed temp)
-                self.osp -= 1; i = self.nd; self.push_od(TMP, 0); o = self.tmp(i)
-                self.emit('MOV', o, (K(0), 0)); self.emit('NUMLIT', o, w1=w1); self.mode = S_OPER; return
-            return self.mode_stmt()
+            self.ret((K(0 if self.rom else UNDEF), 0)); return self.fn_close(t)
         return self.fail(55)
+
+    def fn_close(self, t, frame=True):
+        """a function's body ended (t: its entry, popped; its RET emitted): its value (frame: its frame label is defined here)"""
+        k = t[0]
+        if frame: self.deflab(t[2], self.nloc)
+        self.deflab(t[1], self.here())
+        fk = self.cfn; self.fn_exit()
+        # its value: NUMLIT 16 + k (an inner function's: + 64 * (its index + 16 * the env's slot), + the frame's size: npar + the
+        # frame label, which the linker adds: the library's mkclo makes the env cell). Word1 >= 16: a new value each time
+        w1 = (self.npar + 64 * fk + 1024 * (self.npar + 1), 1) if self.curf == 1 else 16 + fk
+        if k == C_FUNCN: self.emit('NUMLIT', (self.var(t[3]), 0), w1=w1)     # its local's value
+        if k == C_FUNCE:                                   # its value
+            self.osp -= 1; i = self.nd; self.push_od(TMP, 0); self.emit('NUMLIT', self.tmp(i), w1=w1); self.mode = S_OPER; return
+        return self.mode_stmt()
+
+    def arrow_start(self, h):
+        """an arrow function's head is known ('(a,' '(a) =>' 'a =>' '() =>'): as 'function (' (S_OPND, S_FNAME; C_FUNCE's d 1),
+        h its first parameter (None: none)"""
+        if self.curf >= 2: return self.fail(41)
+        t, tv = self.top_op()
+        if 0 < t < 100: return self.fail(48)              # (an operator's operand: 1 + x => x)
+        nm = tv if t == M_OKEY else 0
+        self.push_op(M_FN, nm); lo = self.newlab(); self.emit('JMP', label=lo); self.push_cs(C_FUNCE, lo, 0, 0, 1)
+        self.emit('MOV', w1=self.db + nm - STRTAG if nm else 0); self.fn_enter(self.fnnew())
+        if h is not None and not self.err: self.declare(h, 2, PARAM0 + self.npar); self.npar += 1
+
+    def arrow_body(self):
+        """'=>' (its parameters ended): a block or an expression; as the expression's return until '{' says otherwise. An
+        expression declares no locals: its frame label is 1 here (no label definition at its end: arrow_close)"""
+        self.deflab(self.flab, 1); self.push_cs(C_RETURN); self.ca = 1; self.mode = S_ABODY
+
+    def arrow_close(self):
+        """an arrow's expression body is complete: its RET, then the function's end (fn_close)"""
+        self.pop_cs(); i = self.nd - 1; self.ret(self.src(i)); self.nd -= 1
+        t = self.pop_cs(); self.nlet = t[5]; self.fn_close(t, False)
 
     def do_cond(self, t):
         """a do body (just popped) ended: the continue label; the entry stays for while (cond)"""
@@ -1769,7 +1846,7 @@ class Compiler:
     def end_params(self):
         f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
         if f[4] and f[4] != self.npar + 1: return self.fail(76)
-        f[4] = self.npar + 1; self.mode = S_LBRACE
+        f[4] = self.npar + 1; t = self.top_cs(); self.mode = S_AARROW if t[0] == C_FUNCE and t[4] else S_LBRACE
         if not self.rom:                                     # (its value's: FTAB, + 16 parameters: a closure, its env in local 1)
             self.nloc = 1; self.datum(FTAB + self.cfn, self.here() + 8192 * (self.npar + 16 * (self.curf == 2)))
 
@@ -1915,7 +1992,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'PUTC': emit(val(b))
         elif op == 'NUMLIT':                            # a number literal: its cache, or the library parses it (once)
             if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
-            elif rd(addr(a)) == 0: trap('numlit', TRAPDEF, [w1, 0], pc - 2)
+            elif rd(addr(a)) == UNDEF or w1 >= 16: trap('numlit', TRAPDEF, [w1, 0], pc - 2)     # (word1 >= 16: a function's value, made each time)
         elif op in FLOPS or op in FBOPS:                # the line at A's value (or scratch line A) := op of B and C
             x, y = fopnd(b), fopnd(c); d = fscr(a) or val(a)
             for j, w in enumerate(fenc(fline_op(op, x, y))): wr(d + j, w)
@@ -1996,6 +2073,7 @@ def image_mem(c, words, data, init=None):
     mem[init - 1] = c.dp
     assert all(a >= sbase for a in data), 'nothing is staged: globals start at 0'
     mem[c.db] = STRTAG                  # the untag constant at data_base (read only: an overlay on the page)
+    mem.update(GINIT)                   # the globals: undefined (in the page's image)
     mem.update(BSTRW)                   # the built-in strings (the page: .fin's overlays)
     mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
@@ -2008,8 +2086,8 @@ def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
     return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'))
 
 def image(src, lib, ram=False):
-    """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero (the page's
-    compile chain supplies code and data), or with ram=True the program as the CSS compiler leaves it (CPU-only pages,
+    """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero but the globals
+    (undefined: GINIT; the page's compile chain supplies code and data), or with ram=True the program as the CSS compiler leaves it (CPU-only pages,
     the CSS CPU's model). steps/expected come from cc_ref's simulation."""
     La = LAYOUT
     c = Compiler(La['data_base'], La['code_base'], lib)
@@ -2017,7 +2095,7 @@ def image(src, lib, ram=False):
     if c.err: raise ValueError(f'compile error {c.err}')
     mem = image_mem(c, words, data, lib.get('init', La['init']))
     r = run(lib['rom'], dict(mem), La['sp0'], ent=lib.get('entries'))
-    if not ram: mem = {}
+    if not ram: mem = dict(GINIT)
     return dict(rom=lib['rom'], romSize=La['rom_size'], ram=[mem.get(La['rom_size'] + i, 0) for i in range(La['ram_size'])],
                 ramSize=La['ram_size'], sp0=La['sp0'], outBase=La['out_base'], rows=La['rows'], cols=La['cols'], source=src,
                 codeBase=La['code_base'], init=La.get('init'), steps=r[0], expected=r[1], entries=lib.get('entries', {}))

@@ -284,7 +284,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     def is_noop(pg):
         fixed = {'mode': pg.spec_mode, 'err': 0}
         return not pg.out and all(pg.x.cur[n] == S(n) or (n in fixed and isK(pg.x.cur[n], fixed[n])) for n in pst)
-    allm = set(range(R.S_ERR))
+    allm = set(range(R.NMODES)) - {R.S_ERR}
     noop_tc = []
     for tc in sorted({c for k, _ in progs for c in D.key_tcodes(k)}):
         ks = [(k, pg) for k, pg in progs if D.key_tcodes(k) == [tc]]
@@ -293,10 +293,11 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for tc in noop_tc:
         css.append(f'@container style(--tcq: {tc}) {{ .tpA, .tpB {{ ' + ' '.join(f'--q-new-{n}: var(--x-{n});' for n in pst) + ' --q-ran: 1; } }')
     progs = [(k, pg) for k, pg in progs if not (D.key_tcodes(k)[0] in noop_tc and len(D.key_tcodes(k)) == 1 and is_noop(pg))]
-    # variants of one mode whose CSS is identical (a third of them: mostly modes that treat many punctuation tokens
-    # alike) share one rule whose condition lists all their token codes. Every rule costs time on every token level
-    # whether it applies or not (docs/BENCHMARKS.md §4c), so fewer rules is faster.
-    rules = {}                                         # (mode, declarations) -> token codes, in first-seen order
+    # variants whose CSS is identical (a third of them: mostly modes that treat many punctuation tokens alike; and the
+    # modes that only rename another, cc_ref.CMODES / S_ABODY, outside the tokens they handle) share one rule whose
+    # condition lists all their modes and token codes. Every rule costs time on every token level whether it applies or
+    # not (docs/BENCHMARKS.md §4c), so fewer rules is faster.
+    rules = {}                                         # declarations -> {mode: token codes}, in first-seen order
     for key, pg in progs:
         X = pg.x; outs = set(pg.out)
         pool = {}
@@ -309,10 +310,14 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         decl = [f'--{pool[n]}: {tocss(node, pref)};' for n, node in X.temps]
         decl += [f'--q-new-{n}: {tocss(X.cur[n], pref)};' for n in pst] + ['--q-ran: 1;']
         for n, _ in X.temps: N.add(pool[n], n in outs and n not in PORTS)
-        rules.setdefault((key[0], ' '.join(decl)), []).extend(D.key_tcodes(key))
-    for (mode, body), tcs in rules.items():
-        tcond = f'style(--tcq: {tcs[0]})' if len(tcs) == 1 else '(' + ' or '.join(f'style(--tcq: {t})' for t in tcs) + ')'
-        css.append(f'@container style(--vh: {mode}) and {tcond} {{ .tpA, .tpB {{ {body} }} }}')
+        rules.setdefault(' '.join(decl), {}).setdefault(key[0], []).extend(D.key_tcodes(key))
+    def anyof(name, vs): return f'style(--{name}: {vs[0]})' if len(vs) == 1 else '(' + ' or '.join(f'style(--{name}: {v})' for v in vs) + ')'
+    for body, bym in rules.items():
+        byt = {}                                       # token codes -> the modes with exactly those
+        for mode, tcs in bym.items(): byt.setdefault(tuple(tcs), []).append(mode)
+        conds = [f'{anyof("vh", ms)} and {anyof("tcq", tcs)}' for tcs, ms in byt.items()]
+        cond = conds[0] if len(conds) == 1 else ' or '.join(f'({c})' for c in conds)
+        css.append(f'@container {cond} {{ .tpA, .tpB {{ {body} }} }}')
     # code / data overlays (fixed, contained by #tcr)
     css.append(lbl.group('Code and data overlays', 'each emitted word is an element anchored as its RAM cell'))
     cb0 = code_base - R.LAYOUT['rom_size']          # RAM index of the first code word (--c<index> names RAM cells)

@@ -218,7 +218,7 @@ class Sim:
             x, y = val(b), val(c); pc = self.cat(op, a, x, y, ps, pc, trap, wr, addr); npst, done = self.npst, self.cdone
         elif op == 'NUMLIT' and ps == WBACK: wr(addr(a), rd(fp + TRAPDEF))
         elif op == 'NUMLIT':                            # a number literal: its cache (A), or numlit parses its string (word1) once
-            if ps or rd(addr(a)) == 0: pc = trap((fp + TRAPDEF) & AMASK, [w1, 0], TRAPDEF * 8192 + (pc - 2) // 2, 'numlit', ps)
+            if ps or rd(addr(a)) == R.UNDEF or w1 >= 16: pc = trap((fp + TRAPDEF) & AMASK, [w1, 0], TRAPDEF * 8192 + (pc - 2) // 2, 'numlit', ps)
         elif op in R.FDOPS:                              # numstr's candidate: B's line, C the scale; ok into A, or the limbs into A's line
             f = R.fscr(b); v = val(b); q = f if f is not None else (v + R.DBLTAG) & AMASK
             x = R.fdec([rd(q + j) for j in range(4)]); cv, ok = R.fcand(x, val(c))

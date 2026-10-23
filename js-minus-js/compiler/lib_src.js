@@ -349,6 +349,7 @@ function numscan(s, i, e) {
 // a number literal (NUMLIT, the first time it is read): its string's number
 function numlit(s, d) {
   if (s >= 1024) { return mkclo(s, __fp() - __TRAPDEF__); }
+  if (s >= 16) { return mkfn(s - 16); }
   if (s >= 0) { return mkfn(s); }
   return numscan(s, 0, peek(s - 1));
 }
