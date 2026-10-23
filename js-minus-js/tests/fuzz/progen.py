@@ -127,7 +127,8 @@ class Gen:
         if k == 'lit':
             x = r.random()
             v = r.randint(0, 9) if x < .5 else r.randint(10, 999) if x < .8 else r.randint(1000, 9000) if x < .95 else r.randint(8192, 300000)
-            return lit(v if not any(lo <= v < hi for lo, hi in TAGGED) else 8192)       # (numbers there are arrays to our machine)
+            v = v if not any(lo <= v < hi for lo, hi in TAGGED) else 8192              # (numbers there are arrays to our machine)
+            return ('raw', f'{v}.') if x > .97 else lit(v)                             # (1. is 1: the dot is the number's)
         if k == 'var':
             vs = self.vars(lambda v: v.ty == 'num')
             return ('raw', r.choice(vs).name) if vs else lit(r.randint(0, 20))

@@ -389,8 +389,9 @@ class Prog(Base):
                 rest = self.m(and_(not_(cE), not_(sp), not_(cG), not_(cB), not_(cH)), 'rest')
                 cI = self.m(and_(rest, or_(alc, and_(dgc, eq(tkc, 1)))), 'cI')
                 cJ = self.m(and_(rest, not_(cI), dgc), 'cJ')
-                cK = self.m(and_(rest, not_(cI), not_(cJ), ne(two, 0)), 'cK')
-                cL = self.m(and_(rest, not_(cI), not_(cJ), eq(two, 0)), 'cL')
+                cN = self.m(and_(rest, not_(cI), not_(cJ), ceq(46), eq(tkc, 2)), 'cN')     # a number's trailing dot
+                cK = self.m(and_(rest, not_(cI), not_(cJ), not_(cN), ne(two, 0)), 'cK')
+                cL = self.m(and_(rest, not_(cI), not_(cJ), not_(cN), eq(two, 0)), 'cL')
                 with self.when(cE): tok(5)
                 with self.when(cG): self.set('lx', 2)
                 with self.when(cB): self.set('lx', 6)
@@ -415,7 +416,8 @@ class Prog(Base):
                 with self.when(cJ):
                     nacc = self.m(add(mul(mul(eq(tkc, 2), self.v('acc')), 10), sub(c, 48)), 'nacc')
                     self.set('acc', nacc); self.set('tkc', 2)
-                    with self.when(not_(dgcn)): tok(1, nacc); self.set('tkc', 0)
+                    with self.when(and_(not_(dgcn), ne(cn, 46))): tok(1, nacc); self.set('tkc', 0)
+                with self.when(cN): tok(1, self.v('acc')); self.set('tkc', 0)    # (1.x: NUM ID)
                 with self.when(cK): self.set('p2', two)
                 with self.when(cL): tok(4, c)
         # the pending newline (cc_ref.char): decided at the blank before the next significant character, or on it (+ - /)
