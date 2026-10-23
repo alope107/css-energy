@@ -77,7 +77,9 @@ function oom() {
   return 0;
 }
 // the block at b in the map (it starts a block made since the space was cleared) / marked in it
-function mark(b) { var x = (b - __HEAP0__) / 8; var h = __MAP__ + x / 16; poke(h, peek(h) + peek(__POWT__ + x % 16)); return 0; }
+function mark(b) { var x = (b - __HEAP0__) / 8; var h = __MAP__ + x / 16; if (peek(__POWT__ + 1) == 0) { powt(); } poke(h, peek(h) + peek(__POWT__ + x % 16)); return 0; }
+// the map's powers of two (the collector fills them in; mark may run before it ever has: mkfn)
+function powt() { var i = 0; var x = 1; while (i < 16) { poke(__POWT__ + i, x); x = x * 2; i++; } return 0; }
 function marked(b) { var x = (b - __HEAP0__) / 8; return (peek(__MAP__ + x / 16) / peek(__POWT__ + x % 16)) % 2; }
 // the references in [p, e) forwarded (stk: stack words, which are conservative)
 function fwdrange(p, e, stk) {
@@ -104,6 +106,7 @@ function scan(s) {
   }
   x = 0 - 2 - h;
   if (x % 8 == 1) { fwdrange(s + 4, s + 4 + peek(s + 2), 0); }
+  if (x % 8 == 3) { poke(s + 3, fwd(peek(s + 3))); poke(s + 4, fwd(peek(s + 4))); poke(s + 5, fwd(peek(s + 5))); }     // (a function's env, name, props)
   return x - x % 8;
 }
 // a value -> the same value after the collection: a from-space object, string or array is copied (once); anything else is
@@ -117,6 +120,8 @@ function fwd(w) {
   if (a >= flo + 3) { if (a < flo + __H__) { return fwdblk(w, a - 3, 1); } }
   a = w + __DBLTAG__;
   if (a >= flo + 4) { if (a < flo + __H__) { return fwdblk(w, a - 4, 2); } }
+  a = w + __FUNTAG__;
+  if (a >= flo + 1) { if (a < flo + __H__) { return fwdblk(w, a - 1, 3); } }
   return w;
 }
 // a stack word: a reference only if it starts a block in the map (MFREF found it in a from-space tag range)
@@ -125,6 +130,7 @@ function fwdc(w, flo) {
   if ((b < flo) + (b >= flo + __H__)) { b = w + __STRTAG__ - 2; }
   if ((b < flo) + (b >= flo + __H__)) { b = w - __ARRTAG__ - 3; }
   if ((b < flo) + (b >= flo + __H__)) { b = w + __DBLTAG__ - 4; }
+  if ((b < flo) + (b >= flo + __H__)) { b = w + __FUNTAG__ - 1; }
   if ((b - flo) % 8) { return w; }
   if (marked(b) == 0) { return w; }
   return fwd(w);
@@ -149,7 +155,7 @@ function fwdblk(w, b, kind) {
   if (x % 8 != kind) { return w; }
   n = peek(__G_FREE__);
   if (kind == 0) { __mcpy(n, b, peek(b + 1) + 3); }
-  else if (kind == 2) { __mcpy(n, b, 8); nw = 8; }
+  else if (kind >= 2) { __mcpy(n, b, 8); nw = 8; }        // (a double, a function)
   else {
     cap = peek(b + 1); len = peek(b + 2); nw = rnd8(cap + 4);
     poke(n, 0 - 3 - nw); poke(n + 1, cap); poke(n + 2, len); poke(n + 3, n + 4);
@@ -170,6 +176,7 @@ function tostr(v) {
   if (__kind(v, __K_SPECIAL__)) { return catv(v); }
   if (__kind(v, __K_DBL__)) { return numstr(v); }
   if (__kind(v, __K_ARR__)) { return join(v, 0); }
+  if (__kind(v, __K_FUN__)) { return fnsrc(v); }
   if (__kind(v, __K_OBJ__)) {
     r = newstr(15);
     poke(r, 91); poke(r + 1, 111); poke(r + 2, 98); poke(r + 3, 106); poke(r + 4, 101); poke(r + 5, 99); poke(r + 6, 116);
@@ -179,8 +186,17 @@ function tostr(v) {
   r = newstr(__kind(v, __K_NLEN__)); __nput(r, v);
   return r;
 }
+// a function as a string: "function name() { [native code] }" (JavaScript gives its source, which the machine doesn't keep)
+function fnsrc(f) {
+  var n = 0; var r = 0;
+  if (peek(f + 3)) { n = peek(peek(f + 3) - 1); }
+  r = newstr(n + 29); w_fnhead(r);
+  if (n) { __mcpy(r + 9, peek(f + 3), n); }
+  w_fntail(r + 9 + n);
+  return r;
+}
 // an array or object as a primitive (its string); anything else as it is
-function prim(v) { if (__kind(v, __K_AO__)) { return tostr(v); } return v; }
+function prim(v) { if (__kind(v, __K_AO__) + __kind(v, __K_FUN__)) { return tostr(v); } return v; }
 // two strings: -1, 0, 1 (by character codes, as JavaScript compares them)
 function scmp(a, b) {
   var la = peek(a - 1); var lb = peek(b - 1); var m = la; var i = 0; var c = 0; var d = 0;
@@ -323,7 +339,32 @@ function numscan(s, i, e) {
   return fbox();
 }
 // a number literal (NUMLIT, the first time it is read): its string's number
-function numlit(s, d) { return numscan(s, 0, peek(s - 1)); }
+function numlit(s, d) { if (s >= 0) { return mkfn(s); } return numscan(s, 0, peek(s - 1)); }
+// CALLV found no function with as many parameters as arguments (cc_ref CALLV): f is called anyway, entered through this frame's
+// return word. The callee's frame is the CALLV's (fp + off: its return word written here); missing parameters are undefined,
+// written last (MFILL: with many arguments that frame can reach this one's words); not a function: the TypeError
+function callv(f) {
+  var r = peek(__fp()) % 8192; var n = peek(2 * r - 2) % 8192; var off = peek(2 * r - 1); var fc = __fp() - __TRAPOFF__ + off; var np = 0;
+  if (__kind(f, __K_FUN__) == 0) { m_uncaught(); m_typeerr(); m_notfn(); putc(10); halt(); }
+  np = peek(f + 1) % 16;
+  poke(fc, off * 8192 + r);
+  poke(__CVRET__, (__TRAPOFF__ - off) * 8192 + peek(f));
+  if (np > n) { __mfill(fc + 1 + n, __UNDEF__, np - n); }
+  poke(__fp(), peek(__CVRET__));
+  return 0;
+}
+// a function's value (NUMLIT's for a function's name, s its index k: cc_ref FTAB / FCACHE): an 8-word block (cc_ref.FUNTAG) from
+// its FTAB word (its body + 8192 * its parameters) and the instruction pair before its body ([MOV][its name]); a function never
+// declared: the ReferenceError
+function mkfn(k) {
+  var d = peek(__FTAB__ + k) % 8192; var f = 0;
+  if (d == 0) { refstub(); }
+  f = __alloc(8, __A_RAW__);
+  poke(f, 0 - 13); poke(f + 1, d); poke(f + 2, peek(__FTAB__ + k) / 8192); poke(f + 3, 0); poke(f + 4, peek(2 * d - 1));
+  poke(f + 5, 0); poke(f + 6, 0); poke(f + 7, 0);
+  mark(f);
+  return f + 1 - __FUNTAG__;
+}
 
 // ---------------- a double as a string (JavaScript's Number::toString): the shortest digits that read back as the number, the
 // closest of those (ties to even). Each candidate is tested exactly with the FPU (the two-product's low part makes M * 5^n
@@ -998,6 +1039,7 @@ function ins(v, d) {
   }
   if (__kind(v, __K_OBJ__)) { return insobj(v, d); }
   if (__kind(v, __K_DBL__)) { prn(numstr(v)); return 0; }
+  if (__kind(v, __K_FUN__)) { if (peek(v + 3)) { m_fnname(); prn(peek(v + 3)); putc(93); } else { m_fnanon(); } return 0; }
   prn(v);
   return 0;
 }

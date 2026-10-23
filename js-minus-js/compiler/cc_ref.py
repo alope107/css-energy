@@ -44,7 +44,7 @@ AMASK = 32767                           # addresses are 15-bit
 
 # the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
 OPN = ('MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE JLEQ JLNE JNLT JNGT JNLE JNGE HALT  JZ JNZ  CALL RET NOT TENTER '
-       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DBIT DNEG NUMLIT  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC'
+       ' LDI STI  DADD DSUB DMUL DDIV DMOD DLT DGT DLE DGE DEQ DNE DLEQ DLNE DBIT DNEG NUMLIT  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  CALLV  ALLOC'
        '  APUSH  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET'
        '  FLD FADD FSUB FMUL FDIV FMOD FPOW FSQRT FFLOOR FCEIL FROUND FTRUNC FABS FTPLO FSCALE FP10 FCONST FEXP FLOG FSIN FCOS FTAN'
        '  FNORM FINT FCMP FEXPO FLOG10 FDIGIT  FCOK FCDIG  FAND FOR FXOR FSHL FSHR FUSHR  ADD SUB MUL DIV MOD LT GT LE GE EQ NE').split()
@@ -78,6 +78,9 @@ assert DIGS + 22 <= LAYOUT['sp0']
 # the runtime library uses (the raw arithmetic, the primitives) may lie above)
 USEROPS = OPN.index('ALLOC')            # the first that only the runtime library uses
 assert USEROPS <= 64
+# CALLV A, off (word1): a call of the value in the frame's slot fp + off (the return word's), A arguments above it: a function
+# whose meta (its parameters) is A is entered here as CALL enters; anything else traps to the library's callv (frame at
+# TRAPOFF), which pads missing parameters with undefined (or reports a TypeError) and enters the function itself
 # NET A, B: A = the network gateway's answer to the word B (net/device.py), every part's bytes left in RBUF0 … (netw); the
 # lib's fetch(url) / read() are made of it (the ROM reaches it as __net)
 # The runtime's primitives (the ROM reaches them through intrinsics; the CSS CPU runs them a cache line per execution):
@@ -89,7 +92,7 @@ assert USEROPS <= 64
 # the from-space at C; MWALK: through [len][bytes][0] strings from B, the offset of the first of length A, or of the first at
 # or past C). APUSH 0, B, C: B.push(C) and return, as the ROM's push routine's first instruction (no array, or a full one:
 # on to the next instruction)
-KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap', 'typeof', 'special', 'smi', 'dbl', 'num']
+KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap', 'typeof', 'special', 'smi', 'dbl', 'fun', 'num']
 ALLOCK = ['str', 'arr', 'raw', 'chunk', 'dbl']
 # LDI A, B, C: A = mem[B + C]; STI A, B, C: mem[A + B] = C (raw memory: the runtime library's peek, poke and p[i]); GETFP A: A = fp.
 # The dynamic operators (user code's arithmetic and comparisons): DADD ... DMOD A, B, C, DNEG A, B and DLT ... DNE compute two
@@ -112,7 +115,7 @@ TRAPDEF = 61
 WBACK = 512                             # (the CSS CPU's pst for that move: a trap's own executions count from 1)
 TRAPS = {'DADD': 'dadd', 'DSUB': 'dsub', 'DMUL': 'dmul', 'DDIV': 'ddiv', 'DMOD': 'dmod', 'DNEG': 'dneg',
          'DLT': 'dlt', 'DGT': 'dgt', 'DLE': 'dle', 'DGE': 'dge', 'DEQ': 'deq', 'DNE': 'dne', 'DLEQ': 'dleq', 'DLNE': 'dlne',
-         'DBIT': 'dbit', 'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc', 'JLT': 'jcmp'}
+         'DBIT': 'dbit', 'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'CALLV': 'callv', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc', 'JLT': 'jcmp'}
 # a string's + that finds the heap full (the cat class's trap): the routine collects, then joins
 CATTRAPS = {'DADD': 'gccat'}
 OP = {n: i for i, n in enumerate(OPN)}
@@ -173,6 +176,9 @@ EMAX = 7                                # instructions per step (14 code words)
 SDATA = 256                             # globals: data_base + 1 .. + SDATA - 1 (data_base itself holds STRTAG, for the lib)
 STR0 = LAYOUT['data_base'] + SDATA      # the string area: STR0 (the lib's empty DONE marker) .. SEND
 SEND = STR0 + LAYOUT['str_size']
+# FTAB + k (the NF words after the DONE marker): function k's body (its instruction pair's index) + 8192 * its parameters, for
+# its value (the library's mkfn: the pair before the body holds [MOV][word1: its name]); FCACHE + k: the global that caches it
+FTAB = STR0 + 1
 # The special values: words of slot 15 (no number, string, array or object is one), JavaScript's values that aren't numbers in
 # the machine's integer range: the booleans, null, undefined, and the numbers NaN, +-Infinity and -0. Comparisons and ! make
 # TRUE / FALSE in user code (the ROM keeps raw 0 / 1). Falsy: 0, FALSE ... MZERO and the empty string
@@ -197,7 +203,7 @@ def BSTRV(k): return BSTR + 12 * k + 1 - 262144                       # (- STRTA
 BSTRW = {BSTR + 12 * k + i: w for k, t in enumerate(BSTRS) for i, w in enumerate([len(t)] + [ord(ch) for ch in t]) if w}   # (RAM holds the zeros)
 assert all(len(t) <= 10 for t in BSTRS) and BSTR + 12 * len(BSTRS) <= LAYOUT['strend']
 TRUEV, FALSEV = BSTRV(2), BSTRV(3)
-STRP0 = STR0 + 1                        # the program's own strings start here (STR0 is the empty DONE marker)
+STRP0 = FTAB + NF                       # the program's own strings start here (STR0 is the empty DONE marker, then FTAB)
 assert SEND == LAYOUT['code_base']
 CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 holds the staged-data count)
 STRTAG = 262144                         # a string value is its address - STRTAG (machine words are 20-bit signed)
@@ -220,7 +226,12 @@ def isobj(v): return HEAP0 <= v + OBJTAG < HEAP_HI
 DBLTAG = 425984                         # a boxed double is its number line's address - DBLTAG (slot -13)
 def isdbl(v): return -DBLTAG <= v < -DBLTAG + 32768
 def isnum(v): return issmi(v) or v in (INF, NINF, NAN, MZERO) or isdbl(v)
-def isref(v): return isstr(v) or isarr(v) or isobj(v) or isdbl(v)
+# A function is an 8-word heap block [hdr | code | meta | env | name | props | . .] (collector kind 3), its value the address of
+# its code word - FUNTAG (slot -14): code is its body's instruction pair, meta its parameters' count, name its name (a string
+# or 0). (The runtime library makes them: mkfn)
+FUNTAG = 458752
+def isfun(v): return -FUNTAG <= v < -FUNTAG + 32768
+def isref(v): return isstr(v) or isarr(v) or isobj(v) or isdbl(v) or isfun(v)
 
 # ---- the FPU's numbers (Python floats are the same IEEE doubles as Chrome's calc())
 import math, struct
@@ -363,7 +374,7 @@ def catv(v):
     return BSTRV(BS_ZERO if v == MZERO else v - SPV0) if isspecial(v) else v
 def catok(x, y):
     """a string's + the machine joins (the cat class): a string with a string, an integer or a special"""
-    return (isstr(x) or isstr(y)) and not any(isarr(v) or isobj(v) or isdbl(v) for v in (x, y))
+    return (isstr(x) or isstr(y)) and not any(isarr(v) or isobj(v) or isdbl(v) or isfun(v) for v in (x, y))
 def notown(v):
     """a string that isn't the program's own (a heap string, or a built-in one): run-time keys look these up by their characters"""
     return isstr(v) and not (STRP0 <= v + STRTAG < SEND)
@@ -373,6 +384,7 @@ def ownkey(k):
 def typecode(v):
     """typeof's type code (TYPENAMES)"""
     if isstr(v): return 4
+    if isfun(v): return 5
     if isarr(v) or isobj(v) or v == NULL: return 1
     if v == UNDEF: return 0
     if v in (TRUE, FALSE): return 2
@@ -381,7 +393,7 @@ def kind(k, v):
     """KIND's tests (KINDS[k])"""
     return [isstr(v) + 2 * isarr(v) + 3 * isobj(v), int(isstr(v)), int(isarr(v)), int(isobj(v)), int(isarr(v) or isobj(v)),
             int(notown(v)), len(str(v)), int(isref(v)), int(isstr(v) and v + STRTAG >= HEAP0), BSTRV(BS_TYPE + typecode(v)),
-            int(isspecial(v)), int(issmi(v)), int(isdbl(v)), int(isnum(v))][k]
+            int(isspecial(v)), int(issmi(v)), int(isdbl(v)), int(isfun(v)), int(isnum(v))][k]
 def rnd8(n): return -(-n // 8) * 8
 def allocw(k, n):
     """an ALLOC's block, in words: a string of n bytes ([hdr][len][bytes][0]), an array of capacity n ([hdr][cap][len][ptr]
@@ -414,7 +426,7 @@ def isfref(w, flo):
     """MFREF's test: w refers to a block in the from-space at flo (an object, a string, an array)"""
     H = LAYOUT['heap_size']
     return (flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
-            or flo + 4 <= w + DBLTAG < flo + H)
+            or flo + 4 <= w + DBLTAG < flo + H or flo + 1 <= w + FUNTAG < flo + H)
 def mcase(op, c):
     """MCPY's letters: MUPPER a-z to A-Z, MLOWER A-Z to a-z"""
     lo = 97 if op == 'MUPPER' else 65
@@ -479,6 +491,7 @@ LITK = {KW[w]: v for w, v in LITERALS.items()}
 # is is an undefined variable (error 4, at the end). A call of a function that is never declared is JavaScript's
 # ReferenceError at run time: its label stays undefined, and the page's undefined labels are 0, the library's refstub
 NIMP, IMPC = 4, 2
+FCACHE = IMPC + NIMP
 WGLOB = (KW['window'], KW['globalThis'])
 # JavaScript's reserved words among the keywords: no variable, parameter or function may be named so. A declaration checks at
 # once; a name read or called (an implicit global, a function never declared) is checked at the end, in the tables
@@ -533,6 +546,8 @@ M_TELSE = 51
 # M_ARR: an array literal (value: its elements so far); M_METH: a method call's arguments (value: method + 64 * commas)
 M_PAREN, M_CALL, M_ARR, M_METH, M_PUTC, M_PRINT, M_TERN = 100, 101, 102, 103, 104, 105, 108
 M_OBJ, M_OKEY, M_INDEX = 109, 110, 111
+# M_CALLV: a call of a value (the callee in its slot, below the arguments; value: 64 * commas) -> CALLV
+M_CALLV = 113
 # the runtime library's intrinsics (rom mode): M_INTR's value = the intrinsic (INTR) + 32 * its slot on the operand stack (d0)
 M_INTR = 112
 # control stack kinds. Bodies: IFB / ELSEB / LOOPB and DOB (a = continue target, b = break target; DOB c = the loop
@@ -578,7 +593,7 @@ class Compiler:
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0; self.tflag = 0
         self.dp = 1                         # globals (parser): global k is data_base + k (data_base itself holds STRTAG)
-        self.sdp = data_base + SDATA + 1    # string literals and property names (lexer); data_base + SDATA itself is the lib's
+        self.sdp = data_base + SDATA + 1 + NF     # string literals and property names (lexer): STRP0; data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at
         # parser
         self.mode = S_STMT; self.pn = (0, 0)
@@ -593,7 +608,7 @@ class Compiler:
         self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings and names: h1 h2 address
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
         self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
-        if not rom: self.nsym = NIMP; self.dp = IMPC + NIMP
+        if not rom: self.nsym = NIMP; self.dp = FCACHE + NF
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
 
@@ -652,6 +667,9 @@ class Compiler:
         k = self.nimp
         if k >= NIMP: self.fail(24); return 0
         self.sym[k] = [h[0], h[1], 1 if assign else 3, IMPC + k, 0, 0]; self.nimp += 1; self.symstep = 1; return k
+    def fnlook(self, h):
+        """function table index for a name, or -1"""
+        return next((k for k in range(self.nfn) if (self.fn[k][0], self.fn[k][1]) == h), -1)
     def fnfind(self, h):
         """function table index for a name (adding it, with a new label, if absent)"""
         for k in range(self.nfn):
@@ -1012,6 +1030,12 @@ class Compiler:
         self.emit('CALL', label=self.fn[k][2], w1=(f[0] - 256, f[1]))
         self.nd = d0; self.push_od(TMP, (tv // self.FM) % 4)
 
+    def callv_end(self, tv, last):
+        """a call of a value's ')': CALLV argc, its slot (the callee there, its arguments above)"""
+        argc = tv // 64 + last
+        if last: self.arg_end()
+        self.tb -= argc; d0 = self.nd - 1; f = self.tmp(d0)
+        self.emit('CALLV', (argc, 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0); self.mode = S_OPER
     def asi_close(self, f):
         """'}' right after a statement without ';': end the statement (knowing the next token is not 'else'),
         then close the block"""
@@ -1119,7 +1143,7 @@ class Compiler:
             if tok == ('P', 58) and self.icm: self.sdp += self.icm            # an object literal's key: commit its string
             if tok[0] != 'ID' and tok != ('P', T_NL): self.icm = 0
             if tok != ('P', T_NL):                             # (console.log's log is not a property name)
-                self.kpos = 2 if tok == ('P', 46) and not self.lcon else int(tok in (('P', 123), ('P', 44)))
+                self.kpos = 2 if (tok == ('P', 46) and not self.lcon) or (tok == ('ID', KW['function']) and not self.rom) else int(tok in (('P', 123), ('P', 44)))
                 self.lcon = int(tok == ('ID', KW['console']))
             self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 125, 7, 8))) + int(tok == ('ID', KW['return']))
             cp0 = self.cp; self.token(*tok)
@@ -1178,6 +1202,9 @@ class Compiler:
                     self.push_op(M_INTR, [KW[n] for n in INTR].index(h) + 32 * self.nd); self.push_od(TMP, 0)
                 elif h in GLOBAL_INDEX:                                  # parseInt(s), ...: a method on a dummy receiver
                     self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, GLOBAL_INDEX[h])    # (the receiver: unused)
+                elif not self.rom and self.lookup(h) >= 0:   # a variable's value: CALLV (the callee in its slot)
+                    j = self.lookup(h); self.snapshot(lambda q: q < 256)
+                    self.push_od(self.var(j), 0); self.to_temp(self.nd - 1); self.push_op(M_CALLV)
                 else:
                     self.snapshot(lambda q: q < 256)          # the callee may change a global still waiting on the stack
                     k = self.fnfind(h); self.push_op(M_CALL, k + self.FM * self.fn[k][3]); self.push_od(TMP, 0)   # its slot
@@ -1188,7 +1215,10 @@ class Compiler:
             if j < 0 and h == KW['String'] and isP(46):          # String.fromCharCode(...): a method on a dummy receiver
                 self.push_od(K(0), 0); self.mode = S_DOT; return
             tyo = self.top_op()[0] == TYPEOF
-            if j < 0 and (tyo or self.rom):
+            k = self.fnlook(h) if j < 0 and not self.rom else -1
+            if k >= 0:                                         # a function's name as a value: its object (made once, cached)
+                self.emit('NUMLIT', (FCACHE + k, 0), w1=k); self.push_od(FCACHE + k, 0)
+            elif j < 0 and (tyo or self.rom):
                 if not tyo: return self.fail(4)
                 self.push_od(K(UNDEF), 0)                        # typeof x, x undeclared: "undefined"
             else:
@@ -1322,7 +1352,11 @@ class Compiler:
             self.mode = S_NAMES if self.pn[0] else S_NAMEE; self.pn = v; return
         if m == S_FNAME:
             if kind != 'ID' or v in RESERVED: return self.fail(34)
-            k = self.fnfind(v); self.cfn = k; self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
+            if not self.rom:                                   # its value's descriptor (FTAB): [MOV][its name], the name committed
+                if self.tid >= NOROOM: return self.fail(26)
+                self.datum(self.tid - 1, self.tlen); self.emit('MOV', w1=self.tid - STRTAG)
+            k = self.fnfind(v); self.cfn = k
+            self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
             self.curf = 1; self.nloc = 0; self.npar = 0; self.fsym = self.nsym
             le = self.newlab(); self.cs[self.csp - 1][2] = le
             self.mode = S_FPAREN; return
@@ -1395,6 +1429,8 @@ class Compiler:
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
             if isP(41) and self.top_op()[0] == M_CALL:
                 self.osp -= 1; self.call_end(self.opv[self.osp], 0); self.mode = S_OPER; return
+            if isP(41) and self.top_op()[0] == M_CALLV:
+                self.osp -= 1; return self.callv_end(self.opv[self.osp], 0)
             if isP(41) and self.top_op()[0] == M_INTR:
                 self.osp -= 1; self.intr_end(self.opv[self.osp]); self.mode = S_OPER; return
             if isP(41) and self.top_op()[0] == M_METH:       # x.m() (or x.m(a, ) with a trailing comma)
@@ -1439,6 +1475,8 @@ class Compiler:
                     self.mode = S_OPND; return
                 if dyn: self.index_read(self.nd - 2)
                 else: self.prop_read(self.nd - 1, key)
+            if isP(40) and not self.rom:                      # e(...): a call of e's value (CALLV: in its slot)
+                self.to_temp(self.nd - 1); self.snapshot(lambda q: q < 256); self.push_op(M_CALLV); self.mode = S_OPND; return
             if kind == 'P' and v in BIN:
                 op = BIN[v] + 2 * (v in (1, 2) and self.tflag)            # (== / !=: LEQ / LNE)
                 self.popops(prec(op))
@@ -1495,12 +1533,13 @@ class Compiler:
                     if t == M_OKEY: return self.okey_end(tv, 0)
                     if t == M_ARR: return self.arr_elem(tv)
                     if t == M_CALL: self.arg_end(); self.opv[self.osp - 1] += 4 * self.FM
-                    if t == M_METH: self.arg_end(); self.opv[self.osp - 1] += 64    # count the arguments
-                    if t in (M_CALL, M_METH, M_PUTC, M_INTR): self.mode = S_OPND; return
+                    if t in (M_METH, M_CALLV): self.arg_end(); self.opv[self.osp - 1] += 64    # count the arguments
+                    if t in (M_CALL, M_METH, M_PUTC, M_INTR, M_CALLV): self.mode = S_OPND; return
                     if self.osp == 0 and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
                     return self.fail(44)
                 if t == M_PAREN: self.osp -= 1; return
                 if t == M_CALL: self.osp -= 1; return self.call_end(tv, 1)
+                if t == M_CALLV: self.osp -= 1; return self.callv_end(tv, 1)
                 if t == M_INTR: self.osp -= 1; return self.intr_end(tv)
                 if t == M_METH: self.osp -= 1; return self.meth_end(tv, 1)
                 if t == M_PUTC:
@@ -1617,6 +1656,7 @@ class Compiler:
         f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
         if f[4] and f[4] != self.npar + 1: return self.fail(76)
         f[4] = self.npar + 1; self.mode = S_LBRACE
+        if not self.rom: self.datum(FTAB + self.cfn, self.here() + 8192 * self.npar)      # (its value's: FTAB)
 
     # ---------------- whole program
     def compile(self, src):
@@ -1742,8 +1782,12 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
                 if r is None: trap('jcmp', TRAPOFF, [x, y], pc)
                 elif (r == TRUE) != ng: pc = 2 * a
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
+        elif op == 'CALLV':                             # the callee in the frame's slot fp + off: a function with A parameters (as many
+            f = rd(fp + w1); q = (f + FUNTAG) & AMASK   # as the arguments) is called; anything else goes to the library's callv
+            if isfun(f) and rd(q + 1) == a: wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * rd(q)
+            else: trap('callv', TRAPOFF, [f], pc)
         elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = 2 * (r % 8192); pst = WBACK * int(r // 8192 == TRAPDEF)
-        elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b)) or isdbl(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's form)
+        elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b)) or isdbl(val(b)) or isfun(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's form)
         elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + (pst + 2) // 2); fp += TRAPOFF; pc = 2 * a; pst = 0
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1; sep = (0, 32, 10)[a // 2 % 4]

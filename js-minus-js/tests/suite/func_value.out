@@ -1,0 +1,3 @@
+[Function: myFunction] true function
+[ [Function: myFunction] ] { g: [Function: myFunction] } function
+true true false

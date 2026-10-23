@@ -218,7 +218,8 @@ def isstr_v(x): return f"calc(clamp(0, {x} - {STR_LO - STRTAG - 1}, 1) * clamp(0
 def isarr_v(x): return f"calc(clamp(0, {x} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {x}, 1))"
 def isobj_v(x): return f"calc(clamp(0, {x} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {x}, 1))"
 def isdbl_v(x): return f"calc(clamp(0, {x} + {R.DBLTAG + 1}, 1) * clamp(0, {32768 - R.DBLTAG} - {x}, 1))"     # (cc_ref.isdbl)
-def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)} + {isdbl_v(x)})"
+def isfun_v(x): return f"calc(clamp(0, {x} + {R.FUNTAG + 1}, 1) * clamp(0, {32768 - R.FUNTAG} - {x}, 1))"     # (cc_ref.isfun)
+def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)} + {isdbl_v(x)} + {isfun_v(x)})"
 def own_v(x): return f"calc(clamp(0, {x} + {STRTAG - R.STRP0 + 1}, 1) * clamp(0, {R.SEND - STRTAG} - {x}, 1))"     # (a string: the program's own)
 def special_v(x): return f"clamp(0, {x} - {R.SPV0 - 1}, 1)"
 def smi_v(x): return f"calc(clamp(0, {x} - {R.SMI_LO - 1}, 1) * clamp(0, {R.SMI_HI + 1} - {x}, 1))"
@@ -248,7 +249,7 @@ anydbl = f"min(1, calc({isdbl_v(xB)} + {isdbl_v(yC)}))"
 # A string's + (no array or object, pst 0) goes to the cat class: pst CAT0 from the next execution (dcat)
 CATT, CAT0 = 1024, 2048
 NOCAT = os.environ.get('NOCAT') == '1'     # (measurement only: a string's + traps to the ROM's cat, as before the cat class)
-anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)} + {anydbl}))"     # (a double too: the library)
+anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)} + {anydbl} + {isfun_v(xB)} + {isfun_v(yC)}))"     # (a double or a function too: the library)
 def neg_v(x): return f"clamp(0, -1 * {x}, 1)"
 def nz_v(x): return f"calc({x} * (1 - {eq(x, R.MZERO)}))"                    # -0 as 0
 def nul_v(x): return f"calc({eq(x, R.NULL)} + {eq(x, R.UNDEF)})"
@@ -420,8 +421,9 @@ KINDE = ("if(" + " ".join(f"style(--kk: {i}): {e};" for i, e in enumerate([
     f"calc({isstr_v(xB)} * (1 - {_own}))", ndig(xB), isref_v(xB), f"calc({isstr_v(xB)} * clamp(0, {xB} + {STRTAG - HEAP0 + 1}, 1))",
     # typeof: its name, BSTRS[BS_TYPE + type code] (cc_ref.typecode)
     f"calc({R.BSTRV(R.BS_TYPE)} + 12 * (4 * {isstr_v(xB)} + {isarr_v(xB)} + {isobj_v(xB)} + {eq(xB, R.NULL)} + 2 * ({eq(xB, R.TRUE)} + {eq(xB, R.FALSE)})"
-    f" + 3 * (1 - {isstr_v(xB)} - {isarr_v(xB)} - {isobj_v(xB)} - {eq(xB, R.NULL)} - {eq(xB, R.UNDEF)} - {eq(xB, R.TRUE)} - {eq(xB, R.FALSE)})))",
-    special_v(xB), smi_v(xB), isdbl_v(xB)])) +
+    f" + 5 * {isfun_v(xB)} + 3 * (1 - {isstr_v(xB)} - {isarr_v(xB)} - {isobj_v(xB)} - {eq(xB, R.NULL)} - {eq(xB, R.UNDEF)} - {eq(xB, R.TRUE)} - {eq(xB, R.FALSE)}"
+    f" - {isfun_v(xB)})))",
+    special_v(xB), smi_v(xB), isdbl_v(xB), isfun_v(xB)])) +
     f" else: calc({smi_v(xB)} + {eq(xB, R.INF)} + {eq(xB, R.NINF)} + {eq(xB, R.NAN)} + {eq(xB, R.MZERO)} + {isdbl_v(xB)}))")     # (num)
 # JZ / JNZ / NOT: 0 and the empty string are false (a string's length, the word before its address: read z, only for a string);
 # in user code also false, null, undefined, NaN and -0 (the specials from FALSE on)
@@ -556,7 +558,7 @@ pr = OPND + read("x", "var(--aB)") + [
     f"--mx: calc((1 - var(--kB)) * (1 - {eq('var(--op)', OP['PRINTK'])}) * {miss('x')});",
     f"--pv: {by_op({'PRINTK': 'var(--vg)'}, xB)};",
     f"--prLN: {eq('round(down, mod(var(--A), 8) / 2)', 2)};", f"--prSP: {eq('round(down, mod(var(--A), 8) / 2)', 1)};",
-    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)} + {isdbl_v(pv)}));",
+    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)} + {isdbl_v(pv)} + {isfun_v(pv)}));",
     f"--pp: calc({pv} + {STRTAG} + {special_v(pv)} * ({R.BSTR + 1 - 12 * R.SPV0 - STRTAG} + 11 * {pv}"
     f" + 12 * clamp(0, mod(var(--A), 16) - 7, 1) * {eq(pv, R.MZERO)}));",       # (a special: its name; a + chain's piece's -0: "0")
     f"--isStr: calc((1 - {isputc}) * clamp(0, var(--pp) - {STR_LO - 1}, 1) * clamp(0, {STRP_HI} - var(--pp), 1));",
@@ -646,6 +648,20 @@ def alloc_val(j):
 TRAP_NX = lambda routine, done: {'pc': f"if(style(--tlast: 1): {routine}; style(--{done}: 1): calc({pc} + 2); else: {pc})",
                                  'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': f"calc(var(--steps) + var(--tlast) + var(--{done}))"}
 NEWCLASSES = {}
+# CALLV A, off: x the callee (fp + off), l its block's first line [hdr code meta env] when it is a function: one with A
+# parameters is entered (the return word over x); anything else traps to callv (frame at TRAPOFF, its argument x)
+# (cvf, cvok: pooled names, the fdig class's gdl, gdc)
+CV_PRE = [f"--gdl: {isfun_v('var(--vx)')};", f"--gdc: calc(var(--gdl) * {eq('var(--lw2)', 'var(--A)')} * (1 - min(1, var(--pst))));"] + \
+    trap("calc(1 - var(--gdc))", "var(--pst)", 1, f"mod({fp} + {TRAPOFF}, 32768)", "var(--vx)", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)")
+NEWCLASSES['callv'] = dict(ops=['CALLV'], pre=CV_PRE,
+    reads=[("x", f"mod({fp} + var(--vg), 32768)", "1")], lines=[("l", f"mod(var(--vx) + {R.FUNTAG - 1}, 32768)", "var(--gdl)")],
+    write=("if(style(--tr: 1): var(--taddr); else: mod(" + fp + " + var(--vg), 32768))",
+           f"if(style(--tr: 1): var(--tval); else: calc(var(--vg) * 8192 + ({pc} + 2) / 2))", None, "1"),
+    nx={'pc': f"if(style(--tr: 0): calc(2 * var(--lw1)); style(--tlast: 1): {ENT['callv']}; else: {pc})",
+        'fp': f"if(style(--tr: 0): calc({fp} + var(--vg)); style(--tlast: 1): var(--tF); else: {fp})",
+        'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast))",
+        'pst': "if(style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"},
+    deps={'l': [('x', None)]})
 NEWCLASSES['alloc'] = dict(ops=['ALLOC'], pre=AL_PRE,
     reads=[("x", "var(--aB)", "1 - var(--kB)"), ("k", HP, "1"), ("r", "var(--amw)", f"calc((1 - var(--tr)) * {eq(pst, 3)})")], pair={'k': 'j'},
     write=("var(--aaddr)", None, None, "1"), wline=("var(--akk)", alloc_val),
@@ -698,7 +714,8 @@ def isfref_v(w, flo):
     return (f"min(1, calc(clamp(0, {w} + {OBJTAG + 1} - {flo}, 1) * clamp(0, {flo} + {H_ - OBJTAG} - {w}, 1)"
             f" + clamp(0, {w} + {STRTAG - 1} - {flo}, 1) * clamp(0, {flo} + {H_ - STRTAG} - {w}, 1)"
             f" + clamp(0, {w} - {ARRTAG + 2} - {flo}, 1) * clamp(0, {flo} + {H_ + ARRTAG} - {w}, 1)"
-            f" + clamp(0, {w} + {R.DBLTAG - 3} - {flo}, 1) * clamp(0, {flo} + {H_ - R.DBLTAG} - {w}, 1)))")
+            f" + clamp(0, {w} + {R.DBLTAG - 3} - {flo}, 1) * clamp(0, {flo} + {H_ - R.DBLTAG} - {w}, 1)"
+            f" + clamp(0, {w} + {R.FUNTAG} - {flo}, 1) * clamp(0, {flo} + {H_ - R.FUNTAG} - {w}, 1)))")
 isw = eq('var(--op)', OP['MWALK'])
 NEWCLASSES['mcmp'] = dict(ops=['MCMP', 'MFEQ', 'MFREF', 'MWALK'], pre=OPND + OPNDA + [f"--zA: {kv('A', 'z')};", f"--mo: {pst};",
     f"--mk: max(0, min(var(--zA) - var(--mo), 4 - var(--up), 4 - {eq('var(--op)', OP['MCMP'])} * var(--ul)));"] +

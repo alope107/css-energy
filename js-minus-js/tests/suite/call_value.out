@@ -1,0 +1,4 @@
+3 3 NaN 3 30
+12 15
+4
+Uncaught TypeError: not a function

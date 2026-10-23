@@ -209,6 +209,11 @@ class Sim:
         elif op == 'LDI': x, y = val(b), val(c); wr(addr(a), rd(x + y))
         elif op == 'STI': x, y = val(b), val(c); z = val(a); wr(z + x, y)
         elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + (ps + 2) // 2); fp += TRAPOFF; pc = 2 * a
+        elif op == 'CALLV':                             # x: the callee (fp + off), l: its block's first line if it is a function
+            x = rd((fp + w1) & AMASK); q = (x + R.FUNTAG - 1) & AMASK
+            ln = [rd(q + j) for j in range(4)] if R.isfun(x) else [0] * 4
+            if not ps and R.isfun(x) and ln[2] == a: wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * ln[1]
+            else: pc = trap((fp + TRAPOFF) & AMASK, [x], TRAPOFF * 8192 + pc // 2, 'callv', ps)
         elif op == 'DADD' and ps >= CATT:               # the cat class (a string's +, below)
             x, y = val(b), val(c); pc = self.cat(op, a, x, y, ps, pc, trap, wr, addr); npst, done = self.npst, self.cdone
         elif op == 'NUMLIT' and ps == WBACK: wr(addr(a), rd(fp + TRAPDEF))
@@ -308,7 +313,7 @@ class Sim:
                 elif (r == R.TRUE) != ng: pc = 2 * a
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
         elif op == 'RET': r = rd(fp); v = val(b); wr(fp, v); fp -= r // 8192; pc = 2 * (r % 8192); npst = WBACK * (r // 8192 == TRAPDEF)
-        elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b)) or R.isdbl(val(b))): npst = pc - 2; pc = st['ent']['pstub']
+        elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b)) or R.isdbl(val(b)) or R.isfun(val(b))): npst = pc - 2; pc = st['ent']['pstub']
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1
             f = self.free(cw)

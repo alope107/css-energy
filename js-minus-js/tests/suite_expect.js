@@ -2,8 +2,10 @@
 // An .out is rewritten only when it changes: the checks in the Makefile are out of date when one is newer than them.
 const fs = require('fs'), path = require('path'), vm = require('vm'), { show } = require('./jsprint.js');
 const dir = process.argv[2];
-// an uncaught error as the machine reports it (README: a ReferenceError without the name, which it doesn't keep)
-const uncaught = e => e.name === 'ReferenceError' ? 'Uncaught ReferenceError\n' : e.name === 'TypeError' ? `Uncaught TypeError: ${e.message}\n` : 'NODE-ERROR ' + e.message + '\n';
+// an uncaught error as the machine reports it (README: a ReferenceError without the name, which it doesn't keep,
+// and "x is not a function" without the callee's text)
+const uncaught = e => e.name === 'ReferenceError' ? 'Uncaught ReferenceError\n' : e.name !== 'TypeError' ? 'NODE-ERROR ' + e.message + '\n'
+  : `Uncaught TypeError: ${e.message.endsWith('is not a function') ? 'not a function' : e.message}\n`;
 for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) {
   let out = '';
   const ctx = { console: { log: (...a) => { out += a.map(show).join(' ') + '\n'; } }, putc: c => { out += String.fromCharCode(c); }, ...require('../net/shim.js')() };
