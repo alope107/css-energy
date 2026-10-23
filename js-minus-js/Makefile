@@ -46,9 +46,9 @@ help:
 
 all: page
 
-# ---- runtime library -> ROM (jsc.js, the self-hosted subset compiler, compiles lib_src.js under Node)
+# ---- runtime library -> ROM (cc_ref.py compiles lib_src.js in its rom mode)
 lib: $(CC)/lib.json
-$(CC)/lib.json: $(CC)/lib_src.js $(CC)/libbuild.js $(CC)/jsc.js $(CC)/layout.json $(CC)/rtlib.py machine/uarch.py
+$(CC)/lib.json: $(CC)/lib_src.js $(CC)/cc_ref.py $(CC)/layout.json $(CC)/rtlib.py machine/uarch.py
 	$(PY) $(CC)/rtlib.py $@
 
 # ---- image (ROM = lib) -> page (editor + readback + CSS compiler + CSS CPU; machine/gen_css.py)

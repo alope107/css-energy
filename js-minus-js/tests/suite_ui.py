@@ -1,5 +1,5 @@
 """suite_ui.py [maxsteps [limit]] — level 5 setup: for every suite test the machine can finish quickly, write the expected
-console (Node's output laid out on the page's 8 x 16 console grid, as the PUTC service does) to build/ui_exp, and
+console (Node's output laid out on the page's console grid, layout.json's cols x rows, as the output instructions do) to build/ui_exp, and
 print the ui_seq.js argument list. The user's program from the bug report is first.
 The net_* programs need the network gateway: NET=1 lists only them (make l5-net), otherwise they are left out."""
 import sys, os, json, glob
@@ -8,7 +8,7 @@ import cc_ref as R
 HERE = os.path.dirname(os.path.abspath(__file__))
 lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
 EXP = os.path.join(ROOT, 'build', 'ui_exp')
-COLS, ROWS = 8, 16
+COLS, ROWS = R.LAYOUT['cols'], R.LAYOUT['rows']
 def grid(out):
     g = [' '] * (COLS * ROWS); p = 0
     for ch in out:
@@ -28,7 +28,7 @@ progs = [f for f in progs if os.path.basename(f).startswith('net_') == NET]
 for f in ([] if NET else [f'{EXP}/user_report.js']) + progs:
     if len(args) >= 2 * limit: break
     c, r = R.compile_and_run(open(f).read(), lib)
-    if r[0] > maxsteps and not NET: continue      # (a network program's time is its round trips, not its steps)
+    if r is None or (r[0] > maxsteps and not NET): continue      # (r None: the compiler rejects it; a network program's time is its round trips)
     name = os.path.basename(f)[:-3]
     open(f'{EXP}/{name}.grid', 'w').write(grid(open(f[:-3] + '.out').read()) + '\n')
     args += [f, f'{EXP}/{name}.grid']

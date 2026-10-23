@@ -197,7 +197,7 @@ chats.
     stayed at 4.0–4.2 (8.0–8.2 in all); three more: 3.6 each, 14.3 in all. A word takes about 8 page frames whichever
     child carries it. *(measured 2026-10-21; `net/probe/probe7.js`, the extra children driven by the harness)* Built
     into the page (4 modems, 2 bytes each), a body takes half the time, not a quarter: the 4 modems' reloads cost the
-    page a third of its frames (32 → 22 frames/s), and the CPU then works through 8 bytes per word (BENCHMARKS §14).
+    page a third of its frames (32 → 22 frames/s), and the CPU then works through 8 bytes per word (BENCHMARKS §16).
 59. **A box that goes `display: none` keeps its scroll offset and gets it back when it shows again**
     (`PaintLayerScrollableArea`: saved into the element when the box is destroyed, restored when it is made again;
     `paint_layer_scrollable_area.cc` 173 / 219 in 153). A scroll timeline on it then reads the old offset at once. With
@@ -232,5 +232,5 @@ chats.
 64. **A `requestAnimationFrame` loop in the page runs the network programs ~1.5× faster**: `net_long` 6.7–6.9 s with a
     harness's rAF loop, 9.9–11.5 s without (FizzBuzz ~10–20%). In 2.5 s of trace Chrome ran 48 lifecycle updates with
     the loop and 34 without (99–142 `BeginMainFrame`s), for the same style work. The page has no script, so time it
-    without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §14's earlier times).
+    without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §16's earlier times).
     *(measured 2026-10-22)*

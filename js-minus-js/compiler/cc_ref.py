@@ -1,32 +1,36 @@
 #!/usr/bin/env python3
-"""cc_ref.py — reference for the CSS compiler: a character-at-a-time pushdown transducer for a JS subset.
+"""cc_ref.py — reference for the CSS compiler: a character-at-a-time pushdown transducer for a JS subset, generating
+code for the register machine.
 
 Written the way the CSS chain will compute it: one step per source character, fixed-size tables and stacks,
 no recursion, no lookahead beyond the next character. Each step may complete one token; the parser handles it
 (shunting-yard for expressions, a control stack for statements, symbol/function/label tables) and emits a few
-code words. Words that need an address not known yet carry a label id; labels are resolved after the last step.
+instructions. Words that need an address not known yet carry a label id; labels are resolved after the last step.
 
-Subset: var/let/const (also `var a = 1, b = 2`), function (params, locals, recursion, forward calls),
-if/else/else if, while, do-while, for(;;), switch/case/default, break, continue, return; bodies with or without braces;
-integers, true/false, string literals ("..." or '...', escapes \\n \\t \\r \\\\ \\" \\'), static array literals (with .length),
-a[i] read/write; + - * / % < > <= >= == != === !== && || (short-circuit, JS value semantics) ?: ! unary -; = += -= *= /= %=
-++ -- (also on a[i]) as statements; x++ x-- ++x --x also in expressions; calls; putc(x); console.log(a, b, ...), where + at the top
-level of an argument concatenates when an operand is a string ("n = " + n, s + "!"); // and /* */ comments;
-statements end with ';', or a newline / '}' where JavaScript would insert one. Objects: literals {a: 1, "b": 2, 3: x},
-o.x and x[k] reads, o.x / x[k] assignment statements (=, op=, ++, --), null; strings are interned (see OBJTAG below).
+Code generation. An operand of an expression is a descriptor on an operand stack (od): a variable, a constant, a value in
+its temp, a big constant LOADK must load first, or a comparison a branch may take as it is. Code is emitted when an
+operator pops (shunting-yard), as one three-address instruction reading the operands where they are:
+- the last operator of an assignment's value writes the target directly (n = n + 1 is ADD n, n, #1);
+- a comparison (or a !) popped last where a branch takes the value stays pending and fuses into the branch;
+- an operand still on the stack is copied to its temp before something changes it: a global before a call, a variable
+  before its ++ / --, every variable at the start of a conditional region (&&, ||, ?:), since a copy made inside one
+  would be made on one path only; x op= e reads x first (it is the left operand);
+- console.log's + chains keep their pieces on the operand stack and print them at the argument's end.
 
-Strings are built at run time (+ on a string: DYN, whose slow path is the ROM's). At the top level of a console.log argument
-a + chain with a string in it is not built: its pieces stay on the stack and the ROM's pnK prints them (or, if a comparison,
-&& / || or ?: follows, catnK joins them into one string first).
+The machine (machine/csssim.py, machine/gen_css.py). An instruction is two words at an even address:
+  word0 = op * 8192 + A        A: a destination operand, a jump target, flags or a count
+  word1 = (B - 512) * 1024 + C B, C: source operands (10 bits each); LOADK, PRINTK and CALL use word1 whole
+An operand o (10 bits) is a cell or a constant: 0 ... 255 a global (data_base + o); 256 ... 767 a frame slot (fp + o - 256);
+768 ... 1023 the constant o - 896. A frame is [return word] fp, the parameters fp + 1 ..., the locals, then the temps: the
+operand stack's slot d is T(d) = fp + 1 + npar + nloc + d, nloc the function's final count of locals (its frame label,
+which the linker adds: times 1 in A, 1024 in B, 1 in C or CALL's word1). A call's slot T(d0) takes the return word and its
+arguments go to T(d0 + 1) ...: CALL target, off (fp + off = T(d0)) writes off * 8192 + the return address there and adds off
+to fp; RET v writes v over the return word, the caller's T(d0), and subtracts off again. Top-level code runs with fp = sp0.
 
-Values: integers; a string is a tagged pointer (address - STRTAG), so console.log can tell it from a number at
-run time; booleans are 0/1. Values are also typed statically: the compiler tracks the type of the last value it
-emitted (lb: 0 unknown, 1 boolean, 2 string, 3 number) -- comparisons, !, true/false, string literals, number
-literals and arithmetic, variables by their last assignment, functions by their returns -- and calls the lib's
-printBool, puts or printNum (also for an unknown type: printNum checks for a string among negative values, so a
-wrong guess costs nothing for non-negative numbers and still prints correctly). The last argument calls the ...Ln entry (prints a newline); others
-are followed by PUSHI 32 PUTC.
-"""
+Values: integers; a string is a tagged pointer (address - STRTAG), so console.log can tell it from a number at run time;
+booleans are 0/1. Values are also typed statically (0 unknown, 1 boolean, 2 string, 3 number), each operand descriptor
+with its type: comparisons, !, true/false, string literals, number literals and arithmetic, variables by their last
+assignment, functions by their returns. Only booleans need it, to print as true / false (PRINT's boolean flag)."""
 import sys, json, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'net'))
 from device import Device
@@ -35,21 +39,55 @@ from device import Device
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
 LAYOUT['out_base'] = LAYOUT['rom_size'] + LAYOUT['ram_size'] - LAYOUT['cols'] * LAYOUT['rows']
 assert LAYOUT['data_base'] == LAYOUT['rom_size'], 'RAM index = address - rom_size = address - data_base (the compile chain relies on it)'
-AMASK = 32767                           # addresses are 15-bit (the font's address registers: 4 hex digits, the top one 3 bits)
+AMASK = 32767                           # addresses are 15-bit
 
-# opcodes (jsc.js)
-NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG, \
-    JMP, JZ, JNZ, CALL, ENTER, RET, POP, DUP, PUTC, HALT, JMPI, SHL13, INCG, INCL, IDX, IDXL, \
-    PRINT, PRINTB, PRINTSP, PRINTBSP, PRINTLN, PRINTBLN, SCANI, SCAN, LDF, PUTV, NEW, SETF, ENDK, OVER, JNEG, PUSHS, IDXA, STOREX, DYN, NET = range(59)
-# NET: pop a word, push the network gateway's answer (net/device.py); the lib's fetch(url) / read() are made of it
-# PRINT family (serviced by CSS on the page, machine/uarch.py in the model): pop a value and print it. A tagged string pointer
-# prints its bytes, anything else prints in decimal; the B forms print 0 / 1 as false / true (the static type says
-# boolean). SP / LN add a space / newline. PRINT_OP[sep] + (type == boolean) is the opcode.
-PRINT_OP = {0: PRINT, 32: PRINTSP, 10: PRINTLN}
-PRINT_SEP = {PRINT: 0, PRINTB: 0, PRINTSP: 32, PRINTBSP: 32, PRINTLN: 10, PRINTBLN: 10}
+# the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
+OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE HALT  JZ JNZ  CALL RET NOT TENTER '
+       ' LDI STI  DADD DADDL DADDR DLT DGT DLE DGE DEQ DNE  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC  APUSH'
+       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET').split()
+# NET A, B: A = the network gateway's answer to the word B (net/device.py), every part's bytes left in RBUF0 … (netw); the
+# lib's fetch(url) / read() are made of it (the ROM reaches it as __net)
+# The runtime's primitives (the ROM reaches them through intrinsics; the CSS CPU runs them a cache line per execution):
+# KIND A, B, k: A = kind test k of B (KINDS). ALLOC A, n, k: a new block (ALLOCK: a string of n bytes, its header, length and
+# NUL written, A its value; an array of capacity n, its first line written, A its value; n raw words or an object chunk's, A
+# their address), marked in the collector's map (but raw ones); the heap full: the ROM's galloc collects and the ALLOC executes again. MCPY A, B, C:
+# C words from B to A (A <= B if they overlap; MUPPER / MLOWER mapping letters' case; MFILL: the value B); NPUT A, B: B's
+# decimal digits at A. MCMP A, B, C: A = the first i < A where B[i] != C[i], else A (MFEQ: B[i] == C; MFREF: B[i] refers into
+# the from-space at C; MWALK: through [len][bytes][0] strings from B, the offset of the first of length A, or of the first at
+# or past C). APUSH 0, B, C: B.push(C) and return, as the ROM's push routine's first instruction (no array, or a full one:
+# on to the next instruction)
+KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap']
+ALLOCK = ['str', 'arr', 'raw', 'chunk']
+# LDI A, B, C: A = mem[B + C]; STI A, B, C: mem[A + B] = C (raw memory: the runtime library's peek, poke and p[i]); GETFP A: A = fp.
+# The dynamic operators: DADD A, B, C (DADDL / DADDR: B / C is a boolean) and DLT ... DNE compute numbers here and trap into the
+# runtime library for a string, array or object. GETX A, B, C: A = B[C] (an array inside its length here, else the library);
+# GETP A, B, C: A = B.key (C: the key's string-area offset; one execution per pair it probes); NEW A: a new object. SETX A, B, C:
+# A[B] = C (an array inside its length here); SETP A, B, C: A.key = B (C the key; a new key in the chunk here, a full chunk in the
+# library). A trap is a call into the library: a dest trap's frame is its destination, a temp, so the routine's value lands there;
+# SETX / SETP's frame is at TRAPOFF (the CSS CPU writes a trap's frame one word per execution, its arguments then the return word).
+# PRINT of an array or an object jumps to pstub with its own address (the CSS CPU keeps it in pst), whose TENTER A writes the
+# return word at fp + TRAPOFF (pst + 2) and calls A, ptrap, which decodes the PRINT's operand itself (the out class writes no
+# memory). TRAPS names each trapping instruction's routine (lib.json entries)
+TRAPOFF = 60
+TRAPS = {'DADD': 'dadd', 'DADDL': 'daddl', 'DADDR': 'daddr', 'DLT': 'dlt', 'DGT': 'dgt', 'DLE': 'dle', 'DGE': 'dge', 'DEQ': 'deq', 'DNE': 'dne',
+         'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc'}
+# a string's + that finds the heap full (the cat class's trap): the routine collects, then joins
+CATTRAPS = {'DADD': 'gccat', 'DADDL': 'gccatl', 'DADDR': 'gccatr'}
+OP = {n: i for i, n in enumerate(OPN)}
+# operator codes on the parser's operator stack (and their precedences: prec)
+NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG = range(23)
+NAME = {ADD: 'ADD', SUB: 'SUB', MUL: 'MUL', DIV: 'DIV', MOD: 'MOD', LT: 'LT', GT: 'GT', LE: 'LE', GE: 'GE', EQ: 'EQ', NE: 'NE',
+        NOT: 'NOT', NEG: 'NEG'}
+CMPS = (LT, GT, LE, GE, EQ, NE)
+INV = {LT: GE, GE: LT, GT: LE, LE: GT, EQ: NE, NE: EQ}
+DYN = {ADD: 'DADD', LT: 'DLT', GT: 'DGT', LE: 'DLE', GE: 'DGE', EQ: 'DEQ', NE: 'DNE'}
+SEP = {0: 0, 32: 1, 10: 2}              # PRINT / PRINTK's A: separator * 2 + boolean
 
 # limits (= the CSS chain's fixed table sizes)
-OD, CD, NS, NF, NL, EMAX, NI = 8, 8, 32, 16, 64, 12, 32      # NI: interned strings and property names
+OD, CD, NS, NF, NL, NI = 8, 8, 32, 16, 64, 32  # NI: interned strings and property names
+ODN = 10                                # the operand stack (its temps T(0) ... T(9))
+TBMAX = 24                              # descriptors + collapsed arguments: a frame's live words stay below TRAPOFF
+EMAX = 7                                # instructions per step (14 code words)
 SDATA = 256                             # globals: data_base + 1 .. + SDATA - 1 (data_base itself holds STRTAG, for the lib)
 STR0 = LAYOUT['data_base'] + SDATA      # the string area: STR0 (the lib's empty DONE marker) .. SEND
 SEND = STR0 + LAYOUT['str_size']
@@ -64,22 +102,14 @@ CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 hol
 STRTAG = 262144                         # a string value is its address - STRTAG (machine words are 20-bit signed)
 NOROOM = 8192                           # added to a string token's address when it didn't fit (addresses are 13-bit)
 PARAM0 = 6144                           # parameter i's symbol address until its function's ')' (cc_dsl's encoding; above the globals)
-# objects (machine/uarch.py has the instructions, compiler/rtlib.py the ROM routines): an object is an 8-word chunk of pairs in the
-# heap, its value the chunk's address - OBJTAG. A property key is stored as its value + STRTAG: a string key becomes its address.
-# String literals and property names are interned (a table of NI by content hash), so equal strings are one value and o.x,
-# o["x"] and o[s] with s = "x" find the same key. o.x is SCANI x then LDF 1 (or PUTV x to store); x[k] calls the ROM's GETX /
-# SETX, which also index arrays (an array is an address, an object negative), except for a name whose static type is number
-# (an array literal), indexed as before.
 OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
-HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)       # = machine/uarch.py
+HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)
 RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
 def netw(ans):
-    """NET's writes for the parts' answers: [(address, value)], part 0's whole answer last (at sp - 1: address None)"""
+    """NET's writes for the parts' answers: [(address, value)], part 0's whole answer last (at A: address None)"""
     out = [(RBUF0 + 2 * j + k, (d >> 8 * k) & 255 if d >> 16 > k else -1) for j, d in enumerate(ans) for k in (0, 1)]
     return out + [(None, ans[0])]
-VECS = {n: LAYOUT['vec_base'] + i for i, n in enumerate(LAYOUT['vectors'])}
-GCVEC, PUTVEC, SETXVEC, GETXVEC, DYNVEC, PRINTVEC = (VECS[n] for n in ('gc', 'append', 'setx', 'getx', 'dyn', 'print'))
 ARRTAG = LAYOUT['arrtag']
 HEAP_HI = HEAP0 + 2 * LAYOUT['heap_size']
 STRV_LO, STRV_HI = LAYOUT['data_base'] + SDATA - STRTAG, HEAP_HI - STRTAG     # a value in [STRV_LO, STRV_HI) is a string
@@ -90,11 +120,64 @@ def isref(v): return isstr(v) or isarr(v) or isobj(v)
 def truthy(mem, v):
     """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address)"""
     return v != 0 and not (isstr(v) and mem[(v - 1) & AMASK] == 0)
-def dyntrap(imm, a, b):
-    """DYN takes the ROM's slow path: == / != with two strings, the others with a string, array or object on either side"""
-    return (isstr(a) and isstr(b)) if imm % 64 in (EQ, NE) else (isref(a) or isref(b))
+def notown(v):
+    """a string that isn't the program's own (a heap string, or SEED's): run-time keys look these up by their characters"""
+    return isstr(v) and not (STRP0 <= v + STRTAG < HEAP0)
+def kind(k, v):
+    """KIND's tests (KINDS[k])"""
+    return [isstr(v) + 2 * isarr(v) + 3 * isobj(v), int(isstr(v)), int(isarr(v)), int(isobj(v)), int(isarr(v) or isobj(v)),
+            int(notown(v)), len(str(v)), int(isref(v)), int(isstr(v) and v + STRTAG >= HEAP0)][k]
+def rnd8(n): return -(-n // 8) * 8
+def allocw(k, n):
+    """an ALLOC's block, in words: a string of n bytes ([hdr][len][bytes][0]), an array of capacity n ([hdr][cap][len][ptr]
+    [elements]), n raw words, an object chunk of n words"""
+    return rnd8(n + (3, 4, 0, 0)[k])
+# ALLOC's executions on the CSS CPU (csssim.py, gen_css.py), --pst the phase: HP (or the trap), the header's line (a string's
+# [hdr][len][0][0], an array's [hdr][cap][0][ptr]), a string's NUL past that line, the map's bit, A
+AP_HP, AP_HDR, AP_NUL, AP_MAP, AP_RES = range(5)
+def allocnext(ph, k, n):
+    """the phase after ph for an ALLOC of kind k, n"""
+    while True:
+        ph += 1
+        if ph == AP_HDR and k >= 2: continue
+        if ph == AP_NUL and (k != 0 or n < 2): continue
+        if ph == AP_MAP and k == 2: continue
+        return ph
+def allochdr(k, n, nw, base):
+    """the header line ALLOC writes (kinds 0, 1)"""
+    return [-2 - nw, n, 0, 0] if k == 0 else [-3 - nw, n, 0, base + 4]
+# The collector's map of block starts (a bit per 8 heap words, 16 to a word, both semi-spaces: MAPN words from MAP), kept as
+# blocks are made (ALLOC, NEW, a string's +, the collector's copies): a stack word is a reference only if its block is marked
+MAP = LAYOUT['map_base']; MAPN = 2 * LAYOUT['heap_size'] // 128
+def mapbit(b):
+    """the map's word and bit for the block at b"""
+    x = (b - HEAP0) // 8; return MAP + x // 16, x % 16
+def isfref(w, flo):
+    """MFREF's test: w refers to a block in the from-space at flo (an object, a string, an array)"""
+    H = LAYOUT['heap_size']
+    return flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
+def mcase(op, c):
+    """MCPY's letters: MUPPER a-z to A-Z, MLOWER A-Z to a-z"""
+    lo = 97 if op == 'MUPPER' else 65
+    return c + (-32 if op == 'MUPPER' else 32) if op in ('MUPPER', 'MLOWER') and lo <= c < lo + 26 else c
+def s20(x): return (x + (1 << 19)) % (1 << 20) - (1 << 19)       # machine words: 20-bit two's complement
 H1M, H2M = 65521, 65519
 
+# operand encodings (10-bit fields)
+def L(off): return 256 + off            # frame slot fp + off
+def K(v): return 896 + v                # constant -128 ... 127
+def isK(o): return 768 <= o < 1024
+# operand descriptors (od entries: type * 4096 + descriptor): an operand encoding (< 1024), KBIG (the value pk, LOADK must load it:
+# only on top), TMP (the value is in this entry's temp), CND + cop * 4 + nloc flags of B and C (a pending comparison; B and C in
+# pk as word1 packs them; only on top)
+KBIG, TMP, CND = 1024, 1025, 1028
+CNDOPS = CMPS + (NOT,)
+
+# (__dadd: the dynamic + instruction, a string built in CSS; the rest: the runtime's primitives, OPN's comment)
+INTR = ['peek', 'poke', '__fp', 'prn', 'halt', '__dadd', '__kind', '__alloc', '__mcpy', '__mupper', '__mlower', '__mfill', '__nput',
+        '__mcmp', '__mfeq', '__mfref', '__mwalk', '__apush', '__net']
+INTRN = (1, 2, 0, 1, 0, 2, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2, 1)      # their arguments
+INTRV = ('peek', '__fp', '__dadd', '__kind', '__alloc', '__mcmp', '__mfeq', '__mfref', '__mwalk', '__net')    # those with a value
 def h1h2(s):
     a = b = 0
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
@@ -116,7 +199,7 @@ ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String']
-                          + [m[0] for m in ALLM]}
+                          + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
 
@@ -137,40 +220,37 @@ CONT = (46, 91, 40, 63, 58, 44, 41, 93, 42, 37, 60, 62, 38, 124, 61, 59, 125)   
 BLANK = (9, 10, 13, 32)
 COMPOUND = {9: ADD, 10: SUB, 11: MUL, 12: DIV, 13: MOD}
 ESC = {110: 10, 116: 9, 114: 13}
-BOOLOPS = (LT, GT, LE, GE, EQ, NE, NOT)
-DYNOPS = (ADD, LT, GT, LE, GE, EQ, NE)
-NUMOPS = (PUSHI, ADD, SUB, MUL, DIV, MOD, NEG, SHL13)
 def prec(code):
     return {MUL: 7, DIV: 7, MOD: 7, ADD: 6, M_CADD: 6, SUB: 6, LT: 5, GT: 5, LE: 5, GE: 5, EQ: 4, NE: 4, AND: 3, OR: 2, M_TELSE: 1,
             NOT: 8, NEG: 8}.get(code, 0)
 
+# popops pops at most popcap(minprec) operators: between markers the binary operators' precedences increase upwards (one per
+# class from minprec to 7, M_TELSE at 1), and unary ones (8) stack only on top: UNARYRUN of them at most (more: error 22). The CSS
+# compiler's popops loops that many times
+UNARYRUN = 4
+def popcap(minprec): return min(OD, 8 - minprec + UNARYRUN)
 # + at the top level of a console.log argument (value: the left operand's static type); precedence of +. M_PRINT's value: 2 after a
-# ',' (until the next argument starts) + 4 * the pieces of a + chain already on the stack (PIECES at most: then they are joined)
+# ',' (until the next argument starts) + 4 * the pieces of a + chain already on the operand stack (PIECES at most)
 M_CADD = 50
-PIECES = 8
-# c ? a : b is  c JZ L1  a JMP L2  L1: b  L2:. '?' pushes the marker M_TERN (value L1 + 64 * reuse); ':' replaces it with
-# the operator M_TELSE (value L2 + 64 * the then-branch's static type), lowest precedence, whose pop defines L2. In a
-# chain a ? x : b ? y : z the inner ternary reuses the outer L2 (reuse: M_TELSE was on top at '?'), so at most one
-# M_TELSE sits between markers and popops defines at most one L2.
+PIECES = 4                              # (each a PRINT at the argument's end: EMAX bounds them)
+# c ? a : b is  c Jfalse L1  a -> T(i) JMP L2  L1: b -> T(i)  L2:. '?' pushes the marker M_TERN (value L1 + 64 * reuse); ':'
+# replaces it with the operator M_TELSE (value L2 + 64 * the then-branch's static type), lowest precedence, whose pop moves the
+# else value to T(i) and defines L2. In a chain a ? x : b ? y : z the inner ternary reuses the outer L2 (reuse: M_TELSE was on
+# top at '?'), so at most one M_TELSE sits between markers.
 M_TELSE = 51
 # OPS markers (codes >= 100)
 # M_ARR: an array literal (value: its elements so far); M_METH: a method call's arguments (value: method + 64 * commas)
 M_PAREN, M_CALL, M_ARR, M_METH, M_PUTC, M_PRINT, M_TERN = 100, 101, 102, 103, 104, 105, 108
-# object literal: NEW, then its first pairs (string keys) stored in place (SETF) and the keys ended there (ENDK), the rest the
-# general way, as o.x = v / o[n] = v. M_OBJ (value: the pairs stored in place + 4 once the keys are ended), and above it while
-# a value is parsed M_OKEY (value: 0 a SETF pair, 1 a number key (SETX), else the key for PUTV); x[k] on a value: M_INDEX
 M_OBJ, M_OKEY, M_INDEX = 109, 110, 111
+# the runtime library's intrinsics (rom mode): M_INTR's value = the intrinsic (INTR) + 32 * its slot on the operand stack (d0)
+M_INTR = 112
 # control stack kinds. Bodies: IFB / ELSEB / LOOPB and DOB (a = continue target, b = break target; DOB c = the loop
-# top) / FUNCB; + BRACELESS: the body is a single statement, closed when that statement completes. A DOB stays on
-# the stack through its while (cond): a ')' with a DOB on top can only end that condition.
+# top) / FUNCB (a = the label past the function, b = its frame label: its count of locals); + BRACELESS: the body is a single
+# statement, closed when that statement completes. A DOB stays on the stack through its while (cond): a ')' with a DOB on top
+# can only end that condition. A function is declared at the program's top level, so its FUNCB is entry 0.
 C_BLOCK, C_IFB, C_ELSEB, C_DOB, C_LOOPB, C_FUNCB = 1, 2, 3, 4, 5, 6
 C_IFC, C_WHILEC, C_FORINIT, C_FORCOND, C_FORSTEP, C_ASSIGN, C_EXPR, C_RETURN = 10, 11, 12, 13, 14, 15, 16, 17
-# a property assignment statement: a = 0 o.x (the key's string-area offset in c * 64 + d) / 1 x[k], b = the compound op
 C_PSET = 19
-# switch (e) { ... }: the header C_SWITCHC, then the body C_SWITCH (a = the pending test's label, b = the end (break) label,
-# c = default's label, d = 1 a clause seen + 2 a default seen). The value stays on the stack only while it is tested: each
-# case is  JMP Bk (the previous body falls through)  Tk: DUP <value> EQ JZ Tk+1 POP  Bk:, so the bodies run with the
-# stack as it was. C_CASE (a = Bk, b = 1 if there is a previous body) is on top while the case value is parsed.
 C_SWITCHC, C_SWITCH, C_CASE = 30, 31, 32
 BRACELESS = 20
 C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_DOB + BRACELESS, C_LOOPB + BRACELESS
@@ -178,57 +258,63 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
 (S_STMT, S_OPND, S_OPER, S_NAMES, S_NAMEE, S_VAR, S_VARAFTER, S_LPAREN, S_LBRACE, S_ELSE, S_FNAME, S_FPAREN, S_FPARAM,
  S_FPSEP, S_CONDOT, S_CONLOG, S_CONLP, S_CONFIRST, S_INC, S_AFTERELSE, S_PREINC,
  S_DOWHILE, S_DOT, S_OKEY, S_OCOLON, S_SWCASE, S_ERR) = range(27)
-# S_DOT: a property name after '.'; S_OKEY / S_OCOLON: an object literal's key / its ':'. After o.x (SCANI emitted, the key in pn)
-# or x[k] the parser is in S_OPER with pm = 1 / 2: the load is pending until the next token shows it is not assigned to.
-# pm = 3 after x++ / ++x in an expression, which no '.' or '[' may follow. pm = 4 + a method's index after x.name for a method's
-# name (METHODS): a call if '(' follows, else the property (pn: its key, as after o.x).
-# S_SWCASE: a switch body's first token (case, default or '}'); default's ':' is read in S_OCOLON
+# pm = 3 after x++ / ++x in an expression, which no '.' or '[' may follow.
 
 def tmerge(a, b):
     """static type of a value that is one of two values of types a, b (?: && ||). A boolean with anything else is boolean: the
-    PRINTB forms print only 0 / 1 as false / true, and other numbers and strings as they are, so only a 0 or 1 from the
+    boolean PRINT prints only 0 / 1 as false / true, and other numbers and strings as they are, so only a 0 or 1 from the
     other side misprints (unknown would misprint every boolean)"""
     return 1 if 1 in (a, b) else a if a == b else 0
 
 class Compiler:
-    def __init__(self, data_base, code_base, lib):
-        """lib: the runtime library's entry addresses (lib.json)"""
-        self.db, self.cb = data_base, code_base
-        self.ent = lib['entries']                    # the ROM routines compiled code calls (mkarr, the methods)
+    def __init__(self, data_base, code_base, lib=None, rom=False):
+        """lib: the runtime library's entry addresses (lib.json). rom: compile the runtime library itself (rtlib.py): raw memory
+        (peek, poke, p[i]), the intrinsics (INTR), no globals, and tables large enough for it"""
+        self.db, self.cb, self.rom = data_base, code_base, rom
+        self.NF, self.NL = (NF, NL) if not rom else (256, 8192)
+        self.LM, self.FM = self.NL, max(16, self.NF)         # a label + LM * a flag or type; a function + FM * its type
+        self.CODESZ = CODESZ if not rom else LAYOUT['rom_size']
+        self.ent = (lib or {}).get('entries', {})   # the ROM routines compiled code calls
         # lexer. An identifier that may be a property name (after '.', '{' or ','; kpos 2 / 1 / 1) writes its bytes to the
         # string area at sdp, not committed; the level after it writes the NUL at inul. It is committed (sdp moves past it):
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0
-        self.dp = data_base + 1             # globals and array literals (parser); data_base holds STRTAG
+        self.dp = data_base + 1             # globals (parser); data_base holds STRTAG
         self.sdp = data_base + SDATA + 1 + len(SEED)    # string literals and property names (lexer; after SEED); data_base + SDATA itself is the lib's
-                                            # empty DONE marker, which PRINT stops at (a property name there printed as '')
+                                            # empty DONE marker, which PRINT stops at
         # parser
         self.mode = S_STMT; self.pn = (0, 0)
         self.ops = [0] * OD; self.opv = [0] * OD; self.osp = 0
         self.cs = [[0] * 6 for _ in range(CD)]; self.csp = 0                   # kind a b c d, e: nlet when pushed
+        self.od = [0] * ODN; self.nd = 0; self.pk = 0; self.tb = 0                          # operand descriptors; pk: the big constant / pending comparison on top
         # symbols: h1 h2 kind(1 g, 2 l) addr type const. Two regions: function- and program-level names grow up from 0
         # (nsym), block-scoped let / const grow down from NS - 1 (nlet); closing a block restores nlet
         self.sym = [[0, 0, 0, 0, 0, 0] for _ in range(NS)]; self.nsym = 0; self.nlet = 0
-        self.fn = [[0, 0, 0, 0, 0] for _ in range(NF)]; self.nfn = 0           # h1 h2 label type argc (+1; 0: no call or definition yet)
-        self.lab = [-1] * NL; self.nlab = 0
+        self.fn = [[0, 0, 0, 0, 0] for _ in range(self.NF)]; self.nfn = 0      # h1 h2 label type argc (+1; 0: no call or definition yet)
+        self.lab = [-1] * self.NL; self.nlab = 0
         self.itab = [[0, 0, 0] for _ in range(NI)]; self.nint = 0             # interned strings and names: h1 h2 address
         self.cp = 0; self.curf = 0; self.cfn = 0; self.nfdef = 0; self.nloc = 0; self.npar = 0; self.fsym = 0    # fsym: nsym at function start
-        self.pendLa = 0; self.err = 0; self.lb = 0; self.asic = 0; self.pm = 0
+        self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.code = {}; self.data = {}
-        self.emitted = []
 
     # ---------------- helpers
-    def emit(self, op, imm=0, label=None, b=None):
-        """b: the static type of the value this leaves on the stack (default: by opcode)"""
-        self.code[self.cp] = (op, imm, label); self.emitted.append((self.cp, op, imm, label)); self.cp += 1
-        self.lb = (1 if op in BOOLOPS else 3 if op in NUMOPS else 0) if b is None else b
+    def frame_label(self): return self.cs[0][2] if self.curf else None
+    def emit(self, op, a=(0, 0), b=(512, 0), c=(0, 0), label=None, w1=None):
+        """one instruction: op A, B, C, operands as (field, temp?) (a temp adds the frame label: times 1 in A, 1024 in B, 1 in
+        C); or A and word1 whole (w1: a value, or (field, temp?) for CALL's offset). label: A is that label's value at link time"""
+        fl = self.frame_label()
+        if w1 is None: w, m = (b[0] - 512) * 1024 + c[0], 1024 * b[1] + c[1]
+        elif isinstance(w1, tuple): w, m = w1
+        else: w, m = w1, 0
+        lab0 = label if label is not None else fl if a[1] else None
+        self.code[self.cp] = (op, a[0], w, lab0, fl if m else None, m); self.cp += 1
     def newlab(self):
-        if self.nlab >= NL: self.fail(20)
+        if self.nlab >= self.NL: self.fail(20)
         self.nlab += 1; return self.nlab - 1
     def deflab(self, l, v):
-        if l < NL: self.lab[l] = v                    # (a label past NL comes only after error 20)
-    def here(self): return self.cb + self.cp
+        if l < self.NL: self.lab[l] = v               # (a label past NL comes only after error 20)
+    def here(self): return self.cb + 2 * self.cp
     def fail(self, code):
         if not self.err: self.err = code
     def push_cs(self, *f, e=None):
@@ -254,7 +340,7 @@ class Compiler:
         """function table index for a name (adding it, with a new label, if absent)"""
         for k in range(self.nfn):
             if (self.fn[k][0], self.fn[k][1]) == h: return k
-        if self.nfn >= NF: self.fail(23); return 0
+        if self.nfn >= self.NF: self.fail(23); return 0
         l = self.newlab(); self.fn[self.nfn] = [h[0], h[1], l, 0, 0]; self.nfn += 1
         return self.nfn - 1
     def declare(self, h, kind, addr, cst=0, blk=0):
@@ -271,37 +357,6 @@ class Compiler:
     def decl_blk(self):
         """the declaration in progress is block-scoped: let / const (pn[0] 1 / 2) below the function or program level"""
         return int(self.pn[0] > 0 and self.csp > self.curf)
-    def load(self, j):
-        k, a = self.sym[j][2], self.sym[j][3]
-        self.emit(LOADL if k == 2 else LOADG, a % 8192, b=self.sym[j][4])
-    def store(self, j):
-        k, a = self.sym[j][2], self.sym[j][3]
-        self.emit(STOREL if k == 2 else STOREG, a % 8192)
-    def popops(self, minprec):
-        """shunting-yard: pop and emit operators with precedence >= minprec (stops at markers).
-        && / || were emitted as jumps when pushed; popping one defines its jump's target."""
-        while self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
-            self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
-            if code in (AND, OR):                              # the value is one of the operands: their merged type
-                self.deflab(val % 64, self.here()); self.lb = tmerge(val // 64, self.lb)
-            elif code == M_TELSE:                              # the value's type: both branches' if they agree
-                self.deflab(val % 64, self.here()); self.lb = tmerge(val // 64, self.lb)
-            elif code in DYNOPS:                               # val: the left operand's static type
-                self.emit_dyn(code, val, self.lb)
-            elif code == M_CADD:                               # numbers: add; a string (not after a boolean): two pieces; else DYN
-                if val in (1, 3) and self.lb in (1, 3): self.emit(ADD)
-                elif 2 in (val, self.lb) and val != 1:
-                    if self.lb == 1: self.emit(CALL, self.ent['b2s'], b=2)
-                    self.opv[self.osp - 1] += 4
-                else: self.emit_dyn(ADD, val, self.lb)
-            else: self.emit(code)
-    def emit_dyn(self, code, lt, rt):
-        """a + b or a comparison, the operands of static types lt and rt: the plain instruction when they are known to be numbers
-        (for a comparison, when either is), else DYN (the ROM's slow path takes strings). DYN's immediate carries which
-        operands are booleans, for + on a string"""
-        num = lambda t: t in (1, 3)
-        if (num(lt) and num(rt)) if code == ADD else (num(lt) or num(rt)): return self.emit(code)
-        self.emit(DYN, code + 64 * int(lt == 1) + 128 * int(rt == 1), b=(2 if 2 in (lt, rt) else 0) if code == ADD else 1)
     def intern(self, h, addr, ln):
         """the interned string of hash h: its address, entering it (at addr) if new; -1 when the table is full. Every string
         and name in the string area is [length][bytes][0], its address that of the first byte: this copy's length word is
@@ -314,31 +369,320 @@ class Compiler:
         return addr
     def datum(self, a, v):
         if a < SEND: self.data[a] = v
-    def key_name(self, h):
-        """a property name (identifier token): its key, the interned address (-1: failed)"""
-        if self.tid >= NOROOM: self.fail(26); return -1
-        return self.intern(h, self.tid, self.tlen)
-    def stmt_level(self):
-        """an assignment to o.x / x[k]: only as a statement of its own"""
-        return self.osp == 0 and self.top_cs()[0] == C_EXPR
-
     def loop_entry(self, brk):
         """the innermost loop (or, for break, switch) entry: a = its continue label, b = its break label"""
         for k in range(self.csp - 1, -1, -1):
             if self.cs[k][0] in (C_LOOPB, C_LOOPB1, C_DOB, C_DOB1) or (brk and self.cs[k][0] == C_SWITCH): return self.cs[k]
         return None
+
+    # ---------------- operands
+    def var(self, j):
+        """symbol j's operand: a global, or a frame slot (parameter k at fp + 1 + k, its table address PARAM0 + k; local k after
+        the parameters)"""
+        k, a = self.sym[j][2], self.sym[j][3]
+        return (L(a - PARAM0 + 1) if a >= PARAM0 else L(a)) if k == 2 else a - self.db
+    def tmp(self, i): return (L(1 + self.npar * self.curf + self.tb + i), self.curf)    # T(i): past the locals (+ the frame label)
+    def arg_end(self):
+        """an argument or an array element ended: into its temp, which leaves the operand stack (the temps' base tb moves past it
+        until the call is made)"""
+        self.to_temp(self.nd - 1); self.nd -= 1; self.tb += 1
+    # an od entry also holds the temps' base tb it was pushed at (* 16384): below a call's collapsed arguments a descriptor's temp
+    # is T(its own tb + i), which a snapshot needs (every other change is to descriptors pushed at the current tb)
+    def desc(self, i): return self.od[i] % 4096
+    def otype(self, i): return self.od[i] // 4096 % 4
+    def set_od(self, i, d, t): self.od[i] = self.tb * 16384 + t * 4096 + d
+    def push_od(self, d, t, k=0):
+        """push a descriptor (k: a big constant's value). A big constant only stays pending on top: one below goes to its temp"""
+        if self.nd >= ODN or self.nd + self.tb >= TBMAX: return self.fail(22)
+        if self.nd and self.desc(self.nd - 1) == KBIG: self.src(self.nd - 1)
+        self.set_od(self.nd, d, t); self.nd += 1
+        if d == KBIG: self.pk = k
+    def push_num(self, v, t=3):
+        v = s20(v)
+        if -128 <= v < 128: self.push_od(K(v), t)
+        else: self.push_od(KBIG, t, v)
+    def src(self, i):
+        """descriptor i as a source operand (field, temp?): a big constant is loaded into its temp first"""
+        d = self.desc(i)
+        if d == KBIG: self.emit('LOADK', self.tmp(i), w1=self.pk); self.set_od(i, TMP, self.otype(i)); d = TMP
+        return self.tmp(i) if d == TMP else (d, 0)
+    def put(self, dst, i):
+        """the value of descriptor i into operand dst (field, temp?)"""
+        if self.desc(i) == KBIG: self.emit('LOADK', dst, w1=self.pk)
+        elif self.src(i) != dst: self.emit('MOV', dst, self.src(i))      # (a pending comparison only ever meets a branch)
+    def to_temp(self, i):
+        self.put(self.tmp(i), i); self.set_od(i, TMP, self.otype(i))
+    def snapshot(self, hit, n=None):
+        """operands still on the stack (below n) that a call or ++ / -- is about to change: copied to their temps first. At the
+        start of a conditional region (&&, ||, ?:) every variable below is copied: a copy made inside it would be made on one
+        path only"""
+        for i in range(self.nd if n is None else n):
+            d = self.desc(i)
+            if d < 768 and hit(d):
+                tb = self.od[i] // 16384; f = (L(1 + self.npar * self.curf + tb + i), self.curf)
+                self.emit('MOV', f, (d, 0)); self.od[i] = tb * 16384 + self.otype(i) * 4096 + TMP
+    def pend(self, i, cop, b, c):
+        """descriptor i := the pending comparison b cop c (or ! b: cop NOT)"""
+        self.set_od(i, CND + 4 * CNDOPS.index(cop) + 2 * b[1] + c[1], 1); self.pk = (b[0] - 512) * 1024 + c[0]
+    def branch(self, lab, sense):
+        """pop the top value and jump to lab if its truth is sense (a pending comparison fuses into the jump)"""
+        i = self.nd - 1; d = self.desc(i); self.nd -= 1
+        if d >= CND:
+            cop = CNDOPS[(d - CND) // 4]; b = (self.pk // 1024 + 512, (d - CND) // 2 % 2); c = (self.pk % 1024, (d - CND) % 2)
+            if cop == NOT: return self.emit('JZ' if sense else 'JNZ', b=b, label=lab)
+            return self.emit('J' + NAME[cop if sense else INV[cop]], b=b, c=c, label=lab)
+        if isK(d):                                       # a constant condition: jump or not, known now
+            if (d != K(0)) == sense: self.emit('JMP', label=lab)
+            return
+        if d == KBIG and self.otype(i) != 2:
+            if (self.pk != 0) == sense: self.emit('JMP', label=lab)
+            return
+        self.emit('JNZ' if sense else 'JZ', b=self.src(i), label=lab)
+
+    def popops(self, minprec, mode=None):
+        """pop and emit operators with precedence >= minprec. mode 'br': a comparison or ! popped last stays pending for the
+        branch that takes the value; ('dest', o): an operator popped last writes operand o directly (an assignment's target).
+        A big constant on top goes to its temp before the first pop (unless that pop splits a console.log + chain), so each pop
+        emits at most one instruction"""
+        if (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec and self.nd and self.desc(self.nd - 1) == KBIG
+                and not (self.ops[self.osp - 1] == M_CADD and 2 in (self.opv[self.osp - 1], self.otype(self.nd - 1))
+                         and self.opv[self.osp - 2] < 4 * (PIECES - 1))): self.src(self.nd - 1)        # (M_PRINT is below M_CADD)
+        npop = 0
+        while not self.err and self.osp and 0 < prec(self.ops[self.osp - 1]) and prec(self.ops[self.osp - 1]) >= minprec:
+            if npop == popcap(minprec): return self.fail(22)
+            npop += 1
+            self.osp -= 1; code, val = self.ops[self.osp], self.opv[self.osp]
+            last = not (self.osp and 0 < prec(self.ops[self.osp - 1]) >= minprec)
+            dest = mode[1] if last and isinstance(mode, tuple) else None
+            if code in (AND, OR):                       # the left operand is in T(i), tested; the right one joins it there
+                i = self.nd - 2; self.put(self.tmp(i), i + 1); self.nd -= 1
+                self.set_od(i, TMP, tmerge(val // self.LM, self.otype(i + 1))); self.deflab(val % self.LM, self.here())
+            elif code == M_TELSE:                       # c ? a : b: a went to T(i); b joins it
+                i = self.nd - 1; t = tmerge(val // self.LM, self.otype(i)); self.to_temp(i); self.set_od(i, TMP, t); self.deflab(val % self.LM, self.here())
+            elif code == NOT and last and mode == 'br':
+                i = self.nd - 1; self.pend(i, NOT, self.src(i), (0, 0))
+            elif code in (NOT, NEG):
+                i = self.nd - 1; b = self.src(i)
+                if dest is None: self.emit(NAME[code], self.tmp(i), b); self.set_od(i, TMP, 1 if code == NOT else 3)
+                else: self.emit(NAME[code], (dest, 0), b); self.set_od(i, dest, 1 if code == NOT else 3)
+            elif code == M_CADD:                        # + at a console.log argument's top level: a string on either side splits it
+                i = self.nd - 2
+                if 2 in (val, self.otype(i + 1)) and self.opv[self.osp - 1] < 4 * (PIECES - 1):
+                    self.opv[self.osp - 1] += 4                # two pieces (M_PRINT is right below)
+                else: self.binop(ADD, i, dest)                 # (past PIECES: the last two joined)
+            else: self.binop(code, self.nd - 2, dest, mode == 'br' and last)
+
+    def isdyn(self, code, lt, rt):
+        """the dynamic operator for + unless both operands are numbers or booleans, for a comparison unless either is (cc_ref's
+        static types: a string, array or object compares by the runtime library's rules)"""
+        num = lambda t: t in (1, 3)
+        if self.rom: return False                       # (the runtime library's words are raw)
+        if code == ADD: return not (num(lt) and num(rt))
+        return code in CMPS and not (num(lt) or num(rt))
+    def dynop(self, code, lt, rt):
+        return ('DADDL' if lt == 1 else 'DADDR' if rt == 1 else 'DADD') if code == ADD else DYN[code]
+    def binop(self, code, i, dest, pend=False):
+        lt, rt = self.otype(i), self.otype(i + 1)
+        b, c = self.src(i), self.src(i + 1); self.nd -= 1
+        if self.isdyn(code, lt, rt):                    # (into its temp: a trap's frame is the destination)
+            self.emit(self.dynop(code, lt, rt), self.tmp(i), b, c)
+            return self.set_od(i, TMP, 1 if code in CMPS else 2 if 2 in (lt, rt) else 0)
+        t = 1 if code in CMPS else 3
+        if pend and code in CMPS: self.pend(i, code, b, c)
+        elif dest is None: self.emit(NAME[code], self.tmp(i), b, c); self.set_od(i, TMP, t)
+        else: self.emit(NAME[code], (dest, 0), b, c); self.set_od(i, dest, t)
+
+    def compound(self, code, i, o):
+        """x op= e with the old value at i, e above: into o (the dynamic + into i's temp, then o); its static type"""
+        lt, rt = self.otype(i), self.otype(i + 1)
+        if not self.isdyn(code, lt, rt): self.emit(NAME[code], o, self.src(i), self.src(i + 1)); return 3
+        self.emit(self.dynop(code, lt, rt), self.tmp(i), self.src(i), self.src(i + 1))
+        if o != self.tmp(i): self.emit('MOV', o, b=self.tmp(i))
+        return 2 if 2 in (lt, rt) else 0
+
+    def cond_ctx(self, closer):
+        """this token ends a statement-level expression that a branch takes (an if / while / do-while condition, a for test)"""
+        if any(self.ops[k] >= 100 for k in range(self.osp)): return False
+        t = self.top_cs()[0]
+        return (closer == 41 and t in (C_IFC, C_WHILEC, C_DOB, C_DOB1)) or (closer == 59 and t == C_FORCOND)
+    def dest_ctx(self):
+        """an assignment's value ends here: its last operator may write the target"""
+        t = self.top_cs()
+        if any(self.ops[k] >= 100 for k in range(self.osp)) or t[0] != C_ASSIGN or t[2]: return None
+        return ('dest', self.var(t[1]))
+    def end_mode(self, closer):
+        return 'br' if self.cond_ctx(closer) else self.dest_ctx()
+
     def print_call(self, sep):
-        """a console.log argument ended (sep: 32 a space follows, 10 a newline): one PRINT word, which pops the value and prints it
-        and the separator. The machine tells strings from numbers at run time (and arrays and objects: the ROM prints them);
-        only booleans need the static type (the B forms). A + chain's pieces on the stack (c before this one): the ROM's pnK"""
-        c = self.opv[self.osp - 1] // 4
-        if not c: return self.emit(PRINT_OP[sep] + int(self.lb == 1), b=0)
-        if self.lb == 1: self.emit(CALL, self.ent['b2s'], b=2)
-        self.emit(PUSHI, sep); self.emit(CALL, self.ent[f'pn{c + 1}']); self.emit(POP, b=0)
+        """a console.log argument ended: its pieces (a + chain with a string) are on the operand stack from d0; print each"""
+        c = self.opv[self.osp - 1] // 4; d0 = self.nd - 1 - c
+        for i in range(d0, self.nd):
+            flags = 2 * (SEP[sep] if i == self.nd - 1 else 0) + int(self.otype(i) == 1) + 8 * (c > 0)   # (8: a piece, made a string)
+            if self.desc(i) == KBIG: self.emit('PRINTK', (flags, 0), w1=self.pk)
+            else: self.emit('PRINT', (flags, 0), self.src(i))
+        self.nd = d0
+
+    def key_name(self, h):
+        """a property name (identifier token): its key, the interned address (-1: failed)"""
+        if self.tid >= NOROOM: self.fail(26); return -1
+        return self.intern(h, self.tid, self.tlen)
+    def marker(self):
+        """the innermost marker on the operator stack (0: none)"""
+        return next((self.ops[k] for k in range(self.osp - 1, -1, -1) if self.ops[k] >= 100), 0)
+
     def join_pieces(self):
         """a + chain's pieces (M_PRINT on top) before an operator that is not +: joined into one string (the left operand)"""
         t, tv = self.top_op()
-        if t == M_PRINT and tv >= 4: self.emit(CALL, self.ent[f'catn{tv // 4 + 1}'], b=2); self.opv[self.osp - 1] = tv % 4
+        if t != M_PRINT or tv < 4: return
+        d0 = self.nd - 1 - tv // 4; self.src(self.nd - 1)    # (a big constant on top first: one instruction per join)
+        for k in range(d0 + 1, self.nd):
+            lt, rt = self.otype(d0), self.otype(k)
+            self.emit(self.dynop(ADD, lt, rt), self.tmp(d0), self.src(d0), self.src(k)); self.set_od(d0, TMP, 2)
+        self.nd = d0 + 1; self.opv[self.osp - 1] = tv % 4
+
+    def prop_read(self, i, key, keep=False):
+        """o.key with [o] at i: its value replaces it (keep: pushed above it, for o.key op= e)"""
+        o = self.src(i); d = self.nd if keep else i
+        if keep and (self.nd >= ODN or self.nd + self.tb >= TBMAX): return self.fail(22)
+        self.emit('GETP', self.tmp(d), o, (key - self.db, 0))
+        if keep: self.set_od(d, TMP, 0); self.nd += 1
+        else: self.set_od(i, TMP, 0); self.nd = i + 1
+
+    def prop_write(self, i, key, val):
+        """o.key = val with [o] at i; it is popped"""
+        self.emit('SETP', self.src(i), val, (key - self.db, 0)); self.nd = i
+
+    def meth_end(self, tv, last):
+        """a method call's ')': M_METH's value tv = the method + 64 * the commas; the receiver and the arguments above its slot"""
+        name, ents, ty = ALLM[tv % 64]; argc = tv // 64 + last
+        if argc not in ents: return self.fail(77)
+        e = 'tostringb' if name == 'String' and self.otype(self.nd - 1) == 1 else ents[argc]       # String(a boolean): true / false
+        if last: self.arg_end()
+        self.tb -= argc + 1; d0 = self.nd - 1; f = self.tmp(d0)
+        self.emit('CALL', (self.ent.get(e, 0), 0), w1=(f[0] - 256, f[1]))
+        self.nd = d0; self.push_od(TMP, ty); self.mode = S_OPER
+
+    def arr_elem(self, tv):
+        """an array literal's element ended (','): tv elements before it. The first 8 are collapsed arguments of mkarrN, made at the
+        eighth; past it each is stored (SETX of the next index: its trap appends)"""
+        if tv >= 8: self.arr_store(tv)
+        else:
+            self.arg_end()
+            if tv == 7: self.arr_make(8)
+        self.opv[self.osp - 1] = tv + 1; self.mode = S_OPND
+
+    def arr_store(self, k):
+        """element k (past the eighth, on top) into the array below it"""
+        if k > 127: return self.fail(22)
+        i = self.nd - 1; self.emit('SETX', self.src(i - 1), (K(k), 0), self.src(i)); self.nd = i
+
+    def arr_make(self, n):
+        """mkarrN of the n collapsed elements above the slot"""
+        self.tb -= n; d0 = self.nd - 1; f = self.tmp(d0)
+        self.emit('CALL', (self.ent.get(f'mkarr{n}', 0), 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0)
+
+    def arr_end(self, n, last):
+        """an array literal's ']': n elements before (last: and one just ended)"""
+        if n >= 8:
+            if last: self.arr_store(n)
+        else:
+            if last: self.arg_end(); n += 1
+            self.arr_make(n)
+        self.mode = S_OPER
+
+    def okey_end(self, tv, close):
+        """an object literal's value ended (',' or, close, '}'): store the pair (tv: the key's string-area offset, 0 a number key below
+        the value)"""
+        self.osp -= 1; i = self.nd - 1
+        if tv: self.emit('SETP', self.src(i - 1), self.src(i), (tv, 0)); self.nd = i
+        else: self.emit('SETX', self.src(i - 2), self.src(i - 1), self.src(i)); self.nd = i - 1
+        if close: self.osp -= 1; self.mode = S_OPER                 # (M_OBJ)
+        else: self.mode = S_OKEY
+
+    def case_end(self):
+        """a case value ended (':'): J!= Tnext, T(0), value  Bk:  (the switch's value in T(0), this one above it)"""
+        c = self.pop_cs(); tn = self.newlab()
+        if self.isdyn(EQ, self.otype(0), self.otype(1)):
+            self.emit('DEQ', self.tmp(1), self.src(0), self.src(1)); self.emit('JZ', b=self.tmp(1), label=tn)
+        else: self.emit('JNE', b=self.src(0), c=self.src(1), label=tn)
+        self.nd = 0
+        if c[2]: self.deflab(c[1], self.here())
+        t = self.top_cs(); t[1] = tn; t[4] |= 1; self.mode = S_STMT
+
+    def stmt_level(self):
+        """an assignment to x[k]: only as a statement of its own"""
+        return self.osp == 0 and self.top_cs()[0] == C_EXPR
+
+    def index_read(self, i, keep=False):
+        """x[k] with [x, k] at i, i + 1: its value replaces them (keep: pushed above them, for x[k] op= e)"""
+        x, k = self.src(i), self.src(i + 1)
+        d = self.nd if keep else i
+        if keep and (self.nd >= ODN or self.nd + self.tb >= TBMAX): return self.fail(22)
+        self.emit('LDI' if self.rom else 'GETX', self.tmp(d), x, k)    # (GETX: an array in bounds inline, else getx)
+        if keep: self.set_od(d, TMP, 0); self.nd += 1
+        else: self.set_od(i, TMP, 0); self.nd = i + 1
+
+    def index_write(self, i, val):
+        """x[k] = val with [x, k] at i, i + 1 (val an operand); they are popped"""
+        self.emit('STI' if self.rom else 'SETX', self.src(i), self.src(i + 1), val); self.nd = i
+
+    def intr_end(self, tv):
+        """an intrinsic's ')': its operands from d0 + 1 (d0: the slot of its value)"""
+        n, d0 = tv % 32, tv // 32; a = [self.src(i) for i in range(d0 + 1, self.nd)]
+        if len(a) != INTRN[n]: return self.fail(77)
+        name = INTR[n]; t = self.tmp(d0)
+        if name in ('__kind', '__alloc') and not isK(a[1][0]): return self.fail(77)       # (the test or kind: a constant)
+        if name == 'peek': self.emit('LDI', t, a[0], (K(0), 0))
+        elif name == 'poke': self.emit('STI', a[0], (K(0), 0), a[1])
+        elif name == '__fp': self.emit('GETFP', t)
+        elif name == 'prn': self.emit('PRINT', (0, 0), a[0])
+        elif name == '__dadd': self.emit('DADD', t, a[0], a[1])
+        elif name == '__kind': self.emit('KIND', t, a[0], a[1])
+        elif name == '__alloc': self.emit('ALLOC', t, a[0], a[1])
+        elif name == '__nput': self.emit('NPUT', a[0], a[1], (K(0), 0))
+        elif name == '__apush': self.emit('APUSH', (K(0), 0), a[0], a[1])
+        elif name == '__net': self.emit('NET', t, a[0])
+        elif name in ('__mcmp', '__mfeq', '__mfref', '__mwalk'): self.emit('MOV', t, a[2]); self.emit(name[2:].upper(), t, a[0], a[1])
+        elif name != 'halt': self.emit(name[2:].upper(), a[0], a[1], a[2])         # (MCPY, MUPPER, MLOWER, MFILL)
+        else: self.emit('HALT')
+        self.nd = d0; self.push_od(TMP if name in INTRV else K(0), 0)
+
+    def print_end(self):
+        """console.log(...) ended. Its PRINTs printed every argument, so it leaves no value: it must be a statement of its own
+        (C_EXPR, nothing else open)"""
+        if self.osp or self.top_cs()[0] != C_EXPR: return self.fail(30)
+        self.pop_cs(); self.mode = S_INC
+
+    def call_end(self, tv, last):
+        """a call's ')': its slot T(d0) (pushed at '(') takes the return word, the arguments are in T(d0 + 1) .... Our calls pass
+        exactly as many words as the function takes, so every call and the definition must agree on the count (the first one
+        seen sets it; 76 otherwise)"""
+        k, argc = tv % self.FM, tv // (4 * self.FM) + last
+        if last: self.arg_end()
+        if self.fn[k][4] and self.fn[k][4] != argc + 1: return self.fail(76)
+        self.fn[k][4] = argc + 1
+        self.tb -= argc; d0 = self.nd - 1; f = self.tmp(d0)
+        self.emit('CALL', label=self.fn[k][2], w1=(f[0] - 256, f[1]))
+        self.nd = d0; self.push_od(TMP, (tv // self.FM) % 4)
+
+    def asi_close(self, f):
+        """'}' right after a statement without ';': end the statement (knowing the next token is not 'else'),
+        then close the block"""
+        self.asic = 1; f(); self.asic = 0
+        if not self.err: self.close_block()
+
+    def incdec(self, h, v, x=0):
+        """++ (v 7) / -- (8) of a variable. x: 0 a statement, 1 ++x in an expression (its new value), 2 x++ (the old)"""
+        j = self.lookup(h)
+        if j < 0: return self.fail(6)
+        if self.sym[j][5]: return self.fail(64)
+        o = self.var(j)
+        if x: self.snapshot(lambda q: q == o)
+        if x == 2: self.push_od(o, 3); self.to_temp(self.nd - 1)
+        self.emit('ADD' if v == 7 else 'SUB', (o, 0), (o, 0), (K(1), 0))
+        if x == 1: self.push_od(o, 3)
+        if x: self.pm = 3; self.mode = S_OPER
+        else: self.mode = S_INC
 
     # ---------------- lexer: one character -> at most one token
     def sbyte(self, a, v):
@@ -413,7 +757,9 @@ class Compiler:
                 self.lcon = int(tok == ('ID', KW['console']))
             self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 125, 7, 8))) + int(tok == ('ID', KW['return']))
             cp0 = self.cp; self.token(*tok)
-            if self.cp - cp0 > EMAX: self.fail(61)
+            if self.cp - cp0 > EMAX:                     # (instructions; the page's EMAX slots don't hold the rest)
+                self.fail(61)
+                for k in range(cp0 + EMAX, self.cp): self.code.pop(k, None)
 
     def newline(self):
         """a newline (also in a comment): after return a T_NL at once; after another token that can end a statement, pending"""
@@ -425,24 +771,21 @@ class Compiler:
     def token(self, kind, v):
         if self.err: return
         isP = lambda c: kind == 'P' and v == c
-        isK = lambda k: kind == 'ID' and v == KW[k]
+        isK_ = lambda k: kind == 'ID' and v == KW[k]
         m = self.mode
-        if isP(T_NL) and m not in (S_NAMES, S_NAMEE, S_OPER, S_VARAFTER, S_INC, S_OPND): return     # a newline elsewhere: nothing
-        # ---- pending NAME (statement start): decide what it was
+        if isP(T_NL) and m not in (S_NAMES, S_NAMEE, S_OPER, S_VARAFTER, S_INC, S_OPND): return
         if m == S_NAMES:
             h = self.pn
-            if isP(61) or (kind == 'P' and v in COMPOUND):       # NAME = e, NAME op= e
+            if isP(61) or (kind == 'P' and v in COMPOUND):
                 j = self.lookup(h)
                 if j < 0: return self.fail(5)
-                if self.sym[j][5]: return self.fail(64)            # assignment to a constant
-                if not isP(61): self.load(j)
+                if self.sym[j][5]: return self.fail(64)
+                if not isP(61): self.push_od(self.var(j), self.sym[j][4])     # x op= e: x is the left operand, read first
                 self.push_cs(C_ASSIGN, j, COMPOUND.get(v, 0) if kind == 'P' else 0); self.mode = S_OPND; return
-            if isP(7) or isP(8):                          # NAME++ / NAME--
-                return self.incdec(h, v)
+            if isP(7) or isP(8): return self.incdec(h, v)
             if isP(91) and self.lookup(h) < 0: return self.fail(7)        # NAME[e] = e: an expression statement (x[k] below)
-            # anything else: an expression statement starting with NAME
             self.push_cs(C_EXPR); m = self.mode = S_NAMEE
-            if self.err: return                               # (the DSL's later blocks need live: they stop here too)
+            if self.err: return
         if m == S_NAMEE:
             h = self.pn
             if h == KW['console']:
@@ -450,113 +793,112 @@ class Compiler:
                 self.mode = S_CONLOG; return
             if isP(40):
                 if h == KW['putc']: self.push_op(M_PUTC)
-                elif h in GLOBAL_INDEX: self.emit(PUSHI, 0); self.push_op(M_METH, GLOBAL_INDEX[h])     # parseInt(s), ...
+                elif self.rom and h in [KW[n] for n in INTR]:          # an intrinsic: its operands stay where they are
+                    self.push_op(M_INTR, [KW[n] for n in INTR].index(h) + 32 * self.nd); self.push_od(TMP, 0)
+                elif h in GLOBAL_INDEX:                                  # parseInt(s), ...: a method on a dummy receiver
+                    self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, GLOBAL_INDEX[h])    # (the receiver: unused)
                 else:
-                    k = self.fnfind(h); self.push_op(M_CALL, k + 16 * self.fn[k][3])
+                    self.snapshot(lambda q: q < 256)          # the callee may change a global still waiting on the stack
+                    k = self.fnfind(h); self.push_op(M_CALL, k + self.FM * self.fn[k][3]); self.push_od(TMP, 0)   # its slot
                 self.mode = S_OPND; return
-            if isP(7) or isP(8): return self.incdec(h, v, 2)       # x++ / x-- in an expression: the old value
+            if isP(7) or isP(8): return self.incdec(h, v, 2)
             j = self.lookup(h)
             if j < 0 and h == KW['String'] and isP(46):          # String.fromCharCode(...): a method on a dummy receiver
-                self.emit(PUSHI, 0); self.mode = S_DOT; return
+                self.push_od(K(0), 0); self.mode = S_DOT; return
             if j < 0: return self.fail(4)
-            self.load(j); m = self.mode = S_OPER                 # fall through: this token follows an operand
-        # ---- after an if body: else?
+            self.push_od(self.var(j), self.sym[j][4]); m = self.mode = S_OPER
         if m == S_ELSE:
-            if isK('else'):
-                # an if that is itself the body of a braceless else ends where that else ends: reuse its label and
-                # wrapper (an else-if chain then needs one control-stack entry and one end label, however long)
+            if isK_('else'):
                 t = self.top_cs(); reuse = t[0] == C_ELSEB1
                 lb = t[1] if reuse else self.newlab()
-                self.emit(JMP, 0, lb); self.deflab(self.pendLa, self.here())
-                self.pendLa = lb + 64 * reuse; self.mode = S_AFTERELSE; return
-            # a token no statement can start with closes no do body (an error either way: 8 rather than 66), so
-            # the CSS variants for such tokens stay pure errors and are dropped
+                self.emit('JMP', label=lb); self.deflab(self.pendLa, self.here())
+                self.pendLa = lb + self.LM * reuse; self.mode = S_AFTERELSE; return
             dook = kind in ('ID', 'EOF') or (kind == 'P' and v in (59, 123, 125, 7, 8, 41))
             self.deflab(self.pendLa, self.here()); self.complete_stmt(1, dook); m = self.mode
-        if m == S_DOWHILE:                                     # a do body ended: while (cond)
-            if isP(59): return                                 # the ';' of a do-while that was the body
-            if not isK('while'): return self.fail(66)
+        if m == S_DOWHILE:
+            if isP(59): return
+            if not isK_('while'): return self.fail(66)
             self.mode = S_LPAREN; return
-        if m == S_AFTERELSE:                                   # else { ... } or else <statement> (including if)
-            reuse = self.pendLa >= 64                          # (the enclosing else's wrapper closes this else too)
+        if m == S_AFTERELSE:
+            reuse = self.pendLa >= self.LM
             if isP(123):
                 if reuse: self.push_cs(C_BLOCK)
                 else: self.push_cs(C_ELSEB, self.pendLa)
                 self.mode = S_STMT; return
             if not reuse: self.push_cs(C_ELSEB1, self.pendLa)
             m = self.mode = S_STMT
-        if m == S_LBRACE:                                      # a body: { ... } or a single statement
+        if m == S_LBRACE:
             if isP(123): self.mode = S_SWCASE if self.top_cs()[0] == C_SWITCH else S_STMT; return
             if self.top_cs()[0] not in (C_IFB, C_LOOPB, C_DOB): return self.fail(33)
             self.cs[self.csp - 1][0] += BRACELESS; m = self.mode = S_STMT
         if m == S_SWCASE:
-            if not (isK('case') or isK('default') or isP(125)): return self.fail(74)
+            if not (isK_('case') or isK_('default') or isP(125)): return self.fail(74)
             m = self.mode = S_STMT
-        # ---- statements
         if m == S_STMT:
-            t = self.top_cs()[0]
             if kind == 'EOF':
                 if self.csp: return self.fail(40)
-                if self.nfdef < self.nfn: return self.fail(60)        # a function called but never defined
-                self.emit(HALT); return
+                if self.nfdef < self.nfn: return self.fail(60)
+                self.emit('HALT'); return
             if isP(123): self.push_cs(C_BLOCK); return
             if isP(125): return self.close_block()
-            if isP(59): return self.end_simple_stmt(kind, v)   # empty statement (or an empty for init)
-            if isP(41) and t == C_FORSTEP: return self.end_simple_stmt(kind, v)     # for (...;...;)
+            if isP(59): return self.end_simple_stmt(kind, v)
+            if isP(41) and self.top_cs()[0] == C_FORSTEP: return self.end_simple_stmt(kind, v)
             if isP(7) or isP(8): self.pn = (v, 0); self.mode = S_PREINC; return
             if kind != 'ID': return self.fail(8)
-            if isK('var') or isK('let') or isK('const'):          # pn[0]: the declaration kind, 0 var 1 let 2 const
-                self.pn = (int(isK('let')) + 2 * int(isK('const')), 0); self.mode = S_VAR; return
-            if isK('if'): self.push_cs(C_IFC); self.mode = S_LPAREN; return
-            if isK('switch'): self.push_cs(C_SWITCHC); self.mode = S_LPAREN; return
-            if isK('case') or isK('default'):
+            if isK_('var') or isK_('let') or isK_('const'):
+                self.pn = (int(isK_('let')) + 2 * int(isK_('const')), 0); self.mode = S_VAR; return
+            if isK_('if'): self.push_cs(C_IFC); self.mode = S_LPAREN; return
+            if isK_('switch'): self.push_cs(C_SWITCHC); self.mode = S_LPAREN; return
+            if isK_('case') or isK_('default'):
                 t = self.top_cs(); seen = t[4] & 1
                 if t[0] != C_SWITCH: return self.fail(73)
-                if isK('case'):                                # [JMP Bk]  T: DUP <value> (then ':')
+                if isK_('case'):                               # [JMP Bk]  T: <value> J!= Tnext, T(0), value  Bk:
                     bk = self.newlab() if seen else 0
-                    if seen: self.emit(JMP, 0, bk)
-                    self.deflab(t[1], self.here()); self.emit(DUP)
+                    if seen: self.emit('JMP', label=bk)
+                    self.deflab(t[1], self.here()); self.push_od(TMP, t[4] // 4)      # the switch's value, in T(0)
                     self.push_cs(C_CASE, bk, seen); self.mode = S_OPND; return
                 if t[4] & 2: return self.fail(75)              # a second default
-                if not seen: self.emit(JMP, 0, t[1])           # the value goes to the tests first
+                if not seen: self.emit('JMP', label=t[1])      # the value goes to the tests first
                 ld = self.newlab(); self.deflab(ld, self.here())
-                t[3] = ld; t[4] = 3; self.mode = S_OCOLON; return
-            if isK('while'):
+                t[3] = ld; t[4] |= 3; self.mode = S_OCOLON; return
+            if isK_('while'):
                 lh = self.newlab(); self.deflab(lh, self.here()); self.push_cs(C_WHILEC, lh); self.mode = S_LPAREN; return
-            if isK('do'):                                      # top: body; continue: cond JNZ top; break:
+            if isK_('do'):
                 lt, lc, lb = self.newlab(), self.newlab(), self.newlab(); self.deflab(lt, self.here())
                 self.push_cs(C_DOB, lc, lb, lt); self.mode = S_LBRACE; return
-            if isK('for'):
+            if isK_('for'):
                 l1, le, lb, l2 = self.newlab(), self.newlab(), self.newlab(), self.newlab()
                 self.push_cs(C_FORINIT, l1, le, lb, l2); self.mode = S_LPAREN; return
-            if isK('return'):
+            if isK_('return'):
                 if not self.curf: return self.fail(57)
                 self.push_cs(C_RETURN); self.mode = S_OPND; return
-            if isK('break') or isK('continue'):
-                e = self.loop_entry(isK('break'))
+            if isK_('break') or isK_('continue'):
+                e = self.loop_entry(isK_('break'))
                 if e is None: return self.fail(56)
-                self.emit(JMP, 0, e[2] if isK('break') else e[1]); self.mode = S_INC; return
-            if isK('function'):
+                self.emit('JMP', label=e[2] if isK_('break') else e[1]); self.mode = S_INC; return
+            if isK_('function'):
                 if self.curf or self.csp: return self.fail(41)
-                lo = self.newlab(); self.emit(JMP, 0, lo); self.mode = S_FNAME
+                lo = self.newlab(); self.emit('JMP', label=lo); self.mode = S_FNAME
                 self.push_cs(C_FUNCB, lo); return
             self.pn = v; self.mode = S_NAMES; return
-        if m == S_PREINC:                                      # ++x / --x (pn[1]: in an expression)
+        if m == S_PREINC:
             if kind != 'ID': return self.fail(10)
             return self.incdec(v, self.pn[0], self.pn[1])
         if m == S_VAR:
             if kind != 'ID': return self.fail(9)
             cst, blk = int(self.pn[0] == 2), self.decl_blk()
-            if self.pn[0] and self.redecl(v): return self.fail(78)    # let / const of a name this scope declares already
-            if self.curf: self.nloc += 1; self.declare(v, 2, self.nloc, cst, blk)
+            if self.pn[0] and self.redecl(v): return self.fail(78)
+            if self.curf: self.nloc += 1; self.declare(v, 2, self.npar + self.nloc, cst, blk)
             else:
-                if self.dp >= self.db + SDATA: return self.fail(25)            # globals would reach the strings
+                if self.dp >= self.db + SDATA: return self.fail(25)
                 self.declare(v, 1, self.dp, cst, blk); self.dp += 1
             self.mode = S_VARAFTER; return
         if m == S_VARAFTER:
+            j = NS - self.nlet if self.decl_blk() else self.nsym - 1
             if isP(61):
-                self.push_cs(C_ASSIGN, NS - self.nlet if self.decl_blk() else self.nsym - 1, 0, 1 + self.pn[0]); self.mode = S_OPND; return
-            if self.pn[0] == 2: return self.fail(65)           # const without an initialiser
+                self.push_cs(C_ASSIGN, j, 0, 1 + self.pn[0]); self.mode = S_OPND; return
+            if self.pn[0] == 2: return self.fail(65)
+            if self.curf: self.emit('MOV', (self.var(j), 0), (K(0), 0))      # a local without a value: 0
             if isP(44): self.mode = S_VAR; return
             if (isP(T_NL) or isP(125)) and self.top_cs()[0] in (C_FORINIT, C_FORSTEP): return None if isP(T_NL) else self.fail(53)
             if isP(125): return self.asi_close(lambda: self.end_simple_stmt('P', T_NL))
@@ -567,10 +909,7 @@ class Compiler:
             return self.end_simple_stmt(kind, v)
         if m == S_LPAREN:
             if not isP(40): return self.fail(32)
-            t = self.top_cs()[0]
-            if t == C_FORINIT:
-                self.mode = S_STMT; return                  # the init statement (or ';')
-            self.mode = S_OPND; return
+            self.mode = S_STMT if self.top_cs()[0] == C_FORINIT else S_OPND; return
         if m == S_FNAME:
             if kind != 'ID': return self.fail(34)
             k = self.fnfind(v); self.cfn = k; self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
@@ -583,293 +922,231 @@ class Compiler:
         if m == S_FPARAM:
             if isP(41): return self.end_params()
             if kind != 'ID': return self.fail(36)
-            self.declare(v, 2, PARAM0 + self.npar); self.npar += 1; self.mode = S_FPSEP; return     # (= the DSL's encoding until end_params)
+            self.declare(v, 2, PARAM0 + self.npar); self.npar += 1; self.mode = S_FPSEP; return
         if m == S_FPSEP:
             if isP(44): self.mode = S_FPARAM; return
             if isP(41): return self.end_params()
             return self.fail(37)
         if m == S_CONLOG:
-            if not isK('log'): return self.fail(38)
+            if not isK_('log'): return self.fail(38)
             self.mode = S_CONLP; return
         if m == S_CONLP:
             if not isP(40): return self.fail(39)
             self.push_op(M_PRINT); self.mode = S_CONFIRST; return
-        if m == S_CONFIRST:                                    # an argument's first token (a string: concatenation)
-            if isP(41):                                        # console.log()
-                if self.opv[self.osp - 1] == 2: return self.fail(30)   # console.log(a, ): a's space is printed already
-                self.osp -= 1; self.emit(PUSHI, 10); self.emit(PUTC); return self.print_end()
+        if m == S_CONFIRST:
+            if isP(41):
+                if self.opv[self.osp - 1] == 2: return self.fail(30)
+                self.osp -= 1; self.emit('PUTC', b=(K(10), 0)); return self.print_end()
             self.opv[self.osp - 1] = 0
             m = self.mode = S_OPND
-        # ---- objects
         if m == S_DOT:                                         # o . name
             if kind != 'ID': return self.fail(69)
             if v == KW['length'] or (v in METHOD_INDEX and self.tparen): self.datum(self.tid - 1, self.tlen)   # (its committed bytes' length word)
             if v == KW['length']:                              # a string's or an array's length: the word before its value's address
-                self.emit(PUSHI, 1); self.emit(SUB); self.emit(LOADI, b=3); self.mode = S_OPER; return
+                i = self.nd - 1; self.emit('LDI', self.tmp(i), self.src(i), (K(-1), 0)); self.set_od(i, TMP, 3); self.mode = S_OPER; return
             if v in METHOD_INDEX and self.tparen:              # x.name( for a method's name: the call (S_OPER)
                 self.pn = (0, 0); self.pm = 4 + METHOD_INDEX[v]; self.mode = S_OPER; return
             ks = self.key_name(v)
             if ks < 0: return
-            if v in METHOD_INDEX:                              # a call if '(' follows, else the property (S_OPER)
-                self.pn = (ks, 0); self.pm = 4 + METHOD_INDEX[v]; self.mode = S_OPER; return
-            self.emit(SCANI, ks); self.pn = (ks, 0); self.pm = 1; self.mode = S_OPER; return
+            self.pn = (ks, 0); self.pm = 4 + METHOD_INDEX[v] if v in METHOD_INDEX else 1; self.mode = S_OPER; return
         if m == S_OKEY:                                        # { key : value, ... }
-            t, tv = self.top_op()
-            if isP(125):                                       # {} or a trailing comma
-                if tv < 4: self.emit(ENDK, 2 * tv)
-                self.osp -= 1; self.lb = 0; self.mode = S_OPER; return
+            if isP(125): self.osp -= 1; self.mode = S_OPER; return     # {} or a trailing comma (M_OBJ)
             if kind == 'ID': ks = self.key_name(v)
             elif kind == 'STR':
                 if v[0] >= NOROOM: return self.fail(26)
                 ks = self.intern((v[1], v[2]), v[0], v[3])
-            elif kind == 'NUM': ks = -2
+            elif kind == 'NUM': ks = 0; self.push_num(v)       # a number key: as o[n] = v
             else: return self.fail(71)
-            if ks == -1: return
-            if ks >= 0 and tv < 3:                             # one of the first pairs, all string keys: stored in place
-                self.emit(PUSHI, ks); self.emit(SETF, 2 * tv); self.push_op(M_OKEY, 0)
-            else:
-                if tv < 4: self.emit(ENDK, 2 * tv); self.opv[self.osp - 1] = tv | 4          # end the keys stored in place
-                self.emit(DUP)
-                if ks >= 0: self.emit(SCANI, ks); self.push_op(M_OKEY, ks)             # as o.x = v (PUTV may add a chunk)
-                else:                                          # a number key: as o[n] = v
-                    if v < 8192: self.emit(PUSHI, v)
-                    else: self.emit(PUSHI, v // 8192); self.emit(SHL13); self.emit(PUSHI, v % 8192); self.emit(ADD)
-                    self.push_op(M_OKEY, 1)
-            self.mode = S_OCOLON; return
+            if ks < 0: return
+            self.push_op(M_OKEY, ks - self.db if ks else 0); self.mode = S_OCOLON; return
         if m == S_OCOLON:
             if not isP(58): return self.fail(72)
             self.mode = S_STMT if self.top_cs()[0] == C_SWITCH else S_OPND; return      # (default's ':')
-        # ---- expressions
         if m == S_OPND:
-            if kind == 'NUM':
-                if v < 8192: self.emit(PUSHI, v)
-                else: self.emit(PUSHI, v // 8192); self.emit(SHL13); self.emit(PUSHI, v % 8192); self.emit(ADD)
-                self.mode = S_OPER; return
+            if kind == 'NUM': self.push_num(v); self.mode = S_OPER; return
             if kind == 'STR':
-                if v[0] >= NOROOM: return self.fail(26)                       # string data would reach the code
+                if v[0] >= NOROOM: return self.fail(26)
                 e = self.intern((v[1], v[2]), v[0], v[3])
                 if e < 0: return
-                self.emit(PUSHS, e, b=2); self.mode = S_OPER; return
-            if isK('true') or isK('false'): self.emit(PUSHI, int(isK('true')), b=1); self.mode = S_OPER; return
-            if isK('null'): self.emit(PUSHI, 0, b=0); self.mode = S_OPER; return
-            if isP(123):                                       # an object literal
-                self.emit(NEW); self.push_op(M_OBJ, 0); self.mode = S_OKEY; return
+                self.push_od(KBIG, 2, e - STRTAG); self.mode = S_OPER; return
+            if isK_('true') or isK_('false'): self.push_od(K(int(isK_('true'))), 1); self.mode = S_OPER; return
+            if isK_('null'): self.push_od(K(0), 0); self.mode = S_OPER; return
+            if isP(123):                                       # an object literal: NEW, then each pair as o.key = v
+                i = self.nd; self.push_od(TMP, 0)
+                if self.err: return
+                self.emit('NEW', self.tmp(i)); self.push_op(M_OBJ); self.mode = S_OKEY; return
+            if isP(91): self.push_od(TMP, 0); self.push_op(M_ARR, 0); return      # an array literal: its slot, the elements, mkarrN
             if isP(40): self.push_op(M_PAREN); return
             if isP(33): self.push_op(NOT); return
             if isP(45): self.push_op(NEG); return
-            if isP(7) or isP(8): self.pn = (v, 1); self.mode = S_PREINC; return      # ++x / --x in an expression
-            if isP(91): self.push_op(M_ARR, 0); return          # an array literal: its elements, then mkarr
+            if isP(7) or isP(8): self.pn = (v, 1); self.mode = S_PREINC; return
             if kind == 'ID': self.pn = v; self.mode = S_NAMEE; return
-            if isP(41) and self.top_op()[0] in (M_CALL, M_METH):      # f() (or f(a, ) with a trailing comma)
-                self.osp -= 1; (self.call_end if self.ops[self.osp] == M_CALL else self.meth_end)(self.opv[self.osp], 0); self.mode = S_OPER; return
+            if isP(41) and self.top_op()[0] == M_CALL:
+                self.osp -= 1; self.call_end(self.opv[self.osp], 0); self.mode = S_OPER; return
+            if isP(41) and self.top_op()[0] == M_INTR:
+                self.osp -= 1; self.intr_end(self.opv[self.osp]); self.mode = S_OPER; return
+            if isP(41) and self.top_op()[0] == M_METH:       # x.m() (or x.m(a, ) with a trailing comma)
+                self.osp -= 1; self.mode = S_OPER; return self.meth_end(self.opv[self.osp], 0)
             if isP(93) and self.top_op()[0] == M_ARR:         # [] (or [a, ] with a trailing comma)
-                self.osp -= 1; return self.arr_end(self.opv[self.osp])
-            if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:     # return;
-                self.emit(PUSHI, 0)
+                self.osp -= 1; return self.arr_end(self.opv[self.osp], 0)
+            if (isP(59) or isP(T_NL) or isP(125)) and self.top_cs()[0] == C_RETURN and self.osp == 0:
+                self.push_od(K(0), 0)
                 if isP(125): return self.asi_close(lambda: self.end_expr_stmt('P', T_NL))
                 return self.end_expr_stmt(kind, v)
             if isP(T_NL): return
-            if isP(59) and self.top_cs()[0] == C_FORCOND and self.osp == 0:    # for (; ; )
-                self.emit(PUSHI, 1); return self.end_expr_stmt(kind, v)
+            if isP(59) and self.top_cs()[0] == C_FORCOND and self.osp == 0:
+                self.push_od(K(1), 1); return self.end_expr_stmt(kind, v)
             return self.fail(3)
         if m == S_OPER:
-            if self.pm >= 4:                                   # x.name for a method's name: a call, or else the property
-                if isP(40): self.push_op(M_METH, self.pm - 4); self.pm = 0; self.mode = S_OPND; return
-                self.emit(SCANI, self.pn[0]); self.pm = 1
-            if self.pm == 3:                                   # after x++ / ++x: not a member expression (x++[1], x++.y)
+            if self.pm == 3:
                 self.pm = 0
                 if isP(46) or isP(91): return self.fail(48)
-            if self.pm:                                        # after o.x (cursor on the stack) or x[k] ([x, k] on the stack)
-                ks, dyn = self.pn[0], self.pm == 2
+            if self.pm >= 4:                                   # x.name for a method's name: a call (the receiver above its slot),
+                if isP(40):                                    # or else the property
+                    i = self.nd - 1                            # (the receiver: an argument)
+                    self.put(self.tmp(i + 1), i); self.set_od(i, TMP, 0); self.tb += 1
+                    self.push_op(M_METH, self.pm - 4); self.pm = 0; self.mode = S_OPND; return
+                self.pm = 1
+            if self.pm in (1, 2):                              # after o.x ([o] on the operand stack, the key in pn) or x[k] ([x, k]): read
+                dyn, key = self.pm == 2, self.pn[0]            # it unless it is assigned to
                 asg = isP(61) or (kind == 'P' and v in COMPOUND) or isP(7) or isP(8)
+                self.pm = 0
                 if asg:
                     if not self.stmt_level(): return self.fail(70)
-                    op = COMPOUND.get(v, 0) if kind == 'P' else 0
-                    if not isP(61):                                # the old value: [c] DUP LDF 1 / [x, k] OVER OVER IDXA
-                        if dyn: self.emit(OVER); self.emit(OVER); self.emit(IDXA, b=0)
-                        else: self.emit(DUP); self.emit(LDF, 1)
-                    if isP(7) or isP(8):                           # o.x++ / x[k]--
-                        self.emit(PUSHI, 1); self.emit(ADD if isP(7) else SUB)
-                        if dyn: self.emit(STOREX)
-                        else: self.emit(PUTV, ks)
-                        self.pop_cs(); self.pm = 0; self.mode = S_INC; return
-                    off = ks - self.db - SDATA
-                    self.cs[self.csp - 1][:5] = [C_PSET, dyn, op, off // 64 if not dyn else 0, off % 64 if not dyn else 0]
-                    self.pm = 0; self.mode = S_OPND; return
-                self.emit(IDXA if dyn else LDF, 0 if dyn else 1, b=0)
-                self.pm = 0
+                    if not isP(61):                            # the old value, above [o] / [x, k]
+                        if dyn: self.index_read(self.nd - 2, keep=True)
+                        else: self.prop_read(self.nd - 1, key, keep=True)
+                        if self.err: return
+                    if isP(7) or isP(8):                       # o.x++ / x[k]--
+                        i = self.nd - 1; self.emit('ADD' if isP(7) else 'SUB', self.tmp(i), self.tmp(i), (K(1), 0))
+                        if dyn: self.index_write(i - 2, self.tmp(i))
+                        else: self.prop_write(i - 1, key, self.tmp(i))
+                        self.pop_cs(); self.mode = S_INC; return
+                    off = 0 if dyn else key - self.db
+                    self.cs[self.csp - 1][:5] = [C_PSET, int(dyn), COMPOUND.get(v, 0) if kind == 'P' else 0, off // 64, off % 64]
+                    self.mode = S_OPND; return
+                if dyn: self.index_read(self.nd - 2)
+                else: self.prop_read(self.nd - 1, key)
             if kind == 'P' and v in BIN:
                 op = BIN[v]; self.popops(prec(op))
+                if self.err: return
                 t, tv = self.top_op()
-                if op == ADD and t == M_PRINT and (tv >= 4 or self.lb == 2):    # "..." + x in console.log: a piece, kept on the stack
-                    if self.lb == 1: self.emit(CALL, self.ent['b2s'], b=2)
-                    if tv // 4 == PIECES - 1: self.emit(CALL, self.ent[f'catn{PIECES}'], b=2); tv %= 4     # (too many: joined)
+                if op == ADD and t == M_PRINT and (tv >= 4 or self.otype(self.nd - 1) == 2) and tv < 4 * (PIECES - 1):   # "..." + x in console.log: a piece
                     self.opv[self.osp - 1] = tv + 4; self.mode = S_OPND; return
-                if op == ADD: self.push_op(M_CADD if t == M_PRINT else ADD, self.lb); self.mode = S_OPND; return
-                if prec(op) <= prec(ADD): self.join_pieces()       # (* / % bind tighter: they end no piece)
-                if op in (AND, OR):                            # short-circuit: a DUP JZ/JNZ L POP b L:
-                    lb = self.lb; l = self.newlab(); self.emit(DUP); self.emit(JZ if op == AND else JNZ, 0, l); self.emit(POP)
-                    self.push_op(op, l + 64 * lb); self.mode = S_OPND; return
-                self.push_op(op, self.lb); self.mode = S_OPND; return    # (the left operand's static type: popops)
-            if isP(63):                                        # c ? ...
-                self.popops(2); self.join_pieces(); t, tv = self.top_op()
-                l = self.newlab(); self.emit(JZ, 0, l); self.push_op(M_TERN, l + 64 * int(t == M_TELSE)); self.mode = S_OPND; return
-            if isP(58):                                        # c ? a : ...
-                self.popops(1); t, tv = self.top_op()
+                if op == ADD: self.push_op(M_CADD if t == M_PRINT else ADD, self.otype(self.nd - 1)); self.mode = S_OPND; return
+                if prec(op) <= prec(ADD): self.join_pieces()   # (* / % bind tighter: they end no piece)
+                if op in (AND, OR):                           # a: tested in its temp; b joins it there (popops)
+                    i = self.nd - 1; lt = self.otype(i); l = self.newlab(); self.to_temp(i); self.snapshot(lambda q: True, i)
+                    self.emit('JZ' if op == AND else 'JNZ', b=self.tmp(i), label=l)
+                    self.push_op(op, l + self.LM * lt); self.mode = S_OPND; return
+                self.push_op(op, self.otype(self.nd - 1)); self.mode = S_OPND; return
+            if isP(63):                                        # c ? a : b
+                self.popops(2, 'br')
+                if self.err: return
+                self.join_pieces(); t, tv = self.top_op()
+                self.snapshot(lambda q: True, self.nd - 1)
+                l = self.newlab(); self.branch(l, False); self.push_op(M_TERN, l + self.LM * int(t == M_TELSE)); self.mode = S_OPND; return
+            if isP(58):
+                self.popops(1)
+                if self.err: return
+                t, tv = self.top_op()
                 if t != M_TERN:
                     if self.osp == 0 and self.top_cs()[0] == C_CASE: return self.case_end()
                     return self.fail(67)
-                self.osp -= 1; lbt = self.lb
-                if tv >= 64:                                   # reuse the enclosing M_TELSE's L2
-                    ev = self.opv[self.osp - 1]; self.emit(JMP, 0, ev % 64)
-                    self.opv[self.osp - 1] = ev % 64 + 64 * tmerge(ev // 64, lbt)
+                self.osp -= 1; i = self.nd - 1; lbt = self.otype(i); self.to_temp(i); self.nd -= 1
+                if tv >= self.LM:
+                    ev = self.opv[self.osp - 1]; self.emit('JMP', label=ev % self.LM)
+                    self.opv[self.osp - 1] = ev % self.LM + self.LM * tmerge(ev // self.LM, lbt)
                 else:
-                    l2 = self.newlab(); self.emit(JMP, 0, l2); self.push_op(M_TELSE, l2 + 64 * lbt)
-                self.deflab(tv % 64, self.here()); self.mode = S_OPND; return
+                    l2 = self.newlab(); self.emit('JMP', label=l2); self.push_op(M_TELSE, l2 + self.LM * lbt)
+                self.deflab(tv % self.LM, self.here()); self.mode = S_OPND; return
             if isP(46): self.mode = S_DOT; return               # o.x
             if isP(91): self.push_op(M_INDEX); self.mode = S_OPND; return     # x[k]
-            if isP(125):                                       # '}' ending an object literal's value?
-                self.popops(1); t, tv = self.top_op()
-                if t == M_OKEY: return self.okey_end(tv, 1)
-            if isP(41) or isP(44) or isP(93):
+            if isP(93):                                        # x[k]: the read is pending (pm 2); or an array literal's end
                 self.popops(1)
+                if self.err: return
                 t, tv = self.top_op()
-                if isP(44) and t == M_OKEY: return self.okey_end(tv, 0)
-                if isP(93) and t == M_INDEX: self.osp -= 1; self.pm = 2; return
-                if isP(93) and t == M_ARR: self.osp -= 1; return self.arr_end(tv + 1)
-                if isP(44) and t == M_ARR: self.opv[self.osp - 1] += 1; self.mode = S_OPND; return
+                if t == M_INDEX: self.osp -= 1; self.pm = 2; return
+                if t == M_ARR: self.osp -= 1; return self.arr_end(tv, 1)
+                return self.fail(45)
+            if isP(125) and self.marker() == M_OKEY:           # '}' ending an object literal's value
+                self.popops(1)
+                if self.err: return
+                return self.okey_end(self.top_op()[1], 1)
+            if isP(41) or isP(44):
+                self.popops(1, self.end_mode(v))
+                if self.err: return
+                t, tv = self.top_op()
                 if isP(44):
-                    if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return     # (2: after a ',')
-                    if t in (M_CALL, M_METH): self.opv[self.osp - 1] += 64      # count the arguments
-                    if t in (M_CALL, M_METH, M_PUTC): self.mode = S_OPND; return
+                    if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return
+                    if t == M_OKEY: return self.okey_end(tv, 0)
+                    if t == M_ARR: return self.arr_elem(tv)
+                    if t == M_CALL: self.arg_end(); self.opv[self.osp - 1] += 4 * self.FM
+                    if t == M_METH: self.arg_end(); self.opv[self.osp - 1] += 64    # count the arguments
+                    if t in (M_CALL, M_METH, M_PUTC, M_INTR): self.mode = S_OPND; return
                     if self.osp == 0 and self.top_cs()[0] == C_ASSIGN and self.top_cs()[3]: return self.end_expr_stmt(kind, v)
                     return self.fail(44)
-                if isP(93): return self.fail(45)
                 if t == M_PAREN: self.osp -= 1; return
                 if t == M_CALL: self.osp -= 1; return self.call_end(tv, 1)
+                if t == M_INTR: self.osp -= 1; return self.intr_end(tv)
                 if t == M_METH: self.osp -= 1; return self.meth_end(tv, 1)
-                if t == M_PUTC: self.osp -= 1; self.emit(PUTC); self.emit(PUSHI, 0); return
+                if t == M_PUTC:
+                    self.osp -= 1; self.emit('PUTC', b=self.src(self.nd - 1)); self.nd -= 1; self.push_od(K(0), 0); return
                 if t == M_PRINT: self.print_call(10); self.osp -= 1; return self.print_end()
                 if self.osp: return self.fail(46)
-                return self.end_expr_stmt(kind, v)             # ')' closing a statement-level paren
+                return self.end_expr_stmt(kind, v)
             asiok = (not any(self.ops[k] >= 100 for k in range(self.osp)) and self.top_cs()[0] in (C_ASSIGN, C_EXPR, C_RETURN, C_PSET)
-                     and not (self.csp >= 2 and self.cs[self.csp - 2][0] in (C_FORINIT, C_FORSTEP)))      # (none in a for header)
-            if isP(T_NL) and not asiok: return                   # a newline ends the statement, unless inside ( [ or a call
+                     and not (self.csp >= 2 and self.cs[self.csp - 2][0] in (C_FORINIT, C_FORSTEP)))
+            if isP(T_NL) and not asiok: return
             if isP(125) and asiok:
-                return self.asi_close(lambda: (self.popops(1), self.end_expr_stmt('P', T_NL)))
+                return self.asi_close(lambda: (self.popops(1, self.dest_ctx()), self.err or self.end_expr_stmt('P', T_NL)))
             if isP(59) or isP(T_NL):
-                self.popops(1)
+                self.popops(1, self.end_mode(59))
+                if self.err: return
                 if self.osp: return self.fail(47)
                 return self.end_expr_stmt(kind, v)
             return self.fail(48)
         return self.fail(99)
 
-    def okey_end(self, tv, close):
-        """an object literal's value ended (',' or, close, '}'): store the pair"""
-        self.osp -= 1; o = self.opv[self.osp - 1]
-        if tv == 0: self.emit(SETF, 2 * o + 1); self.opv[self.osp - 1] = o + 1
-        elif tv == 1: self.emit(STOREX)
-        else: self.emit(PUTV, tv)
-        if close:
-            if self.opv[self.osp - 1] < 4: self.emit(ENDK, 2 * self.opv[self.osp - 1])
-            self.osp -= 1; self.lb = 0; self.mode = S_OPER
-        else: self.mode = S_OKEY
-
-    def arr_end(self, n):
-        """an array literal's ']': its n elements are on the stack"""
-        if n <= 8: self.emit(CALL, self.ent[f'mkarr{n}'], b=0)        # (fixed-count routines for short literals)
-        else: self.emit(PUSHI, n); self.emit(CALL, self.ent['mkarr'], b=0)
-        self.mode = S_OPER
-
-    def meth_end(self, tv, last):
-        """a method call's ')': M_METH's value tv = the method + 64 * the commas; last: an argument just ended"""
-        name, ents, ty = ALLM[tv % 64]; argc = tv // 64 + last
-        if argc not in ents: return self.fail(77)
-        e = 'tostringb' if name == 'String' and self.lb == 1 else ents[argc]       # String(a boolean): true / false
-        self.emit(CALL, self.ent.get(e, 0), b=ty); self.mode = S_OPER
-
-    def call_end(self, tv, last):
-        """a call's ')': M_CALL's value tv = function index + 16 * its type + 64 * the commas; last: an argument just ended.
-        Our calls pass exactly as many words as the function pops, so every call and the definition must agree on the count
-        (the first one seen sets it; 76 otherwise)"""
-        k, argc = tv % 16, tv // 64 + last
-        if self.fn[k][4] and self.fn[k][4] != argc + 1: return self.fail(76)
-        self.fn[k][4] = argc + 1
-        self.emit(CALL, 0, self.fn[k][2], b=(tv // 16) % 4)
-
-    def print_end(self):
-        """console.log(...) ended. Its PRINT words popped every argument, so it leaves no value: it must be a statement of its
-        own (C_EXPR, nothing else open), which ends here without the expression statement's POP"""
-        if self.osp or self.top_cs()[0] != C_EXPR: return self.fail(30)
-        self.pop_cs(); self.mode = S_INC
-
-    def case_end(self):
-        """a case value ended (':'): EQ JZ Tnext POP Bk:"""
-        c = self.pop_cs(); self.emit_dyn(EQ, 0, self.lb); tn = self.newlab(); self.emit(JZ, 0, tn); self.emit(POP)
-        if c[2]: self.deflab(c[1], self.here())
-        t = self.top_cs(); t[1] = tn; t[4] |= 1; self.mode = S_STMT
-
-    def asi_close(self, f):
-        """'}' right after a statement without ';': end the statement (knowing the next token is not 'else'),
-        then close the block"""
-        self.asic = 1; f(); self.asic = 0
-        if not self.err: self.close_block()
-
-    def incdec(self, h, v, x=0):
-        """++ (v 7) / -- (8) of a variable. x: 0 a statement, 1 ++x in an expression (leaves the new value), 2 x++ (the old)"""
-        j = self.lookup(h)
-        if j < 0: return self.fail(6)
-        if self.sym[j][5]: return self.fail(64)
-        k, a = self.sym[j][2], self.sym[j][3]
-        if x == 2: self.load(j)
-        if v == 7: self.emit(INCL if k == 2 else INCG, a % 8192)
-        else:
-            self.load(j); self.emit(PUSHI, 1); self.emit(SUB)
-            if x == 1: self.emit(DUP)
-            self.store(j)
-        if x == 1 and v == 7: self.load(j)
-        if x: self.lb = 3; self.pm = 3; self.mode = S_OPER
-        else: self.mode = S_INC
-
     # ---- an expression ended at statement level (';' or ')' or ','): what was it for?
     def end_expr_stmt(self, kind, v):
         isP = lambda c: kind == 'P' and v == c
-        t = self.top_cs()
-        k = t[0]
+        t = self.top_cs(); k = t[0]
         if k == C_IFC and isP(41):
-            self.pop_cs(); la = self.newlab(); self.emit(JZ, 0, la); self.push_cs(C_IFB, la); self.mode = S_LBRACE; return
-        if k == C_SWITCHC and isP(41):                         # the value on the stack; the first test's label, the end label
-            self.pop_cs(); lt, le = self.newlab(), self.newlab(); self.push_cs(C_SWITCH, lt, le); self.mode = S_LBRACE; return
+            self.pop_cs(); la = self.newlab(); self.branch(la, False); self.push_cs(C_IFB, la); self.mode = S_LBRACE; return
         if k in (C_DOB, C_DOB1) and isP(41):
             # the statement ends at ')': JavaScript inserts a ';' here even without a newline, and a ';' that follows
             # is an empty statement (so `if (a) do s; while (c); else ...` is rejected)
-            self.pop_cs(); self.emit(JNZ, 0, t[3]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
+            self.pop_cs(); self.branch(t[3], True); self.deflab(t[2], self.here()); return self.complete_stmt(0)
+        if k == C_SWITCHC and isP(41):                         # the value into T(0), where the case tests read it. C_SWITCH: the
+            self.pop_cs(); self.to_temp(0); ty = self.otype(0); self.nd = 0     # next test's label, the end, default's label,
+            self.push_cs(C_SWITCH, self.newlab(), self.newlab(), 0, 4 * ty); self.mode = S_LBRACE; return    # 4 * type + seen + 2 default
         if k == C_WHILEC and isP(41):
-            self.pop_cs(); le = self.newlab(); self.emit(JZ, 0, le); self.push_cs(C_LOOPB, t[1], le); self.mode = S_LBRACE; return
-        if k == C_FORCOND and isP(59):
-            self.pop_cs()                                      # t: l1 le lb l2
-            self.emit(JZ, 0, t[2]); self.emit(JMP, 0, t[3]); self.deflab(t[4], self.here())
+            self.pop_cs(); le = self.newlab(); self.branch(le, False); self.push_cs(C_LOOPB, t[1], le); self.mode = S_LBRACE; return
+        if k == C_FORCOND and isP(59):                         # t: l1 le lb l2. The test jumps into the body; else out
+            self.pop_cs(); self.branch(t[3], True); self.emit('JMP', label=t[2]); self.deflab(t[4], self.here())
             self.push_cs(C_FORSTEP, t[1], t[2], t[3], t[4], e=t[5]); self.mode = S_STMT; return
         if k == C_ASSIGN:                                      # t: symbol, compound op, from a declaration
-            self.pop_cs()
-            if t[2] == ADD: self.emit_dyn(ADD, self.sym[t[1]][4], self.lb)
-            elif t[2]: self.emit(t[2])
-            self.sym[t[1]][4] = self.lb; self.store(t[1])
+            self.pop_cs(); o = (self.var(t[1]), 0); i = self.nd - 1
+            if t[2]:                                           # (a snapshot replaced x below e if e changed it)
+                self.sym[t[1]][4] = self.compound(t[2], i - 1, o); self.nd -= 1
+            else: self.put(o, i); self.sym[t[1]][4] = self.otype(i)
+            self.nd -= 1
             if isP(44) and t[3]: self.pn = (t[3] - 1, 0); self.mode = S_VAR; return     # var a = 1, b ...
             return self.end_simple_stmt(kind, v)
-        if k == C_PSET:                                        # t: dynamic, compound op, key offset (c * 64 + d)
-            self.pop_cs()
-            if t[2] == ADD: self.emit_dyn(ADD, 0, self.lb)              # (the old value's type is not known)
-            elif t[2]: self.emit(t[2])
-            if t[1]: self.emit(STOREX)
-            else: self.emit(PUTV, self.db + SDATA + t[3] * 64 + t[4])
+        if k == C_PSET:                                        # t: dynamic (x[k]), compound op, the key's offset (o.key: 64 * t[3] + t[4]).
+            self.pop_cs(); i = self.nd - 1; dyn = t[1]         # [x, k, (old,) e] or [o, (old,) e] on the operand stack
+            if t[2]: self.compound(t[2], i - 1, self.tmp(i - 1)); val = self.tmp(i - 1); i -= 1
+            else: val = self.src(i)
+            if dyn: self.index_write(i - 2, val)
+            else: self.prop_write(i - 1, self.db + 64 * t[3] + t[4], val)
             return self.end_simple_stmt(kind, v)
         if k == C_EXPR:
-            self.pop_cs(); self.emit(POP); return self.end_simple_stmt(kind, v)
+            self.pop_cs(); self.nd -= 1; return self.end_simple_stmt(kind, v)
         if k == C_RETURN and (isP(59) or isP(T_NL)):
-            self.pop_cs()
-            if self.lb: self.fn[self.cfn][3] = self.lb
-            self.emit(RET, self.npar); return self.complete_stmt(0)
+            self.pop_cs(); i = self.nd - 1
+            if self.otype(i): self.fn[self.cfn][3] = self.otype(i)
+            self.emit('RET', b=self.src(i)); self.nd -= 1; return self.complete_stmt(0)
         return self.fail(50)
 
     # ---- a simple statement's terminator: ';' normally, ';' after a for init, ')' after a for step
@@ -881,7 +1158,7 @@ class Compiler:
             self.pop_cs(); self.deflab(t[1], self.here()); self.push_cs(C_FORCOND, t[1], t[2], t[3], t[4], e=t[5]); self.mode = S_OPND; return
         if t[0] == C_FORSTEP:
             if not isP(41): return self.fail(52)
-            self.pop_cs(); self.emit(JMP, 0, t[1]); self.deflab(t[3], self.here())
+            self.pop_cs(); self.emit('JMP', label=t[1]); self.deflab(t[3], self.here())
             self.push_cs(C_LOOPB, t[4], t[2], e=t[5]); self.mode = S_LBRACE; return
         if not (isP(59) or isP(T_NL)): return self.fail(53)
         self.complete_stmt(0)
@@ -896,7 +1173,7 @@ class Compiler:
             t = self.pop_cs(); self.nlet = t[5]                # the body's block scope ends
             if k == C_DOB1: return self.do_cond(t)
             if k == C_ELSEB1: self.deflab(t[1], self.here())
-            elif k == C_LOOPB1: self.emit(JMP, 0, t[1]); self.deflab(t[2], self.here())
+            elif k == C_LOOPB1: self.emit('JMP', label=t[1]); self.deflab(t[2], self.here())
             elif nonelse or self.asic: self.deflab(t[1], self.here())
             else: self.pendLa = t[1]; self.mode = S_ELSE; return
 
@@ -907,14 +1184,14 @@ class Compiler:
         if k == C_IFB: self.pendLa = t[1]; self.mode = S_ELSE; return
         if k == C_ELSEB: self.deflab(t[1], self.here()); return self.complete_stmt(0)
         if k == C_DOB: return self.do_cond(t)
-        if k == C_LOOPB: self.emit(JMP, 0, t[1]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
-        if k == C_SWITCH:                                      # [JMP end]  T: POP [JMP default]  end:
-            if t[4] & 1: self.emit(JMP, 0, t[2])
-            self.deflab(t[1], self.here()); self.emit(POP)
-            if t[4] & 2: self.emit(JMP, 0, t[3])
+        if k == C_LOOPB: self.emit('JMP', label=t[1]); self.deflab(t[2], self.here()); return self.complete_stmt(0)
+        if k == C_SWITCH:                                  # the last test failed: to default if there is one
+            if t[4] & 2: self.emit('JMP', label=t[2])
+            self.deflab(t[1], self.here())
+            if t[4] & 2: self.emit('JMP', label=t[3])
             self.deflab(t[2], self.here()); return self.complete_stmt(0)
-        if k == C_FUNCB:
-            self.emit(PUSHI, 0); self.emit(RET, self.npar); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
+        if k == C_FUNCB:                                   # (still inside: the RET's frame label)
+            self.emit('RET', b=(K(0), 0)); self.deflab(t[2], self.nloc); self.deflab(t[1], self.here())
             self.curf = 0; self.nsym = self.fsym; self.mode = S_STMT; return
         return self.fail(55)
 
@@ -923,12 +1200,9 @@ class Compiler:
         self.deflab(t[1], self.here()); self.csp += 1; self.mode = S_DOWHILE
 
     def end_params(self):
-        for i in range(self.npar):                           # param k of n sits at fp - 1 - n + k
-            self.sym[self.fsym + i][3] = -1 - self.npar + i
         f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
         if f[4] and f[4] != self.npar + 1: return self.fail(76)
-        f[4] = self.npar + 1
-        self.emit(ENTER, 0, self.cs[self.csp - 1][2]); self.mode = S_LBRACE
+        f[4] = self.npar + 1; self.mode = S_LBRACE
 
     # ---------------- whole program
     def compile(self, src):
@@ -937,142 +1211,190 @@ class Compiler:
             self.char(s[i], s[i + 1] if i + 1 < len(s) else 0)
         return self.link()
 
+    def words_ir(self):
+        """the code as the CSS compiler emits it: {address: (word without labels, label id or None, its multiplier)}"""
+        out = {}
+        for i, (op, a, w, lab0, lab1, m) in self.code.items():
+            out[self.cb + 2 * i] = (OP[op] * 8192 + a, lab0, 1)
+            out[self.cb + 2 * i + 1] = (w, lab1, m)
+        return out
+
     def link(self):
-        if self.cp > CODESZ: self.fail(62)                # (the page checks this in .fin)
+        if 2 * self.cp > self.CODESZ: self.fail(62)           # (the page checks this in .fin)
         words = {}
-        for a, (op, imm, lab) in self.code.items():
+        for a, (w, lab, m) in self.words_ir().items():
             if lab is not None:
-                if lab >= NL or self.lab[lab] < 0: self.fail(60); imm = 0
-                else: imm = self.lab[lab] % 8192
-            words[self.cb + a] = op * 8192 + imm
+                if lab >= self.NL or self.lab[lab] < 0: self.fail(60)
+                else: w += m * self.lab[lab]
+            words[a] = w
         return words, dict(self.data)
 
-# ---------------- simulator (= build.js run())
-def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, net=None):
-    """strict: check the stack discipline the compiler promises: statements leave the stack as they found it, so sp
-    never goes below sp0 (RuntimeError 'stack underflow') and is back at sp0 at HALT ('stack unbalanced').
-    net: the NET instruction's gateway (default: net/device.py's, which serves tests/net/)"""
+# ---------------- simulator
+def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, trace=None, ent=None, net=None):
+    """the register machine from code_base (fp = sp0) on a RAM image; returns (steps, output). ent: the runtime library's entries
+    (the traps' routines). strict: fp is back at sp0 at HALT. net: the NET instruction's gateway (default: net/device.py's,
+    which serves tests/net/)"""
     if net is None: net = Device()
     if out_base is None: out_base = LAYOUT['out_base']
     mem = [0] * (AMASK + 1)
     romw = [w or 0 for w in rom]       # instructions only: a data read below RAM gives 0 (the page has no ROM leaves)
     for a, v in mem_init.items(): mem[a] = v
-    pc, sp, fp, optr, steps, out = 0, sp0, sp0, 0, 0, []
-    s20 = lambda x: (x + (1 << 19)) % (1 << 20) - (1 << 19)       # machine words: 20-bit two's complement
-    ROMN = LAYOUT['rom_size']
+    db, ROMN = LAYOUT['data_base'], LAYOUT['rom_size']
+    pc, fp, optr, steps, out, pst = LAYOUT['code_base'], sp0, 0, 0, [], 0
+    def addr(o): return (db + o if o < 256 else fp + o - 256) & AMASK
     def rd(a): a &= AMASK; return mem[a] if a >= ROMN else 0
+    def val(o): return o - 896 if o >= 768 else rd(addr(o))
     def wr(a, v):
         a &= AMASK
         if a >= ROMN: mem[a] = s20(v)
+    def trap(name, base, args, ret):
+        """a call into the runtime library: the frame at fp + base (the arguments above its return word)"""
+        nonlocal fp, pc
+        for i, x in enumerate(args): wr(fp + base + 1 + i, x)
+        wr(fp + base, base * 8192 + ret); fp += base; pc = ent[name]
+    def chars(v, boolean):
+        """a string, number or boolean operand of +: its characters"""
+        if isstr(v): p = (v + STRTAG) & AMASK; return [rd(p + i) for i in range(rd(p - 1))]
+        return [ord(ch) for ch in ('true' if v else 'false')] if boolean and v in (0, 1) else [ord(ch) for ch in str(v)]
+    def cat(a, x, y, bx, by):
+        """the + of a string with a string, number or boolean (bx / by: DADDL / DADDR's boolean side) into A, as the ROM's cat lays
+        it out (newstr: [hdr][len][bytes][0] from HP); False if the heap is full (the ROM's cat collects)"""
+        t = chars(x, bx) + chars(y, by); n = len(t); nw = (n + 10) // 8 * 8; hp = rd(HP)
+        if hp + nw - 8 >= rd(GCLIM) + LAYOUT['heap_size'] - 7: return False
+        base = HEAP0 + hp; wr(HP, hp + nw)
+        for i, w in enumerate([-2 - nw, n] + t + [0]): wr(base + i, w)
+        mark(base); wr(addr(a), base + 2 - STRTAG); return True
+    def mark(b):
+        """the block at b in the collector's map"""
+        w, k = mapbit(b); wr(w, rd(w) | 1 << k)
+    def probe(o, key):
+        """GETP / SETP: the address of key's word in object o's chunks, or of the word that ends its keys (0)"""
+        cur = (o + OBJTAG) & AMASK
+        while True:
+            k = rd(cur)
+            if k == key or k == 0: return cur
+            cur = (k + OBJTAG) & AMASK if k < 0 else cur + 2
+    def setp(o, key, v, full=None):
+        """SETP / SETX of an object: the key's pair, else a free pair in place, else the library (a full chunk: setp, or for
+        SETX setx with its own operands, as the CSS CPU hands it back)"""
+        q = probe(o, key)
+        if rd(q): wr(q + 1, v)
+        elif (q - HEAP0) % 8 < 6: wr(q, key); wr(q + 1, v); wr(q + 2, 0)
+        else: name, args = full or ('setp', [o, key, v]); trap(name, TRAPOFF, args, pc)
+    def emit(c):
+        nonlocal optr
+        if c == 10: optr = (optr // cols + 1) * cols % (cols * rows)
+        else: mem[out_base + optr] = c; optr = (optr + 1) % (cols * rows)
+        out.append(c)
     tdiv = lambda a, b: 0 if b == 0 else int(a / b)
     tmod = lambda a, b: 0 if b == 0 else a - b * int(a / b)
+    ALU = {'ADD': lambda a, b: a + b, 'SUB': lambda a, b: a - b, 'MUL': lambda a, b: a * b, 'DIV': tdiv, 'MOD': tmod,
+           'LT': lambda a, b: int(a < b), 'GT': lambda a, b: int(a > b), 'LE': lambda a, b: int(a <= b), 'GE': lambda a, b: int(a >= b),
+           'EQ': lambda a, b: int(a == b), 'NE': lambda a, b: int(a != b)}
     while True:
         steps += 1
         if steps > max_steps: raise RuntimeError('step limit')
-        if strict and sp < sp0 and pc >= LAYOUT['code_base']: raise RuntimeError(f'stack underflow at code word {pc - LAYOUT["code_base"]}')
-        w = romw[pc] if pc < len(romw) else mem[pc]; op, imm = w // 8192, w % 8192; simm = imm - 8192 if imm >= 4096 else imm; pc += 1
-        if op == 0: pass
-        elif op == 1: mem[sp] = imm; sp += 1
-        elif op == 2: mem[sp] = mem[imm]; sp += 1
-        elif op == 3: sp -= 1; mem[imm] = mem[sp]
-        elif op == 4: mem[sp] = mem[fp + simm]; sp += 1
-        elif op == 5: sp -= 1; mem[fp + simm] = mem[sp]
-        elif op == 6: a = mem[sp - 1]; mem[sp - 1] = mem[a & AMASK]
-        elif op == 7: sp -= 1; b = mem[sp]; sp -= 1; a = mem[sp]; mem[a & AMASK] = b
-        elif 8 <= op <= 20:
-            sp -= 1; b = mem[sp]; a = mem[sp - 1]
-            mem[sp - 1] = [s20(a + b), s20(a - b), s20(a * b), tdiv(a, b), tmod(a, b), int(a < b), int(a > b), int(a <= b), int(a >= b), int(a == b), int(a != b),
-                           int(a != 0 and b != 0), int(a != 0 or b != 0)][op - 8]
-        elif op == 21: mem[sp - 1] = int(not truthy(mem, mem[sp - 1]))
-        elif op == 22: mem[sp - 1] = s20(-mem[sp - 1])
-        elif op == 23: pc = imm
-        elif op == 24:
-            sp -= 1
-            if not truthy(mem, mem[sp]): pc = imm
-        elif op == 25:
-            sp -= 1
-            if truthy(mem, mem[sp]): pc = imm
-        elif op == 26: mem[sp] = pc; sp += 1; pc = imm
-        elif op == 27:                                     # ENTER: the frame, its locals zeroed (they are the collector's roots)
-            mem[sp] = fp; fp = sp; sp = sp + 1 + imm
-            for i in range(1, imm + 1): mem[fp + i] = 0
-        elif op == 28:
-            v = mem[sp - 1]; oldfp = mem[fp]; ret = mem[fp - 1]; nsp = fp - 1 - imm; mem[nsp] = v; sp = nsp + 1; fp = oldfp; pc = ret
-        elif op == 29: sp -= 1
-        elif op == 30: mem[sp] = mem[sp - 1]; sp += 1
-        elif op == 31:
-            sp -= 1; c = mem[sp]
-            if c == 10: optr = (optr // cols + 1) * cols % (cols * rows)
-            else: mem[out_base + optr] = c; optr = (optr + 1) % (cols * rows)
-            out.append(c)
-        elif op == 32:
-            if strict and sp != sp0: raise RuntimeError(f'stack unbalanced at HALT: sp - sp0 = {sp - sp0}')
+        w0, w1 = (romw[pc], romw[pc + 1]) if pc < len(romw) else (mem[pc], mem[pc + 1])
+        op = OPN[w0 // 8192]; a = w0 % 8192; b = w1 // 1024 + 512; c = w1 % 1024
+        if trace: trace(pc, op, a, b, c, w1)
+        pc += 2
+        if op in ALU: wr(addr(a), ALU[op](val(b), val(c)))
+        elif op == 'MOV': wr(addr(a), val(b))
+        elif op == 'NEG': wr(addr(a), -val(b))
+        elif op == 'NOT': wr(addr(a), int(not truthy(mem, val(b))))
+        elif op == 'LOADK': wr(addr(a), w1)
+        elif op == 'GETFP': wr(addr(a), fp)
+        elif op == 'LDI': wr(addr(a), rd(val(b) + val(c)))
+        elif op == 'STI': wr(val(a) + val(b), val(c))
+        elif op == 'JMP': pc = a
+        elif op == 'JZ': pc = a if not truthy(mem, val(b)) else pc
+        elif op == 'JNZ': pc = a if truthy(mem, val(b)) else pc
+        elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
+            if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
             return steps, ''.join(map(chr, out))
-        elif op == 33: sp -= 1; pc = mem[sp]
-        elif op == 34: mem[sp - 1] = s20(mem[sp - 1] * 8192)
-        elif op == 35: mem[imm] = s20(mem[imm] + 1)
-        elif op == 36: mem[fp + simm] = s20(mem[fp + simm] + 1)
-        elif op == 37: mem[sp - 1] = mem[(mem[imm] + mem[sp - 1]) & AMASK]
-        elif op == 38: mem[sp - 1] = mem[(mem[fp + simm] + mem[sp - 1]) & AMASK]
-        elif op == PUSHS: mem[sp] = imm - STRTAG; sp += 1
-        elif op == NET:                                    # the answers' bytes into RBUF0 …, part 0's answer on the stack
-            for a, v in netw(net(mem[sp - 1])): mem[sp - 1 if a is None else a] = s20(v)
-        # arrays and dynamic operators: the fast case here, the rest in ROM (a trap: the return address pushed, as by CALL)
-        elif op in (IDXA, STOREX):
-            x, k = (mem[sp - 2], mem[sp - 1]) if op == IDXA else (mem[sp - 3], mem[sp - 2])
-            a = (x - ARRTAG) & AMASK; inb = isarr(x) and 0 <= k < mem[a - 1]
-            if op == IDXA and isarr(x): mem[sp - 2] = mem[(mem[a] + k) & AMASK] if inb else 0; sp -= 1
-            elif op == STOREX and inb: mem[(mem[a] + k) & AMASK] = mem[sp - 1]; sp -= 3
-            else: mem[sp] = pc; sp += 1; pc = GETXVEC if op == IDXA else SETXVEC
-        elif op == DYN:
-            b = mem[sp - 1]; a = mem[sp - 2]
-            if dyntrap(imm, a, b): mem[sp] = pc; sp += 1; pc = DYNVEC
-            else: sp -= 1; mem[sp - 1] = {ADD: s20(a + b), EQ: int(a == b), NE: int(a != b), LT: int(a < b), GT: int(a > b), LE: int(a <= b)}.get(imm % 64, int(a >= b))
-        # objects (machine/uarch.py's microcode, instruction by instruction). Data reads below RAM give 0, writes there are lost.
-        elif op in (SCANI, SCAN):                          # probe one key; execute again unless it stopped
-            key = imm if op == SCANI else mem[KEYCELL]
-            t3 = mem[sp - 1]; t2 = rd(t3)
-            if t2 == key or t2 == 0: pass                  # found, or the keys end: the cursor stays on that word
-            else: mem[sp - 1] = t2 if t2 < 0 else s20(t3 + 2); pc -= 1      # a link / the next pair
-        elif op == LDF: mem[sp - 1] = rd(mem[sp - 1] + imm)
-        elif op == PUTV:
-            c = mem[sp - 2]
-            if rd(c) != 0: wr(c + 1, mem[sp - 1]); sp -= 2
-            else: wr(c + 1, pc - 1); pc = PUTVEC         # the append routine, [c, v]
-        elif op == NEW:
-            t2 = mem[HP]; t1 = mem[GCLIM] + LAYOUT['heap_size'] - 7          # GCLIM: the space's offset (0 or heap_size)
-            if s20(t2 - t1) < 0: mem[sp] = t2 + HEAP0 - OBJTAG; mem[HP] = t2 + 8
-            else: mem[GCSP] = sp; mem[RETCELL] = pc - 1; pc = GCVEC
-            sp += 1
-        elif op == SETF: wr(mem[sp - 2] + imm, mem[sp - 1]); sp -= 1
-        elif op == ENDK: wr(mem[sp - 1] + imm, 0); wr(mem[sp - 1] + imm + 1, 0)
-        elif op == OVER: mem[sp] = mem[sp - 2]; sp += 1
-        elif op == JNEG:
-            if mem[sp - 2] < 0: pc = imm
-        elif PRINT <= op <= PRINTBLN and (isarr(mem[sp - 1]) or isobj(mem[sp - 1])):     # the ROM prints it
-            mem[sp] = pc; sp += 1; pc = PRINTVEC
-        elif PRINT <= op <= PRINTBLN:
-            sp -= 1; v = mem[sp]; p = v + STRTAG; sep = PRINT_SEP[op]
+        elif op[0] == 'J': pc = a if ALU[op[1:]](val(b), val(c)) else pc
+        elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc); fp += w1; pc = a
+        elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = r % 8192
+        elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's one-line form)
+        elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + pst + 2); fp += TRAPOFF; pc = a; pst = 0
+        elif op in ('PRINT', 'PRINTK'):
+            v = val(b) if op == 'PRINT' else w1; sep = (0, 32, 10)[a // 2 % 4]
             if isstr(v):                                   # a literal or a heap string (data_base + SDATA: the lib's DONE marker, empty)
-                text = []
-                while p != LAYOUT["data_base"] + SDATA and mem[p] != 0: text.append(mem[p]); p += 1
-            elif op % 2 == 0 and v in (0, 1): text = [ord(ch) for ch in ('true' if v else 'false')]
+                p = v + STRTAG; text = []
+                while p != db + SDATA and mem[p] != 0: text.append(mem[p]); p += 1
+            elif a % 2 and v in (0, 1): text = [ord(ch) for ch in ('true' if v else 'false')]
             else: text = [ord(ch) for ch in str(v)]
-            for c in text + ([sep] if sep else []):
-                if c == 10: optr = (optr // cols + 1) * cols % (cols * rows)
-                else: mem[out_base + optr] = c; optr = (optr + 1) % (cols * rows)
-                out.append(c)
-        else: raise RuntimeError(f'bad op {op} at {pc - 1}')
+            for ch in text + ([sep] if sep else []): emit(ch)
+        elif op == 'PUTC': emit(val(b))
+        elif op in ('DADD', 'DADDL', 'DADDR'):
+            x, y = val(b), val(c)
+            if not (isref(x) or isref(y)): wr(addr(a), x + y)
+            elif isarr(x) or isobj(x) or isarr(y) or isobj(y): trap(TRAPS[op], a - 256, [x, y], pc)
+            elif not cat(a, x, y, op == 'DADDL', op == 'DADDR'): trap(CATTRAPS[op], a - 256, [x, y], pc)
+        elif op in ('DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE'):
+            x, y = val(b), val(c)
+            if (isstr(x) and isstr(y)) if op in ('DEQ', 'DNE') else (isref(x) or isref(y)): trap(TRAPS[op], a - 256, [x, y], pc)
+            else: wr(addr(a), ALU[op[1:]](x, y))
+        elif op == 'GETX':                              # an array: its element (0 past its length); anything else: the library
+            x, k = val(b), val(c)
+            if isarr(x):
+                q = (x - ARRTAG) & AMASK; wr(addr(a), rd(rd(q) + k) if 0 <= k < rd(q - 1) else 0)
+            elif isobj(x) and not notown(k): q = probe(x, s20(k + STRTAG)); wr(addr(a), rd(q + 1) if rd(q) else 0)
+            else: trap('getx', a - 256, [x, k], pc)
+        elif op == 'SETX':                              # an array, k inside its length: the store; anything else: the library
+            x, k, v = val(a), val(b), val(c); q = (x - ARRTAG) & AMASK
+            if isarr(x) and 0 <= k < rd(q - 1): wr(rd(q) + k, v)
+            elif isobj(x) and not notown(k): setp(x, s20(k + STRTAG), v, ('setx', [x, k, v]))
+            else: trap('setx', TRAPOFF, [x, k, v], pc)
+        elif op == 'NEW':                               # a chunk with no keys (the heap full: the collector, then NEW again)
+            hp = rd(HP)
+            if s20(hp - (rd(GCLIM) + LAYOUT['heap_size'] - 7)) < 0: wr(HEAP0 + hp, 0); mark(HEAP0 + hp); wr(HP, hp + 8); wr(addr(a), hp + HEAP0 - OBJTAG)
+            else: trap('gcnew', a - 256, [], pc - 2)
+        elif op == 'GETP':                              # o.key (C: the key's offset from data_base): 0 if missing or not an object
+            o = val(b); wr(addr(a), rd(probe(o, db + c) + 1) if isobj(o) and rd(probe(o, db + c)) else 0)
+        elif op == 'SETP':                              # o.key = v: the key's pair, else a free pair in place, else the library
+            o, v = val(a), val(b)
+            if isobj(o): setp(o, db + c, v)
+        elif op == 'KIND': wr(addr(a), kind(c - 896, val(b)))
+        elif op == 'ALLOC':                             # a block at HP (the heap full: the collector, then ALLOC again)
+            n, k = val(b), c - 896; nw = allocw(k, n); hp = rd(HP); base = HEAP0 + hp
+            if hp + nw > rd(GCLIM) + LAYOUT['heap_size']: trap('galloc', a - 256, [nw], pc - 2)
+            else:
+                if k == 0: wr(base, -2 - nw); wr(base + 1, n); wr(base + 2 + n, 0)
+                elif k == 1: wr(base, -3 - nw); wr(base + 1, n); wr(base + 2, 0); wr(base + 3, base + 4)
+                if k != 2: mark(base)
+                wr(HP, hp + nw); wr(addr(a), (base + 2 - STRTAG, base + 3 + ARRTAG, base, base)[k])
+        elif op in ('MCPY', 'MUPPER', 'MLOWER'):
+            d, s_, n = val(a), val(b), val(c)
+            for i in range(n): wr(d + i, mcase(op, rd(s_ + i)))
+        elif op == 'MFILL':
+            d, v, n = val(a), val(b), val(c)
+            for i in range(n): wr(d + i, v)
+        elif op == 'NPUT':
+            p, v = val(a), val(b)
+            for i, ch in enumerate(str(v)): wr(p + i, ord(ch))
+        elif op in ('MCMP', 'MFEQ', 'MFREF'):
+            n, p, q = val(a), val(b), val(c); i = 0
+            while i < n and not (rd(p + i) != rd(q + i) if op == 'MCMP' else rd(p + i) == q if op == 'MFEQ' else isfref(rd(p + i), q)): i += 1
+            wr(addr(a), i)
+        elif op == 'MWALK':
+            n, p, e = val(a), val(b), val(c); o = 0
+            while p + o < e and rd(p + o) != n: o += rd(p + o) + 2
+            wr(addr(a), o)
+        elif op == 'APUSH':                             # (no array, or a full one: on to the ROM's push)
+            x, v = val(b), val(c); q = (x - ARRTAG) & AMASK
+            if isarr(x) and rd(q - 1) < rd(q - 2):
+                n = rd(q - 1); wr(rd(q) + n, v); wr(q - 1, n + 1); r = mem[fp]; wr(fp, n + 1); fp -= r // 8192; pc = r % 8192
+        elif op == 'NET':                               # the answers' bytes into RBUF0 …, part 0's answer into A
+            for ad, v in netw(net(val(b))): wr(addr(a) if ad is None else ad, v)
+        else: raise RuntimeError(f'bad op {op} at {pc - 2}')
 
 def image_mem(c, words, data, init=None):
-    """RAM as the CSS compiler leaves it: code words; strings in place; initialised globals/arrays staged at
-    init (the lib's startup copies them into the data area), their count at init - 1"""
+    """RAM as the CSS compiler leaves it: code words; strings in place; the globals' count at init - 1"""
     if init is None: init = LAYOUT['init']
     mem = dict(words)
     sbase = c.db + SDATA
-    for a, v in data.items():
-        if a >= sbase: mem[a] = v
-        else: mem[init + a - c.db] = v
+    for a, v in data.items(): mem[a] = v
     mem[init - 1] = c.dp - c.db
     assert all(a >= sbase for a in data), 'nothing is staged: globals start at 0'
     mem[c.db] = STRTAG                  # the untag constant at data_base (read only: an overlay on the page)
@@ -1084,28 +1406,44 @@ def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
     c = Compiler(LAYOUT['data_base'], LAYOUT['code_base'], lib)
     words, data = c.compile(src)
     if c.err: return c, None
-    mem = image_mem(c, words, data, lib.get('init', 5120))
-    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict)
+    mem = image_mem(c, words, data, lib.get('init', LAYOUT['init']))
+    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'))
 
 def image(src, lib, ram=False):
     """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero (the page's
     compile chain supplies code and data), or with ram=True the program as the CSS compiler leaves it (CPU-only pages,
     the CSS CPU's model). steps/expected come from cc_ref's simulation."""
-    L = LAYOUT
-    c = Compiler(L['data_base'], L['code_base'], lib)
+    La = LAYOUT
+    c = Compiler(La['data_base'], La['code_base'], lib)
     words, data = c.compile(src)
     if c.err: raise ValueError(f'compile error {c.err}')
-    mem = image_mem(c, words, data, lib['init'])
-    r = run(lib['rom'], dict(mem), L['sp0'])
+    mem = image_mem(c, words, data, lib.get('init', La['init']))
+    r = run(lib['rom'], dict(mem), La['sp0'], ent=lib.get('entries'))
     if not ram: mem = {}
-    return dict(rom=lib['rom'], romSize=L['rom_size'], ram=[mem.get(L['rom_size'] + i, 0) for i in range(L['ram_size'])],
-                ramSize=L['ram_size'], sp0=L['sp0'], outBase=L['out_base'], rows=L['rows'], cols=L['cols'], source=src,
-                codeBase=L['code_base'], init=L['init'], steps=r[0], expected=r[1])
+    return dict(rom=lib['rom'], romSize=La['rom_size'], ram=[mem.get(La['rom_size'] + i, 0) for i in range(La['ram_size'])],
+                ramSize=La['ram_size'], sp0=La['sp0'], outBase=La['out_base'], rows=La['rows'], cols=La['cols'], source=src,
+                codeBase=La['code_base'], init=La.get('init'), steps=r[0], expected=r[1], entries=lib.get('entries', {}))
+
+def disasm(words, base=None):
+    """the instructions of a {address: word} map, as text lines"""
+    out = []
+    for a in sorted(words)[::2]:
+        w0, w1 = words[a], words.get(a + 1, 0); op = OPN[w0 // 8192]; A = w0 % 8192; b = w1 // 1024 + 512; c = w1 % 1024
+        def o(x): return f'#{x - 896}' if x >= 768 else f'F{x - 256}' if x >= 256 else f'G{x}'
+        if op in ('LOADK', 'PRINTK', 'CALL'): args = f'{o(A) if op == "LOADK" else A}, {w1}'
+        elif op in ('JMP', 'HALT'): args = f'{A}'
+        elif op[0] == 'J': args = f'{A}, {o(b)}' + ('' if op in ('JZ', 'JNZ') else f', {o(c)}')
+        elif op in ('MOV', 'NEG', 'NOT'): args = f'{o(A)}, {o(b)}'
+        elif op == 'PRINT': args = f'{A}, {o(b)}'
+        elif op in ('PUTC', 'RET'): args = o(b)
+        else: args = f'{o(A)}, {o(b)}, {o(c)}'
+        out.append(f'{a:5} {op:6} {args}')
+    return out
 
 if __name__ == '__main__':
-    import json
-    lib = json.load(open(__import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath(__file__)), 'lib.json')))
+    lib = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib.json')))
     src = open(sys.argv[1]).read()
     c, r = compile_and_run(src, lib)
-    print('err', c.err, 'code words', c.cp, 'data words', c.dp - LAYOUT['data_base'], 'labels', c.nlab)
+    print('err', c.err, 'instructions', c.cp, 'data words', c.dp - LAYOUT['data_base'], 'labels', c.nlab)
+    if '-d' in sys.argv: print('\n'.join(disasm(c.link()[0])))
     if r: print('steps', r[0], 'output:'); print(r[1])

@@ -248,6 +248,32 @@ class Ctx:
                 if x.v not in live: live.add(x.v); stack.append(byname[x.v])
             else: stack.extend(x.a)
         self.temps = [(n, x) for n, x in self.temps if n in live]
+    def inline(self, keep):
+        """a temp used once (by another temp or the final state) and not named in keep goes into its user's expression: one CSS
+        declaration fewer, the same arithmetic (every operation keeps integers, so a registered value's rounding changes nothing)"""
+        uses = {}
+        def count(x, k=1):                # k: how many times x appears in its user's CSS text (css2: ite(c, a, b) is b + c * (a - b))
+            if x.op == 'T': uses[x.v] = uses.get(x.v, 0) + k
+            elif x.op == '?': count(x.a[0], k); count(x.a[1], k); count(x.a[2], 2 * k)
+            else:
+                for y in x.a: count(y, k)
+        for _, x in self.temps: count(x)
+        for x in self.cur.values(): count(x)
+        one = {n for n, _ in self.temps if uses.get(n) == 1 and n not in keep}
+        sub, memo = {}, {}
+        def rw(x):
+            if x.op == 'T': return sub.get(x.v, x)
+            if not x.a: return x
+            r = memo.get(x)
+            if r is None:
+                a = tuple(rw(y) for y in x.a); r = x if a == x.a else N(x.op, a, x.v); memo[x] = r
+            return r
+        temps = []
+        for n, x in self.temps:
+            x = rw(x)
+            if n in one: sub[n] = x
+            else: temps.append((n, x))
+        self.temps = temps; self.cur = {k: rw(v) for k, v in self.cur.items()}
     def run_python(self, env):
         """env: {('S', n): v, ('I', n): v} -> evaluates temps; returns new state dict."""
         e = dict(env)

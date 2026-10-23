@@ -4,8 +4,8 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
 import csslabel as lbl
 
-def static(COLS, ROWS, UIL, UIP, WOFF):
-    """the editor page's hand-written CSS"""
+def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
+    """the editor page's hand-written CSS (EDS: the editors, #ed and the samples the picker shows)"""
     TOPS = ROWS * 20 + 48
     return f"""
   {lbl.section('Editor page', 'hand-written: the layout, the Run button and the compile status line')}
@@ -13,7 +13,7 @@ def static(COLS, ROWS, UIL, UIP, WOFF):
   :root {{ --paper: #f3f5f7; --sheet: #fff; --ink: #17212b; --muted: #5b6875; --rule: #c9d1d9; --accent: #2456c9; }}
   body {{ background: var(--paper); color: var(--ink); }}
   #app {{ position: relative; overflow: hidden; margin: 0 0 0 {COLS * 11 + 72}px; padding: 20px 24px 48px 0; width: {UIP * 10 + 60}px; display: grid; gap: 1rem; align-content: start;
-    contain: strict; height: {UIL * 24 + 560}px;   /* the scan relayouts stay inside #app (the CPU's fixed readers are not touched) */
+    contain: strict; height: {UIL * 24 + 640}px;   /* the scan relayouts stay inside #app (the CPU's fixed readers are not touched) */
     will-change: transform; }}   /* its own compositor layer: the CPU's per-pass paint invalidations then don't re-record the editor and notes */
   #app h1 {{ font-size: 1.15rem; margin: 0; }}
   .lede {{ margin: .3rem 0 0; color: var(--muted); }}
@@ -22,7 +22,20 @@ def static(COLS, ROWS, UIL, UIP, WOFF):
   .scanpos {{ font: .8rem ui-monospace, monospace; color: var(--muted); }}
   .frame {{ background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }}
   .frame:focus-within {{ border-color: var(--accent); }}
-  #ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
+  .ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
+  {lbl.group('Sample picker', 'radio buttons beside #run (#pk0, #pk1, ...) pick the editor that shows; each keeps its own edits')}
+  .pkr {{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }}
+  .picker {{ display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 .7rem; }}
+  .picker label {{ cursor: pointer; user-select: none; font: 500 .8rem/1 system-ui, sans-serif; padding: .38rem .72rem; border-radius: 999px;
+    border: 1px solid var(--rule); background: var(--sheet); color: var(--muted); transition: background .15s, color .15s, border-color .15s; }}
+  .picker label::before {{ content: attr(data-icon); margin-right: .35em; }}
+  .picker label:hover {{ border-color: var(--accent); color: var(--ink); }}
+  .ed {{ display: none; }}
+  {" ".join(f"#pk{e}:checked ~ #app .ed{e}," for e in range(EDS))[:-1]} {{ display: block; }}
+  {" ".join(f"#pk{e}:checked ~ #app label[for=pk{e}]," for e in range(EDS))[:-1]} {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
+  {" ".join(f"#pk{e}:focus-visible ~ #app label[for=pk{e}]," for e in range(EDS))[:-1]} {{ outline: 2px solid var(--ink); outline-offset: 2px; }}
+  #run:checked ~ #app .picker {{ opacity: .45; pointer-events: none; }}   /* the scan reads the editor that shows: no switching while it runs */
+  #run:checked ~ .pkr {{ visibility: hidden; }}
   {lbl.group('Run / Edit button')}
   .runbtn {{ position: relative; display: inline-block; cursor: pointer; font: 600 .9rem/1 system-ui, sans-serif; color: #fff; background: var(--accent);
     border-radius: 6px; padding: .55rem 1rem; user-select: none; }}

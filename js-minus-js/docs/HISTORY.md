@@ -40,22 +40,40 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   idle levels 269 µs), an `if()` ~70 ns per entry it contains, size containers above a subtree restyling it once per
   container (7 times per fill). FizzBuzz on the page 10.5 → 3.9 s after Run; CPU-only pages 2.8–7.3× faster
   (BENCHMARKS §12). The font CPU's code was removed; it last exists at commit `181cbb7`.
-- **13, the network (2026-10-19 … 21, branch `css-fetch`).** `fetch(url)` / `read()` through one `NET` instruction and
+- **13, the register machine (2026-10-21).** A proof of concept on a subset (`exp/regvm/`) ran compute-bound programs
+  2.0–2.6× faster than the stack machine at the same compile time, so the whole language moved over: two-word
+  three-address instructions, a stack of operand descriptors instead of a register allocator, the runtime library
+  compiled by `cc_ref` itself, and instructions that do in CSS what the stack machine left to ROM routines: the dynamic
+  operators, `a[i]` and `o.x` in place, NEW, a string's `+` written word by word (the cat class), traps that write their
+  frame one word per execution. The full language first compiled 8–13% slower than main (median per program); inlining
+  the DSL's single-use temps and materialising each code record's word brought it to 3% (BENCHMARKS §14). Run times:
+  §14. The stack machine last exists at `212175a`.
+- **14, the hybrid (2026-10-22).** Benchmarked against each other, the register machine won on compute and branch
+  `rom-css` (the stack machine with the runtime's work on memory as instructions, a cache line per execution) on
+  strings, arrays and objects. The hybrid took `rom-css`'s primitives onto the register machine, redone for three-address
+  code (KIND, ALLOC, the MCPY and MCMP families, APUSH, a line-wide cat class), and found its two remaining costs on the
+  way: the collector's per-collection walk of from-space (now a map kept as blocks are made, which also fixed a hang on a
+  grown array's headerless block) and user code evicted from the data cache by the data it works on (now a code cache of
+  its own: suite passes −28% in the model). With GETX / SETX probing objects in the machine, 25 programs ran 1.74× faster
+  than the register machine and 1.53× than `rom-css` (geometric means); two light programs 3–4% slower than the register
+  machine, since every register costs every pass (BENCHMARKS §15).
+- **15, the network (2026-10-19 … 21, branch `css-fetch`, on the stack machine).** `fetch(url)` / `read()` through one `NET` instruction and
   a modem iframe that reloads itself (ARCHITECTURE §3.8). `<object>`s fire their request once only (ENGINE_NOTES 53); a
   quirks-mode child reads any same-origin body as CSS (50). The first return channel was responsive iframes (51): it
   needed a flag in 153 and its height never shrank (52). The user's fragment-scroll readback (56,
   `net/xhtml-tests/`) replaced it: no flag, 20 bits per answer. The gateway is a proxy: CSS can't build a URL, and CSS
   can't read an arbitrary body. On the font CPU a word took 0.5–0.8 s; on the CSS CPU about 0.25 s. Then 4 modems with
-  2 bytes each: half the time for a body (BENCHMARKS §14), not the quarter the probe promised; two bugs on the way, a
+  2 bytes each: half the time for a body (BENCHMARKS §16), not the quarter the probe promised; two bugs on the way, a
   hidden box restoring stale answers (ENGINE_NOTES 59) and the request flickering to idle on settling passes.
-- **14, held modem loads (2026-10-22, branch `net-modem`).** The modems stopped reloading all the time: the gateway
+- **16, held modem loads (2026-10-22, branch `net-modem`).** The modems stopped reloading all the time: the gateway
   holds each one's next load until it has the answers (ENGINE_NOTES 62), the old document sends the next request as
   soon as the page lays it out, and the answer is in the document, not a quirks-mode stylesheet. 1.6–2.0× per program
-  (BENCHMARKS §14). Traces then showed what a modem document costs the page: two forced style passes of the CPU page
+  (BENCHMARKS §16). Traces then showed what a modem document costs the page: two forced style passes of the CPU page
   each, at its parse's end and when `document.fonts` turns ready (ENGINE_NOTES 63), so each document now answers two
   parts, on its slot's x and y. On the way: a harness's `requestAnimationFrame` loop had been running the page 1.5×
   faster than a user sees it (64), and a server-wide cap on held loads starved `make l5-net`'s 6 browsers (the cap is
   per browser now, by cookie).
+  `NET` moved to the register machine with the hybrid's merge (2026-10-23): `NET A, B` (ARCHITECTURE §3.8).
 
 ## Dead ends and superseded approaches
 
@@ -101,19 +119,47 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
 | 39 | NEW zero-filling its chunk | 12 micro-cycles, two lines per object | NEW zeroes nothing; ENDK |
 | 40 | Every identifier writing its bytes to the string area | FizzBuzz compiled ~7% slower | only after `.`, `{` or `,` |
-| 41 | `<object>`s as the request primitive, toggled by `display` | each fetches once; showing it again reuses its frame (ENGINE_NOTES 53) | a self-reloading modem iframe |
-| 42 | An SVG `<object>`'s natural size as the return channel | set by the `width` / `height` attributes, not CSS; SVG is XML (no quirks) | responsive iframes, then fragment scroll |
-| 43 | Responsive iframes as the return channel | a flag in 153; the height never shrinks (mod-4096 answers, 12 bits); every load relays the page out | fragment scroll (ENGINE_NOTES 56) |
-| 44 | The modem cross-site, in its own process (font CPU) | ~40 loads/s but the page dropped to 5–6 frames/s | in process (fragment scroll needs it anyway) |
-| 45 | Acting on a request seen in two consecutive loads | one more load per word | one clean load (each digit once) |
-| 46 | 4 modems' answers unpacked by the lib | ~250 steps per READ; its cells evicted the stack and code (sets 9, 10) | NET writes the bytes; cells in sets 11–14 |
-| 47 | The modems' boxes inside `#clk`, shown by a transition latch | Edit hid them, Run restored stale answers; the latch didn't hold | outside `#clk`, the register `rlive` |
-| 48 | Modems that reload all the time (0 s refresh), the request read at the next load | each word waited for a load to finish and another to start; the reloads cost the page a third of its frames | loads the gateway holds until there is an answer; the request read live (ENGINE_NOTES 62) |
-| 49 | The answer as a quirks-mode stylesheet (`rx`, `application/json`) per load | one more request per load; the gateway writes the documents anyway | the answer in the document (`#t`'s position) |
-| 50 | 4 modems, one answer each | each document costs the page two forced style passes (ENGINE_NOTES 63): 8 per word | 2 modems, two answers each (x and y) |
-| 51 | A render-blocking stylesheet arriving after the parse, to skip `FinishedParsing`'s forced update | still forced, at 0 and 15 ms | — |
+| 41 | A trap's frame written by one instruction | the CPU writes one word (one cache set) per execution | the frame word by word, `--pst` counting |
+| 42 | PRINT writing a trap frame for an array or object | a memory write in the out class would cost every PRINT | `pstub` (TENTER), `ptrap` decodes the PRINT |
+| 43 | SETX / SETP frames at a fixed fp + 48 | a function's live temps could reach it | TRAPOFF 60; `TBMAX` bounds the live frame |
+| 44 | Call arguments as operand descriptors | `[1, [2, [3, [4, [5]]]]]` overflowed the 10 descriptors | arguments leave the stack in their temps (`tb`) |
+| 45 | `tb` only as the current base | a snapshot under a call copied a global over a collapsed argument (fuzz) | each descriptor keeps the `tb` it was pushed at |
+| 46 | The 511-word code area, 6 instructions per token | 22% / 7% of generated programs rejected (main: 14% / 0%) | 1,023 words, `EMAX` 7, `PIECES` 4 |
+| 47 | Inlining every single-use DSL temp | a ternary's else operand appears twice in css2's text: nested ones doubled, 344 KB declarations, out of memory | uses weighted by occurrences in the text |
+| 48 | The operand stack's top in its own DSL variable | no smaller: pushes still write a slot, pops then read one | slots only |
+| 49 | One-hot index flags shared between the slot selects | −1.5% CSS text, +7% declarations | inline selects |
+| 50 | `pow2` by a loop in the collector's bitmap | 22% of the suite's steps (`mapbuild` 14% more) | a 16-word table of powers of two |
+| 51 | One output instruction per pass, 8 columns | every line starts in bank 0: one short line per pass | a mask of the banks written, 9 columns |
+| 52 | The runtime's `join` and `repeat` calling `cat` | the ROM copy loop and allocation per piece (stars: 5,205 steps) | `__dadd`, the cat class (1,082) |
+| 53 | The picker's per-line checks as `:has()` on `#app`, per editor | 264 searches of ~10,000 elements: compile +1.7 s | `:has(> .frame > …)` on the editors' section |
+| 54 | The collector's bitmap built at each collection by walking from-space by its headers | a miss per block: 21–31% of the GC programs' passes; a grown array's raw block has no header, and a negative first element looped the walk (`gc_rawblock.js` never halted) | the map kept as blocks are made (ALLOC, NEW, the cat class, the copies) |
+| 55 | User code fetched through the data cache | 23% of the suite's passes ended on code misses: a loop's code (two words an instruction) evicted by its data | a 16-line code cache of its own (8 lines thrash: `obj_gc` 9,350 passes against 4,015) |
+| 56 | HP and GCLIM as registers instead of memory cells (model) | 2–4% fewer passes in the GC programs, for an access path the ROM's collector would need | not done |
+| 57 | A line written whole into a clean victim without a fill (model) | ~0%: allocation writes rarely cover a line, and their victims are dirty | not done |
+| 58 | SETX's full chunk trapping from the obj class, as SETP's does | its trap's steps (pst 1 … 3) would route it back to the arr class | the chunk handed back (pst 512), the arr class's trap from its first step |
+| 59 | A 32-line code cache | caesar 24% and bank 13% faster, the other 23 timed programs 0–12% slower: every register costs every pass (~20 µs; 80 dummy registers alone +2.3% on FizzBuzz) | 16 lines (`ICACHE=32,1` builds 32) |
+| 60 | Code kept in the data cache by its replacement (evict the data way when the victim is code; model) | data starved: caesar 454 passes against 314, `obj_gc` 8,111 against 6,397 | a separate code cache |
+| 61 | The code cache's register subjects outside the chain (in `.fl`, where they change) | no faster (1,046 against 1,040 ms on FizzBuzz): the cost isn't the subjects' depth | not done |
+| 62 | `<object>`s as the request primitive, toggled by `display` | each fetches once; showing it again reuses its frame (ENGINE_NOTES 53) | a self-reloading modem iframe |
+| 63 | An SVG `<object>`'s natural size as the return channel | set by the `width` / `height` attributes, not CSS; SVG is XML (no quirks) | responsive iframes, then fragment scroll |
+| 64 | Responsive iframes as the return channel | a flag in 153; the height never shrinks (mod-4096 answers, 12 bits); every load relays the page out | fragment scroll (ENGINE_NOTES 56) |
+| 65 | The modem cross-site, in its own process (font CPU) | ~40 loads/s but the page dropped to 5–6 frames/s | in process (fragment scroll needs it anyway) |
+| 66 | Acting on a request seen in two consecutive loads | one more load per word | one clean load (each digit once) |
+| 67 | 4 modems' answers unpacked by the lib | ~250 steps per READ; its cells evicted the stack and code (sets 9, 10) | NET writes the bytes; cells in sets 11–14 |
+| 68 | The modems' boxes inside `#clk`, shown by a transition latch | Edit hid them, Run restored stale answers; the latch didn't hold | outside `#clk`, the register `rlive` |
+| 69 | Modems that reload all the time (0 s refresh), the request read at the next load | each word waited for a load to finish and another to start; the reloads cost the page a third of its frames | loads the gateway holds until there is an answer; the request read live (ENGINE_NOTES 62) |
+| 70 | The answer as a quirks-mode stylesheet (`rx`, `application/json`) per load | one more request per load; the gateway writes the documents anyway | the answer in the document (`#t`'s position) |
+| 71 | 4 modems, one answer each | each document costs the page two forced style passes (ENGINE_NOTES 63): 8 per word | 2 modems, two answers each (x and y) |
+| 72 | A render-blocking stylesheet arriving after the parse, to skip `FinishedParsing`'s forced update | still forced, at 0 and 15 ms | — |
 
 ## Open leads (untried)
+
+- **What a register costs.** ~20 µs a pass each, changing or not (BENCHMARKS §15: 80 unused registers +2.3% on FizzBuzz),
+  about four times the style cost measured for a subject alone: the 358 registers are ~2 ms of a light pass, and a
+  cheaper register would pay for a 32-line code cache (caesar 24% faster) on everything else.
+- **An intermittent early HALT** (the register machine's tree, 110 of 2,273 steps, on 2026-10-21; the hybrid's
+  obj_keys, 218 of 313, once in ~370 runs): with a fresh browser per run, never twice. A harness that dumps pc, fp and
+  the cache when HALT comes early would tell a HALT executed from one read wrongly.
 
 - **Fewer traps.** Suite traps are mostly misses (1,309) and arithmetic EXT (1,104; 160 in `primes.js`): MOD / DIV,
   SHL13 and small-constant multiply in the font; dirty lines above SP treated as clean; an eviction buffer; next-line
@@ -132,6 +178,13 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
+- **Language**: a wider console; printing objects, `undefined`, `in` / `delete`, prototypes; booleans as parameters;
+  specific error codes on the page.
+- **More in CSS**: string comparison (`DEQ` / `DLT` on two strings go to `scmp` in ROM, which compares with MCMP); a
+  console write set of two cells per bank (output-bound programs fill the four cells of every pass).
+- **Compile time**: the register compiler writes 53K characters of CSS per token level against the stack machine's
+  41K (BENCHMARKS §14), mostly the operand-descriptor slots (selects and conditional updates over 10 slots) and the 7
+  instruction slots' muxes; fewer descriptor slots, or slots indexed by a one-hot register, would cut both.
 - **Network, cheaper words**: what a word still costs is the CPU's frames (the lib between words, ~60 steps per byte
   in `read()` and the program's loop), one frame of register lag on the request (`rreq` follows `--req` a frame later;
   the iframes' height could read the chain's end through `anchor-size()`, if a settling pass doesn't flicker it), and
@@ -144,5 +197,3 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 - **Network, more**: POST, request headers and response headers (more words); a gateway on the deployed site (a Worker
   with state per page); a two-click path with no gateway at all, through a form GET to a `data:` document (ENGINE_NOTES
   57: it can read CORS-enabled JSON as CSS and report through responsive iframes).
-- **Language**: a wider console; built strings; printing objects, `undefined`, `in` / `delete`, prototypes; booleans
-  as parameters; specific error codes on the page.
