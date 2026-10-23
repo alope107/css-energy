@@ -608,3 +608,19 @@ times, `main`'s page against this one, interleaved (`shared/js/ab.js`) in a benc
 
 `display: none` was faster to paste into but built ~6,000 probe boxes at Run, a few percent of the compile; the
 content-visibility version keeps them and showed no compile cost above the noise.
+
+**Rows named by where they show (ENGINE_NOTES 77).** The sentinels' names now come from a view-timeline animation, so
+the positional selectors and the `:has()` rules per line are gone, and lines nested by Chrome or by a paste read as
+they show. Against the content-visibility page above, interleaved in a bench lease (FizzBuzz; pastes as above):
+
+| | before | rows named by position |
+|---|---|---|
+| 200 formatted lines over 200 | 1,125 ms | 211 ms (0.19×) |
+| 200 plain lines over 200 | 1,174 ms | 222 ms (0.19×) |
+| 8 formatted lines into FizzBuzz | 81 ms | 33 ms (0.38×) |
+| Compile, FizzBuzz (`compiledMs` ratio, median and IQR; A-vs-A 0.997, 0.985–1.016) | 1.00 | 0.945 (0.924–0.974) |
+
+The first version left every probe's 64 cells laid out, absent rows' too, and the compile took 1.37× as long (IQR
+1.35–1.38): the old `:has()` rules had hidden the probes of absent lines. A probe's width now comes from its
+sentinel's height (constant through the scan), and `@container (width: 0px)` drops its cells. Pausing the rows'
+animations at Run, or dropping their `:has()` leaf filter, changed nothing (1.41×, 1.41×).

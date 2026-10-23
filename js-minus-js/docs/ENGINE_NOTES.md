@@ -249,3 +249,14 @@ chats.
     `@container style()` query that is false still do it (Chrome matches their selectors, and :has() still invalidates);
     leaving the probes' contents out (`content-visibility: hidden` while editing) cut a 200-over-200 formatted paste
     from 3.5 s to 1.2 s. *(measured 2026-10-23; BENCHMARKS §18)*
+77. **A discrete animation of `anchor-name` on a view timeline names a box by where it shows**: `@keyframes` with
+    `anchor-name: --r0`, `--r1`, … over ranges of view progress, run on `animation-timeline: view(block …)`, gives each
+    `::before` / `::after` the name of the row it is laid out in, however deep its element is nested, and
+    `anchor-size()` reads the animated name (a probe per row). It takes a layout to apply: the names are last frame's.
+    A view inset of `calc(100% - X)` cuts the scrollport to a fixed X, so a scroller that grows doesn't move the
+    progress of the rows above X. Measured in the editor: a sentinel's box (16px, the probe font's content area at
+    16px) starts at its 24px row's top, and progress is `(X - top) / (X + 16)`; except a `::before` in a block that
+    holds only inline content, whose progress put it 12px higher (line 0 alone in the editor read as no row) until a
+    `display: block` `::after` put the inline content in an anonymous block. Positional selectors can name only an
+    element's siblings, and each line a paste adds or removes restyles every one of them (76).
+    *(measured 2026-10-23; readback/ui_rb.py; tests/editor_input.js)*
