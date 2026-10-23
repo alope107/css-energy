@@ -7,24 +7,25 @@ editor (or pick one of ten samples) and press Run. The program then goes through
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
 3. **CSS runs it.** Each layout pass executes up to 32 instructions of a register machine as a chain of nested
    elements, out of a cache of RAM held in custom properties. Strings, arrays and objects have instructions of their
-   own: `+` builds a string in CSS, `a[i]` and `o.x` read and write in place, a trap calls the runtime library in ROM
-   for the rest. (Until 2026-10-21 it was a stack machine, last at commit `212175a`; until 2026-10-19 a GSUB "CPU"
+   own: `+` builds a string in CSS, `a[i]` and `o.x` read and write in place, and the runtime library in ROM has
+   instructions that copy, compare and allocate a cache line at a time; user code is fetched through a cache of its own. (Until 2026-10-21 it was a stack machine, last at commit `212175a`; until 2026-10-19 a GSUB "CPU"
    font ran it while Chrome shaped text, last at `181cbb7`.)
 4. **The output appears.** It shows in a 9 × 16 console.
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-21).**
+**Status (2026-10-22).**
 
 - Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, the ten
   samples through the compiler in Chrome and on the page, plus differential tests that check thousands of generated,
   reformatted and mutated programs against Node (`make fuzz`). The CPU's checks: C1 (its model, every program) and C2
-  (a CPU-only page per program, 118 under 1,500 steps).
-- The machine is a register machine since 2026-10-21. Against the stack machine it replaced, programs take 2.2–4.8×
-  fewer steps and run 1.1–2.8× faster on CPU-only pages (compute-bound ones 1.9–2.8×; FizzBuzz is bound by the
-  console's 4 cells per pass), with compile time within ~3% (BENCHMARKS §14).
+  (a CPU-only page per program, 118 under 1,500 steps); all 146 programs as CPU-only pages, objects included.
+- The machine is a register machine since 2026-10-21, with the runtime's work on memory as machine instructions and a
+  code cache since 2026-10-22. On 25 programs on CPU-only pages it is 1.74× faster than the register machine before it
+  and 1.53× than the stack machine with those instructions (geometric means; strings, arrays and objects up to 7.6×,
+  compute as fast; BENCHMARKS §15), with compile time unchanged.
 - On the page, FizzBuzz 1–15 compiles in about 2.3 s from Run (including the 1.2 s readback sweep) and halts about
-  3.1 s after Run.
+  3.2 s after Run.
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -130,8 +131,9 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
 
 An object is an 8-word heap chunk (three key/value pairs and an overflow link). `o.x` is one instruction (GETP) whose
 key is the string's interned address, probing one pair per execution; allocation is a pointer bump (NEW); a copying
-collector in ROM runs when the heap is full. A key built at run time is first matched by its characters against the program's strings
-(then the object's own keys), so it finds the same property as the literal. Details:
+collector in ROM runs when the heap is full. `o[k]` with a number or one of the program's strings as `k` probes in the machine
+too; a key built at run time is first matched by its characters against the object's own keys (and, when stored, the
+program's strings), so it finds the same property as the literal. Details:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.6.
 
 ### Limits

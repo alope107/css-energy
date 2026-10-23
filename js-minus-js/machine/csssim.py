@@ -13,7 +13,8 @@ never cached. The read ports read a miss's block (and the next) in the pass that
 writes back would read it stale: then the fill waits a pass (the chain re-misses and the ports read it again); a prefetch of
 that block is skipped. A stalled instruction keeps the words it did read (latches) for its re-execution at the start of the
 next pass, so it needs only its written line resident at the end: without them three blocks in one set (code, an operand
-and a string) evicted each other forever. Instructions in ROM are fetched from a static table, not through the cache (ROMF).
+and a string) evicted each other forever. Instructions in ROM are fetched from a static table, not through the cache (ROMF);
+user code through a code cache of its own (ISET direct-mapped lines), which only fetches fill, prefetching the next line.
 
 An instruction (compiler/cc_ref.py) is two words at an even address, both in one block, so one fetch. Its accesses: its
 source operands B and C when they are cells, its destination A; RET reads the return word at fp and writes the value there;
@@ -34,7 +35,8 @@ import cc_ref as R
 from cc_ref import OPN, s20
 from uarch import STRP_HI, HEAP0, HP, GCLIM, OBJTAG, ARRTAG
 TRAPOFF, HS = R.TRAPOFF, LA['heap_size']
-CATT, CAT0 = 1024, 2048        # a DADD's pst: the cat class's trap (+ its step) and its executions (+ k)
+CATT, CAT0 = 1024, 2048        # a DADD's pst: the cat class's trap (+ its step) and its executions (+ k); ALLOC's trap
+XBACK = 512                    # a SETX's pst: its probe found the chunk full, the arr class's trap from its first step
 
 NSET, NWAY = 16, 2
 ROMF = PREF = True
@@ -48,7 +50,12 @@ ALU = {'ADD': lambda a, b: s20(a + b), 'SUB': lambda a, b: s20(a - b), 'MUL': la
        'EQ': lambda a, b: int(a == b), 'NE': lambda a, b: int(a != b)}
 
 class Stall(Exception):
-    def __init__(self, miss=None): self.miss = miss
+    def __init__(self, miss=None, ic=False): self.miss = miss; self.ic = ic
+# user code (code_base .. init) is fetched through a cache of its own, direct-mapped (ISET lines, line b at b mod ISET), which
+# only fetches fill, prefetching the next line: data no longer evicts the program's loops (ICACHE=sets,ways to try others)
+_IC = os.environ.get('ICACHE', '16,1'); ISET, IWAY = (int(x) for x in _IC.split(','))
+CODE0, CODE1 = ref.LA['code_base'] // 4, ref.LA['init'] // 4
+
 
 class Sim:
     def __init__(self, st):
@@ -58,6 +65,8 @@ class Sim:
         self.words = [[[0] * 4 for _ in range(NWAY)] for _ in range(NSET)]; self.fifo = [0] * NSET
         self.pending = None; self.passes = 0; self.wbacks = 0; self.stale = self.pstale = False; self.wb = None
         self.latch = {}; self.reads = {}; self.first = False
+        self.itag = [[None] * IWAY for _ in range(ISET)]; self.iwords = [[[0] * 4 for _ in range(IWAY)] for _ in range(ISET)]
+        self.ififo = [0] * ISET; self.pic = False
     def way(self, b):
         s = setof(b)
         for w in range(NWAY):
@@ -68,7 +77,23 @@ class Sim:
         if self.first and a in self.latch: v = self.latch[a]
         else: s, w = self.way(a // 4); v = self.words[s][w][a % 4]
         self.reads[a] = v; return v
+    def rdu(self, a):
+        """a read that isn't latched (the map's word, MCMP's second line): it must hit"""
+        a &= AMASK; s, w = self.way(a // 4); return self.words[s][w][a % 4]
+    def ifetch(self, pc):
+        """the instruction's two words through the code cache"""
+        b = pc // 4; s = b % ISET
+        for w in range(IWAY):
+            if self.itag[s][w] == b: v = self.iwords[s][w]; return v[pc % 4], v[pc % 4 + 1]
+        raise Stall(b, True)
+    def ifill(self, b):
+        for nb in (b, b + 1):
+            s = nb % ISET
+            if nb >= CODE1 or nb in self.itag[s]: continue
+            w = self.ififo[s]; self.itag[s][w] = nb; self.ififo[s] = (w + 1) % IWAY
+            self.iwords[s][w] = [self.st['mem'].get(4 * nb + j, 0) for j in range(4)]
     def fill(self, b, cw):
+        if self.pic: self.ifill(b); return cw
         s = setof(b); w = self.fifo[s]
         if self.dirty[s][w]:
             vt = self.tag[s][w]
@@ -84,29 +109,34 @@ class Sim:
         return cw
     def cat(self, op, a, x, y, ps, pc, trap, wr, addr):
         """one execution of a string's + (cc_ref.run's cat), pst CAT0 + k: k 0 HP += the block's words (or, the heap full, the ROM's
-        cat through a trap, pst CATT + its step), 1 the header, 2 the length, 3 ... the bytes (one each), then the terminator, then
-        A. The reads: X's and Y's lengths (a string's length word), HP and GCLIM, a string's byte"""
+        gccat through a trap, pst CATT + its step), 1 the header and length, 2 + i the characters from i (a line of them: from X
+        or Y, to the end of their line; a string's from its line; the NUL with the last if it fits), n + 2 the NUL, n + 3 the
+        map's bit, then A. The reads: X's and Y's lengths (a string's length word), HP and GCLIM, a string's line"""
         rd = self.rd; st = self.st
         def ln(v, boolean):
             if R.isstr(v): return rd((v + STRTAG - 1) & AMASK)
             return (4 if v else 5) if boolean and v in (0, 1) else len(str(v))
-        def ch(v, boolean, i):
-            if R.isstr(v): return rd((v + STRTAG + i) & AMASK)
-            return ord((('true' if v else 'false') if boolean and v in (0, 1) else str(v))[i])
+        def text(v, boolean): return [ord(ch) for ch in (('true' if v else 'false') if boolean and v in (0, 1) else str(v))]
         la, lb = ln(x, op == 'DADDL'), ln(y, op == 'DADDR'); n = la + lb; nw = (n + 10) // 8 * 8
         hp, gl = rd(HP), rd(GCLIM)
         self.npst, self.cdone = 0, True
         if ps < CAT0 or (ps == CAT0 and hp + nw - 8 >= gl + HS - 7):
-            r = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.TRAPS[op], 0 if ps == CAT0 else ps - CATT)
+            r = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.CATTRAPS[op], 0 if ps == CAT0 else ps - CATT)
             self.npst = self.npst_t + CATT if self.npst_t else 0; self.cdone = self.done_t; return r
-        k = ps - CAT0; base = HEAP0 + hp - nw
+        k = ps - CAT0; base = HEAP0 + hp - nw; i = k - 2; nk = k + 1
         if k == 0: wr(HP, hp + nw)
-        elif k <= n + 3:
-            i = k - 3
-            wr(base + k - 1, -2 - nw if k == 1 else n if k == 2 else 0 if k == n + 3 else
-               ch(x, op == 'DADDL', i) if i < la else ch(y, op == 'DADDR', i - la))
+        elif k == 1: wr(base, -2 - nw); wr(base + 1, n)
+        elif i < n:
+            v, j, lv, bl = (x, i, la, op == 'DADDL') if i < la else (y, i - la, lb, op == 'DADDR'); d_ = base + 2 + i
+            if R.isstr(v): sa = (v + STRTAG + j) & AMASK; c_ = min(lv - j, 4 - d_ % 4, 4 - sa % 4); t = [rd(sa + q) for q in range(c_)]
+            else: c_ = min(lv - j, 4 - d_ % 4); t = text(v, bl)[j:j + c_]
+            if i + c_ == n and (d_ + c_) % 4: t.append(0)                 # the NUL, in the same line
+            for q, w in enumerate(t): wr(d_ + q, w)
+            nk = k + len(t)
+        elif i == n: wr(base + 2 + n, 0)
+        elif i == n + 1: mw, bit = R.mapbit(base); wr(mw, self.rdu(mw) | 1 << bit)
         else: wr(addr(a), base + 2 - STRTAG); return pc
-        self.npst, self.cdone = ps + 1, False; return pc - 2
+        self.npst, self.cdone = CAT0 + nk, False; return pc - 2
     def chunk(self, flags, v, f):
         """one PRINT execution (flags: separator * 2 + boolean): (cells written, newline after, done, next pst); reads may stall.
         f: the cells this pass can still take (the free run of console banks from optr's): a longer chunk is cut there and
@@ -147,6 +177,10 @@ class Sim:
         pc, fp = st['pc'], st['fp']
         self.reads = {}
         if ROMF and pc < ref.ROMN: w0, w1 = st['mem'].get(pc, 0), st['mem'].get(pc + 1, 0)
+        elif ISET and CODE0 <= pc // 4 < CODE1:
+            if self.first and pc in self.latch: w0, w1 = self.latch[pc], self.latch[pc + 1]
+            else: w0, w1 = self.ifetch(pc)
+            self.reads[pc], self.reads[pc + 1] = w0, w1
         else: w0 = rd(pc); w1 = rd(pc + 1)
         op = OPN[w0 // 8192]; a = w0 % 8192; b = w1 // 1024 + 512; c = w1 % 1024
         def addr(o): return (DB + o if o < 256 else fp + o - 256) & AMASK
@@ -178,20 +212,35 @@ class Sim:
             if cat: npst = CAT0; done = False; pc -= 2           # a string's +: the cat class from the next execution
             elif ps or slow: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, R.TRAPS[op], ps)
             else: wr(addr(a), ALU['ADD' if op[1] == 'A' else op[1:]](x, y))
+        elif op == 'GETX' and ps >= CATT:                # an object's probe, as GETP's, the key from C (+ KBIAS)
+            o = val(b); key = s20(val(c) + STRTAG); q = ps; k, v = rd(q), rd(q + 1)
+            if k == key or k == 0: wr(addr(a), v if k else 0)
+            else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
+        elif op == 'SETX' and ps >= CATT:                # as SETP's, the key from B, the value C; a full chunk: back to the
+            o, key, v = val(a), s20(val(b) + STRTAG), val(c)     # arr class, whose trap's setx makes a new chunk (pst XBACK)
+            q = ps - ps % 2; k = rd(q); rd(q + 1)
+            if ps % 2: wr(q, key); wr(q + 1, v)
+            elif k == key: wr(q + 1, v)
+            elif k == 0 and (q - HEAP0) % 8 < 6: wr(q + 2, 0); npst = q + 1; done = False; pc -= 2
+            elif k == 0: npst = XBACK; done = False; pc -= 2
+            else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
         elif op in ('GETX', 'SETX'):                     # x: the array (B / A), y: the index (C / B), z: its len and ptr, e: the
             g = op == 'GETX'                             # element (GETX, inside the length) or C (SETX)
             x = val(b) if g else val(a); y = val(c) if g else val(b)
             arr = not ps and R.isarr(x); q = (x - ARRTAG) & AMASK
             ln, ptr = (rd(q - 1), rd(q)) if arr else (0, 0)
             inb = arr and 0 <= y < ln
+            hand = not ps and R.isobj(x) and not R.notown(y)       # (an object: its probe, from the next execution)
             if g:
                 e = rd(ptr + y) if inb else 0
                 if arr: wr(addr(a), e)
+                elif hand: npst = (x + OBJTAG) & AMASK; done = False; pc -= 2
                 else: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, 'getx', ps)
             else:
                 e = val(c)
                 if inb: wr(ptr + y, e)
-                else: pc = trap(fp + TRAPOFF, [x, y, e], TRAPOFF * 8192 + pc, 'setx', ps)
+                elif hand: npst = (x + OBJTAG) & AMASK; done = False; pc -= 2
+                else: pc = trap(fp + TRAPOFF, [x, y, e], TRAPOFF * 8192 + pc, 'setx', ps % XBACK)
         elif op == 'GETP':                               # one pair per execution (pst: the pair's address, 0 the first)
             o = val(b); key = DB + c
             if not R.isobj(o): wr(addr(a), 0)
@@ -212,9 +261,10 @@ class Sim:
         elif op == 'NEW':                                # the chunk's first key, the value, then HP; full: the collector (NEW again)
             hp, gl = rd(HP), rd(GCLIM)
             if not ps and s20(hp - (gl + HS - 7)) >= 0: pc = trap(addr(a), [], (a - 256) * 8192 + pc - 2, 'gcnew', 0)
+            elif ps == 2: mw, bit = R.mapbit(HEAP0 + hp); wr(mw, self.rdu(mw) | 1 << bit); npst = 3; done = False; pc -= 2
             else:
-                wr((HEAP0 + hp, addr(a), HP)[ps], (0, hp + HEAP0 - OBJTAG, hp + 8)[ps])
-                if ps < 2: npst = ps + 1; done = False; pc -= 2
+                wr((HEAP0 + hp, addr(a), None, HP)[ps], (0, hp + HEAP0 - OBJTAG, None, hp + 8)[ps])
+                if ps < 3: npst = ps + 1; done = False; pc -= 2
         elif op == 'JMP': pc = a
         elif op in ('JZ', 'JNZ'): pc = a if truthy(val(b)) == (op == 'JNZ') else pc
         elif op == 'HALT': pc -= 2; st['halt'] = True
@@ -233,6 +283,54 @@ class Sim:
             ch = val(b)
             if ch != 10 and not self.free(cw): raise Stall()
             out = ([], True) if ch == 10 else ([ch], False)
+        elif op == 'KIND': wr(addr(a), R.kind(c - 896, val(b)))
+        elif op == 'ALLOC':                              # pst: the phase (cc_ref.AP_*), CATT + a step: the trap
+            n = val(b); k = c - 896; nw = R.allocw(k, n); hp, gl = rd(HP), rd(GCLIM)
+            if ps >= CATT or (ps == 0 and hp + nw > gl + HS):
+                pc = trap(addr(a), [nw], (a - 256) * 8192 + pc - 2, 'galloc', ps - CATT if ps else 0)
+                npst = self.npst_t + CATT if self.npst_t else 0
+            else:
+                base = HEAP0 + hp - (nw if ps else 0)
+                if ps == R.AP_HP: wr(HP, hp + nw)
+                elif ps == R.AP_HDR:
+                    for j, w in enumerate(R.allochdr(k, n, nw, base)): wr(base + j, w)
+                elif ps == R.AP_NUL: wr(base + 2 + n, 0)
+                elif ps == R.AP_MAP: mw, bit = R.mapbit(base); wr(mw, self.rdu(mw) | 1 << bit)
+                else: wr(addr(a), (base + 2 - STRTAG, base + 3 + ARRTAG, base, base)[k])
+                if ps != R.AP_RES: npst = R.allocnext(ps, k, n); done = False; pc -= 2
+        elif op in ('MCPY', 'MUPPER', 'MLOWER', 'MFILL', 'NPUT'):     # a line per execution (pst: the words done)
+            sv = val(b); n = val(c) if op != 'NPUT' else None; d_ = val(a); o = ps
+            if op == 'NPUT': dg = [ord(ch) for ch in str(sv)]; n = len(dg)
+            ad = (d_ + o) & AMASK; cp = op not in ('MFILL', 'NPUT'); as_ = (sv + o) & AMASK
+            k = max(0, min(n - o, 4 - ad % 4, 4 - as_ % 4 if cp else 4))
+            t = [R.mcase(op, rd(as_ + j)) for j in range(k)] if cp else [sv] * k if op == 'MFILL' else dg[o:o + k]
+            for j, w in enumerate(t): wr(ad + j, w)
+            if o + k < n: npst = o + k; done = False; pc -= 2
+        elif op in ('MCMP', 'MFEQ', 'MFREF'):            # a line of each per execution (pst: the words done); A at the end
+            pv, qv, n = val(b), val(c), val(a); o = ps
+            ap = (pv + o) & AMASK; aq = (qv + o) & AMASK
+            k = max(0, min(n - o, 4 - ap % 4, 4 - aq % 4 if op == 'MCMP' else 4))
+            ws = [rd(ap + j) for j in range(k)]; qs = [self.rdu(aq + j) for j in range(k)] if op == 'MCMP' else None
+            hit = next((j for j in range(k) if (ws[j] != qs[j] if op == 'MCMP' else ws[j] == qv if op == 'MFEQ' else R.isfref(ws[j], qv))), None)
+            if hit is not None: wr(addr(a), o + hit)
+            elif o + k >= n: wr(addr(a), o + k)
+            else: npst = o + k; done = False; pc -= 2
+        elif op == 'MWALK':                              # a string per execution (pst: the offset)
+            pv, e, n = val(b), val(c), val(a); o = ps
+            if pv + o >= e: wr(addr(a), o)
+            else:
+                L_ = rd(pv + o)
+                if L_ == n: wr(addr(a), o)
+                elif pv + o + L_ + 2 >= e: wr(addr(a), o + L_ + 2)
+                else: npst = o + L_ + 2; done = False; pc -= 2
+        elif op == 'APUSH':                              # pst 0 the element (no array or a full one: on), 1 the length, 2 the
+            x, v = val(b), val(c); q = (x - ARRTAG) & AMASK     # result over the return word, and return (reads: x, v, the
+            r = rd(fp) if ps == 2 else None                      # return word, the array's first line)
+            hl = [rd(q - 3 + j) for j in range(4)] if R.isarr(x) else [0, 0, 0, 0]; cap, ln, ptr = hl[1:]
+            if ps == 0 and not (R.isarr(x) and ln < cap): pass
+            elif ps == 0: wr(ptr + ln, v); npst = 1; done = False; pc -= 2
+            elif ps == 1: wr(q - 1, ln + 1); npst = 2; done = False; pc -= 2
+            else: wr(fp, ln); fp -= r // 8192; pc = r % 8192
         else: raise SystemExit(f'op {op} not in csssim.py')
         # commit
         for (s, w, j), v in mem_w.items(): self.words[s][w][j] = v; self.dirty[s][w] = 1
@@ -254,11 +352,11 @@ class Sim:
             self.first = n == 0
             try: cw = self.execute(cw); n += 1
             except Stall as e:
-                self.pending = e.miss; why = 'miss' if e.miss is not None else 'write'; self.latch = dict(self.reads); break
+                self.pending = e.miss; self.pic = e.ic; why = 'miss' if e.miss is not None else 'write'; self.latch = dict(self.reads); break
         else: why = 'halt' if self.st['halt'] else 'K'; self.latch = {}
         self.first = False
-        self.stale = self.pending is not None and self.pending == self.wb
-        self.pstale = self.pending is not None and self.pending + 1 == self.wb
+        self.stale = self.pending is not None and self.pending == self.wb and not self.pic
+        self.pstale = self.pending is not None and self.pending + 1 == self.wb and not self.pic
         return n, why
 
 if __name__ == '__main__':

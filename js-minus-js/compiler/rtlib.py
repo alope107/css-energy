@@ -10,16 +10,17 @@ L = R.LAYOUT
 H = L['heap_size']
 DB, INIT, SP0 = L['data_base'], L['init'], L['sp0']
 CELL = U.CELL
-MAP, MAPN = L['rt_base'] + 32, H // 8 // 16     # the collector's bitmap of from-space's block starts (16 bits to a word)
-POWT = MAP + MAPN                                # its powers of two
+MAP, MAPN = R.MAP, R.MAPN                        # the collector's map of block starts (a bit per 8 heap words, 16 to a word)
+POWT = MAP + MAPN                                # its powers of two (the collector fills them in)
 assert H % 8 == 0 and U.HEAP0 % 8 == 0 and U.HEAP0 + 2 * H <= L['rom_size'] + L['ram_size'] - L['cols'] * L['rows']
-assert POWT + 16 <= SP0
+assert MAP >= L['rt_base'] + len(L['rt_cells']) and POWT + 16 <= SP0
 
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=R.SDATA, STR_LO=U.STR_LO, HEAP0=U.HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=R.STRTAG, OBJTAG=U.OBJTAG, ARRTAG=U.ARRTAG,
-             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPN=MAPN, POWT=POWT)
+             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT)
     k.update(CELL)
+    k.update({f'K_{n.upper()}': i for i, n in enumerate(R.KINDS)}); k.update({f'A_{n.upper()}': i for i, n in enumerate(R.ALLOCK)})
     return k
 
 def build(out):

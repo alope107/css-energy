@@ -37,7 +37,7 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by `cc_ref` in rom mode, 4,806 words), then `pstub` (2) | the page's static ROM table |
+| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by `cc_ref` in rom mode, 4,282 words), then `pstub` (2) | the page's static ROM table |
 | 6144 | `data_base`: `STRTAG` = 262144, the untag constant (and the object key bias) | compiler `.fin` (an overlay) |
 | 6145 … 6399 | globals (255 words) | the program |
 | 6400 | `STR0`: the empty marker; then `"true"` and `"false"` (`SEED`) | compiler `.fin` |
@@ -45,7 +45,7 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 7168 … 8190 | code (`code_base`, 1,023 words: 511 instructions) | compiler overlays |
 | 8191 | count of global words (the collector's roots) | compiler `.fin` |
 | 8447 | `strend`: the string area's end | compiler `.fin` |
-| 8448 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); the collector's bitmap at 8480 (24 words) and its powers of two at 8504 (16) | instructions, ROM routines |
+| 8448 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); the collector's map of block starts at 8480 (`map_base`: a bit per 8 heap words, 48 words for both semi-spaces) and its powers of two at 8528 (16) | instructions, ROM routines |
 | 8704 … 16239 | stack (`sp0`) | program |
 | 16240 … 22383 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, the cat class, ROM routines, the collector |
 | 22384 … 22527 | console: the last `cols × rows` = 144 words | output instructions |
@@ -73,16 +73,20 @@ lists them in class order (the CSS CPU's class is a range of opcodes).
 | Class | Ops | What they do |
 |---|---|---|
 | alu | ADD SUB MUL DIV MOD LT GT LE GE EQ NE | A = B op C (20-bit wrap; `/` truncates; x / 0 = x % 0 = 0) |
-| mov | MOV NEG LOADK GETFP | A = B, −B, word1, fp |
+| mov | MOV NEG LOADK GETFP KIND | A = B, −B, word1, fp; KIND A, B, k: A = kind test k of B (`cc_ref.KINDS`: the kind's code, string, array, object, array or object, a string not the program's own, its decimal length, any reference, a heap string) |
 | jump | JMP, JLT … JNE, HALT | to A (if B op C) |
 | test | JZ JNZ | to A if B is false / true: 0 and the empty string are false (a string's length word is read) |
 | call | CALL RET NOT TENTER | CALL A, off: the return word (off × 8192 + return address) at fp + off, fp += off. RET B: B over the return word (the caller's slot for the value), fp −= off. TENTER A: CALL A with off = TRAPOFF and the return address pst + 2 (PRINT's trap) |
 | mem | LDI STI | A = mem[B + C]; mem[A + B] = C (raw memory: the runtime library's `peek`, `poke`, `p[i]`) |
 | dyn | DADD DADDL DADDR, DLT … DNE | numbers here; `+` with a string goes on to the cat class (L / R: that side is a boolean); with an array or object, and `==` / `!=` of two strings, the library |
-| arr | GETX SETX | A = B[C], A[B] = C: an array inside its length here; anything else the library (an array grows, a string's character, an object's run-time key) |
+| arr | GETX SETX | A = B[C], A[B] = C: an array inside its length here; an object whose key is a number or the program's own string goes to the obj class's probe (pst: its first pair); anything else the library (an array grows, a string's character, a key built at run time) |
 | obj | GETP SETP NEW | A = B.key, A.key = B (C: the key's string-area offset), probing one pair per execution; SETP adds a pair in place (a full chunk: the library); NEW: a chunk |
 | out | PRINT PRINTK PUTC | up to 4 console cells per execution (§3.2); PRINT of an array or object jumps to `pstub` |
-| cat | (a DADD with pst ≥ 1024) | a string's `+`, one word per execution (§3.6) |
+| alloc | ALLOC | A = a new block of n words (B) of kind k (C: `cc_ref.ALLOCK`: a string of n bytes, its header, length and NUL written, A its value; an array of capacity n, its first line written; n raw words; an object chunk), marked in the collector's map (but raw ones) (§3.5) |
+| apush | APUSH | the ROM's `push` routine's first instruction: B.push(C) and return (no array, or a full one: on to the routine) |
+| mcpy | MCPY MUPPER MLOWER MFILL NPUT | C words from B to A (A ≤ B if they overlap; mapping letters' case); B into C words at A; B's digits at A: a line per execution |
+| mcmp | MCMP MFEQ MFREF MWALK | A = the first i < A where B[i] ≠ C[i] / = C / refers into the from-space at C, else A: a line per execution; MWALK: the offset from B of the first `[len][bytes][0]` string of length A, or of the first at or past C, a string per execution |
+| cat | (a DADD with pst ≥ 1024) | a string's `+`, a line per execution (§3.6) |
 
 **Traps.** A trapping instruction calls a ROM routine (`cc_ref.TRAPS`) as CALL would. A destination trap (the dynamic
 operators, GETX, NEW) puts the routine's frame at its destination A, always a temp, so the value lands there; SETX and
@@ -91,7 +95,9 @@ one word per execution, so a trap is several executions (pc stays, `--pst` count
 arguments last first (a destination trap's C may be the word after its frame's), then the return word, fp, pc. Once
 started (pst > 0) it finishes whatever its operands then hold. PRINT of an array or an object writes nothing (the out
 class has no memory write): it jumps to `pstub` with its own address in pst; `pstub`'s TENTER makes the frame and calls
-`ptrap`, which decodes the PRINT's operand from the instruction itself. NEW's trap (the heap full) returns to the NEW.
+`ptrap`, which decodes the PRINT's operand from the instruction itself. NEW's and ALLOC's traps (the heap full: `gcnew`,
+`galloc`) return to the instruction, which executes again; a string's `+` that finds the heap full calls `gccat` (`cc_ref.CATTRAPS`),
+which collects and joins.
 
 **Values** (`cc_ref.isstr` / `isarr` / `isobj`). A string is its first byte's address − `STRTAG`, an array its ptr word's
 address + `ARRTAG` (2^18), an object its chunk's address − `OBJTAG` (491,520). The tags are multiples of 2^15, so the
@@ -204,24 +210,30 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 
 ### 3.1 A pass
 
-- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px; 277 of them: pc, fp, the console cursor,
-  `--pst`, steps, halt, the pending miss, the cache (32 tags with dirty bits, 16 victim bits, 128 words), the read ports'
-  eight words, the latches, the RAM and console write channels. Two passes per frame.
+- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px; 358 of them: pc, fp, the console cursor,
+  `--pst`, steps, halt, the pending miss, the data cache (32 tags with dirty bits, 16 victim bits, 128 words), the code
+  cache (16 tags, 64 words), the read ports' eight words, the latches, the RAM and console write channels. Two passes
+  per frame.
 - **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers; a dirty
   victim's words go out through the RAM write channels. The next block is prefetched into its own set if it is absent
-  there and the victim is clean.
+  there and the victim is clean. A miss of the fetch (`--pic`) fills the code cache instead, and prefetches the next line
+  there if it is absent and code.
 - **Chain**: 32 levels of three nested `display: contents` elements, styled once per pass:
-  - `.f` fetches both words: ROM from a static table (one rule per 1,024-word tier), RAM through the cache; decodes
-    op, A, B, C and the class (`cls_of`: the opcode's range, and the cat class for a DADD with pst ≥ 1024).
+  - `.f` fetches both words: ROM from a static table (one rule per 1,024-word tier), user code through the code cache;
+    decodes op, A, B, C and the class (`cls_of`: the opcode's range; the cat class for a DADD with pst ≥ 1024, the obj
+    class for a GETX / SETX with pst ≥ 1024).
   - `.x` executes: one `@container style(--cls: c)` rule per class (§1), `if()` on `--op` inside it. A class reads only
-    what its instructions read (x: B, y: C, z / h: a third word or pair, e: a fourth, k / j: HP and GCLIM, s: a
-    string's byte, w: the written word's set), since a rule evaluates every declaration in it.
+    what its instructions read (x: B, y: C, z / h: a third word or pair, e: a fourth, k / j: HP and GCLIM, p and l: a
+    line, r: the collector map's word, w: the written word's set), since a rule evaluates every declaration in it.
   - `.c` commits: registers on success; on a stall, `--stop` and the missing block; output, bank by bank; a write as
-    its whole cache set (16 rules on the set). SETP's new pair writes two words of one block (`--w2`).
+    its whole cache set (16 rules on the set). SETP's new pair writes two words of one block (`--w2`); the primitives
+    and the cat class up to a line (`write_line`: words u … u + k − 1).
 - **Stalls**: an instruction runs only if every word it touches is cached (and, for output, its first cell's console
   bank is free this pass). The first that can't stops the chain. It keeps the operands it did read (**latches**:
-  f/g, x, y, z/h, p, e, k/j, s) for its re-execution as the next pass's first instruction, so it needs only its written
+  f/g, x, y, z/h, p, e, k/j) for its re-execution as the next pass's first instruction, so it needs only its written
   line resident at the end. A read is latched only if the reads its address came from were good (a class's `deps`).
+  Two reads aren't latched: the map's word (r), which the same execution writes, so a miss there fills the written line,
+  and MCMP's second line (l), the last read in order, which the last fill leaves resident.
 - **Export** (`.ex`): the registers' subjects at the chain's end; the pass's writes into the channels; and eight
   **read ports** that read the missing block and the next during this pass's layout, for the next pass's fill.
 - A miss on the block the same pass writes back would read its leaf before the write lands, so that fill waits a pass
@@ -229,8 +241,14 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 
 ### 3.2 Memory and output
 
-- Cache: 16 sets × 2 ways × 4 words, set `(b + b / 16 + b / 256) mod 16` of block `b`, FIFO victims, write-allocate.
+- Data cache: 16 sets × 2 ways × 4 words, set `(b + b / 16 + b / 256) mod 16` of block `b`, FIFO victims, write-allocate.
   `--T<line>` = 2 × (block + 1) + dirty, 0 for empty.
+- Code cache: user code (`code_base` … `init`) is fetched through 16 direct-mapped lines of its own (line `b mod 16`,
+  `--IT<i>` = block + 1, `--IW<i>_<word>`; `ICACHE=32,1` builds 32, for loops of more than 32 instructions). Only fetches fill it, and a fill prefetches the next
+  line, so a loop's code stays resident while its data streams through the data cache: in the model, suite passes
+  −28% (code misses 6,881 → 1,539; BENCHMARKS §15). Every register costs every pass, so 32 lines (caesar 24% faster) made
+  23 of the 25 timed programs 2–12% slower (BENCHMARKS §15). Code isn't written at run time; the data cache still serves
+  reads of code as data (`ptrap` decoding a PRINT).
 - RAM: `memtree.py`'s leaves and decode trees, four banks. The read ports' leaf names are muxes; the most-read blocks
   (globals, strings, code) have their own mux, evaluated only when a block is missing.
 - Console: its own four small trees and channels in a `contain: strict` box. A pass writes at most one cell per bank
@@ -242,8 +260,8 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 
 ### 3.3 Model and checks
 
-- `machine/csssim.py` runs the same design pass by pass (cache, prefetch, stall rules, latches, micro-steps, output
-  banks); C1 checks it on every suite program against Node and cc_ref's steps. `machine/cssref.py` gives it machine
+- `machine/csssim.py` runs the same design pass by pass (both caches, prefetch, stall rules, latches, micro-steps,
+  output banks); C1 checks it on every suite program against Node and cc_ref's steps. `machine/cssref.py` gives it machine
   states.
 - `gen_css.py` refuses a page in which a registered `<integer>` value is more than one term (Chrome takes it as
   invalid and uses 0), a property is registered twice, or a class declares a property that isn't registered.
@@ -264,39 +282,69 @@ ROM and `entries` (every routine's address: the compiler calls the methods and `
 routines). It is a static table in the page (in tiers of 1,024 words), so a change means `make page`.
 
 - The dialect: functions, locals, `while` / `for` / `if`, no short-circuit `&&` / `||` or `break`, `peek` / `poke` /
-  `p[i]` on raw memory, `putc`, `prn` (PRINT), `halt`, `__fp()` (this frame's fp). No globals or string literals (they
-  would land in the program's data area). A routine's frame holds tagged values, which the collector updates; a raw
-  address must not be kept across an allocation.
-- `lib_src.js`: kinds, `halloc`, the collector, strings (`newstr`, `tostr`, `cat`, `scmp`), the dynamic operators'
-  routines, arrays (`newarr`, `grow`, `push`, `pop`, `join`), `getx` / `setx` / `setp`, `mkarrN`, the methods, printing
-  arrays and objects (`pval`, `ptrap`), run-time string keys (`okey`).
+  `p[i]` on raw memory, `putc`, `prn` (PRINT), `halt`, `__fp()` (this frame's fp), and the primitives' intrinsics
+  (`cc_ref.INTR`, below). No globals or string literals (they would land in the program's data area). A routine's frame
+  holds tagged values, which the collector updates; a raw address must not be kept across an allocation.
+- `lib_src.js`: the collector and its stubs (`gcnew`, `galloc`, `gccat`), strings (`newstr`, `tostr`, `cat`, `scmp`), the
+  dynamic operators' routines, arrays (`newarr`, `grow`, `push`, `pop`, `join`), `getx` / `setx` / `setp`, `mkarrN`, the
+  methods, printing arrays and objects (`pval`, `ptrap`), run-time string keys (`okey`).
+
+**The runtime's primitives** (from branch `rom-css`, on the stack machine, redone for the register machine). The ROM's
+work on memory is instructions that take a cache line per execution, `--pst` holding their progress, where a loop of
+register code takes an instruction per word; and type tests are one instruction (KIND) where they were calls. One step
+in `cc_ref.run()`; executions in `csssim.py`; a class each in `gen_css.py` (KIND inside mov). Intrinsics (rom mode):
+
+| Intrinsic | Instructions | Executions |
+|---|---|---|
+| `__kind(v, K)` | KIND T, v, #K | 1 |
+| `__alloc(n, A)` | ALLOC T, n, #A | HP (or the trap), the header's line, a string's NUL past it, the map's bit, T |
+| `__mcpy` / `__mupper` / `__mlower` (d, s, n), `__mfill(d, v, n)`, `__nput(p, v)` | MCPY … d, s, n | a line of d per execution (to the end of the run, of d's line, of s's line) |
+| `__mcmp(p, q, n)` / `__mfeq(p, v, n)` / `__mfref(p, flo, n)` | MOV T, n; MCMP … T, p, q | a line of p (and of q) per execution, T at the end |
+| `__mwalk(p, e, n)` | MOV T, n; MWALK T, p, e | a string per execution |
+| `__apush(x, v)` | APUSH 0, x, v | the element, the length, the result over the return word (and return) |
+
+The ROM's `newstr` is one ALLOC; `join` sums its pieces' lengths and copies them into one string (MCPY, NPUT); `repeat`
+doubles its copy; `slice`, `concat`, `grow`, `shift` and the collector's copies are MCPY; `find` searches with MFEQ and
+compares with MCMP; `mkarrN` copies its arguments off its frame with one MCPY; `push` is APUSH, then the slow path.
 
 ### 3.6 Strings, arrays and objects, and the collector
 
 **Heap blocks.** 8-aligned, a multiple of 8 words. A string is `[hdr][len][bytes…][0]`, an array
-`[hdr][cap][len][ptr][elements…]` (ptr points at the elements, inline until the array outgrows `cap`, then at a data
-block of its own); `hdr` = −2 − words − kind (kind 0 string, 1 array).
+`[hdr][cap][len][ptr][elements…]` (ptr points at the elements, inline until the array outgrows `cap`, then at a raw
+block of its own, which has no header and isn't in the collector's map); `hdr` = −2 − words − kind (kind 0 string, 1
+array).
 
 **Objects.** An 8-word chunk `[k0 v0 k1 v1 k2 v2 L pad]`. A key is a string's address in the string area (a value +
 2^18), a number `n` is `n + 2^18`; 0 ends the keys (NEW zeroes `k0`; SETP's new pair writes the 0 after it first); `L`
-is 0 or a link to an overflow chunk (negative). GETP / SETP probe one pair per execution (`--pst`: the pair's address).
-Strings and names are interned by content hash, so a key is a compile-time constant and `o[s]` finds `o.x` when `s` is
-`"x"` (a heap string key is first replaced by the program's string with its characters, `okey`).
+is 0 or a link to an overflow chunk (negative). GETP / SETP probe one pair per execution (`--pst`: the pair's address),
+and so do GETX / SETX when the key is a number or the program's own string (SETX hands a full chunk back to the arr
+class, `--pst` 512, whose trap calls `setx`). Strings and names are interned by content hash, so a key is a
+compile-time constant and `o[s]` finds `o.x` when `s` is `"x"`. A key built at run time (a heap string, or one of
+`SEED`'s) traps to `getx` / `setx`, whose `okey` replaces it by the object's key with its characters if it has one, else,
+when it is being stored, by the program's string with them if there is one (MWALK finds the strings of its length,
+MCMP compares): a key is the literal whenever one exists, so it finds the same property as a literal key.
 
 **A string's `+` in CSS (the cat class).** A DADD whose operands are a string and a string, number or boolean (no array
-or object) hands over to the cat class (pst 2048). Then one word per execution, pst 2048 + k: HP += the block's words
-(the heap full: the ROM's `cat` through a trap, which collects), the header, the length, each byte (a string's read
-through the cache; a number's digits and `true` / `false` computed), the terminator, then A. Each execution re-derives
-the block from HP and the operands' lengths, so nothing but pst carries state, and A is written last (it may be B).
-The layout is `newstr`'s, so the collector and the routines see the same heap either way.
+or object) hands over to the cat class (pst 2048). Then, pst 2048 + k: HP += the block's words (the heap full: `gccat`
+through a trap, which collects and joins), the header and the length, the characters a line per execution (from X or
+from Y, to the end of the source, of the written line and of a string's line; a number's digits and `true` / `false`
+computed; the NUL with the last chunk if it fits), the NUL, the map's bit, then A. Each execution re-derives the block
+from HP and the operands' lengths, so nothing but pst carries state, and A is written last (it may be B). The layout is
+`newstr`'s, so the collector and the routines see the same heap either way.
 
 **The collector** (`lib_src.js` `gc`): Cheney copying between the semi-spaces, conservative on the stack. The roots: the
 globals (up to the count at `init − 1`) and every word of the stack from `sp0` up to its own frame except the return
-words (found by walking the frames: off = the word / 8192). A word is forwarded only if it is aligned at the start of a
-from-space block, which a bitmap built over from-space first tells (`mapbuild`, 16 bits a word, powers of two from a
-table); a stale frame word keeps a dead block alive at worst. The scan follows an object's keys and values up to its
-first free pair (and its link if all three are used) and an array's elements up to its length. HP and GCLIM are offsets
-from `heap_lo`; GCLIM is the current space's offset, so zeroed RAM is space A and needs no setup.
+words (found by walking the frames: off = the word / 8192). A frame keeps stale words (a register machine's temps aren't
+cleared), so a stack word is forwarded only if it starts a block in the **map** at `map_base` (a bit per 8 heap words,
+16 to a word, both semi-spaces). The map is kept as blocks are made: ALLOC (strings, arrays, chunks), NEW and the cat
+class set their block's bit, the collector's copies set theirs in to-space, and a collection clears to-space's half first;
+a stale word keeps a dead block alive at worst. (Until 2026-10-22 the bitmap was built at each collection by walking
+from-space by its headers, a miss per block, 14–31% of the GC programs' passes; and a grown array's raw block, which
+has no header, could misguide the walk into a loop: `tests/suite/gc_rawblock.js`.) MFREF finds the next word that refers
+into from-space a line at a time, so roots and elements that are numbers cost nothing; copies are MCPY. The scan follows
+an object's keys and values up to its first free pair (and its link if all three are used) and an array's elements up to
+its length. HP and GCLIM are offsets from `heap_lo`; GCLIM is the current space's offset, so zeroed RAM is space A and
+needs no setup.
 
 ### 3.7 The stack machine (replaced 2026-10-21; last at `212175a`)
 

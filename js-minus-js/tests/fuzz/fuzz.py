@@ -46,6 +46,7 @@ def ours(src, max_steps=2_000_000):
         if 'step limit' in str(e): return 0, None, 'steps'
         return 0, None, f'crash: {e}'
     except Exception as e: return 0, None, f'crash: {type(e).__name__} {e}'
+    if out.endswith('out of memory\n'): return 0, None, 'heap'          # (the heap is a limit, as the step count is)
     return 0, out, None
 
 def fits(src):
@@ -87,11 +88,11 @@ def check(name, src, nres, opts, res, expect_reject=False, mutated=False):
         if mutated: res.c['we reject, Node runs (subset)'] += 1; return None
         return f'compile error {err} on a valid program'
     if lim and lim.startswith('crash'): return f'the simulator crashed: {lim}'
-    if lim: res.c['step limit (skipped)'] += 1; return None
+    if lim: res.c['step limit (skipped)' if lim == 'steps' else 'out of memory (skipped)'] += 1; return None
     if out != nres['out']: return f'L1 output differs:\n--- ours\n{out}--- node\n{nres["out"]}'
     if fits(src):
         perr, pout, plim = ours(padded_source(src.rstrip('\n'), 24, 64))
-        if (perr, pout) != (0, out) and plim != 'steps': return f'L1 on the padded page text differs: err {perr} {plim or ""}\n{pout}'
+        if (perr, pout) != (0, out) and plim not in ('steps', 'heap'): return f'L1 on the padded page text differs: err {perr} {plim or ""}\n{pout}'
         res.c['fits the page'] += 1
     if opts.c1 and fits(src):
         oc = c1(src)

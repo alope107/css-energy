@@ -14,6 +14,7 @@ steady to ±0.5% (10.79 s median, 8 runs); a CPU-only page's load → HALT to ±
 
 | What | Current | Section |
 |---|---|---|
+| The hybrid: the runtime's primitives (branch `rom-css`) and a code cache on the register machine (2026-10-22) | 25 programs on CPU-only pages 1.74× faster than the register machine and 1.53× than the stack machine with the primitives (geometric means; total 334.5 s against 545.7 and 452.3); faster than both on 23, compute as fast as the register machine; suite steps −57%, passes −45% / −27% (model) | §15 |
 | Register machine against the stack machine (2026-10-21) | samples on CPU-only pages 1.07–2.75× faster (compute 1.9–2.8×, FizzBuzz output-bound 1.07×), 3.0× fewer suite steps; compile time median ×1.03; FizzBuzz on the page compiled as fast, HALT 3.1 s (main 3.4 s) | §14 |
 | FizzBuzz 1–15 on the page | 476 steps, 103 shapings; compiled 2.51–2.58 s after Run, HALT at 10.75–10.90 s (run ≈ 8.3 s). Before: 1,329 steps, 193 shapings, HALT 18.2–18.3 s | §5a |
 | FizzBuzz on the CPU alone (no editor, no compile chain) | HALT 6.25–6.48 s after load | §5c |
@@ -411,3 +412,100 @@ rounds):
   per editor and line on `#app`, each a search of its ~10,000 elements. On the editors' section with child combinators
   (`.pane:not(:has(> .frame > .ed<i> > div:nth-of-type(k))) ~ .probes …`) they cost less than main's 24 on `#app`
   (without the picker, compiled 2,426–2,475 ms, HALT 3,240–3,357).
+
+## 15. The hybrid: the runtime's primitives and a code cache on the register machine (2026-10-22)
+
+Branch `hybrid`: the register machine (`regvm`, `ae19432`) with branch `rom-css`'s runtime primitives (`b19708f`, on the
+stack machine) redone for three-address code, the collector's map of block starts kept as blocks are made, GETX / SETX
+probing objects in the machine, and a code cache (ARCHITECTURE §3.2, §3.5, §3.6). Against `regvm` and `rom-css`, each
+built in its own worktree. Headless Chromium 153, the mini PC; every timing in a bench lease (`shared/py/bench.py`,
+P-cores, foreign load 0.0%).
+
+**Model** (`cc_ref` steps, `csssim.py` passes, K = 32; the 145 suite programs and samples all three run):
+
+| | Register machine | Stack machine + primitives | Hybrid |
+|---|---|---|---|
+| steps | 319,709 | 310,954 | 137,579 |
+| passes | 34,165 | 25,722 | 18,664 |
+
+- Where the hybrid's passes end (146 programs, 21,633 passes): heap misses 10,332, stack 3,636, full (K) 1,964, the
+  runtime's cells and the map 1,666, code 1,539, globals 1,111, strings 885. Without the code cache (30,360 passes) code
+  misses were 6,881 (23%): a loop's code, two words an instruction, evicted by its data from the 128-word data cache.
+- The primitives alone (no code cache) took the 145 programs' passes to 25,796 (−24% against the register machine; the GC
+  programs still 1.3–1.4× the stack machine's, `mapbuild` gone but the loops' code evicted); the code cache to 18,664.
+- Tried in the model (HISTORY 56–61): HP and GCLIM as registers −2–4% in the GC programs; whole-line writes without a fill
+  ~0%; keeping code in the data cache by its replacement +45% (data starved); 16 data lines instead of 32 +50%.
+
+**CPU-only pages**, load → HALT (`machine/halttime.js`, POLL=30; run = first step → HALT), three interleaved rounds, the
+order rotating (median; ratio IQRs within ±2%):
+
+| Program | Register machine | Stack + primitives | Hybrid | Hybrid / register | Hybrid / stack |
+|---|---|---|---|---|---|
+| fizzbuzz (sample) | 0.96 s | 1.07 s | 0.99 s | 1.030 | 0.926 |
+| hanoi | 1.11 s | 1.25 s | 0.91 s | 0.819 | 0.719 |
+| bank | 5.41 s | 4.76 s | 2.79 s | 0.518 | 0.589 |
+| collatz | 3.74 s | 7.41 s | 3.72 s | 0.994 | 0.501 |
+| caesar | 10.30 s | 10.96 s | 6.64 s | 0.645 | 0.610 |
+| fib | 23.25 s | 51.83 s | 22.67 s | 0.976 | 0.437 |
+| tree | 14.64 s | 11.30 s | 9.74 s | 0.665 | 0.863 |
+| stars | 7.74 s | 3.44 s | 2.03 s | 0.264 | 0.590 |
+| sort | 6.75 s | 5.12 s | 3.78 s | 0.560 | 0.733 |
+| primes | 19.26 s | 20.23 s | 10.43 s | 0.547 | 0.515 |
+| deep_recursion | 49.83 s | 57.82 s | 49.37 s | 0.992 | 0.854 |
+| str_build | 3.08 s | 5.08 s | 3.21 s | 1.040 | 0.630 |
+| str_cmp | 4.42 s | 3.85 s | 2.90 s | 0.657 | 0.753 |
+| str_methods | 11.63 s | 9.43 s | 7.29 s | 0.630 | 0.773 |
+| str_index | 9.28 s | 9.34 s | 5.40 s | 0.582 | 0.580 |
+| str_keys | 83.75 s | 46.15 s | 38.58 s | 0.460 | 0.835 |
+| arr_grow | 10.77 s | 6.66 s | 5.46 s | 0.490 | 0.819 |
+| arr_nested | 10.58 s | 8.30 s | 4.83 s | 0.459 | 0.585 |
+| arr_methods | 20.76 s | 11.66 s | 10.54 s | 0.508 | 0.909 |
+| arr_print | 12.94 s | 13.41 s | 9.72 s | 0.751 | 0.724 |
+| obj_count | 8.48 s | 3.71 s | 1.11 s | 0.131 | 0.300 |
+| arr_gc | 147.77 s | 105.38 s | 87.69 s | 0.594 | 0.832 |
+| obj_gc_small | 67.61 s | 44.28 s | 40.40 s | 0.598 | 0.912 |
+| obj_keys | 4.89 s | 3.62 s | 2.14 s | 0.438 | 0.591 |
+| obj_grow | 6.79 s | 6.21 s | 2.15 s | 0.316 | 0.348 |
+| **total, geometric mean** | 545.7 s | 452.3 s | 334.5 s | **0.574** | **0.652** |
+
+- Faster than the stack machine with the primitives on all 25 and than the register machine on 20; compute as fast as the
+  register machine (fib 0.976, collatz 0.994, deep_recursion 0.992). Slower than it on two light, output- or miss-bound
+  programs (fizzbuzz +3%, str_build +4%) with fewer passes (38 against 40, 93 against 100): a pass costs more (below).
+- The largest gains are where the runtime's loops were: run-time object keys (obj_count 0.13: GETX / SETX probe in the
+  machine), array literals and `push` (obj_grow, arr_nested, arr_grow), `repeat` and `join` (stars 0.26, a string built
+  once), the collector (arr_gc, obj_gc_small 0.59–0.60 against the register machine's `mapbuild`).
+
+**Per-pass cost.** Every register costs every pass, whether it changes or not: FizzBuzz (the sample), run ms, five
+interleaved rounds — register machine 961; the same page with 176 more registered properties 962 (registered properties
+cost nothing here); hybrid 993 with a 16-line code cache, 1,018 with 80 unused registers more, 1,050 with a 32-line code
+cache (another 80 registers and a wider lookup). Moving the code cache's register subjects from the chain's end into
+`.fl` (where they change) made no difference (1,046 against 1,040).
+
+**Code cache size**, one interleaved round of the 25: 16 lines 334.8 s, 32 lines 343.5 s (geometric mean 32 / 16 1.023):
+32 lines made caesar 24% and bank 13% faster (their loops are longer than 32 instructions) and 23 others 0–12% slower.
+Default 16 (`ICACHE=32,1` builds 32).
+
+**The editor page, FizzBuzz 1–15** (`machine/ui_seq.js`, three rounds, the three pages in rotation):
+
+| Page | compiledMs | haltMs |
+|---|---|---|
+| register machine | 2,269–2,329 | 3,111–3,184 |
+| stack machine + primitives | 2,306–2,371 | 3,389–3,516 |
+| hybrid | 2,278–2,314 | 3,182–3,277 |
+
+The program is 148 steps in 22 passes on both register pages (model); the hybrid's run after compiling is ~0.1 s longer,
+the per-pass cost above. (With a 32-line code cache: 3,296–3,358.)
+
+**Compile time** (`tests/suite_css.js`, the L3 page, one browser, one run each): per program, hybrid / register machine
+median 1.007 (IQR 0.961–1.061), totals 115.5 against 114.7 s over the 182 programs all three run; the stack machine's
+compiler 106.9 s (its pages compile ~7% faster, as in §14). The compiler is the register machine's: only the opcode
+numbers moved (KIND joined the mov class).
+
+**Costs.** The CPU-only page 4.42 MB (register machine 4.14, stack + primitives 4.40), the editor page 17.4 MB (17.1,
+14.7); 357 registers (276, 274) and 844 registered properties (657, 684); the ROM 4,284 words (4,784, 6,139).
+
+**Correctness.** L1 136/136, C1 136/136, L2 ALL OK, `make fuzz` ALL OK, L3 183/183, L5 smoke ok, and all 146 programs
+(the suite and the samples) as CPU-only pages in Chrome with Node's console and cc_ref's steps. A new suite program,
+`gc_rawblock.js`, never halted on the register machine (its collector's walk, HISTORY 54). One early HALT in ~370 timed
+runs of the hybrid (obj_keys, 218 of 313 steps), not reproduced in 140 more; the register machine had one in 66 on
+2026-10-21 (tree, 110 of 2,273): the same intermittent fault, inherited, not found yet.

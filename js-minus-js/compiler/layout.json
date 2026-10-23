@@ -10,6 +10,7 @@
  "rt_base": 8448,
  "vec_base": 6128,
  "heap_lo": 16240,
+ "map_base": 8480,
  "heap_size": 3072,
  "objtag": 491520,
  "arrtag": 262144,

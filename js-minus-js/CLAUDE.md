@@ -33,6 +33,7 @@ make c2              # a CPU-only page per program under 1,500 steps runs to HAL
 node tests/picker.js build/js_in_css.xhtml [sample...]   # the sample picker on the page (default: three quick ones)
 make dist            # copy the built page to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
+python3 tools/romprof.py tests/suite/x.js          # where the passes go: user code, the ROM routine it called, the innermost
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
 SPEC=1 python3 tests/cmp_dsl.py tests/suite/x.js   # L2 on one program
 ```
@@ -64,7 +65,7 @@ readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
            picker.js (the sample picker on the page)
 samples/   the picker's programs (at most 23 lines: an editor's initial text starts at its line 1; output = Node's, 9 columns)
-tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
+tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof.py (passes by ROM routine)
 ```
 
 ## How to make changes
@@ -86,9 +87,13 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 - Every instruction is defined three times: `cc_ref.run()` (the reference), `csssim.py` (the CSS CPU's model, pass by
   pass) and `gen_css.py`'s instruction classes. Change all three; `make test` (C1: csssim against Node on every suite
   program) and `make c2` (the pages in Chrome) check them.
-- An instruction writes one word per execution (two in one block at most). One that writes more repeats with pc
-  unchanged and `--pst` counting (a trap's frame, NEW, SETP's new pair, the cat class); only its last execution counts as
-  a step, and csssim must take the same executions and reads in the same order (C1 compares steps, C2 the pages).
+- An instruction writes one word per execution (two in one block for SETP's new pair, up to a line for the primitives
+  and the cat class: `write_line`). One that writes more repeats with pc unchanged and `--pst` counting (a trap's frame,
+  NEW, SETP's new pair, ALLOC, the primitives, the cat class); only its last execution counts as a step, and csssim must
+  take the same executions and reads in the same order (C1 compares steps, C2 the pages; passes only the model shows,
+  so compare a page's frames with csssim's passes after changing a class).
+- A block the runtime makes must be marked in the collector's map (ARCHITECTURE §3.6) unless it is raw (an array's
+  elements): ALLOC, NEW and the cat class do it, and the collector's copies.
 - In `gen_css.py` an instruction belongs to one class (a container-query rule); inside it, `if()` on `--op` picks
   addresses and results. An operand whose address comes from another read must name that read in the class's
   `deps`, exactly: latches (a stalled instruction's operands kept for its re-execution) are what guarantee progress.
@@ -100,15 +105,18 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)
 - The lib is the ROM, a static table in the page's fetch rules (tiers of 1,024 words); `make page` rebuilds
   lib → image → page. `rtlib.py` compiles `lib_src.js` with `cc_ref` in rom mode (so a compiler change rebuilds it).
 - The dialect has no short-circuit `&&` / `||`, no `break`, blocks after every `if` / `while`, `//` comments only;
-  `peek` / `poke` / `p[i]`, `__fp()`, `prn`, `halt` are the intrinsics. No globals or string literals (they would land in
-  the program's data area): fixed cells are `layout.json` `rt_cells`.
+  `peek` / `poke` / `p[i]`, `__fp()`, `prn`, `halt` are the intrinsics, with the machine's primitives (`cc_ref.INTR`,
+  ARCHITECTURE §3.5): `__kind`, `__alloc`, `__mcpy` / `__mupper` / `__mlower` / `__mfill` / `__nput`, `__mcmp` / `__mfeq` /
+  `__mfref` / `__mwalk`, `__apush`. Work on memory belongs in them (a cache line per execution); a loop here takes an
+  instruction per word. No globals or string literals (they would land in the program's data area): fixed cells are
+  `layout.json` `rt_cells`.
   Frames are roots: a tagged value in a local survives a collection (it is updated); a raw address must not be held
   across anything that allocates. Keywords are recognised by a 13-bit hash, so a new identifier can collide with one.
 - Values are told apart by range (`cc_ref.isstr` / `isarr` / `isobj`): the tags are multiples of 2^15, so `peek(x - 1)`
   is the length of a string or an array.
 - Compare `python3 machine/csssim.py tests/suite/fizzbuzz.js` (and the `tests/programs/t*.js`) before and after:
-  passes track wall time, steps don't. Data sits in RAM behind a 32-line cache of 4-word lines (2-way); instructions
-  in ROM never miss.
+  passes track wall time, steps don't. Data sits in RAM behind a 32-line cache of 4-word lines (2-way); user code
+  behind a 16-line code cache of its own (direct-mapped, prefetching the next line); instructions in ROM never miss.
 
 ### Machine or page change (`machine/`, `readback/`)
 

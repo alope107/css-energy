@@ -48,6 +48,15 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   frame one word per execution. The full language first compiled 8–13% slower than main (median per program); inlining
   the DSL's single-use temps and materialising each code record's word brought it to 3% (BENCHMARKS §14). Run times:
   §14. The stack machine last exists at `212175a`.
+- **14, the hybrid (2026-10-22).** Benchmarked against each other, the register machine won on compute and branch
+  `rom-css` (the stack machine with the runtime's work on memory as instructions, a cache line per execution) on
+  strings, arrays and objects. The hybrid took `rom-css`'s primitives onto the register machine, redone for three-address
+  code (KIND, ALLOC, the MCPY and MCMP families, APUSH, a line-wide cat class), and found its two remaining costs on the
+  way: the collector's per-collection walk of from-space (now a map kept as blocks are made, which also fixed a hang on a
+  grown array's headerless block) and user code evicted from the data cache by the data it works on (now a code cache of
+  its own: suite passes −28% in the model). With GETX / SETX probing objects in the machine, 25 programs ran 1.74× faster
+  than the register machine and 1.53× than `rom-css` (geometric means); two light programs 3–4% slower than the register
+  machine, since every register costs every pass (BENCHMARKS §15).
 
 ## Dead ends and superseded approaches
 
@@ -106,8 +115,23 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 51 | One output instruction per pass, 8 columns | every line starts in bank 0: one short line per pass | a mask of the banks written, 9 columns |
 | 52 | The runtime's `join` and `repeat` calling `cat` | the ROM copy loop and allocation per piece (stars: 5,205 steps) | `__dadd`, the cat class (1,082) |
 | 53 | The picker's per-line checks as `:has()` on `#app`, per editor | 264 searches of ~10,000 elements: compile +1.7 s | `:has(> .frame > …)` on the editors' section |
+| 54 | The collector's bitmap built at each collection by walking from-space by its headers | a miss per block: 21–31% of the GC programs' passes; a grown array's raw block has no header, and a negative first element looped the walk (`gc_rawblock.js` never halted) | the map kept as blocks are made (ALLOC, NEW, the cat class, the copies) |
+| 55 | User code fetched through the data cache | 23% of the suite's passes ended on code misses: a loop's code (two words an instruction) evicted by its data | a 16-line code cache of its own (8 lines thrash: `obj_gc` 9,350 passes against 4,015) |
+| 59 | A 32-line code cache | caesar 24% and bank 13% faster, the other 23 timed programs 0–12% slower: every register costs every pass (~20 µs; 80 dummy registers alone +2.3% on FizzBuzz) | 16 lines (`ICACHE=32,1` builds 32) |
+| 60 | Code kept in the data cache by its replacement (evict the data way when the victim is code; model) | data starved: caesar 454 passes against 314, `obj_gc` 8,111 against 6,397 | a separate code cache |
+| 61 | The code cache's register subjects outside the chain (in `.fl`, where they change) | no faster (1,046 against 1,040 ms on FizzBuzz): the cost isn't the subjects' depth | not done |
+| 56 | HP and GCLIM as registers instead of memory cells (model) | 2–4% fewer passes in the GC programs, for an access path the ROM's collector would need | not done |
+| 57 | A line written whole into a clean victim without a fill (model) | ~0%: allocation writes rarely cover a line, and their victims are dirty | not done |
+| 58 | SETX's full chunk trapping from the obj class, as SETP's does | its trap's steps (pst 1 … 3) would route it back to the arr class | the chunk handed back (pst 512), the arr class's trap from its first step |
 
 ## Open leads (untried)
+
+- **What a register costs.** ~20 µs a pass each, changing or not (BENCHMARKS §15: 80 unused registers +2.3% on FizzBuzz),
+  about four times the style cost measured for a subject alone: the 358 registers are ~2 ms of a light pass, and a
+  cheaper register would pay for a 32-line code cache (caesar 24% faster) on everything else.
+- **An intermittent early HALT** (the register machine's tree, 110 of 2,273 steps, on 2026-10-21; the hybrid's
+  obj_keys, 218 of 313, once in ~370 runs): with a fresh browser per run, never twice. A harness that dumps pc, fp and
+  the cache when HALT comes early would tell a HALT executed from one read wrongly.
 
 - **Fewer traps.** Suite traps are mostly misses (1,309) and arithmetic EXT (1,104; 160 in `primes.js`): MOD / DIV,
   SHL13 and small-constant multiply in the font; dirty lines above SP treated as clean; an eviction buffer; next-line

@@ -40,8 +40,20 @@ assert LAYOUT['data_base'] == LAYOUT['rom_size'], 'RAM index = address - rom_siz
 AMASK = 32767                           # addresses are 15-bit
 
 # the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
-OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP  JMP JLT JGT JLE JGE JEQ JNE HALT  JZ JNZ  CALL RET NOT TENTER '
-       ' LDI STI  DADD DADDL DADDR DLT DGT DLE DGE DEQ DNE  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC').split()
+OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE HALT  JZ JNZ  CALL RET NOT TENTER '
+       ' LDI STI  DADD DADDL DADDR DLT DGT DLE DGE DEQ DNE  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC  APUSH'
+       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK').split()
+# The runtime's primitives (the ROM reaches them through intrinsics; the CSS CPU runs them a cache line per execution):
+# KIND A, B, k: A = kind test k of B (KINDS). ALLOC A, n, k: a new block (ALLOCK: a string of n bytes, its header, length and
+# NUL written, A its value; an array of capacity n, its first line written, A its value; n raw words or an object chunk's, A
+# their address), marked in the collector's map (but raw ones); the heap full: the ROM's galloc collects and the ALLOC executes again. MCPY A, B, C:
+# C words from B to A (A <= B if they overlap; MUPPER / MLOWER mapping letters' case; MFILL: the value B); NPUT A, B: B's
+# decimal digits at A. MCMP A, B, C: A = the first i < A where B[i] != C[i], else A (MFEQ: B[i] == C; MFREF: B[i] refers into
+# the from-space at C; MWALK: through [len][bytes][0] strings from B, the offset of the first of length A, or of the first at
+# or past C). APUSH 0, B, C: B.push(C) and return, as the ROM's push routine's first instruction (no array, or a full one:
+# on to the next instruction)
+KINDS = ['code', 'str', 'arr', 'obj', 'ao', 'notown', 'nlen', 'ref', 'heap']
+ALLOCK = ['str', 'arr', 'raw', 'chunk']
 # LDI A, B, C: A = mem[B + C]; STI A, B, C: mem[A + B] = C (raw memory: the runtime library's peek, poke and p[i]); GETFP A: A = fp.
 # The dynamic operators: DADD A, B, C (DADDL / DADDR: B / C is a boolean) and DLT ... DNE compute numbers here and trap into the
 # runtime library for a string, array or object. GETX A, B, C: A = B[C] (an array inside its length here, else the library);
@@ -54,7 +66,9 @@ OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP  JMP JLT JGT 
 # memory). TRAPS names each trapping instruction's routine (lib.json entries)
 TRAPOFF = 60
 TRAPS = {'DADD': 'dadd', 'DADDL': 'daddl', 'DADDR': 'daddr', 'DLT': 'dlt', 'DGT': 'dgt', 'DLE': 'dle', 'DGE': 'dge', 'DEQ': 'deq', 'DNE': 'dne',
-         'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub'}
+         'GETX': 'getx', 'SETX': 'setx', 'SETP': 'setp', 'NEW': 'gcnew', 'PRINT': 'pstub', 'ALLOC': 'galloc'}
+# a string's + that finds the heap full (the cat class's trap): the routine collects, then joins
+CATTRAPS = {'DADD': 'gccat', 'DADDL': 'gccatl', 'DADDR': 'gccatr'}
 OP = {n: i for i, n in enumerate(OPN)}
 # operator codes on the parser's operator stack (and their precedences: prec)
 NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, AND, OR, NOT, NEG = range(23)
@@ -97,6 +111,46 @@ def isref(v): return isstr(v) or isarr(v) or isobj(v)
 def truthy(mem, v):
     """JZ / JNZ / NOT: 0 and the empty string are false (a string's length is the word before its value's address)"""
     return v != 0 and not (isstr(v) and mem[(v - 1) & AMASK] == 0)
+def notown(v):
+    """a string that isn't the program's own (a heap string, or SEED's): run-time keys look these up by their characters"""
+    return isstr(v) and not (STRP0 <= v + STRTAG < HEAP0)
+def kind(k, v):
+    """KIND's tests (KINDS[k])"""
+    return [isstr(v) + 2 * isarr(v) + 3 * isobj(v), int(isstr(v)), int(isarr(v)), int(isobj(v)), int(isarr(v) or isobj(v)),
+            int(notown(v)), len(str(v)), int(isref(v)), int(isstr(v) and v + STRTAG >= HEAP0)][k]
+def rnd8(n): return -(-n // 8) * 8
+def allocw(k, n):
+    """an ALLOC's block, in words: a string of n bytes ([hdr][len][bytes][0]), an array of capacity n ([hdr][cap][len][ptr]
+    [elements]), n raw words, an object chunk of n words"""
+    return rnd8(n + (3, 4, 0, 0)[k])
+# ALLOC's executions on the CSS CPU (csssim.py, gen_css.py), --pst the phase: HP (or the trap), the header's line (a string's
+# [hdr][len][0][0], an array's [hdr][cap][0][ptr]), a string's NUL past that line, the map's bit, A
+AP_HP, AP_HDR, AP_NUL, AP_MAP, AP_RES = range(5)
+def allocnext(ph, k, n):
+    """the phase after ph for an ALLOC of kind k, n"""
+    while True:
+        ph += 1
+        if ph == AP_HDR and k >= 2: continue
+        if ph == AP_NUL and (k != 0 or n < 2): continue
+        if ph == AP_MAP and k == 2: continue
+        return ph
+def allochdr(k, n, nw, base):
+    """the header line ALLOC writes (kinds 0, 1)"""
+    return [-2 - nw, n, 0, 0] if k == 0 else [-3 - nw, n, 0, base + 4]
+# The collector's map of block starts (a bit per 8 heap words, 16 to a word, both semi-spaces: MAPN words from MAP), kept as
+# blocks are made (ALLOC, NEW, a string's +, the collector's copies): a stack word is a reference only if its block is marked
+MAP = LAYOUT['map_base']; MAPN = 2 * LAYOUT['heap_size'] // 128
+def mapbit(b):
+    """the map's word and bit for the block at b"""
+    x = (b - HEAP0) // 8; return MAP + x // 16, x % 16
+def isfref(w, flo):
+    """MFREF's test: w refers to a block in the from-space at flo (an object, a string, an array)"""
+    H = LAYOUT['heap_size']
+    return flo <= w + OBJTAG < flo + H or flo + 2 <= w + STRTAG < flo + H or flo + 3 <= w - ARRTAG < flo + H
+def mcase(op, c):
+    """MCPY's letters: MUPPER a-z to A-Z, MLOWER A-Z to a-z"""
+    lo = 97 if op == 'MUPPER' else 65
+    return c + (-32 if op == 'MUPPER' else 32) if op in ('MUPPER', 'MLOWER') and lo <= c < lo + 26 else c
 def s20(x): return (x + (1 << 19)) % (1 << 20) - (1 << 19)       # machine words: 20-bit two's complement
 H1M, H2M = 65521, 65519
 
@@ -110,7 +164,11 @@ def isK(o): return 768 <= o < 1024
 KBIG, TMP, CND = 1024, 1025, 1028
 CNDOPS = CMPS + (NOT,)
 
-INTR = ['peek', 'poke', '__fp', 'prn', 'halt', '__dadd']     # (__dadd: the dynamic + instruction: a string built in CSS)
+# (__dadd: the dynamic + instruction, a string built in CSS; the rest: the runtime's primitives, OPN's comment)
+INTR = ['peek', 'poke', '__fp', 'prn', 'halt', '__dadd', '__kind', '__alloc', '__mcpy', '__mupper', '__mlower', '__mfill', '__nput',
+        '__mcmp', '__mfeq', '__mfref', '__mwalk', '__apush']
+INTRN = (1, 2, 0, 1, 0, 2, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2)      # their arguments
+INTRV = ('peek', '__fp', '__dadd', '__kind', '__alloc', '__mcmp', '__mfeq', '__mfref', '__mwalk')    # those with a value
 def h1h2(s):
     a = b = 0
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
@@ -174,7 +232,7 @@ M_TELSE = 51
 # M_ARR: an array literal (value: its elements so far); M_METH: a method call's arguments (value: method + 64 * commas)
 M_PAREN, M_CALL, M_ARR, M_METH, M_PUTC, M_PRINT, M_TERN = 100, 101, 102, 103, 104, 105, 108
 M_OBJ, M_OKEY, M_INDEX = 109, 110, 111
-# the runtime library's intrinsics (rom mode): M_INTR's value = the intrinsic (INTR) + 8 * its slot on the operand stack (d0)
+# the runtime library's intrinsics (rom mode): M_INTR's value = the intrinsic (INTR) + 32 * its slot on the operand stack (d0)
 M_INTR = 112
 # control stack kinds. Bodies: IFB / ELSEB / LOOPB and DOB (a = continue target, b = break target; DOB c = the loop
 # top) / FUNCB (a = the label past the function, b = its frame label: its count of locals); + BRACELESS: the body is a single
@@ -560,17 +618,23 @@ class Compiler:
 
     def intr_end(self, tv):
         """an intrinsic's ')': its operands from d0 + 1 (d0: the slot of its value)"""
-        n, d0 = tv % 8, tv // 8; a = [self.src(i) for i in range(d0 + 1, self.nd)]
-        want = (1, 2, 0, 1, 0, 2)[n]
-        if len(a) != want: return self.fail(77)
-        name = INTR[n]
-        if name == 'peek': self.emit('LDI', self.tmp(d0), a[0], (K(0), 0))
+        n, d0 = tv % 32, tv // 32; a = [self.src(i) for i in range(d0 + 1, self.nd)]
+        if len(a) != INTRN[n]: return self.fail(77)
+        name = INTR[n]; t = self.tmp(d0)
+        if name in ('__kind', '__alloc') and not isK(a[1][0]): return self.fail(77)       # (the test or kind: a constant)
+        if name == 'peek': self.emit('LDI', t, a[0], (K(0), 0))
         elif name == 'poke': self.emit('STI', a[0], (K(0), 0), a[1])
-        elif name == '__fp': self.emit('GETFP', self.tmp(d0))
+        elif name == '__fp': self.emit('GETFP', t)
         elif name == 'prn': self.emit('PRINT', (0, 0), a[0])
-        elif name == '__dadd': self.emit('DADD', self.tmp(d0), a[0], a[1])
+        elif name == '__dadd': self.emit('DADD', t, a[0], a[1])
+        elif name == '__kind': self.emit('KIND', t, a[0], a[1])
+        elif name == '__alloc': self.emit('ALLOC', t, a[0], a[1])
+        elif name == '__nput': self.emit('NPUT', a[0], a[1], (K(0), 0))
+        elif name == '__apush': self.emit('APUSH', (K(0), 0), a[0], a[1])
+        elif name in ('__mcmp', '__mfeq', '__mfref', '__mwalk'): self.emit('MOV', t, a[2]); self.emit(name[2:].upper(), t, a[0], a[1])
+        elif name != 'halt': self.emit(name[2:].upper(), a[0], a[1], a[2])         # (MCPY, MUPPER, MLOWER, MFILL)
         else: self.emit('HALT')
-        self.nd = d0; self.push_od(TMP if name in ('peek', '__fp', '__dadd') else K(0), 0)
+        self.nd = d0; self.push_od(TMP if name in INTRV else K(0), 0)
 
     def print_end(self):
         """console.log(...) ended. Its PRINTs printed every argument, so it leaves no value: it must be a statement of its own
@@ -719,7 +783,7 @@ class Compiler:
             if isP(40):
                 if h == KW['putc']: self.push_op(M_PUTC)
                 elif self.rom and h in [KW[n] for n in INTR]:          # an intrinsic: its operands stay where they are
-                    self.push_op(M_INTR, [KW[n] for n in INTR].index(h) + 8 * self.nd); self.push_od(TMP, 0)
+                    self.push_op(M_INTR, [KW[n] for n in INTR].index(h) + 32 * self.nd); self.push_od(TMP, 0)
                 elif h in GLOBAL_INDEX:                                  # parseInt(s), ...: a method on a dummy receiver
                     self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, GLOBAL_INDEX[h])    # (the receiver: unused)
                 else:
@@ -1186,7 +1250,10 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         if hp + nw - 8 >= rd(GCLIM) + LAYOUT['heap_size'] - 7: return False
         base = HEAP0 + hp; wr(HP, hp + nw)
         for i, w in enumerate([-2 - nw, n] + t + [0]): wr(base + i, w)
-        wr(addr(a), base + 2 - STRTAG); return True
+        mark(base); wr(addr(a), base + 2 - STRTAG); return True
+    def mark(b):
+        """the block at b in the collector's map"""
+        w, k = mapbit(b); wr(w, rd(w) | 1 << k)
     def probe(o, key):
         """GETP / SETP: the address of key's word in object o's chunks, or of the word that ends its keys (0)"""
         cur = (o + OBJTAG) & AMASK
@@ -1194,6 +1261,13 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             k = rd(cur)
             if k == key or k == 0: return cur
             cur = (k + OBJTAG) & AMASK if k < 0 else cur + 2
+    def setp(o, key, v, full=None):
+        """SETP / SETX of an object: the key's pair, else a free pair in place, else the library (a full chunk: setp, or for
+        SETX setx with its own operands, as the CSS CPU hands it back)"""
+        q = probe(o, key)
+        if rd(q): wr(q + 1, v)
+        elif (q - HEAP0) % 8 < 6: wr(q, key); wr(q + 1, v); wr(q + 2, 0)
+        else: name, args = full or ('setp', [o, key, v]); trap(name, TRAPOFF, args, pc)
     def emit(c):
         nonlocal optr
         if c == 10: optr = (optr // cols + 1) * cols % (cols * rows)
@@ -1222,8 +1296,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'JMP': pc = a
         elif op == 'JZ': pc = a if not truthy(mem, val(b)) else pc
         elif op == 'JNZ': pc = a if truthy(mem, val(b)) else pc
-        elif op == 'HALT':
-            if strict and fp != sp0: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
+        elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
+            if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
             return steps, ''.join(map(chr, out))
         elif op[0] == 'J': pc = a if ALU[op[1:]](val(b), val(c)) else pc
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc); fp += w1; pc = a
@@ -1242,7 +1316,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op in ('DADD', 'DADDL', 'DADDR'):
             x, y = val(b), val(c)
             if not (isref(x) or isref(y)): wr(addr(a), x + y)
-            elif isarr(x) or isobj(x) or isarr(y) or isobj(y) or not cat(a, x, y, op == 'DADDL', op == 'DADDR'): trap(TRAPS[op], a - 256, [x, y], pc)
+            elif isarr(x) or isobj(x) or isarr(y) or isobj(y): trap(TRAPS[op], a - 256, [x, y], pc)
+            elif not cat(a, x, y, op == 'DADDL', op == 'DADDR'): trap(CATTRAPS[op], a - 256, [x, y], pc)
         elif op in ('DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE'):
             x, y = val(b), val(c)
             if (isstr(x) and isstr(y)) if op in ('DEQ', 'DNE') else (isref(x) or isref(y)): trap(TRAPS[op], a - 256, [x, y], pc)
@@ -1251,24 +1326,52 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             x, k = val(b), val(c)
             if isarr(x):
                 q = (x - ARRTAG) & AMASK; wr(addr(a), rd(rd(q) + k) if 0 <= k < rd(q - 1) else 0)
+            elif isobj(x) and not notown(k): q = probe(x, s20(k + STRTAG)); wr(addr(a), rd(q + 1) if rd(q) else 0)
             else: trap('getx', a - 256, [x, k], pc)
         elif op == 'SETX':                              # an array, k inside its length: the store; anything else: the library
             x, k, v = val(a), val(b), val(c); q = (x - ARRTAG) & AMASK
             if isarr(x) and 0 <= k < rd(q - 1): wr(rd(q) + k, v)
+            elif isobj(x) and not notown(k): setp(x, s20(k + STRTAG), v, ('setx', [x, k, v]))
             else: trap('setx', TRAPOFF, [x, k, v], pc)
         elif op == 'NEW':                               # a chunk with no keys (the heap full: the collector, then NEW again)
             hp = rd(HP)
-            if s20(hp - (rd(GCLIM) + LAYOUT['heap_size'] - 7)) < 0: wr(HEAP0 + hp, 0); wr(HP, hp + 8); wr(addr(a), hp + HEAP0 - OBJTAG)
+            if s20(hp - (rd(GCLIM) + LAYOUT['heap_size'] - 7)) < 0: wr(HEAP0 + hp, 0); mark(HEAP0 + hp); wr(HP, hp + 8); wr(addr(a), hp + HEAP0 - OBJTAG)
             else: trap('gcnew', a - 256, [], pc - 2)
         elif op == 'GETP':                              # o.key (C: the key's offset from data_base): 0 if missing or not an object
             o = val(b); wr(addr(a), rd(probe(o, db + c) + 1) if isobj(o) and rd(probe(o, db + c)) else 0)
         elif op == 'SETP':                              # o.key = v: the key's pair, else a free pair in place, else the library
             o, v = val(a), val(b)
-            if isobj(o):
-                q = probe(o, db + c)
-                if rd(q): wr(q + 1, v)
-                elif (q - HEAP0) % 8 < 6: wr(q, db + c); wr(q + 1, v); wr(q + 2, 0)
-                else: trap('setp', TRAPOFF, [o, db + c, v], pc)
+            if isobj(o): setp(o, db + c, v)
+        elif op == 'KIND': wr(addr(a), kind(c - 896, val(b)))
+        elif op == 'ALLOC':                             # a block at HP (the heap full: the collector, then ALLOC again)
+            n, k = val(b), c - 896; nw = allocw(k, n); hp = rd(HP); base = HEAP0 + hp
+            if hp + nw > rd(GCLIM) + LAYOUT['heap_size']: trap('galloc', a - 256, [nw], pc - 2)
+            else:
+                if k == 0: wr(base, -2 - nw); wr(base + 1, n); wr(base + 2 + n, 0)
+                elif k == 1: wr(base, -3 - nw); wr(base + 1, n); wr(base + 2, 0); wr(base + 3, base + 4)
+                if k != 2: mark(base)
+                wr(HP, hp + nw); wr(addr(a), (base + 2 - STRTAG, base + 3 + ARRTAG, base, base)[k])
+        elif op in ('MCPY', 'MUPPER', 'MLOWER'):
+            d, s_, n = val(a), val(b), val(c)
+            for i in range(n): wr(d + i, mcase(op, rd(s_ + i)))
+        elif op == 'MFILL':
+            d, v, n = val(a), val(b), val(c)
+            for i in range(n): wr(d + i, v)
+        elif op == 'NPUT':
+            p, v = val(a), val(b)
+            for i, ch in enumerate(str(v)): wr(p + i, ord(ch))
+        elif op in ('MCMP', 'MFEQ', 'MFREF'):
+            n, p, q = val(a), val(b), val(c); i = 0
+            while i < n and not (rd(p + i) != rd(q + i) if op == 'MCMP' else rd(p + i) == q if op == 'MFEQ' else isfref(rd(p + i), q)): i += 1
+            wr(addr(a), i)
+        elif op == 'MWALK':
+            n, p, e = val(a), val(b), val(c); o = 0
+            while p + o < e and rd(p + o) != n: o += rd(p + o) + 2
+            wr(addr(a), o)
+        elif op == 'APUSH':                             # (no array, or a full one: on to the ROM's push)
+            x, v = val(b), val(c); q = (x - ARRTAG) & AMASK
+            if isarr(x) and rd(q - 1) < rd(q - 2):
+                n = rd(q - 1); wr(rd(q) + n, v); wr(q - 1, n + 1); r = mem[fp]; wr(fp, n + 1); fp -= r // 8192; pc = r % 8192
         else: raise RuntimeError(f'bad op {op} at {pc - 2}')
 
 def image_mem(c, words, data, init=None):
