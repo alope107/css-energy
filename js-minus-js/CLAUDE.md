@@ -31,6 +31,8 @@ make l5              # every program under 1,500 steps (~5.5 min; run in the bac
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
 node tests/picker.js build/js_in_css.xhtml [sample...]   # the sample picker on the page (default: three quick ones)
+make l5-net          # the network programs (tests/suite/net_*) on the page, served with the gateway (~1 min)
+node net/server.js .. 8767   # serve the repo root with the network gateway (fetch / read need it; README Network)
 make dist            # copy the built page to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
 python3 tools/romprof.py tests/suite/x.js          # where the passes go: user code, the ROM routine it called, the innermost
@@ -66,6 +68,8 @@ tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  f
            picker.js (the sample picker on the page)
 samples/   the picker's programs (at most 23 lines: an editor's initial text starts at its line 1; output = Node's, 9 columns)
 tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof.py (passes by ROM routine)
+net/       server.js (web server + network gateway: the modem's documents and protocol)  device.py shim.js (the same
+           protocol for the models and Node)  probe/ (what CSS can request and read back)  xhtml-tests/ (the user's tests)
 ```
 
 ## How to make changes
@@ -134,7 +138,7 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof
 ## Done means
 
 - `make test` passes; `make l3` and `make fuzz` for any compiler change; `make l5-smoke` for any change that reaches
-  the page.
+  the page; `make l5-net` for any change to `NET`, the modem (`gen_css.py`'s net class and slot) or `net/`.
 - `dist/` is rebuilt if the page changed.
 - Measured effects are in `docs/BENCHMARKS.md`; new Chrome behaviour is in `docs/ENGINE_NOTES.md`.
 - Paste the tests' summary lines as evidence; don't just say they pass.
@@ -168,3 +172,13 @@ tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof
   `212175a`.
   The font CPU (`gen_fvm4.py`, `cpu4.py`, `cpugen.py`, `otl.py`, `fvm_build.py`, `uarch4.py`, `hbtest.py`, `traps.py`, L4)
   last exists at `181cbb7`.
+- The network (`NET`, ARCHITECTURE §3.8): the gateway's words exist four times, `net/server.js` (the page),
+  `net/device.py` (cc_ref, csssim, the fuzzer), `net/shim.js` (Node) and `lib_src.js`; change them together.
+  The modem's answer is a fragment scroll, which crosses same-origin documents only: keep the modem on the page's
+  origin. The repo-root `http.server` has no gateway: there `fetch` waits ~20 s and returns -1. A network program's
+  time is its round trips, not its steps: `suite_ui.py` lists every `net_*` program for `make l5-net`. The modems'
+  boxes stay outside `#clk` (a hidden box restores its scroll offset: stale answers, ENGINE_NOTES 59), and the read
+  path's runtime cells sit in cache sets the stack and code don't use (`layout.json` pads `rt_cells`). Time network
+  programs with no `requestAnimationFrame` loop in the page: one runs them ~1.5× faster than a user sees
+  (ENGINE_NOTES 64; `pagenet.js` counts frames only with `FRAMES=1`). The gateway holds each modem's next load until
+  it has an answer, at most 4 per browser (Chrome opens 6 connections per host).

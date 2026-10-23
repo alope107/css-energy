@@ -136,3 +136,101 @@ chats.
     Hence `nowrap` and `&nbsp;`.
 49. **An inline `div` is a separate shaping run** (UA `unicode-bidi: isolate`), which the scan's GSUB chain can't
     cross. `unicode-bidi: normal` (or `all: unset`) fixes it.
+
+## The network modem (`NET`, `net/server.js`)
+
+50. **A quirks-mode page applies a same-origin stylesheet whatever its Content-Type**: `application/json`,
+    `text/plain`, `text/html`, even `image/png`. A standards-mode or XHTML page applies only `text/css`, no
+    Content-Type, or `application/x-unknown-content-type`. `X-Content-Type-Options: nosniff` still blocks it.
+    (`StyleSheetContents::ParseAuthorStyleSheet`: lax iff quirks mode and CORS-same-origin;
+    `CSSStyleSheetResource::CanUseSheet`.) The page is XHTML, which has no quirks mode, so until 2026-10-22 the modem, an
+    HTML iframe without a doctype, read the gateway's answers this way (a stylesheet `rx` per load); now the gateway
+    writes them into the modem's documents, which saves that request. *(measured 2026-10-19; probe: `quirks-lax-css`)*
+51. **Responsive iframes carry a number from a child document to the page**: `frame-sizing: content-height` on the
+    iframe, `<meta name="responsive-embedded-sizing">` in an HTML child. Chrome 153 needs
+    `--enable-blink-features=ResponsiveIframes` and reads the meta's content as the allowed origins (`*`); 155 has the
+    feature on and reads `allow-origins=*`. The modem has both metas; each version ignores the other's. The height is
+    recorded at DOMContentLoaded and at load (or by script, `requestResize()`), not as the content changes: the child
+    must load again to report again. Each report marks the iframe for layout, changed or not. It works cross-site,
+    with the child in its own process. *(measured; probe: `responsive-iframe`)*
+52. **The reported height is measured with the viewport the child document started with**, which is the iframe's
+    height then (`LocalFrameView::NaturalSizeLayoutScope`, "consistent ICB"): content shorter than that reports the
+    viewport, so a reported height never shrinks. The modem reports `100vh + mod(R - 100vh, 4096px)`, which grows the
+    iframe by less than 4096 px to the next height that is R mod 4096, and the page reads it mod 4096. A document that
+    isn't opted in clears the size (the iframe falls back to 150 px): `/net/reset.html`, past 2^24 px. *(measured)*
+53. **An `<object>` or a lazy iframe fetches when first shown, and only then**: under `display: none` neither is
+    fetched; showing it fetches; hiding and showing it again reuses the frame and fetches nothing
+    (`HTMLPlugInElement::AttachLayoutTree`: "re-use it now. We do not want to reload the frame"); Firefox doesn't re-fetch
+    either, WebKit does, and the spec's re-fetch is an open issue (`../../bugs/README.md`). So CSS fires each
+    such element's request once. A 404 shows the object's fallback content. An SVG's natural size comes from its
+    `width` / `height` attributes (`SVGSVGElement::IntrinsicWidth`), not from CSS. A non-lazy iframe is fetched even
+    under `display: none`. Repeatable requests need a document that reloads itself: `<meta http-equiv="refresh"
+    content="0">` reloads about 75 times a second beside an idle page. *(measured)*
+54. **There is no `src()`: a CSS URL can't be computed**, so every URL the page can request is in its CSS. What CSS
+    can choose is which one: `background-image: if(style(--x: v): url(…); …)` requests the chosen URL in each fresh
+    document (with `Cache-Control: no-store`), while `@import` and `<link>` are fetched whatever their media.
+    *(measured)*
+55. **A same-process child gets few loads when the page's frames are heavy, and a cross-site child slows the page's
+    frames.** (Measured with the font CPU's height-channel modem, superseded by 56.) Beside the CPU page the modem loaded about 3 times a second in process (the page at 11–13 frames/s,
+    0.7–0.8 s per word). Cross-site (the page on 127.0.0.1, the modem on localhost: `net/server.js` rewrites the
+    iframe's URL) it loads about 40 times a second in its own process, but the page dropped to 5–6 frames/s; still
+    0.5 s per word, about 3 frames. Pacing the modem to 9 loads/s gave 14.5 frames/s but 1.06 s per word; layout
+    containment around the iframe changed nothing. *(measured 2026-10-19)*
+56. **A same-origin child's fragment scroll moves the page's scroll containers**: an iframe navigated to `x.html#t`
+    scrolls its `overflow: hidden` ancestors on the page so that `#t` is in view. With `#t` as wide as the box and after a
+    span R px wide, the box's `scrollLeft` is R (larger or smaller than before), and a scroll timeline reads it. This is
+    the modem's answer channel: no flag (unlike responsive iframes, 51), 2 ms after the child's load. Facts:
+    a cross-origin or `data:` child scrolls nothing; `<meta http-equiv="refresh" content="0">` to the same URL doesn't
+    reload (alternate two URLs: 118 loads/s beside an idle page); the box may be `position: fixed; visibility: hidden`;
+    `scrollLeft` is exact to 2^25 px, but a scroll timeline's registered integer is off by 2–4 above 2^24 (floats), so
+    answers stay below 2^20; the fragment survives a redirect and a form GET (`action="x.html#t"`). From the user's
+    `net/xhtml-tests/readback`. *(measured 2026-10-20; `net/probe/probe5.js`)*
+57. **A quirks-mode `data:` child reads any CORS-enabled response as CSS**: a cross-origin `<link rel=stylesheet
+    crossorigin>` applies whatever its Content-Type (JSON, `text/plain`, `text/html`) if the response has
+    `Access-Control-Allow-Origin`; without `crossorigin` only `text/css` or none applies. A `data:` or `srcdoc` child
+    can opt in to responsive sizing (51) when the page is http (an `about:blank` page matches no source list), also when
+    reached by a form GET; each navigation resets the iframe to 150 px first, so answers below 150 read 150. `data:` URL
+    navigations load up to between 2,030 and 2,050 KB. Trap: Chrome's memory cache hands a URL's earlier response to a
+    later request in another CORS mode; give each probe its own URL. *(measured 2026-10-20; `net/probe/probe4.js`)*
+58. **Several modem children run side by side, paced by the page's frames**: beside the page running a `read()` loop
+    (34 frames/s, 4.3 words/s), one more child doing its own round trips ran at 4.0–4.2 words/s and the page's own
+    stayed at 4.0–4.2 (8.0–8.2 in all); three more: 3.6 each, 14.3 in all. A word takes about 8 page frames whichever
+    child carries it. *(measured 2026-10-21; `net/probe/probe7.js`, the extra children driven by the harness)* Built
+    into the page (4 modems, 2 bytes each), a body takes half the time, not a quarter: the 4 modems' reloads cost the
+    page a third of its frames (32 → 22 frames/s), and the CPU then works through 8 bytes per word (BENCHMARKS §16).
+59. **A box that goes `display: none` keeps its scroll offset and gets it back when it shows again**
+    (`PaintLayerScrollableArea`: saved into the element when the box is destroyed, restored when it is made again;
+    `paint_layer_scrollable_area.cc` 173 / 219 in 153). A scroll timeline on it then reads the old offset at once. With
+    the modems inside `#clk` (hidden by Edit), the last run's answers came back on Run and passed for the first word's
+    (the gateway never saw it). Hence the modems' boxes outside `#clk`, never hidden; a hidden *child* (now the iframe's
+    clip box, `.nclip`) only leaves its box nothing to scroll, which clamps the offset to 0. *(measured 2026-10-21)*
+60. **A transition latch fed by a value that an animation changes didn't hold here**: `--nlive: min(1, var(--rreq));
+    transition: --nlive 0s calc((1 - min(1, var(--rreq))) * 1000000s)`, with `--rreq` from a scroll-driven animation on
+    the same element or inherited from its parent, followed `--rreq` back to 0 within the frame, where memtree's group
+    latch (fed by registers) holds. A held register (`rlive`, zeroed by Edit like the others) latches instead.
+    *(observed 2026-10-21, not reduced)*
+61. **A document fetches a CSS image URL once**: `CSSImageValue::CacheImage` keeps the image it fetched, and the style
+    engine caches image contents by URL per document (`StyleEngine::CacheImageContent`), so an `if()` that comes back to
+    a branch it took before requests nothing, `no-store` or not. A request a document sends more than once needs a URL
+    that changes: the modem's digit URLs carry a tag that every new word changes (its sequence bit) and the document's
+    id. *(Blink source, 153; the modem's tags rely on it)*
+62. **A navigation the server holds leaves the old document working**: while an iframe's next document (here its
+    `<meta http-equiv="refresh" content="0">`) waits for the response, the old one stays, is laid out on resize and
+    sends the requests its CSS chooses; the new one replaces it at commit. 20 s of waiting raised nothing. Each held
+    navigation holds one of Chrome's 6 connections per host, so the gateway holds at most 4 per browser.
+    *(measured 2026-10-22; `net/server.js`)*
+63. **Each same-process child document costs its page two forced style + layout updates**: `Document::FinishedParsing`
+    calls `UpdateStyleAndLayoutTree()`, and after the load, once the document lays out with `document.fonts.ready`
+    still pending, `FontFaceSetDocument::FireDoneEventIfPossible` (a task posted by `DidLayout`) calls
+    `UpdateStyleAndLayout()`. A child's update first updates its owner's document (`Document::UpdateStyleAndLayoutTree`),
+    so on the CSS CPU page each is a style pass of the page between frames, 10–13 ms here (traces, the tasks' `posted
+    from`: `html_document_parser.cc ScheduleEndIfDelayed`, `font_face_set.cc HandlePendingEventsAndPromisesSoon`). With
+    4 modems, one document each per word, that was 8 updates and ~100 ms of the page's main thread per word, a third of
+    it. A render-blocking stylesheet arriving after the parse (at once or 15 ms later) didn't skip the first.
+    `visibility: hidden` on the iframe skips a third, the load event's (`Document::ImplicitClose` checks
+    `View()->IsVisible()`). Hence two answers per document (ARCHITECTURE §3.8). *(measured 2026-10-22)*
+64. **A `requestAnimationFrame` loop in the page runs the network programs ~1.5× faster**: `net_long` 6.7–6.9 s with a
+    harness's rAF loop, 9.9–11.5 s without (FizzBuzz ~10–20%). In 2.5 s of trace Chrome ran 48 lifecycle updates with
+    the loop and 34 without (99–142 `BeginMainFrame`s), for the same style work. The page has no script, so time it
+    without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §16's earlier times).
+    *(measured 2026-10-22)*

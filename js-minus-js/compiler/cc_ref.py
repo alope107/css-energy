@@ -32,6 +32,8 @@ booleans are 0/1. Values are also typed statically (0 unknown, 1 boolean, 2 stri
 with its type: comparisons, !, true/false, string literals, number literals and arithmetic, variables by their last
 assignment, functions by their returns. Only booleans need it, to print as true / false (PRINT's boolean flag)."""
 import sys, json, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'net'))
+from device import Device
 
 # the memory map (compiler/layout.json): ROM 0..rom_size-1 (the lib); RAM from rom_size = data_base; see layout.json's _doc
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
@@ -42,7 +44,9 @@ AMASK = 32767                           # addresses are 15-bit
 # the register machine's instructions, in class order (machine/gen_css.py dispatches on the opcode's range)
 OPN = ('ADD SUB MUL DIV MOD LT GT LE GE EQ NE  MOV NEG LOADK GETFP KIND  JMP JLT JGT JLE JGE JEQ JNE HALT  JZ JNZ  CALL RET NOT TENTER '
        ' LDI STI  DADD DADDL DADDR DLT DGT DLE DGE DEQ DNE  GETX SETX  GETP SETP NEW  PRINT PRINTK PUTC  ALLOC  APUSH'
-       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK').split()
+       '  MCPY MUPPER MLOWER MFILL NPUT  MCMP MFEQ MFREF MWALK  NET').split()
+# NET A, B: A = the network gateway's answer to the word B (net/device.py), every part's bytes left in RBUF0 … (netw); the
+# lib's fetch(url) / read() are made of it (the ROM reaches it as __net)
 # The runtime's primitives (the ROM reaches them through intrinsics; the CSS CPU runs them a cache line per execution):
 # KIND A, B, k: A = kind test k of B (KINDS). ALLOC A, n, k: a new block (ALLOCK: a string of n bytes, its header, length and
 # NUL written, A its value; an array of capacity n, its first line written, A its value; n raw words or an object chunk's, A
@@ -101,6 +105,11 @@ PARAM0 = 6144                           # parameter i's symbol address until its
 OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)
+RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
+def netw(ans):
+    """NET's writes for the parts' answers: [(address, value)], part 0's whole answer last (at A: address None)"""
+    out = [(RBUF0 + 2 * j + k, (d >> 8 * k) & 255 if d >> 16 > k else -1) for j, d in enumerate(ans) for k in (0, 1)]
+    return out + [(None, ans[0])]
 ARRTAG = LAYOUT['arrtag']
 HEAP_HI = HEAP0 + 2 * LAYOUT['heap_size']
 STRV_LO, STRV_HI = LAYOUT['data_base'] + SDATA - STRTAG, HEAP_HI - STRTAG     # a value in [STRV_LO, STRV_HI) is a string
@@ -166,9 +175,9 @@ CNDOPS = CMPS + (NOT,)
 
 # (__dadd: the dynamic + instruction, a string built in CSS; the rest: the runtime's primitives, OPN's comment)
 INTR = ['peek', 'poke', '__fp', 'prn', 'halt', '__dadd', '__kind', '__alloc', '__mcpy', '__mupper', '__mlower', '__mfill', '__nput',
-        '__mcmp', '__mfeq', '__mfref', '__mwalk', '__apush']
-INTRN = (1, 2, 0, 1, 0, 2, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2)      # their arguments
-INTRV = ('peek', '__fp', '__dadd', '__kind', '__alloc', '__mcmp', '__mfeq', '__mfref', '__mwalk')    # those with a value
+        '__mcmp', '__mfeq', '__mfref', '__mwalk', '__apush', '__net']
+INTRN = (1, 2, 0, 1, 0, 2, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2, 1)      # their arguments
+INTRV = ('peek', '__fp', '__dadd', '__kind', '__alloc', '__mcmp', '__mfeq', '__mfref', '__mwalk', '__net')    # those with a value
 def h1h2(s):
     a = b = 0
     for ch in s: a = (a * 31 + ord(ch)) % H1M; b = (b * 37 + ord(ch)) % H2M
@@ -184,7 +193,8 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
            ('toString', {0: 'tostring0'}, 2)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(s), String(x); their names are reserved
-GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'parseint'}, 3), ('String', {1: 'tostring'}, 2)]
+GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'parseint'}, 3), ('String', {1: 'tostring'}, 2),
+           ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
 ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
@@ -631,6 +641,7 @@ class Compiler:
         elif name == '__alloc': self.emit('ALLOC', t, a[0], a[1])
         elif name == '__nput': self.emit('NPUT', a[0], a[1], (K(0), 0))
         elif name == '__apush': self.emit('APUSH', (K(0), 0), a[0], a[1])
+        elif name == '__net': self.emit('NET', t, a[0])
         elif name in ('__mcmp', '__mfeq', '__mfref', '__mwalk'): self.emit('MOV', t, a[2]); self.emit(name[2:].upper(), t, a[0], a[1])
         elif name != 'halt': self.emit(name[2:].upper(), a[0], a[1], a[2])         # (MCPY, MUPPER, MLOWER, MFILL)
         else: self.emit('HALT')
@@ -1219,9 +1230,11 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator
-def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, trace=None, ent=None):
+def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, trace=None, ent=None, net=None):
     """the register machine from code_base (fp = sp0) on a RAM image; returns (steps, output). ent: the runtime library's entries
-    (the traps' routines). strict: fp is back at sp0 at HALT"""
+    (the traps' routines). strict: fp is back at sp0 at HALT. net: the NET instruction's gateway (default: net/device.py's,
+    which serves tests/net/)"""
+    if net is None: net = Device()
     if out_base is None: out_base = LAYOUT['out_base']
     mem = [0] * (AMASK + 1)
     romw = [w or 0 for w in rom]       # instructions only: a data read below RAM gives 0 (the page has no ROM leaves)
@@ -1372,6 +1385,8 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
             x, v = val(b), val(c); q = (x - ARRTAG) & AMASK
             if isarr(x) and rd(q - 1) < rd(q - 2):
                 n = rd(q - 1); wr(rd(q) + n, v); wr(q - 1, n + 1); r = mem[fp]; wr(fp, n + 1); fp -= r // 8192; pc = r % 8192
+        elif op == 'NET':                               # the answers' bytes into RBUF0 …, part 0's answer into A
+            for ad, v in netw(net(val(b))): wr(addr(a) if ad is None else ad, v)
         else: raise RuntimeError(f'bad op {op} at {pc - 2}')
 
 def image_mem(c, words, data, init=None):

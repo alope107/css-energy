@@ -19,13 +19,14 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 - Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, the ten
   samples through the compiler in Chrome and on the page, plus differential tests that check thousands of generated,
   reformatted and mutated programs against Node (`make fuzz`). The CPU's checks: C1 (its model, every program) and C2
-  (a CPU-only page per program, 118 under 1,500 steps); all 146 programs as CPU-only pages, objects included.
+  (a CPU-only page per program, under 1,500 steps); all the programs as CPU-only pages, objects included.
 - The machine is a register machine since 2026-10-21, with the runtime's work on memory as machine instructions and a
   code cache since 2026-10-22. On 25 programs on CPU-only pages it is 1.74× faster than the register machine before it
   and 1.53× than the stack machine with those instructions (geometric means; strings, arrays and objects up to 7.6×,
   compute as fast; BENCHMARKS §15), with compile time unchanged.
 - On the page, FizzBuzz 1–15 compiles in about 2.3 s from Run (including the 1.2 s readback sweep) and halts about
   3.2 s after Run.
+- `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -100,6 +101,9 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
   inside expressions (`a[i++]`, `while (n--)`).
 - **Output**: `console.log(a, b, ...)` and `putc(code)`. An array or object prints as Node prints it on one line:
   `[ 1, 'a', [ 2 ] ]`, `{ k: 1, 'a b': [] }`, `[Array]` / `[Object]` below depth 2.
+- **Network**: `fetch(url)` GETs a URL and returns the HTTP status (`-1` if the request failed); `read()` then returns
+  the body's next byte, `-1` past its end. They work only when the page is served by its gateway, which makes the
+  requests (see [Network](#network)).
 - **Comments**: `//` and `/* */`.
 - **Semicolons**: optional where JavaScript inserts them. A newline after a complete statement ends it unless it is
   inside `( [`, a call or a `for (…)` header, or the next line continues it (starts with `.` `[` `(` `?` `:` `,` or a
@@ -178,6 +182,9 @@ program's strings), so it finds the same property as the literal. Details:
 - **Not supported**: `undefined`, `typeof`, nested functions or closures, template literals, expression statements
   starting with a literal or `(`.
 - **Console**: 9 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
+- **Network**: one request at a time, GET only, no headers; a status above 511 reads as 511. A round trip carries 2 URL
+  bytes or 8 body bytes. Without the gateway (`file:`, a static server) `fetch` returns `-1` after about 20 s. `fetch`
+  and `read` are reserved names.
 
 ### Error codes
 
@@ -209,3 +216,30 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.
+
+## Network
+
+The page can't make requests by itself, so the server it comes from does: `net/server.js` serves the page and is a
+**gateway**. It performs the GET (any URL: relative ones resolve against the page, absolute `http(s)` ones go out from
+the server, so CORS doesn't apply) and hands the body back a byte at a time. What CSS does is talk to the gateway,
+with no script:
+
+- `fetch` and `read` are made of one instruction, `NET`, which sends a word and waits for four answers at once, two
+  from each of two "modem" iframes: a READ brings 2 bytes per answer.
+- The request: the page sets the height of the modem iframes to the word. The modem's document reads its height
+  (`100vh`) and sends it as a few `background-image` URLs that CSS chooses; a resize restyles the document, so the
+  request goes out as soon as the page lays it out.
+- The answer: the gateway answers with a new document for each modem (the old one asks for it as soon as it has
+  loaded, and the gateway holds that request until the answers are ready). It places the element `#t` at x, y = two
+  answers, and the load scrolls to `#t`. The scroll reaches the page's 100 px `overflow: hidden` box around the
+  iframe, and scroll timelines read its `scrollLeft` and `scrollTop`.
+
+```
+node net/server.js .. 8767        # serve the repo root with the gateway (from js-minus-js/)
+# then open http://localhost:8767/js-minus-js/dist/js_in_css.xhtml in Chrome
+```
+
+The gateway is a local tool: it fetches whatever the page asks for, from wherever it runs. The site the repo deploys
+to is static, so it has no gateway, and `fetch` there returns `-1`. The modems start at the program's first network
+word and load once per word each; between words they wait. How it works:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.8.

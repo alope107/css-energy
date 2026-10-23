@@ -331,6 +331,14 @@ class Sim:
             elif ps == 0: wr(ptr + ln, v); npst = 1; done = False; pc -= 2
             elif ps == 1: wr(q - 1, ln + 1); npst = 2; done = False; pc -= 2
             else: wr(fp, ln); fp -= r // 8192; pc = r % 8192
+        elif op == 'NET':                                # the answers come later on the page: it ends the pass, then runs first,
+            x = val(b); P = 2 * R.LAYOUT['net_parts'] + 1           # once per write: the bytes, then part 0's answer into A
+            if ps == 0 and not self.first: raise Stall()
+            a_ = addr(a) if ps == P - 1 else R.RBUF0 + ps
+            self.way((a_ & AMASK) // 4)                  # (its line before the gateway: a stall after it would ask twice)
+            if ps == 0: st['netans'] = R.netw(st.setdefault('net', R.Device())(x))
+            wr(a_, st['netans'][ps][1])
+            if ps < P - 1: npst = ps + 1; done = False; pc -= 2
         else: raise SystemExit(f'op {op} not in csssim.py')
         # commit
         for (s, w, j), v in mem_w.items(): self.words[s][w][j] = v; self.dirty[s][w] = 1

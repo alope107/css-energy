@@ -20,7 +20,7 @@ sleeping neighbourhood are rejected before their style() query is evaluated.
 
 Usage: gen3d.py [engine.json]   (NBOX/NSPH bodies, SCENE=name picks the scene that loads first)
 """
-import math, sys, os, re
+import json, math, sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from simp import simplify as _simplify
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
@@ -81,6 +81,12 @@ BODIES = [
     dict(k='sph', r=18, col='#7bd389'),
     dict(k='sph', r=24, col='#ff9f43'),
 ]
+# BODIES_JSON=file replaces the 8 hand-made bodies (4 boxes, then 4 spheres) and, with "scenes", the hand-placed
+# scenes: {"bodies": [{"k": "box", "h": [hx, hy, hz], "col": "#rgb"}, {"k": "sph", "r": r, …}, …],
+# "scenes": {"name": [{"p": [x, y, z], "rot": […], "v": […], "w": […]}, …]}} (experiments/widgets)
+_BJ = json.load(open(os.environ['BODIES_JSON'])) if os.environ.get('BODIES_JSON') else {}
+if 'bodies' in _BJ:
+    BODIES = _BJ['bodies']
 # extra bodies (NBOX / NSPH environment knobs) for scaling tests and bigger scenes
 _XBOX = [((20, 20, 20), '#e9c46a'), ((30, 15, 15), '#2a9d8f'), ((22, 22, 22), '#f4a261'), ((40, 10, 20), '#8ecae6'),
          ((18, 18, 18), '#e76f51'), ((26, 13, 26), '#b5838d'), ((24, 24, 24), '#90be6d'), ((34, 12, 17), '#c3aed6')]
@@ -151,6 +157,8 @@ SCENES = {
     ],
     'field': [],    # every body at rest on the floor, shelf-packed (the sparse-regime benchmark scene)
 }
+for _k, _v in _BJ.get('scenes', {}).items():
+    SCENES[_k] = [S(*o['p'], o.get('rot', (0, 0, 0)), o.get('v', (0, 0, 0)), o.get('w', (0, 0, 0))) for o in _v]
 import random as _rnd
 
 
@@ -1250,11 +1258,14 @@ for i in range(N):
             ne = f'var(--zs{i}) * ({ne})'
         g.P(f'N{fl}{i}', ne, LF, AW(i), syntax='*')
         g.A(f'N{fl}{i}', f'var(--i{fl}{i})', LF, ('rst', 1))
-    g.P(f'zs{i}', f'1 - sign(max(0, var(--NSC{i}) - {SLEEP_K}))', LF, AW(i))
+    # (the counter is tested against half-integers here and on #LS: it comes back from its register off by ~1e-6,
+    # 46 as 45.999999. Chrome's var() rounds that away (6 significant digits); WebKit's keeps it (6 decimal places),
+    # and an exact test woke every sleeping body on every pass)
+    g.P(f'zs{i}', f'1 - sign(max(0, var(--NSC{i}) - {SLEEP_K + 0.5}))', LF, AW(i))
     sc = V(f'SC{i}')
     # awake: count still passes up to K (ready); a ready body that isn't blocked goes to K+1 (asleep)
     cnt = f'min({SLEEP_K}, {sc} + 1)'   # (only declared on passes that advance time)
-    ready = f'sign(max(0, {sc} - {SLEEP_K - 1}))'
+    ready = f'sign(max(0, {sc} - {SLEEP_K - 0.5}))'
     # '*': undeclared on passes that don't advance time, so the register keeps its value
     g.P(f'NSC{i}', f'(1 - var(--rst)) * (1 - min(1, var(--mv{i}))) * ({cnt} + {ready} * (1 - var(--bk{i})))', LF, AW(i), syntax='*')
     g.A(f'NSC{i}', f'(1 - min(1, var(--pk{i}) + 1 - min(1, abs(var(--GIr) - {i + 1})))) * {sc}', LF, AS(i))
@@ -1499,9 +1510,10 @@ for i in range(N):
         else:
             w(f'--{fl.upper()}{i}:var(--i{fl}{i});')
     # awake unless still for SLEEP_K passes; shake, reset, a gravity change or grabbing wakes it
-    w(f'--SC{i}:var(--isc{i}, 0);--aw{i}:calc(min(1, sign(max(0, {SLEEP_K + 1} - var(--SC{i}))) + var(--kick) + var(--rst) + '
-      f'sign(abs(var(--gy) - var(--GYP))) + 1 - min(1, abs(var(--GI) - {i + 1}))));'
-      f'--nr{i}:calc(sign(max(0, {SLEEP_K} - var(--SC{i}))));--mf{i}:calc(sign(max(0, 2 - var(--SC{i}))));')
+    # (SC and GYP come back from their registers a hair off, so they're compared with a margin of 0.5: see NSC)
+    w(f'--SC{i}:var(--isc{i}, 0);--aw{i}:calc(min(1, sign(max(0, {SLEEP_K + 0.5} - var(--SC{i}))) + var(--kick) + var(--rst) + '
+      f'sign(max(0, abs(var(--gy) - var(--GYP)) - 0.5)) + 1 - min(1, abs(var(--GI) - {i + 1}))));'
+      f'--nr{i}:calc(sign(max(0, {SLEEP_K - 0.5} - var(--SC{i}))));--mf{i}:calc(sign(max(0, 1.5 - var(--SC{i}))));')
 w('--any:calc(sign(' + ' + '.join(f'var(--aw{i})' for i in range(N)) + '));')
 w('--GYP:var(--gy);}')
 w(lbl.section('Clock and time budget (#LT)', 'the clock and the time bank: whether this pass advances time by one step, and which bodies it simulates'))
@@ -1578,9 +1590,10 @@ _names = ' '.join(f'var(--A{i})' for i in range(N))
 w(lbl.section('Container names (named gates)', 'body i\'s rules name container bi, which the levels carry only while it is awake or near an awake body'))
 w('#L0{' + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
 if FFQ:
-    # Firefox has no if(): there every body is always named. The names only let a sleeping neighbourhood's rules be
-    # skipped unevaluated; with all of them present every rule evaluates its own gate, with the same result.
-    w('@supports (-moz-appearance: none){#L0{' + ''.join(f'--A{i}:b{i};' for i in range(N)) + '}}')
+    # Without if() (Firefox; Safari before 27.x) every body is always named. The names only let a sleeping
+    # neighbourhood's rules be skipped unevaluated; with all of them present every rule evaluates its own gate, with
+    # the same result. Without this the --A are the if() text, container-name is invalid and no named rule matches.
+    w('@supports not (width: if(style(--x: 1): 1px; else: 2px)){#L0{' + ''.join(f'--A{i}:b{i};' for i in range(N)) + '}}')
 # every level carries the names, so a named rule always resolves to its parent (Chrome only forces
 # a re-match of rules that depend on a style container for that container's children)
 w(','.join(f'#L{l}' for l in range(NLEV)) + '{container-name:var(--AN)}#L1{--sxg:0;--syg:0;--yawg:0;--tdxg:0;--tdyg:0;--tgig:0}')

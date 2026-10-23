@@ -94,6 +94,14 @@ def isel(key, val):
     return lo(0) if ISET == 8 else "if(" + " ".join(f"style(--{key}hi: {h}): {lo(h)};" for h in range(ISET // 8 - 1)) + f" else: {lo(ISET // 8 - 1)})"
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
+# NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the clock (--t, 600 a second)
+# when this request began: a new request takes the time (consecutive words always differ, by the sequence bit, even when
+# a read() loop's next NET stalls in the pass the last one completed). NWAIT ticks without an answer give -1 (no gateway:
+# a file: URL, a static server). (Counting passes was too slow a clock: a waiting page settles to ~10 passes a second.)
+NWAIT = 12000          # 20 s
+regs += [("rreq", 524290, 0, "calc(var(--go) * var(--req) + (1 - var(--go)) * var(--rreq))"),    # (held on passes that don't run the chain)
+         ("rlive", 2, 0, "calc(var(--go) * max(var(--rlive), min(1, var(--req))) + (1 - var(--go)) * var(--rlive))"),   # a NET has waited this run
+         ("rnt0", 60000, 0, f"calc(var(--go) * (min(1, var(--req)) * {eq('var(--req)', 'var(--rreq)')} * var(--rnt0) + (1 - min(1, var(--req)) * {eq('var(--req)', 'var(--rreq)')}) * mod(var(--t), 60000)) + (1 - var(--go)) * var(--rnt0))")]
 regs += WREGS
 WNAMES = [r[0] for r in WREGS]
 
@@ -455,6 +463,8 @@ def build_class(c, k):
     d += [f"--ok: calc(1 - min(1, calc({' + '.join(f'{m}{miss(n)}' for n, m in acc)})));" if acc else "--ok: 1;",
           f"--mb: {first_miss(acc)};" if acc else "--mb: -1;"] + nexts(k['nx'])
     if c == 'jump': d += [f"--nstop: {eq('var(--op)', OP['HALT'])};", f"--nhalt: {eq('var(--op)', OP['HALT'])};"]
+    if c == 'net': d += [f"--ok: calc((1 - min(1, calc((1 - var(--kB)) * {miss('x')} + {miss('w')}))) * var(--nok));",      # (replaces the generic --ok: it waits)
+                         f"--req: calc((1 - var(--ok) * var(--nfin)) * (1 - (1 - var(--kB)) * {miss('x')}) * (1 + mod({xB}, 524288)));"]
     cls_rules[c] = (k['ops'], d)
 for c, k in CLASSES.items(): build_class(c, k)
 
@@ -635,6 +645,32 @@ NEWCLASSES['mcmp'] = dict(ops=['MCMP', 'MFEQ', 'MFREF', 'MWALK'], pre=OPND + OPN
     nx={'pc': f"calc({pc} + 2 * var(--mdone))", 'steps': "calc(var(--steps) + var(--mdone))",
         'pst': f"calc((1 - var(--mdone)) * if(style(--op: {OP['MWALK']}): var(--mnext); else: calc(var(--mo) + var(--mk))))"},
     deps={'p': [('x', None)], 'e': [('x', None)]})
+# NET A, B (net/server.js and net/device.py have the protocol): a stall without a miss until every modem part's answer to
+# the word B has come. Part j's answer R = valid + 2 seq + 4 value is a slot's scroll offset (slot j / 2; scrollLeft for an
+# even j, scrollTop for an odd one), read by the scroll timeline --nans<j> on #cpu; it counts when it is valid and its seq
+# is the word's bit 0 (the lib alternates it). While it waits, the class leaves --req = 1 + word for the chain's end (the
+# register rreq: the modems' extra height, the request). Then it runs once per write (--pst): each part's answer d
+# unpacked into its two bytes, RBUF0 … RBUF(2P-1) (byte k: (d >> 8k) & 255 if d >> 16 > k, else -1: cc_ref.netw), then
+# part 0's answer into A, which completes it
+from net_slot import SLOT, NW
+NETSHOW = os.environ.get('NETSHOW') == '1'      # a demo page: the modems show, with their request and answers
+NP = R.LAYOUT['net_parts']
+NS = (NP + 1) // 2      # modems: each document answers two parts, on its slot's two axes
+NETTL = ["rreq", "rlive"] + [f"nans{j}" for j in range(NP)]     # the timelines the modems and #cpu share (scoped at body)
+NET_PRE = OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};",
+           f"--nws: mod({xB}, 2);", f"--nfin: {eq(pst, 2 * NP)};",
+           f"--ntime: clamp(0, mod(var(--t) - var(--rnt0), 60000) - {NWAIT - 1}, 1);"]
+for j in range(NP):
+    NET_PRE += [f"--nd{j}: round(down, var(--nans{j}) / 4);",
+                f"--nm{j}: calc(mod(var(--nans{j}), 2) * {eq('mod(round(down, var(--nans' + str(j) + ') / 2), 2)', 'var(--nws)')});"]
+NET_PRE += ["--nmatch: calc(" + " * ".join(f"var(--nm{j})" for j in range(NP)) + ");", "--nok: min(1, calc(var(--nmatch) + var(--ntime)));",
+            # this execution's write: byte pst (part pst / 2, byte pst mod 2), part 0's answer on the last
+            "--nsel: " + sel("pst", 2 * NP + 1, lambda i: "var(--nd0)" if i == 2 * NP else
+                             f"calc(clamp(0, round(down, var(--nd{i // 2}) / 65536) - {i % 2}, 1) * (mod(round(down, var(--nd{i // 2}) / {256 ** (i % 2)}), 256) + 1) - 1)") + ";",
+            "--nval: calc(var(--nmatch) * var(--nsel) - (1 - var(--nmatch)) * var(--ntime));"]
+NEWCLASSES['net'] = dict(ops=['NET'], pre=NET_PRE, reads=[("x", "var(--aB)", "1 - var(--kB)")],
+                         write=(f"calc(var(--nfin) * var(--aA) + (1 - var(--nfin)) * ({R.RBUF0} + {pst}))", "var(--nval)", None, "1"),
+                         nx={'pc': f"calc({pc} + 2 * var(--nfin))", 'steps': "calc(var(--steps) + var(--nfin))", 'pst': f"calc((1 - var(--nfin)) * ({pst} + 1))"})
 for c_, k_ in NEWCLASSES.items(): build_class(c_, k_)
 build_class('cat', CAT_CLASS)                 # (no opcode of its own: a DADD's pst picks it, cls_of)
 CLS = {c: i + 1 for i, c in enumerate(cls_rules)}
@@ -674,6 +710,7 @@ XNEW = ["kA", "aA", "zA", "dslow", "dcat", "csx", "csy", "cbx", "cby", "cla", "c
 XNEW += ("kk ak anw afull abase amw amb amap ares anext adone aaddr akk uarr uok ufall uaddr uval isn ifl icp mlo mdl mpa mpn mpl mn mk mdone"
          " me mhit mlive mnext mres mo clv cc cnul cnull cmap cmb cmw ckk omw xhand").split() + \
         [f"{x}{j}" for j in range(4) for x in ("mi", "mc", "mj", "mh", "mr", "cq", "wm", "wv")]
+P += ["req", "nlive", "nws", "nfin", "nmatch", "ntime", "nok", "nsel", "nval"] + [f"{x}{j}" for j in range(NP) for x in ("nans", "nd", "nm")]
 P += XNEW + ["dfon", "ifon", "ik1", "igb", "igblo", "igbhi", "igp", "ig1", "ib", "iblo", "ibhi", "iu", "ih", "mic"]
 P += [r[0] for r in regs if r[0] not in P] + [f"L{n}" for n in LATCH if n != "p"] + [f"Lp{j}" for j in range(4)] + [f"Lb{n}" for n in LATCH]
 P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA", "nwD", "pi", "dp", "pw")]
@@ -686,6 +723,7 @@ assert not _unreg, f'declared by an instruction class but not registered: {sorte
 props = [lbl.section('Registered properties', 'registers, the chain\'s state and temps: integers')]
 # temps that only the element declaring them reads (.x's reads and scratch) don't inherit
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl", "ib", "iblo", "ibhi", "iu", "ih"}
+LOCAL |= {"nws", "nfin", "nmatch", "ntime", "nok", "nsel", "nval"} | {f"{x}{j}" for j in range(NP) for x in ("nd", "nm")}
 LOCAL |= {"kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv", "ptrap"} | set(XNEW)
 LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pe", "pvE", "pbE", "pf", "pcut", "pn0", "pblk",
           "pfr0", "pfr1", "pfr2", "pfr3",
@@ -696,11 +734,61 @@ props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; init
 
 css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines'),
        "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
-       "#cpu {\n  timeline-scope: " + ", ".join(f"--{r[0]}" for r in regs if r[0] not in WNAMES) +
-       ";\n  animation-name: " + ", ".join(f"r-{r[0]}" for r in regs) + ";\n  animation-timeline: " + ", ".join(f"--{r[0]}" for r in regs) +
+       "#cpu {\n  timeline-scope: " + ", ".join([f"--{r[0]}" for r in regs if r[0] not in WNAMES and r[0] not in ("rreq", "rlive")]) +
+       ";\n  animation-name: " + ", ".join([f"r-{r[0]}" for r in regs] + [f"r-nans{j}" for j in range(NP)]) + ";\n  animation-timeline: " + ", ".join([f"--{r[0]}" for r in regs] + [f"--nans{j}" for j in range(NP)]) +
        ";\n  animation-duration: auto;\n  animation-timing-function: linear;\n  animation-fill-mode: both;\n  " + "\n  ".join(cpu) + "\n}"]
 css.append(lbl.group('Register keyframes', 'each register\'s view timeline mapped onto its value range'))
 css += [f"@keyframes r-{n} {{ from {{ --{n}: {H - OFF}; }} to {{ --{n}: {-1 - OFF}; }} }}" for n, H, OFF, _ in regs]
+css += [lbl.group(f'NET: the modems ({NS}, {NP} parts)', 'slot i\'s scrollLeft and scrollTop are parts 2i and 2i + 1 (the scroll timelines --nans0, --nans1, ...); the iframes\' extra height is the request (rreq)')]
+css += [f"@keyframes r-nans{j} {{ from {{ --nans{j}: 0; }} to {{ --nans{j}: {NW - SLOT}; }} }}" for j in range(NP)]
+css += [# outside #clk, which Edit hides: a hidden slot's scroll offset is saved and restored when it shows again, and the
+        # last run's answers would come back with it (the first word's could match by its sequence bit). Out here they go
+        # on loading through Edit, see the request idle (the register's timeline is inactive: 0) and scroll back to 0.
+        # They read rreq through an animation of their own; its timeline and the answers' are scoped at body (NETTL).
+        # The iframes show from the run's first waiting NET on: the register rlive (a transition latch fed by rreq didn't
+        # hold: it followed rreq to 0 between words, hiding the iframes). The slots always show: hiding a slot would save
+        # its scroll offset and bring a stale answer back with it; hiding its content (.nclip) only leaves it nothing to
+        # scroll. The iframe is NW + rreq px tall in a box of NW x NW that clips it, so both axes scroll 2^20 px whatever
+        # the request.
+        ".nlatch { height: 0; animation-name: r-rreq, r-rlive; animation-timeline: --rreq, --rlive; animation-duration: auto;"
+        " animation-timing-function: linear; animation-fill-mode: both; }",
+        f".nslot {{ position: fixed; left: 0; top: 0; width: {SLOT}px; height: {SLOT}px; overflow: hidden; visibility: hidden; }}",
+        f".nclip {{ display: if(style(--rlive: 1): block; else: none); width: {NW}px; height: {NW}px; overflow: clip; }}",
+        f".modem {{ display: block; border: 0; width: {NW}px; height: calc(({NW} + var(--rreq)) * 1px); }}"]
+css += [f".nslot.np{i} {{ scroll-timeline: " + ", ".join(f"--nans{j} {'xy'[j % 2]}" for j in (2 * i, 2 * i + 1) if j < NP) + "; }" for i in range(NS)]
+if NETSHOW:     # the panel at the top right; modem 0's slot itself at 2.4x (a transform: its scroll offsets, the answers, are unchanged)
+    css += [lbl.group('NETSHOW: the modems, visible', 'a demo of the fragment-scroll answers'),
+            ".nshow { animation-name: r-rreq, " + ", ".join(f"r-nans{j}" for j in range(NP)) + "; animation-timeline: --rreq, " + ", ".join(f"--nans{j}" for j in range(NP)) +
+            "; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both;"
+            " position: fixed; right: 16px; top: 16px; width: 400px; height: 740px; box-sizing: border-box; padding: 12px 16px;"
+            " background: #fff; border: 1px solid #c9d1d9; border-radius: 8px; font: 13px/1.45 system-ui, sans-serif; color: #17212b; z-index: 5; }",
+            ".nshow h2 { font-size: 15px; margin: 0 0 6px; } .nshow p { margin: 0 0 8px; color: #5b6875; }",
+            ".nshow .kv { font: 12px/1.6 ui-monospace, monospace; white-space: pre; } .nshow .kv b { font-weight: 600; }",
+            # the word: 2 p + seq, p = op * 65536 + arg
+            ".nword { --wp: round(down, max(0, var(--rreq) - 1) / 2); counter-set: nq var(--rreq) nop mod(var(--wp), 4)"
+            " nb0 mod(round(down, var(--wp) / 4), 256) nb1 mod(round(down, var(--wp) / 1024), 256); }",
+            ".nword::after { content: \"request \" counter(nq) \" = op \" counter(nop) \" '\" counter(nb0, ascii) counter(nb1, ascii) \"'\\A (op 0: two URL bytes, 1: GET, 2: READ)\"; }",
+            ".ntape { position: relative; height: 18px; margin: 4px 0 2px; background: repeating-linear-gradient(90deg, #c9d1d9 0 1px, transparent 1px 36px), #f3f5f7; border-radius: 3px; }",
+            ".nneedle { position: absolute; top: -3px; width: 3px; height: 24px; background: #e8590c; border-radius: 2px; transition: left .3s ease-out; }",
+            ".ntapel { display: flex; justify-content: space-between; font: 11px ui-monospace, monospace; color: #5b6875; margin-bottom: 4px; }",
+            ".nfilml { font: 11px ui-monospace, monospace; color: #5b6875; }",
+            ".nslot.np0 { left: auto; right: 296px; top: 470px; visibility: visible; transform: scale(2.4); transform-origin: 0 0;"
+            " outline: 1px solid #5b6875; background: #fff; z-index: 6; }",
+            ".nwait { position: absolute; left: 16px; top: 462px; width: 230px; color: #5b6875; }"]     # (the slot, opaque, covers it once the modem shows)
+    for j in range(NP):
+        css += [f".npart{j} {{ counter-set: r{j} var(--nans{j}) n{j} mod(round(down, var(--nans{j}) / 262144), 4) a{j} mod(round(down, var(--nans{j}) / 4), 256)"
+                f" c{j} mod(round(down, var(--nans{j}) / 1024), 256); }}",
+                f".npart{j}::after {{ content: \"part {j}  \" counter(r{j}) \"  \" counter(n{j}) \" bytes '\" counter(a{j}, ascii) counter(c{j}, ascii) \"'\"; }}",
+                f".nneedle{j} {{ left: calc(var(--nans{j}) * 365px / {1 << 20}); }}"]
+NSHOW_HTML = ('<div class="nshow"><h2>The network modems</h2>'
+              f"<p>No script. A NET word sets the height of {NS} modem iframes (the request). The gateway answers it with a new "
+              "document for each: the orange #t at x, y = two parts of the answer, and the load scrolls to it. That scroll moves "
+              f"the iframe's 100 px box on both axes, and scroll timelines read scrollLeft and scrollTop back. A READ brings 2 bytes per part.</p>"
+              '<div class="kv nword"></div>' +
+              "".join(f'<div class="kv npart{j}"></div><div class="ntape"><div class="nneedle nneedle{j}"></div></div>' for j in range(NP)) +
+              '<div class="ntapel"><span>0</span><span>2^19</span><span>2^20 px</span></div>'
+              '<div class="nwait">(the modems appear at the program\'s first fetch)</div>'
+              '<div class="nfilml" style="position: absolute; left: 16px; top: 712px">modem 0\'s real box, 2.4&#215;: it ends on #t (parts 0, 1)</div></div>') if NETSHOW else ""
 
 # a read port's leaf name: a two-level if() on the block's 64-block group (h) and place in it (l), evaluated on the port, only
 # on passes that fill, from a mux of the 512 blocks runs mostly read (HOT) unless the block is outside them (gen_css.py)
@@ -721,7 +809,7 @@ for i in range(2 * WB):
     css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(RB0, BLKS)) - set(HOT), leaf, '--rom')}; }} }}")
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
-css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --pic: 0; --cw: 0; --lat: 1;"
+css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --pic: 0; --cw: 0; --lat: 1; --req: 0;"
            f" --rom: {rom_of('var(--pc)')}; --Lm: calc((1 - var(--go)) * var(--rLm));"
            + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
@@ -791,8 +879,8 @@ if UI:
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
-    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES] + ui_tls + ['--rbrdT']) + "; }")
-else: css.append(memtree.scope(WNAMES))
+    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES + NETTL] + ui_tls + ['--rbrdT']) + "; }")
+else: css.append(memtree.scope(WNAMES + NETTL))
 _sp, _sc = memtree.shared(); props += [lbl.group('RAM write channels')] + _sp; css += _sc
 for w in range(WB):
     _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"{w}{c}" for c in CH)}, BANKN, WOFF, prefix=str(w))
@@ -871,6 +959,9 @@ if os.environ.get('BENCH'):
     open(outp, 'w').write(page); print(outp, len(page), 'bytes; bench pass', sm.passes, 'K', K, 'stall', stall); sys.exit()
 
 # ---------------- HTML
+# the modems: one slot + iframe per two parts; net/server.js gives the page's modems a group id as it serves the page
+MODEMS = "".join(f'<div class="nslot np{i}"><div class="nclip"><iframe class="modem" loading="lazy" src="/net/m0.html?part={i}&amp;n={NP}{"&amp;show" if NETSHOW else ""}#t"'
+                 f' title="network modem {i}" aria-hidden="true"></iframe></div></div>' for i in range(NS))
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM)) | {R.LAYOUT['data_base'] - ROM}
 LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain's overlays hold code, strings and staging
 mem_html = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
@@ -903,7 +994,7 @@ if not UI:
     {chr(10).join(props)}
     {chr(10).join(css)}
     </style>
-    {mem_html}{rom_html}<div class="cons">{con_html}<div class="con"></div>
+    {mem_html}{rom_html}{NSHOW_HTML}<div class="nlatch">{MODEMS}</div><div class="cons">{con_html}<div class="con"></div>
     {console}</div>
     <div id="clk"><div id="cpu">
     <div class="head">
@@ -966,6 +1057,7 @@ else:
 <section class="notes">{notes}</section>
 {ui_rb.probes_html(UIL, UIP, 8)}
 </main>
+{NSHOW_HTML}<div class="nlatch">{MODEMS}</div>
 <div id="clkw">
 <div class="cons">{con_html}<div class="con"></div>
 {console}</div>

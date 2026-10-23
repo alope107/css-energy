@@ -14,11 +14,12 @@ export SOURCE_DATE_EPOCH := 0
 # of the Node, Python, browser and environment variables it runs with (build/<py|fontcpu|ui>.<config>.id).
 include ../shared/make/checks.mk
 SUITE   := tests/suite tests/suite_err tests/fizz.js $(wildcard tests/suite/*.js tests/suite/*.out tests/suite_err/*.js)
-PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py) $(SHARED)/py/csslabel.py
+PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py) net/device.py $(SHARED)/py/csslabel.py
+NET     := net/server.js net/shim.js $(wildcard tests/net/* tests/net/*/*)   # the network gateway and its test files
 HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
 # what the checks depend on outside the repo, and the environment variables their scripts read
 L2       := $(B)/l2.$(call id,$(B)/py,-,tests/cmp_dsl.py $(PYSRC)).log
-FUZZ     := $(B)/fuzz.$(call id,$(B)/py,-,tests/cmp_dsl.py tests/fuzz/fuzz.py tests/fuzz/oracle.js tests/fuzz/all.sh $(PYSRC)).log
+FUZZ     := $(B)/fuzz.$(call id,$(B)/py,-,tests/cmp_dsl.py tests/fuzz/fuzz.py tests/fuzz/oracle.js tests/fuzz/all.sh $(PYSRC) $(NET)).log
 # The browser's part needs `npm install`. Goals that launch no browser skip it (CI deploys with `make dist` and no
 # npm packages: ../deploy/README.md), and those checks' logs get a name no pass is ever written under.
 NOBROWSER := help all lib image page dist expect l1 l2 l2-generic c1 fuzz fuzz-quick test clean
@@ -29,7 +30,7 @@ C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).
 CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
 
 .PHONY: help all lib image page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input c1 c2 fuzz fuzz-quick fuzz-l3 clean
+        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net net-demo c1 c2 fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> page: editor, compile chain, CSS CPU; ~40 s)"
@@ -40,6 +41,7 @@ help:
 	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~30 s)"
 	@echo "make test-ui        L5 on every quick program (~5.5 min)"
 	@echo "make c2             a CPU-only page per quick program runs to HALT (~30 s)"
+	@echo "make l5-net         L5 on the network programs, the page served with its gateway (net/server.js)"
 	@echo "make dist           copy the built page to dist/"
 
 all: page
@@ -121,6 +123,20 @@ l5-smoke: $(B)/l5-smoke.$(UICONF).log
 	$(call report,$<,4)
 $(B)/l5-smoke.$(UICONF).log: $(B)/ui_exp/args-400-6.txt $(UI)
 	SHARDS=$(SHARDS) EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/js_in_css.xhtml $$(cat $<)
+# the net_* programs: the page and tests/net/ served by the network gateway (ui_seq.js NETROOT), so fetch has something to GET
+l5-net: $(B)/l5-net.$(UICONF).log
+	$(call report,$<,7)
+$(B)/ui_exp/net-args.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
+	@mkdir -p $(@D); NET=1 $(PY) tests/suite_ui.py > $@.tmp && mv $@.tmp $@
+$(B)/l5-net.$(UICONF).log: $(B)/ui_exp/net-args.txt $(UI) $(NET)
+	rm -rf $(B)/net-www && mkdir -p $(B)/net-www && cp -r tests/net/. $(B)/net-www/ && ln -s ../js_in_css.xhtml $(B)/net-www/js_in_css.xhtml
+	SHARDS=$(SHARDS) NETROOT=$(B)/net-www EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/net-www/js_in_css.xhtml $$(cat $<)
+# a demo page with the modem showing (NETSHOW=1) and net/demo.js in the editor: serve build/net-demo with net/server.js
+net-demo: $(B)/net-demo/net_demo.xhtml
+$(B)/net-demo/net_demo.xhtml: net/demo.js $(CC)/lib.json $(CC)/mkimage.py machine/gen_css.py machine/uipage.py $(wildcard $(CC)/*.py readback/*.py)
+	@mkdir -p $(@D) && cp -r tests/net/. $(@D)/
+	$(PY) $(CC)/mkimage.py net/demo.js $(B)/ccimg_demo.json
+	UI=1 NETSHOW=1 $(PY) machine/gen_css.py $(B)/ccimg_demo.json $@
 l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what the scan reads is what the editor shows
 	$(call report,$<,2)
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)

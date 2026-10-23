@@ -182,6 +182,60 @@ const PROBES = [
         note: `flat ${r.f}; at on-screen scale ${r.sc.toFixed(3)}: ${r.d} (ratio ${k.toFixed(3)}, 1 / scale ${(1 / r.sc).toFixed(3)})` };
     },
   },
+  // served over HTTP (probe.http: path -> [content type, body]; the page is `index.html`): stylesheet MIME checks don't
+  // apply to file: URLs, and responsive iframes need a child document from the same server
+  {
+    id: 'quirks-lax-css', kind: 'fact',
+    claim: 'a quirks-mode page applies a same-origin stylesheet served with any Content-Type (JSON, text/plain); a standards-mode page only text/css or none',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 50 (the NET modem reads the gateway\'s answers, served as application/json)',
+    http: {
+      'index.html': ['text/html', '<!doctype html><iframe id=q src=q.html></iframe><iframe id=s src=s.html></iframe>'],
+      'q.html': ['text/html', '<link rel=stylesheet href=j.json><link rel=stylesheet href=c.css><i id=j></i><i id=c></i>'],
+      's.html': ['text/html', '<!doctype html><link rel=stylesheet href=j.json><link rel=stylesheet href=c.css><i id=j></i><i id=c></i>'],
+      'j.json': ['application/json', '#j{--o:1}'], 'c.css': ['text/css', '#c{--o:1}'],
+    },
+    read: () => Object.fromEntries(['q', 's'].flatMap(f => { const d = document.getElementById(f).contentDocument;
+      return ['j', 'c'].map(i => [f + i, getComputedStyle(d.getElementById(i)).getPropertyValue('--o').trim()]); })),
+    judge: r => ({ control: r.qc === '1' && r.sc === '1', holds: r.qj === '1' && r.sj === '',
+      note: `text/css applies in quirks / standards: ${r.qc === '1'} / ${r.sc === '1'}; application/json: ${r.qj === '1'} / ${r.sj === '1'}` }),
+  },
+  {
+    id: 'responsive-iframe', kind: 'fact', flags: ['--enable-blink-features=ResponsiveIframes'],
+    claim: 'responsive iframes (on by default from 155; a flag in 153): frame-sizing: content-height sizes the iframe to an opted-in child\'s content height, but no lower than the iframe\'s height when the child loaded',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 51-52, 57 (the first NET modem; a data: child\'s return channel)',
+    http: {
+      'index.html': ['text/html', '<!doctype html><style>iframe{border:0;width:50px;frame-sizing:content-height}</style>' +
+        '<iframe id=t loading=lazy src="c.html?h=345"></iframe><iframe id=s loading=lazy src="c.html?h=40"></iframe><iframe id=n src="n.html"></iframe>'],
+      // (lazy: a child whose load fires before the page's first layout reports 0 px, crbug 575887314; bugs/README.md)
+      // 153 reads the meta's content as the allowed origins, 155+ as allow-origins=…: one of the two opts in
+      'c.html': ['text/html', q => `<meta name=responsive-embedded-sizing content="*"><meta name=responsive-embedded-sizing content="allow-origins=*">` +
+        `<style>html,body{margin:0}</style><div style="height:${q.get('h')}px"></div>`],
+      'n.html': ['text/html', '<style>html,body{margin:0}</style><div style="height:345px"></div>'],
+    },
+    wait: 1500,      // (the height is reported at DOMContentLoaded and at load; read after both)
+    read: () => Object.fromEntries(['t', 's', 'n'].map(i => [i, document.getElementById(i).getBoundingClientRect().height])),
+    judge: r => ({ control: r.n === 150, holds: r.t === 345 && r.s === 150,
+      note: `content 345 px: ${r.t}; content 40 px (in a 150 px iframe): ${r.s}; not opted in: ${r.n} (150 = default)` }),
+  },
+  {
+    id: 'fragment-scroll', kind: 'fact',
+    claim: 'a same-origin child navigated to #t scrolls the page\'s overflow: hidden box around it to bring #t into view, in both directions, on both axes (through an overflow: clip box)',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 56 (the NET modem\'s answers are that scrollLeft and scrollTop)',
+    http: {
+      'index.html': ['text/html', '<!doctype html><style>.s{width:100px;height:1px;overflow:hidden}iframe{display:block;border:0;width:5000px;height:1px}' +
+        '.s2{width:100px;height:100px;overflow:hidden}.k{width:5000px;height:5000px;overflow:clip}.k iframe{height:6000px}</style>' +
+        '<div class=s id=a><iframe src="c.html?w=345#t"></iframe></div><div class=s id=b><iframe src="c.html?w=2000#t"></iframe></div>' +
+        '<div class=s id=n><iframe src="c.html?w=345"></iframe></div><div class=s2 id=xy><div class=k><iframe src="d.html#t"></iframe></div></div>'],
+      'c.html': ['text/html', q => `<style>html,body{margin:0;overflow:hidden}body{white-space:nowrap;font-size:0;height:1px}span{display:inline-block;height:1px}</style>` +
+        `<span style="width:${q.get('w')}px"></span><span id=t style="width:100px"></span>`],
+      'd.html': ['text/html', '<!doctype html><style>html,body{margin:0;overflow:hidden}#t{position:absolute;left:345px;top:678px;width:100px;height:100px}</style><div id=t></div>'],
+    },
+    wait: 1000,
+    read: () => ({ ...Object.fromEntries(['a', 'b', 'n'].map(i => [i, document.getElementById(i).scrollLeft])),
+      xy: [document.getElementById('xy').scrollLeft, document.getElementById('xy').scrollTop] }),
+    judge: r => ({ control: r.n === 0, holds: r.a === 345 && r.b === 2000 && r.xy[0] === 345 && r.xy[1] === 678,
+      note: `#t after 345 px: scrollLeft ${r.a}; after 2000 px: ${r.b}; no fragment: ${r.n}; #t at 345, 678: ${r.xy}` }),
+  },
   {
     id: 'var-ident', kind: 'watch',
     claim: 'var(ident("--m" var(--k))) (dynamic property names) is not supported',
@@ -200,7 +254,16 @@ async function runProbe(B, b, dir, P) {
   await p.addInitScript(`window.prop = ${prop.toString()}`);   // the reads' helper (harness only: the probe pages have no script)
   try {
     let r;
-    if (P.pages) {
+    if (P.http) {
+      const srv = require('http').createServer((req, res) => {
+        const u = new URL(req.url, 'http://x'), [type, body] = P.http[u.pathname.slice(1)] || ['text/plain', null];
+        res.writeHead(body === null ? 404 : 200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+        res.end(typeof body === 'function' ? body(u.searchParams) : body || '');
+      });
+      await new Promise(ok => srv.listen(0, '127.0.0.1', ok));
+      try { await p.goto(`http://127.0.0.1:${srv.address().port}/index.html`); await p.waitForTimeout(P.wait || 300); r = await p.evaluate(P.read); }
+      finally { srv.close(); }
+    } else if (P.pages) {
       r = {};
       for (const [ext, src] of Object.entries(P.pages())) {
         const f = path.join(dir, `${P.id}.${ext}`); fs.writeFileSync(f, src);
@@ -236,7 +299,8 @@ async function main(argv) {
       const B = profile(name); const b = await B.launch();
       console.log(`== ${name} profile (${B.args.join(' ')}): ${b.version()}`);
       for (const P of probes) {
-        const r = await runProbe(B, b, dir, P);
+        const fb = P.flags && await B.launch({ extraArgs: P.flags });     // a probe with flags gets its own browser
+        const r = await runProbe(B, fb || b, dir, P); if (fb) await fb.close();
         if (r.status === 'FAIL' || r.status === 'BROKEN') bad++;
         console.log(`${r.status.padEnd(13)} ${P.id.padEnd(18)} ${P.claim}\n${''.padEnd(32)}${r.note}`);
       }

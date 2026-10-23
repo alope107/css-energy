@@ -509,3 +509,82 @@ numbers moved (KIND joined the mov class).
 `gc_rawblock.js`, never halted on the register machine (its collector's walk, HISTORY 54). One early HALT in ~370 timed
 runs of the hybrid (obj_keys, 218 of 313 steps), not reproduced in 140 more; the register machine had one in 66 on
 2026-10-21 (tree, 110 of 2,273): the same intermittent fault, inherited, not found yet.
+
+## 16. The network (2026-10-21, branch `css-fetch`, measured on the stack machine)
+
+`fetch` / `read` through the fragment-scroll modem (ARCHITECTURE §3.8), headless Chromium 153, no flags; page and gateway
+(`net/server.js`) on one machine. The machine was shared with other sessions' browser jobs: absolute times swing ~2×
+between runs, so the comparisons below are interleaved.
+
+| Measure | Value |
+|---|---|
+| A word beside a trivial page (`net/probe/probe3.js`: the harness as the CPU) | median 20–23 ms; the first after idle ~1 s (the idle reload) |
+| 600 random bytes through it | 609 words, 14.9 s, byte for byte |
+| `net_fetch.js` on the page, compiled → HALT (`net/probe/pagenet.js`, 5 runs) | 9.5–10.9 s; 29 words |
+| A word on the page, median gap between the gateway's requests (5 runs) | 283–330 ms (the font CPU's modem: 0.5–0.8 s); page 25–29 frames/s, modem 5.4–6.2 loads/s |
+| `fetch` with no gateway (`file:`): Run → `-1` | 23 s (the 20 s timeout, then `fetch` gives up) |
+
+Parallel modems (`net/probe/probe7.js`; the page's CPU drives its own modem through a `read()` loop, the harness drives
+the extra ones the same way):
+
+| Modems | Words/s per modem | Words/s in all | Page frames/s |
+|---|---|---|---|
+| 1 | 4.33–4.41 | 4.33–4.41 | 34.6–35.4 |
+| 2 | 3.99–4.16 | 7.98–8.24 | 32.0–32.9 |
+| 4 | 3.57 | 14.29 | 28.3 |
+
+A word costs about 8 page frames whichever modem carries it, so throughput is bytes per word × modems.
+
+**Built in (2026-10-21): 4 modems, 2 bytes each.** A word brings 2 URL bytes or 8 body bytes. Interleaved against the
+single-byte, single-modem page (`e9198b2`), 3 rounds each, `net/probe/pagenet.js`, compiled → HALT:
+
+| Program | 1 byte, 1 modem | 2 bytes, 4 modems | Words | Median word | Page frames/s |
+|---|---|---|---|---|---|
+| `net_long.js` (62 bytes, summed) | 22.6–22.9 s | 11.2–11.4 s (2.0×) | 85 → 20 | 247–252 → 372–390 ms | 32 → 22 |
+| `net_fetch.js` (17 bytes, printed) | 8.4–9.9 s | 4.9–5.1 s (1.7×) | 29 → 9 | 241–263 → 312–342 ms | 28–34 → 26–27 |
+
+Not the 6.6× the parallel probe suggested: the 4 modems' reloads (16–18 a second in all) cost the page a third of its
+frames, so a word takes ~9 frames instead of ~8, and the CPU then works through 8 bytes. On the way: the lib's
+unpacking loop (~250 steps per READ) moved into `NET` itself, which writes the bytes; and the read path's runtime cells
+moved out of cache sets 9 and 10, where they evicted the stack and the code on every byte (`net_long` in csssim: 524 →
+91 passes). Steps per byte, `net_long`: 51 (one byte per word) → 59.
+
+What it costs programs that don't use the network (FizzBuzz; `ab.js`, fresh browser per run; `main` at `212175a`):
+
+| Measure | A vs A | `main` vs this branch |
+|---|---|---|
+| CPU-only page, load → HALT (`halttime.js`, POLL=30) | 0.996 (0.984–1.005), 8 rounds | 1.110 (0.986–1.142), 12 rounds; then 0.976 (0.945–1.094), 16 rounds |
+| Editor page, Run → HALT (`ui_seq.js`) | 1.032 (1.026–1.094), 4 rounds | 1.065 (0.924–1.136), 8 rounds |
+| Editor page, Run → compiled | | 1.014 (0.850–1.082), 6 rounds |
+| Parser variants; temps (`tools/vsz.py`) | | 338 → 338; 70,478 → 70,499 |
+
+No difference shows above this machine's noise; the second CPU-only run had another session's benchmark beside it.
+To settle a few percent, re-measure on a quiet machine.
+
+**Held loads, two answers per document (2026-10-22, branch `net-modem`).** Times in this section until here came from
+`net/probe/pagenet.js`, which ran a `requestAnimationFrame` loop in the page to count frames, and that runs the page
+~1.5× faster than without one (ENGINE_NOTES 64); the ratios hold (both sides had it), the absolute times are low. The
+page has no script, so these are without one: compiled → HALT, interleaved, 4 rounds, each run in a `bench.py` lease
+(the P-cores), a fresh browser per run (`net/probe/runs.js`: Run, poll the status every 100 ms; `SERVER=` the older gateways).
+
+| Program | `main` (`abcc857`): modems reload all the time | Held loads, 4 modems | Held, 2 modems × 2 answers |
+|---|---|---|---|
+| `net_fetch.js` (9 words) | 6.8–8.6 s | 4.1–5.4 s | 3.4–4.8 s |
+| `net_long.js` (20 words) | 18.1–25.1 s | 11.0–13.6 s | 9.1–12.5 s |
+| First word after Run | 1.4–1.5 s | 0.33–0.44 s | 0.32–0.46 s |
+| A URL word (gaps between the gateway's requests) | 0.36–0.75 s | 0.19–0.52 s | 0.17–0.49 s |
+| A READ word (8 bytes; the program sums them) | 1.0–2.5 s | 0.69–0.99 s | 0.61–0.93 s |
+
+Held loads: the gateway holds each modem's next load until it has the modem's answers, so a modem loads once per word
+and the request goes out as soon as the page lays it out (the old document is still there to send it); the answer is
+in the document (no `rx` stylesheet). 1.6–2.0× per program. A word now costs about 4 page frames (URL words; ~10 for a
+READ, most of them the CPU's): the request leaves in the frame that lays it out, the gateway answers within ~3 ms,
+the new documents load and scroll in the next frame, and the CPU reads the answers in that frame (the other frames are
+the lib's and the register `rreq`'s). What the modems still cost is their documents: two forced style passes of the
+page each (ENGINE_NOTES 63), ~100 ms of the main thread per word with 4 of them. Two answers per document (x and y)
+halve that; on a page built with `net_parts` 2 (one answer per document, 2 documents) URL words took ~285 ms against
+~345 ms with 4 documents (3 rounds). Built as 2 modems × 2 answers it is ahead in 6 of the 8 pairs above (a whole
+round ran 25% faster than the next on this machine), and in all 8 of 4 more rounds with the order swapped
+(`net_fetch` 3.4–4.8 s against 3.8–5.4 s, `net_long` 9.1–12.4 s against 10.3–13.7 s; ratios 0.87–0.94): a median
+0.89, ~11% less time.
+

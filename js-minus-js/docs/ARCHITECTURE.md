@@ -37,7 +37,7 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by `cc_ref` in rom mode, 4,282 words), then `pstub` (2) | the page's static ROM table |
+| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by `cc_ref` in rom mode, 4,460 words), then `pstub` (2) | the page's static ROM table |
 | 6144 | `data_base`: `STRTAG` = 262144, the untag constant (and the object key bias) | compiler `.fin` (an overlay) |
 | 6145 … 6399 | globals (255 words) | the program |
 | 6400 | `STR0`: the empty marker; then `"true"` and `"false"` (`SEED`) | compiler `.fin` |
@@ -45,7 +45,7 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 7168 … 8190 | code (`code_base`, 1,023 words: 511 instructions) | compiler overlays |
 | 8191 | count of global words (the collector's roots) | compiler `.fin` |
 | 8447 | `strend`: the string area's end | compiler `.fin` |
-| 8448 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); the collector's map of block starts at 8480 (`map_base`: a bit per 8 heap words, 48 words for both semi-spaces) and its powers of two at 8528 (16) | instructions, ROM routines |
+| 8448 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 8496 (`map_base`: a bit per 8 heap words, 48 words for both semi-spaces) and its powers of two at 8544 (16) | instructions, ROM routines |
 | 8704 … 16239 | stack (`sp0`) | program |
 | 16240 … 22383 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, the cat class, ROM routines, the collector |
 | 22384 … 22527 | console: the last `cols × rows` = 144 words | output instructions |
@@ -86,6 +86,7 @@ lists them in class order (the CSS CPU's class is a range of opcodes).
 | apush | APUSH | the ROM's `push` routine's first instruction: B.push(C) and return (no array, or a full one: on to the routine) |
 | mcpy | MCPY MUPPER MLOWER MFILL NPUT | C words from B to A (A ≤ B if they overlap; mapping letters' case); B into C words at A; B's digits at A: a line per execution |
 | mcmp | MCMP MFEQ MFREF MWALK | A = the first i < A where B[i] ≠ C[i] / = C / refers into the from-space at C, else A: a line per execution; MWALK: the offset from B of the first `[len][bytes][0]` string of length A, or of the first at or past C, a string per execution |
+| net | NET | A = the network gateway's answer to the word B, every part's bytes in RBUF0 … (§3.8) |
 | cat | (a DADD with pst ≥ 1024) | a string's `+`, a line per execution (§3.6) |
 
 **Traps.** A trapping instruction calls a ROM routine (`cc_ref.TRAPS`) as CALL would. A destination trap (the dynamic
@@ -352,10 +353,70 @@ One-word instructions on an evaluation stack (PUSHI, LOADG, …, the DYN, IDXA a
 compiled by the self-hosted `jsc.js` plus hand-written assembly behind a jump table. The register machine runs the same
 programs in 2.2–4.8× fewer steps (BENCHMARKS §14).
 
-### 3.8 The font CPU (removed; last at commit `181cbb7`)
+### 3.9 The font CPU (removed; last at commit `181cbb7`)
 
 A GSUB CPU ran 32 micro-cycles per shaping while Chrome shaped the machine state as a line of text, and CSS serviced
 its traps. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12); ENGINE_NOTES 25–33 are what it relied on.
+
+### 3.8 The network: `NET` and the modems
+
+`fetch(url)` and `read()` are ROM routines (`lib_src.js`, called like `parseInt`: cc_ref `GLOBALS`) made of one
+instruction, `NET` (opcode 58). Its word is `2 p + s`: `s` a sequence bit the lib alternates (the runtime cell
+`NETSEQ`), so consecutive words always differ; `p = 4 arg + op` (`net/device.py`): op 0, two URL bytes (`arg = b0 + 256
+b1`); op 1, GET (the status + 1, 0 if it failed); op 2, READ. P = 4 modem parts (`layout.json` `net_parts`) answer
+each word at once: part j's answer to a READ is the body's bytes 2j and 2j + 1, packed as `b0 + 256 b1 + 65536 n`. `NET`
+unpacks the answers into the bytes `RBUF0 … RBUF7` (−1 where there is none: `cc_ref.netw`) and puts part 0's answer
+over the word. `read()` takes the next byte from there (`RLEFT` counts what's left), so a READ brings 8 bytes.
+`cc_ref.run()`, `cssref.py` and `csssim.py` answer at once from `net/device.py`, which serves `tests/net/`; in csssim a
+`NET` ends its pass the first time and runs first in the next, as on the page.
+
+On the page the CPU can't make requests, so it talks to a gateway (`net/server.js`, which has the protocol) through two
+modem iframes, each answering two parts:
+
+- **The class `net`** (`NET A, B`) reads the word B and stalls without a miss until every part's answer to it has come
+  (ENGINE_NOTES 56). While it waits it leaves `--req = 1 + word` at the chain's end, the register `rreq` (held on
+  passes that don't run the chain). Then it runs 2 P + 1 times (`--pst`): the 8 bytes into `RBUF0 …`, then part 0's
+  answer into A, which completes it; the word stays the request until then. The ROM reaches it as `__net(word)`. `rnt0`
+  holds the clock (`--t`, 600 a second) when this request began; 20 s without an answer give −1.
+- **The request**: the modems, `<iframe loading="lazy" src="/net/m0.html?part=i&n=4#t">`, are `NW + rreq` px tall
+  (`NW` = 2^20 + 100; a word is below 2^19), each in an `NW × NW` box that clips it (`.nclip`), so the slot around it
+  scrolls 2^20 px on both axes whatever the request. The boxes show from the run's first waiting `NET` on (the register
+  `rlive`); before that nothing loads.
+- **The modems' documents**: the gateway serves one per word to each modem, alternating `m0.html#t` and `m1.html#t` (a
+  refresh to the same URL doesn't reload). A document refreshes as soon as it has loaded, and the gateway holds that
+  navigation until the modem has new answers; the old document stays and keeps working (ENGINE_NOTES 62). Modem 0's
+  documents send the request: they read `100vh − NW` and send five hex digits of it plus a check digit as
+  `background-image: if(style(--x: …): url(d/<doc>/<i>/<x>); …)`, `x = 16 tag + digit`. A document fetches a URL once
+  (ENGINE_NOTES 61), so `tag` is 1 + the word's seq bit, which every new word flips, and 0 (nothing sent) for an idle
+  request and for the word the document came with. A resize restyles the document in the frame that lays out the new
+  height, so the request is at the gateway a few ms later.
+- **The answer**: modem i's document puts `#t` (100 × 100 px) at x, y = the answers `R = valid + 2 seq + 4 (answer)` of
+  parts 2i and 2i + 1, below 10^6 (the page reads them through `var()`, which keeps 6 digits), and its load scrolls to
+  `#t`. The scroll reaches `.nslot.np<i>`, the page's 100 × 100 `overflow: hidden` box around the clip box, so its
+  `scrollLeft` and `scrollTop` are the two Rs; the scroll timelines `--nans<2i>` (x) and `--nans<2i+1>` (y) read them.
+  An answer counts when it is valid and its seq is the word's bit 0; a modem's later documents for the same word carry
+  none (R = 0), so an answer never comes back for a later word. Fragment scrolls cross only same-origin documents, so
+  the modems are in the page's process, and each of their documents costs the page two forced style updates
+  (ENGINE_NOTES 63): two answers per document halve them.
+- **Outside `#clk`**: the slots and the iframes sit before `#clkw`, since Edit hides `#clk`. A box that goes `display:
+  none` keeps its scroll offset and gets it back when it shows (ENGINE_NOTES 59): the last run's answers came back
+  with it and could pass for the first word's. Out there the slots always show and only their clip boxes hide; they
+  read `rreq` and `rlive` through animations of their own (their timelines and `--nans<j>` are scoped at `body`), which
+  go inactive on Edit: the clip boxes hide, and the slots scroll back to 0.
+- **The gateway** gives the page's modems a group: as it serves a page it writes a group id into their URLs, each
+  modem's first request is redirected to its own session `/net/s/<id>/m0.html` (the fragment carries over), and its
+  URLs are relative to that, so two pages can't mix their words. It acts on a request once all six digits have come for
+  one tag with a matching check digit, computes the answers once per word, and resolves relative URLs against the page
+  (the first request's referrer). A held navigation holds a connection, and Chrome opens 6 per host: past 4 held in one
+  browser (a cookie tells browsers apart), the gateway answers the others at once and they poll, refreshing every
+  second; a navigation held 20 s is answered with no answers.
+- **The runtime cells** of the read path (`RLEFT`, `RBUF0 …`) sit at `rt_base + 32 … 47`, whose blocks fall in cache
+  sets 11–14: at first they shared sets 9 and 10 with the stack's and the code's hot blocks, and every byte evicted one
+  of the three (`layout.json` pads `rt_cells` to put them there).
+
+A word brings 2 URL bytes or 8 body bytes. A URL word takes about 4 page frames (0.2–0.5 s): the request leaves in the
+frame that lays it out, the new documents scroll in the next, where the CPU reads them; the rest are the lib's and the
+register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 bytes (BENCHMARKS §16).
 
 ---
 
@@ -388,6 +449,7 @@ its traps. It was 2.8–7.3× slower than the CSS CPU (BENCHMARKS §12); ENGINE_
 | C1 | `make c1` | `csssim.py`, the CSS CPU pass by pass, runs every compiled image | Node output, cc_ref's steps |
 | C2 | `make c2` | a CPU-only page per program under 1,500 steps (`tests/csscpu_pages.py`) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 9 × 16 grid |
+| L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
 - `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 135 programs, `tests/suite_err/` 47;
   `samples/` the picker's ten; `tests/programs/` the demos t1–t4.
