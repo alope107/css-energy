@@ -143,8 +143,9 @@ chats.
     `text/plain`, `text/html`, even `image/png`. A standards-mode or XHTML page applies only `text/css`, no
     Content-Type, or `application/x-unknown-content-type`. `X-Content-Type-Options: nosniff` still blocks it.
     (`StyleSheetContents::ParseAuthorStyleSheet`: lax iff quirks mode and CORS-same-origin;
-    `CSSStyleSheetResource::CanUseSheet`.) The page is XHTML, which has no quirks mode, so the gateway's answers are
-    read in the modem, an HTML iframe without a doctype. *(measured 2026-10-19; probe: `quirks-lax-css`)*
+    `CSSStyleSheetResource::CanUseSheet`.) The page is XHTML, which has no quirks mode, so until 2026-10-22 the modem, an
+    HTML iframe without a doctype, read the gateway's answers this way (a stylesheet `rx` per load); now the gateway
+    writes them into the modem's documents, which saves that request. *(measured 2026-10-19; probe: `quirks-lax-css`)*
 51. **Responsive iframes carry a number from a child document to the page**: `frame-sizing: content-height` on the
     iframe, `<meta name="responsive-embedded-sizing">` in an HTML child. Chrome 153 needs
     `--enable-blink-features=ResponsiveIframes` and reads the meta's content as the allowed origins (`*`); 155 has the
@@ -201,10 +202,35 @@ chats.
     (`PaintLayerScrollableArea`: saved into the element when the box is destroyed, restored when it is made again;
     `paint_layer_scrollable_area.cc` 173 / 219 in 153). A scroll timeline on it then reads the old offset at once. With
     the modems inside `#clk` (hidden by Edit), the last run's answers came back on Run and passed for the first word's
-    (the gateway never saw it). Hence the modems' boxes outside `#clk`, never hidden; a hidden *child* (the iframe) only
-    leaves its box nothing to scroll, which clamps the offset to 0. *(measured 2026-10-21)*
+    (the gateway never saw it). Hence the modems' boxes outside `#clk`, never hidden; a hidden *child* (now the iframe's
+    clip box, `.nclip`) only leaves its box nothing to scroll, which clamps the offset to 0. *(measured 2026-10-21)*
 60. **A transition latch fed by a value that an animation changes didn't hold here**: `--nlive: min(1, var(--rreq));
     transition: --nlive 0s calc((1 - min(1, var(--rreq))) * 1000000s)`, with `--rreq` from a scroll-driven animation on
     the same element or inherited from its parent, followed `--rreq` back to 0 within the frame, where memtree's group
     latch (fed by registers) holds. A held register (`rlive`, zeroed by Edit like the others) latches instead.
     *(observed 2026-10-21, not reduced)*
+61. **A document fetches a CSS image URL once**: `CSSImageValue::CacheImage` keeps the image it fetched, and the style
+    engine caches image contents by URL per document (`StyleEngine::CacheImageContent`), so an `if()` that comes back to
+    a branch it took before requests nothing, `no-store` or not. A request a document sends more than once needs a URL
+    that changes: the modem's digit URLs carry a tag that every new word changes (its sequence bit) and the document's
+    id. *(Blink source, 153; the modem's tags rely on it)*
+62. **A navigation the server holds leaves the old document working**: while an iframe's next document (here its
+    `<meta http-equiv="refresh" content="0">`) waits for the response, the old one stays, is laid out on resize and
+    sends the requests its CSS chooses; the new one replaces it at commit. 20 s of waiting raised nothing. Each held
+    navigation holds one of Chrome's 6 connections per host, so the gateway holds at most 4 per browser.
+    *(measured 2026-10-22; `net/server.js`)*
+63. **Each same-process child document costs its page two forced style + layout updates**: `Document::FinishedParsing`
+    calls `UpdateStyleAndLayoutTree()`, and after the load, once the document lays out with `document.fonts.ready`
+    still pending, `FontFaceSetDocument::FireDoneEventIfPossible` (a task posted by `DidLayout`) calls
+    `UpdateStyleAndLayout()`. A child's update first updates its owner's document (`Document::UpdateStyleAndLayoutTree`),
+    so on the CSS CPU page each is a style pass of the page between frames, 10–13 ms here (traces, the tasks' `posted
+    from`: `html_document_parser.cc ScheduleEndIfDelayed`, `font_face_set.cc HandlePendingEventsAndPromisesSoon`). With
+    4 modems, one document each per word, that was 8 updates and ~100 ms of the page's main thread per word, a third of
+    it. A render-blocking stylesheet arriving after the parse (at once or 15 ms later) didn't skip the first.
+    `visibility: hidden` on the iframe skips a third, the load event's (`Document::ImplicitClose` checks
+    `View()->IsVisible()`). Hence two answers per document (ARCHITECTURE §3.8). *(measured 2026-10-22)*
+64. **A `requestAnimationFrame` loop in the page runs the network programs ~1.5× faster**: `net_long` 6.7–6.9 s with a
+    harness's rAF loop, 9.9–11.5 s without (FizzBuzz ~10–20%). In 2.5 s of trace Chrome ran 48 lifecycle updates with
+    the loop and 34 without (99–142 `BeginMainFrame`s), for the same style work. The page has no script, so time it
+    without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §14's earlier times).
+    *(measured 2026-10-22)*

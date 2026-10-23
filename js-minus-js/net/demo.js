@@ -1,5 +1,5 @@
 // fetch a file through the network gateway and print it:
-// watch the modem on the right, one round trip per byte
+// watch the modems on the right: a round trip brings 8 bytes
 var st = fetch("hello.txt");
 console.log(st);
 var c = read();

@@ -219,19 +219,22 @@ const PROBES = [
   },
   {
     id: 'fragment-scroll', kind: 'fact',
-    claim: 'a same-origin child navigated to #t scrolls the page\'s overflow: hidden box around it to bring #t into view, in both directions',
-    docs: 'js-minus-js docs/ENGINE_NOTES.md 56 (the NET modem\'s answers are that scrollLeft)',
+    claim: 'a same-origin child navigated to #t scrolls the page\'s overflow: hidden box around it to bring #t into view, in both directions, on both axes (through an overflow: clip box)',
+    docs: 'js-minus-js docs/ENGINE_NOTES.md 56 (the NET modem\'s answers are that scrollLeft and scrollTop)',
     http: {
-      'index.html': ['text/html', '<!doctype html><style>.s{width:100px;height:1px;overflow:hidden}iframe{display:block;border:0;width:5000px;height:1px}</style>' +
+      'index.html': ['text/html', '<!doctype html><style>.s{width:100px;height:1px;overflow:hidden}iframe{display:block;border:0;width:5000px;height:1px}' +
+        '.s2{width:100px;height:100px;overflow:hidden}.k{width:5000px;height:5000px;overflow:clip}.k iframe{height:6000px}</style>' +
         '<div class=s id=a><iframe src="c.html?w=345#t"></iframe></div><div class=s id=b><iframe src="c.html?w=2000#t"></iframe></div>' +
-        '<div class=s id=n><iframe src="c.html?w=345"></iframe></div>'],
+        '<div class=s id=n><iframe src="c.html?w=345"></iframe></div><div class=s2 id=xy><div class=k><iframe src="d.html#t"></iframe></div></div>'],
       'c.html': ['text/html', q => `<style>html,body{margin:0;overflow:hidden}body{white-space:nowrap;font-size:0;height:1px}span{display:inline-block;height:1px}</style>` +
         `<span style="width:${q.get('w')}px"></span><span id=t style="width:100px"></span>`],
+      'd.html': ['text/html', '<!doctype html><style>html,body{margin:0;overflow:hidden}#t{position:absolute;left:345px;top:678px;width:100px;height:100px}</style><div id=t></div>'],
     },
     wait: 1000,
-    read: () => Object.fromEntries(['a', 'b', 'n'].map(i => [i, document.getElementById(i).scrollLeft])),
-    judge: r => ({ control: r.n === 0, holds: r.a === 345 && r.b === 2000,
-      note: `#t after 345 px: scrollLeft ${r.a}; after 2000 px: ${r.b}; no fragment: ${r.n}` }),
+    read: () => ({ ...Object.fromEntries(['a', 'b', 'n'].map(i => [i, document.getElementById(i).scrollLeft])),
+      xy: [document.getElementById('xy').scrollLeft, document.getElementById('xy').scrollTop] }),
+    judge: r => ({ control: r.n === 0, holds: r.a === 345 && r.b === 2000 && r.xy[0] === 345 && r.xy[1] === 678,
+      note: `#t after 345 px: scrollLeft ${r.a}; after 2000 px: ${r.b}; no fragment: ${r.n}; #t at 345, 678: ${r.xy}` }),
   },
   {
     id: 'var-ident', kind: 'watch',

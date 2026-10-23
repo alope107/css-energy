@@ -210,14 +210,15 @@ The page can't make requests by itself, so the server it comes from does: `net/s
 the server, so CORS doesn't apply) and hands the body back a byte at a time. What CSS does is talk to the gateway,
 with no script:
 
-- `fetch` and `read` are made of one instruction, `NET`, which sends a word and waits for the answers of four
-  "modems" at once: a READ brings 2 bytes from each.
-- The request: the page sets the height of the modem iframes to the word. The modem's document reloads itself all the
-  time; each load reads its height (`100vh`) and sends it as a few `background-image` URLs that CSS chooses.
-- The answer: each load loads the gateway's answer as a stylesheet, served as `application/json`. Only a quirks-mode
-  document may use that as a stylesheet, and the modem has no doctype (the page is XHTML, which has no quirks mode).
-  It lays out a span as wide as the answer, then the element `#t`, and the load scrolls to `#t`. The scroll reaches
-  the page's narrow `overflow: hidden` box around the iframe, and a scroll timeline reads its `scrollLeft`.
+- `fetch` and `read` are made of one instruction, `NET`, which sends a word and waits for four answers at once, two
+  from each of two "modem" iframes: a READ brings 2 bytes per answer.
+- The request: the page sets the height of the modem iframes to the word. The modem's document reads its height
+  (`100vh`) and sends it as a few `background-image` URLs that CSS chooses; a resize restyles the document, so the
+  request goes out as soon as the page lays it out.
+- The answer: the gateway answers with a new document for each modem (the old one asks for it as soon as it has
+  loaded, and the gateway holds that request until the answers are ready). It places the element `#t` at x, y = two
+  answers, and the load scrolls to `#t`. The scroll reaches the page's 100 px `overflow: hidden` box around the
+  iframe, and scroll timelines read its `scrollLeft` and `scrollTop`.
 
 ```
 node net/server.js .. 8767        # serve the repo root with the gateway (from js-minus-js/)
@@ -225,6 +226,6 @@ node net/server.js .. 8767        # serve the repo root with the gateway (from j
 ```
 
 The gateway is a local tool: it fetches whatever the page asks for, from wherever it runs. The site the repo deploys
-to is static, so it has no gateway, and `fetch` there returns `-1`. The modem starts at the program's first network
-word, reloads about 4 times a second each while words come, and once a second after 3 s without one. How it works:
+to is static, so it has no gateway, and `fetch` there returns `-1`. The modems start at the program's first network
+word and load once per word each; between words they wait. How it works:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.8.

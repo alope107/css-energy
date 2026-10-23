@@ -261,15 +261,17 @@ CLASSES['dyn'] = dict(ops=['DYN'], pre=DYN_PRE, reads=[("s1", f"{sp} - 1", None)
     write=(f"calc(var(--dtr) * {sp} + (1 - var(--dtr)) * ({sp} - 2))", f"calc(var(--dtr) * ({pc} + 1) + (1 - var(--dtr)) * var(--dres))", None, "1"),
     nx={'sp': f"calc(var(--dtr) * ({sp} + 1) + (1 - var(--dtr)) * ({sp} - 1))", 'pc': f"calc(var(--dtr) * {DYNVEC} + (1 - var(--dtr)) * ({pc} + 1))"})
 # NET (net/server.js and net/device.py have the protocol): a stall without a miss until every modem part's answer to
-# this word has come. Part j's answer R = valid + 2 seq + 4 value is its slot's scrollLeft, read by the scroll timeline
-# --nans<j> on #cpu; it counts when it is valid and its seq is the word's bit 0 (the lib alternates it). While it waits,
-# the class leaves --req = 1 + word for the chain's end (the register rreq: the modems' height, the request). Then it
+# this word has come. Part j's answer R = valid + 2 seq + 4 value is a slot's scroll offset (slot j / 2; scrollLeft for an
+# even j, scrollTop for an odd one), read by the scroll timeline --nans<j> on #cpu; it counts when it is valid and its seq
+# is the word's bit 0 (the lib alternates it). While it waits, the class leaves --req = 1 + word for the chain's end (the
+# register rreq: the modems' extra height, the request). Then it
 # runs once per write (--pst, as ENTER zeroes its locals): each part's answer d unpacked into its two bytes, RBUF0 …
 # RBUF(2P-1) (byte k: (d >> 8k) & 255 if d >> 16 > k, else -1: cc_ref.netw), then part 0's answer over the word, which
 # completes it (the word stays the request until then).
 from net_slot import SLOT, NW
 NETSHOW = os.environ.get('NETSHOW') == '1'      # a demo page: the modems show, with their request and answers
 NP = R.LAYOUT['net_parts']
+NS = (NP + 1) // 2      # modems: each document answers two parts, on its slot's two axes
 NETTL = ["rreq", "rlive"] + [f"nans{j}" for j in range(NP)]     # the timelines the modems and #cpu share (scoped at body)
 NET_PRE = ["--nws: mod(var(--vs1), 2);", f"--nfin: {eq('var(--pst)', 2 * NP)};",
            f"--ntime: clamp(0, mod(var(--t) - var(--rnt0), 60000) - {NWAIT - 1}, 1);"]
@@ -434,7 +436,7 @@ css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on
        ";\n  animation-duration: auto;\n  animation-timing-function: linear;\n  animation-fill-mode: both;\n  " + "\n  ".join(cpu) + "\n}"]
 css.append(lbl.group('Register keyframes', 'each register\'s view timeline mapped onto its value range'))
 css += [f"@keyframes r-{n} {{ from {{ --{n}: {H - OFF}; }} to {{ --{n}: {-1 - OFF}; }} }}" for n, H, OFF, _ in regs]
-css += [lbl.group(f'NET: the modems ({NP})', 'each slot\'s scrollLeft is its part\'s answer (the scroll timelines --nans0, --nans1, ...); their height is the request (rreq)')]
+css += [lbl.group(f'NET: the modems ({NS}, {NP} parts)', 'slot i\'s scrollLeft and scrollTop are parts 2i and 2i + 1 (the scroll timelines --nans0, --nans1, ...); the iframes\' extra height is the request (rreq)')]
 css += [f"@keyframes r-nans{j} {{ from {{ --nans{j}: 0; }} to {{ --nans{j}: {NW - SLOT}; }} }}" for j in range(NP)]
 css += [# outside #clk, which Edit hides: a hidden slot's scroll offset is saved and restored when it shows again, and the
         # last run's answers would come back with it (the first word's could match by its sequence bit). Out here they go
@@ -442,17 +444,20 @@ css += [# outside #clk, which Edit hides: a hidden slot's scroll offset is saved
         # They read rreq through an animation of their own; its timeline and the answers' are scoped at body (NETTL).
         # The iframes show from the run's first waiting NET on: the register rlive (a transition latch fed by rreq didn't
         # hold: it followed rreq to 0 between words, hiding the iframes). The slots always show: hiding a slot would save
-        # its scroll offset and bring a stale answer back with it; a hidden iframe only leaves its slot nothing to scroll.
+        # its scroll offset and bring a stale answer back with it; hiding its content (.nclip) only leaves it nothing to
+        # scroll. The iframe is NW + rreq px tall in a box of NW x NW that clips it, so both axes scroll 2^20 px whatever
+        # the request.
         ".nlatch { height: 0; animation-name: r-rreq, r-rlive; animation-timeline: --rreq, --rlive; animation-duration: auto;"
         " animation-timing-function: linear; animation-fill-mode: both; }",
-        f".nslot {{ position: fixed; left: 0; top: 0; width: {SLOT}px; height: 1px; overflow: hidden; visibility: hidden; }}",
-        f".modem {{ display: if(style(--rlive: 1): block; else: none); border: 0; width: {NW}px; height: calc((1 + var(--rreq)) * 1px); }}"]
-css += [f".nslot.np{j} {{ scroll-timeline: --nans{j} x; }}" for j in range(NP)]
-if NETSHOW:     # the panel at the top right; part 0's slot itself at 3x (a transform: its scrollLeft, the answer, is unchanged)
+        f".nslot {{ position: fixed; left: 0; top: 0; width: {SLOT}px; height: {SLOT}px; overflow: hidden; visibility: hidden; }}",
+        f".nclip {{ display: if(style(--rlive: 1): block; else: none); width: {NW}px; height: {NW}px; overflow: clip; }}",
+        f".modem {{ display: block; border: 0; width: {NW}px; height: calc(({NW} + var(--rreq)) * 1px); }}"]
+css += [f".nslot.np{i} {{ scroll-timeline: " + ", ".join(f"--nans{j} {'xy'[j % 2]}" for j in (2 * i, 2 * i + 1) if j < NP) + "; }" for i in range(NS)]
+if NETSHOW:     # the panel at the top right; modem 0's slot itself at 2.4x (a transform: its scroll offsets, the answers, are unchanged)
     css += [lbl.group('NETSHOW: the modems, visible', 'a demo of the fragment-scroll answers'),
             ".nshow { animation-name: r-rreq, " + ", ".join(f"r-nans{j}" for j in range(NP)) + "; animation-timeline: --rreq, " + ", ".join(f"--nans{j}" for j in range(NP)) +
             "; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both;"
-            " position: fixed; right: 16px; top: 16px; width: 400px; height: 600px; box-sizing: border-box; padding: 12px 16px;"
+            " position: fixed; right: 16px; top: 16px; width: 400px; height: 740px; box-sizing: border-box; padding: 12px 16px;"
             " background: #fff; border: 1px solid #c9d1d9; border-radius: 8px; font: 13px/1.45 system-ui, sans-serif; color: #17212b; z-index: 5; }",
             ".nshow h2 { font-size: 15px; margin: 0 0 6px; } .nshow p { margin: 0 0 8px; color: #5b6875; }",
             ".nshow .kv { font: 12px/1.6 ui-monospace, monospace; white-space: pre; } .nshow .kv b { font-weight: 600; }",
@@ -464,23 +469,23 @@ if NETSHOW:     # the panel at the top right; part 0's slot itself at 3x (a tran
             ".nneedle { position: absolute; top: -3px; width: 3px; height: 24px; background: #e8590c; border-radius: 2px; transition: left .3s ease-out; }",
             ".ntapel { display: flex; justify-content: space-between; font: 11px ui-monospace, monospace; color: #5b6875; margin-bottom: 4px; }",
             ".nfilml { font: 11px ui-monospace, monospace; color: #5b6875; }",
-            ".nslot.np0 { left: auto; right: 296px; top: 470px; height: 40px; visibility: visible; transform: scale(3); transform-origin: 0 0;"
+            ".nslot.np0 { left: auto; right: 296px; top: 470px; visibility: visible; transform: scale(2.4); transform-origin: 0 0;"
             " outline: 1px solid #5b6875; background: #fff; z-index: 6; }",
-            ".nwait { position: absolute; left: 16px; top: 462px; width: 290px; color: #5b6875; }"]     # (the slot, opaque, covers it once the modem shows)
+            ".nwait { position: absolute; left: 16px; top: 462px; width: 230px; color: #5b6875; }"]     # (the slot, opaque, covers it once the modem shows)
     for j in range(NP):
         css += [f".npart{j} {{ counter-set: r{j} var(--nans{j}) n{j} mod(round(down, var(--nans{j}) / 262144), 4) a{j} mod(round(down, var(--nans{j}) / 4), 256)"
                 f" c{j} mod(round(down, var(--nans{j}) / 1024), 256); }}",
                 f".npart{j}::after {{ content: \"part {j}  \" counter(r{j}) \"  \" counter(n{j}) \" bytes '\" counter(a{j}, ascii) counter(c{j}, ascii) \"'\"; }}",
                 f".nneedle{j} {{ left: calc(var(--nans{j}) * 365px / {1 << 20}); }}"]
 NSHOW_HTML = ('<div class="nshow"><h2>The network modems</h2>'
-              f"<p>No script. A NET word sets the height of {NP} modem iframes (the request). Their documents reload all the time; "
-              "each load lays out a span as wide as its part of the answer, then the orange #t, and scrolls to it. That scroll moves "
-              f"the iframe's 100 px box, and a scroll timeline reads its scrollLeft back. A READ brings 2 bytes per part.</p>"
+              f"<p>No script. A NET word sets the height of {NS} modem iframes (the request). The gateway answers it with a new "
+              "document for each: the orange #t at x, y = two parts of the answer, and the load scrolls to it. That scroll moves "
+              f"the iframe's 100 px box on both axes, and scroll timelines read scrollLeft and scrollTop back. A READ brings 2 bytes per part.</p>"
               '<div class="kv nword"></div>' +
               "".join(f'<div class="kv npart{j}"></div><div class="ntape"><div class="nneedle nneedle{j}"></div></div>' for j in range(NP)) +
               '<div class="ntapel"><span>0</span><span>2^19</span><span>2^20 px</span></div>'
               '<div class="nwait">(the modems appear at the program\'s first fetch)</div>'
-              '<div class="nfilml" style="position: absolute; left: 16px; top: 586px">part 0\'s real box, 3&#215;: it always ends on #t</div></div>') if NETSHOW else ""
+              '<div class="nfilml" style="position: absolute; left: 16px; top: 712px">modem 0\'s real box, 2.4&#215;: it ends on #t (parts 0, 1)</div></div>') if NETSHOW else ""
 
 # a read port's leaf name: a two-level if() on the block's 64-block group (h) and place in it (l). An if() costs ~70 ns per
 # entry it contains, taken or not (exp/csscpu/README.md), so a 4,352-block mux costs ~0.3 ms wherever it is evaluated: each port
@@ -642,9 +647,9 @@ if os.environ.get('BENCH'):
     open(outp, 'w').write(page); print(outp, len(page), 'bytes; bench pass', sm.passes, 'K', K, 'stall', stall); sys.exit()
 
 # ---------------- HTML
-# the modems: one slot + iframe per part; net/server.js gives the page's modems a group id as it serves the page
-MODEMS = "".join(f'<div class="nslot np{j}"><iframe class="modem" loading="lazy" src="/net/m0.html?part={j}&amp;n={NP}{"&amp;show" if NETSHOW else ""}#t"'
-                 f' title="network modem {j}" aria-hidden="true"></iframe></div>' for j in range(NP))
+# the modems: one slot + iframe per two parts; net/server.js gives the page's modems a group id as it serves the page
+MODEMS = "".join(f'<div class="nslot np{i}"><div class="nclip"><iframe class="modem" loading="lazy" src="/net/m0.html?part={i}&amp;n={NP}{"&amp;show" if NETSHOW else ""}#t"'
+                 f' title="network modem {i}" aria-hidden="true"></iframe></div></div>' for i in range(NS))
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM)) | {R.LAYOUT['data_base'] - ROM}
 LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain's overlays hold code, strings and staging
 mem_html = "" if 'nomem' in ABL else "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))

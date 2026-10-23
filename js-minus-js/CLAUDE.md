@@ -161,4 +161,7 @@ net/       server.js (web server + network gateway: the modem's documents and pr
   origin. The repo-root `http.server` has no gateway: there `fetch` waits ~20 s and returns -1. A network program's
   time is its round trips, not its steps: `suite_ui.py` lists every `net_*` program for `make l5-net`. The modems'
   boxes stay outside `#clk` (a hidden box restores its scroll offset: stale answers, ENGINE_NOTES 59), and the read
-  path's runtime cells sit in cache sets the stack and code don't use (`layout.json` pads `rt_cells`).
+  path's runtime cells sit in cache sets the stack and code don't use (`layout.json` pads `rt_cells`). Time network
+  programs with no `requestAnimationFrame` loop in the page: one runs them ~1.5× faster than a user sees
+  (ENGINE_NOTES 64; `pagenet.js` counts frames only with `FRAMES=1`). The gateway holds each modem's next load until
+  it has an answer, at most 4 per browser (Chrome opens 6 connections per host).
