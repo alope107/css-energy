@@ -44,7 +44,7 @@ def initial_lex(data_base):
 
 def initial_parse(data_base):
     st = {n: 0 for n in parse_state_names()}
-    st['dp'] = data_base + 1; st['mode'] = R.S_STMT
+    st['dp'] = 1; st['mode'] = R.S_STMT                # (global k: data_base + k)
     return st
 
 # punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant.
@@ -126,7 +126,7 @@ class Prog(Base):
         self.set('cp', self.v('cp') + 1)
     def deflab(self, l, val): self.labs.append((self.x.g, lift(l), lift(val)))
     def datum(self, addr, val): self.data.append((self.x.g, lift(addr), lift(val)))
-    def here(self): return self.m(add(mul(self.v('cp'), 2), self.cb), 'here')
+    def here(self): return self.m(add(self.v('cp'), self.cb // 2), 'here')     # (cc_ref.here: an instruction pair's index)
     def fail(self, code):
         self.set('err', ite(eq(self.v('err'), 0), code, self.v('err'))); self.set('live', 0)
     def done(self): self.set('live', 0)
@@ -202,7 +202,7 @@ class Prog(Base):
         k, a = self.m(fdiv(r, 16384), 'skk'), self.m(sub(mod(r, 16384), 8192), 'ska')
         # parameter i is stored as kind 2, addr PARAM0 + i: its frame slot is 1 + i
         ispar = self.m(and_(eq(k, 2), ge(a, R.PARAM0)), 'spar')
-        o = self.m(ite(eq(k, 2), add(256, ite(ispar, sub(a, R.PARAM0 - 1), a)), sub(a, self.db)), 'svar')
+        o = self.m(ite(eq(k, 2), add(256, ite(ispar, sub(a, R.PARAM0 - 1), a)), a), 'svar')
         return k, o, b, cst
     def set_symbool(self, j, b):
         """symbol j's type := b (write port: the whole entry)"""
@@ -595,7 +595,7 @@ class Prog(Base):
         ok = self.m(or_(*[eq(mk, 4 * i + a) for i, a, e in pairs]), 'mok')
         with self.when(not_(ok)): self.fail(77)
         with self.when(ok):
-            e = self.m(add(*[mul(eq(mk, 4 * i + a), self.ent.get(e, 0)) for i, a, e in pairs]), 'ment')
+            e = self.m(add(*[mul(eq(mk, 4 * i + a), self.ent.get(e, 0) // 2) for i, a, e in pairs]), 'ment')
             ty = self.m(add(*[mul(eq(mi, i), m[2]) for i, m in enumerate(R.ALLM)]), 'mty')
             if last: self.arg_end()
             self.set('tb', sub(self.v('tb'), argc + 1)); d0 = self.m(self.v('nd') - 1, 'md0'); f = self.tmp(d0)
@@ -604,7 +604,7 @@ class Prog(Base):
     def arr_make(self, n):
         """cc_ref.arr_make: mkarrN of the n collapsed elements above the slot"""
         self.set('tb', sub(self.v('tb'), n)); d0 = self.m(self.v('nd') - 1, 'amd'); f = self.tmp(d0)
-        self.emit(OP['CALL'], (add(*[mul(eq(n, k), self.ent.get(f'mkarr{k}', 0)) for k in range(9)]), 0), w1=(sub(f[0], 256), f[1]))
+        self.emit(OP['CALL'], (add(*[mul(eq(n, k), self.ent.get(f'mkarr{k}', 0) // 2) for k in range(9)]), 0), w1=(sub(f[0], 256), f[1]))
         self.set_od(d0, TMP, 0)
     def arr_store(self, k):
         """cc_ref.arr_store: element k (past the eighth, on top) into the array below it"""
@@ -865,7 +865,7 @@ class Prog(Base):
                 with self.when(rd): self.fail(78)
                 with self.when(and_(ne(curf, 0), not_(rd))):
                     nl = self.m(self.v('nloc') + 1, 'nl'); self.set('nloc', nl); self.declare(th1, th2, 2, add(self.v('npar'), nl), cst, blk)
-                full = self.m(ge(self.v('dp'), self.db + R.SDATA), 'gfull')
+                full = self.m(ge(self.v('dp'), R.SDATA), 'gfull')
                 with self.when(and_(eq(curf, 0), full, not_(rd))): self.fail(25)
                 with self.when(and_(eq(curf, 0), not_(full), not_(rd))):
                     self.declare(th1, th2, 1, self.v('dp'), cst, blk); self.set('dp', self.v('dp') + 1)

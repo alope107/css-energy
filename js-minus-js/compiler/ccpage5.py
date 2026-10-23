@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 
 WOFF = 1 << 20
-BSTRW = [(a, w) for a, w in sorted(R.BSTRW.items()) if w]      # the built-in strings' words (cc_ref BSTRS; RAM holds the zeros)
+BSTRW = sorted(R.BSTRW.items())        # the built-in strings' words (cc_ref BSTRS; RAM holds the zeros)
 OTH = {'A': 'B', 'B': 'A'}
 DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v')) for f in ('h1', 'h2', last)}   # read by var() one level down
 PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
@@ -342,7 +342,7 @@ def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                f' else: var(--s-perr-{y}))')
         css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
-               f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
+               f' width: calc((var(--dpf) + {WOFF}) * 1px); }}'
                # the string untag constant at data_base (the program never writes it)
                f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c0; width: {R.STRTAG + WOFF}px; }}'
                + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{a - data_base}; width: {w + WOFF}px; }}' for i, (a, w) in enumerate(BSTRW))

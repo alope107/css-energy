@@ -18,13 +18,14 @@ operator pops (shunting-yard), as one three-address instruction reading the oper
 - console.log's + chains keep their pieces on the operand stack and print them at the argument's end.
 
 The machine (machine/csssim.py, machine/gen_css.py). An instruction is two words at an even address:
-  word0 = op * 8192 + A        A: a destination operand, a jump target, flags or a count
+  word0 = op * 8192 + A        A: a destination operand, a jump target (an instruction pair's index: its address / 2), flags
+                               or a count
   word1 = (B - 512) * 1024 + C B, C: source operands (10 bits each); LOADK, PRINTK and CALL use word1 whole
 An operand o (10 bits) is a cell or a constant: 0 ... 255 a global (data_base + o); 256 ... 767 a frame slot (fp + o - 256);
 768 ... 1023 the constant o - 896. A frame is [return word] fp, the parameters fp + 1 ..., the locals, then the temps: the
 operand stack's slot d is T(d) = fp + 1 + npar + nloc + d, nloc the function's final count of locals (its frame label,
 which the linker adds: times 1 in A, 1024 in B, 1 in C or CALL's word1). A call's slot T(d0) takes the return word and its
-arguments go to T(d0 + 1) ...: CALL target, off (fp + off = T(d0)) writes off * 8192 + the return address there and adds off
+arguments go to T(d0 + 1) ...: CALL target, off (fp + off = T(d0)) writes off * 8192 + the return address / 2 there and adds off
 to fp; RET v writes v over the return word, the caller's T(d0), and subtracts off again. Top-level code runs with fp = sp0.
 
 Values: integers; a string is a tagged pointer (address - STRTAG), so console.log can tell it from a number at run time;
@@ -158,14 +159,14 @@ BSTRS = ['Infinity', '-Infinity', 'true', 'false', 'null', 'undefined', 'NaN', '
 BS_ZERO, BS_TYPE, BS_EMPTY = 8, 9, 15        # "0", typeof's first ("undefined": type 0), ""
 TYPENAMES = ('undefined', 'object', 'boolean', 'number', 'string', 'function')
 def BSTRV(k): return BSTR + 12 * k + 1 - 262144                       # (- STRTAG)
-BSTRW = {BSTR + 12 * k + i: w for k, t in enumerate(BSTRS) for i, w in enumerate([len(t)] + [ord(ch) for ch in t] + [0])}
+BSTRW = {BSTR + 12 * k + i: w for k, t in enumerate(BSTRS) for i, w in enumerate([len(t)] + [ord(ch) for ch in t]) if w}   # (RAM holds the zeros)
 assert all(len(t) <= 10 for t in BSTRS) and BSTR + 12 * len(BSTRS) <= LAYOUT['strend']
 TRUEV, FALSEV = BSTRV(2), BSTRV(3)
 STRP0 = STR0 + 1                        # the program's own strings start here (STR0 is the empty DONE marker)
 assert SEND == LAYOUT['code_base']
 CODESZ = LAYOUT['init'] - 1 - LAYOUT['code_base']     # code words (init - 1 holds the staged-data count)
 STRTAG = 262144                         # a string value is its address - STRTAG (machine words are 20-bit signed)
-NOROOM = 8192                           # added to a string token's address when it didn't fit (addresses are 13-bit)
+NOROOM = 32768                          # added to a string token's address when it didn't fit (addresses are 15-bit)
 PARAM0 = 6144                           # parameter i's symbol address until its function's ')' (cc_dsl's encoding; above the globals)
 OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
@@ -373,7 +374,7 @@ class Compiler:
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0; self.tflag = 0
-        self.dp = data_base + 1             # globals (parser); data_base holds STRTAG
+        self.dp = 1                         # globals (parser): global k is data_base + k (data_base itself holds STRTAG)
         self.sdp = data_base + SDATA + 1    # string literals and property names (lexer); data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at
         # parser
@@ -407,7 +408,7 @@ class Compiler:
         self.nlab += 1; return self.nlab - 1
     def deflab(self, l, v):
         if l < self.NL: self.lab[l] = v               # (a label past NL comes only after error 20)
-    def here(self): return self.cb + 2 * self.cp
+    def here(self): return self.cb // 2 + self.cp      # (code labels: an instruction pair's index, the address / 2)
     def fail(self, code):
         if not self.err: self.err = code
     def push_cs(self, *f, e=None):
@@ -473,7 +474,7 @@ class Compiler:
         """symbol j's operand: a global, or a frame slot (parameter k at fp + 1 + k, its table address PARAM0 + k; local k after
         the parameters)"""
         k, a = self.sym[j][2], self.sym[j][3]
-        return (L(a - PARAM0 + 1) if a >= PARAM0 else L(a)) if k == 2 else a - self.db
+        return (L(a - PARAM0 + 1) if a >= PARAM0 else L(a)) if k == 2 else a
     def tmp(self, i): return (L(1 + self.npar * self.curf + self.tb + i), self.curf)    # T(i): past the locals (+ the frame label)
     def arg_end(self):
         """an argument or an array element ended: into its temp, which leaves the operand stack (the temps' base tb moves past it
@@ -649,7 +650,7 @@ class Compiler:
         e = ents[argc]
         if last: self.arg_end()
         self.tb -= argc + 1; d0 = self.nd - 1; f = self.tmp(d0)
-        self.emit('CALL', (self.ent.get(e, 0), 0), w1=(f[0] - 256, f[1]))
+        self.emit('CALL', (self.ent.get(e, 0) // 2, 0), w1=(f[0] - 256, f[1]))
         self.nd = d0; self.push_od(TMP, ty); self.mode = S_OPER
 
     def arr_elem(self, tv):
@@ -669,7 +670,7 @@ class Compiler:
     def arr_make(self, n):
         """mkarrN of the n collapsed elements above the slot"""
         self.tb -= n; d0 = self.nd - 1; f = self.tmp(d0)
-        self.emit('CALL', (self.ent.get(f'mkarr{n}', 0), 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0)
+        self.emit('CALL', (self.ent.get(f'mkarr{n}', 0) // 2, 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0)
 
     def arr_end(self, n, last):
         """an array literal's ']': n elements before (last: and one just ended)"""
@@ -986,7 +987,7 @@ class Compiler:
             if self.pn[0] and self.redecl(v): return self.fail(78)
             if self.curf: self.nloc += 1; self.declare(v, 2, self.npar + self.nloc, cst, blk)
             else:
-                if self.dp >= self.db + SDATA: return self.fail(25)
+                if self.dp >= SDATA: return self.fail(25)
                 self.declare(v, 1, self.dp, cst, blk); self.dp += 1
             self.mode = S_VARAFTER; return
         if m == S_VARAFTER:
@@ -1349,7 +1350,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         """a call into the runtime library: the frame at fp + base (the arguments above its return word)"""
         nonlocal fp, pc
         for i, x in enumerate(args): wr(fp + base + 1 + i, x)
-        wr(fp + base, base * 8192 + ret); fp += base; pc = ent[name]
+        wr(fp + base, base * 8192 + ret // 2); fp += base; pc = ent[name]
     def chars(v):
         """a string, number or special operand of +: its characters (a special's name: catv)"""
         v = catv(v)
@@ -1406,23 +1407,23 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'GETFP': wr(addr(a), fp)
         elif op == 'LDI': wr(addr(a), rd(val(b) + val(c)))
         elif op == 'STI': wr(val(a) + val(b), val(c))
-        elif op == 'JMP': pc = a
-        elif op == 'JZ': pc = a if not truthy(mem, val(b), user) else pc
-        elif op == 'JNZ': pc = a if truthy(mem, val(b), user) else pc
+        elif op == 'JMP': pc = 2 * a
+        elif op == 'JZ': pc = 2 * a if not truthy(mem, val(b), user) else pc
+        elif op == 'JNZ': pc = 2 * a if truthy(mem, val(b), user) else pc
         elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
             if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
             return steps, ''.join(map(chr, out))
         elif op[0] == 'J':
             x, y = val(b), val(c); ng = op[1] == 'N' and op != 'JNE'
-            if not user: pc = a if ALU[op[1:]](x, y) else pc
+            if not user: pc = 2 * a if ALU[op[1:]](x, y) else pc
             else:                                       # (anything but integers: the library's jcmp decides, see TRAPS)
                 r = dyn_fast('D' + op[1 + ng:], x, y)
                 if r is None: trap('jcmp', TRAPOFF, [x, y], pc)
-                elif (r == TRUE) != ng: pc = a
-        elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc); fp += w1; pc = a
-        elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = r % 8192; pst = WBACK * int(r // 8192 == TRAPDEF)
+                elif (r == TRUE) != ng: pc = 2 * a
+        elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
+        elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = 2 * (r % 8192); pst = WBACK * int(r // 8192 == TRAPDEF)
         elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's one-line form)
-        elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + pst + 2); fp += TRAPOFF; pc = a; pst = 0
+        elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + (pst + 2) // 2); fp += TRAPOFF; pc = 2 * a; pst = 0
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1; sep = (0, 32, 10)[a // 2 % 4]
             if isspecial(v): v = catv(v) if a & 8 else BSTRV(v - SPV0)     # (its name; a + chain's piece as a string: -0 is 0)
@@ -1488,7 +1489,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'APUSH':                             # (no array, or a full one: on to the ROM's push)
             x, v = val(b), val(c); q = (x - ARRTAG) & AMASK
             if isarr(x) and rd(q - 1) < rd(q - 2):
-                n = rd(q - 1); wr(rd(q) + n, v); wr(q - 1, n + 1); r = mem[fp]; wr(fp, n + 1); fp -= r // 8192; pc = r % 8192
+                n = rd(q - 1); wr(rd(q) + n, v); wr(q - 1, n + 1); r = mem[fp]; wr(fp, n + 1); fp -= r // 8192; pc = 2 * (r % 8192)
         elif op == 'NET':                               # the answers' bytes into RBUF0 …, part 0's answer into A
             for ad, v in netw(net(val(b))): wr(addr(a) if ad is None else ad, v)
         else: raise RuntimeError(f'bad op {op} at {pc - 2}')
@@ -1499,7 +1500,7 @@ def image_mem(c, words, data, init=None):
     mem = dict(words)
     sbase = c.db + SDATA
     for a, v in data.items(): mem[a] = v
-    mem[init - 1] = c.dp - c.db
+    mem[init - 1] = c.dp
     assert all(a >= sbase for a in data), 'nothing is staged: globals start at 0'
     mem[c.db] = STRTAG                  # the untag constant at data_base (read only: an overlay on the page)
     mem.update(BSTRW)                   # the built-in strings (the page: .fin's overlays)
@@ -1548,6 +1549,6 @@ if __name__ == '__main__':
     lib = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib.json')))
     src = open(sys.argv[1]).read()
     c, r = compile_and_run(src, lib)
-    print('err', c.err, 'instructions', c.cp, 'data words', c.dp - LAYOUT['data_base'], 'labels', c.nlab)
+    print('err', c.err, 'instructions', c.cp, 'data words', c.dp, 'labels', c.nlab)
     if '-d' in sys.argv: print('\n'.join(disasm(c.link()[0])))
     if r: print('steps', r[0], 'output:'); print(r[1])

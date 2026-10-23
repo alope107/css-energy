@@ -280,7 +280,7 @@ DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('var(--A)')};", f"--dwb: {eq('var(--
                    f"--dcat: calc({eq('var(--op)', OP['DADD'])} * (1 - min(1, var(--pst))) * (1 - var(--dok)) * var(--cqs) * (1 - {anyao}) * {0 if NOCAT else 1});",
                    f"--dval: {by_op({o: _dval[o] for o in DYNOPS[:-1]}, _dval[DYNOPS[-1]])};"] +
            trap("calc((1 - var(--dwb)) * min(1, calc(var(--pst) + (1 - var(--dok)) * (1 - var(--dcat)))))", "var(--pst)", 2,
-                f"mod({fp} + {TRAPDEF}, 32768)", f"if(style(--pst: 0): {yC}; else: {xB})", f"calc({TRAPDEF * 8192} + {pc})"))
+                f"mod({fp} + {TRAPDEF}, 32768)", f"if(style(--pst: 0): {yC}; else: {xB})", f"calc({TRAPDEF * 8192} + {pc} / 2)"))
 DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
           'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--dcat))",
           'pst': f"if(style(--dcat: 1): {CAT0}; style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"}
@@ -317,7 +317,7 @@ CAT_PRE = OPND + [f"--aA: {oaddr('var(--A)')};", f"--cX: {catv_v(xB)};", f"--cY:
     "--cnul: calc(var(--cin) * " + eq('var(--ci) + var(--cc)', 'var(--ctn)') + " * clamp(0, 4 - var(--uw) - var(--cc), 1));"] + \
     [f"--cq{j}: clamp(0, {j} - var(--uw) + var(--up), 3);" for j in range(4)] + \
     trap(f"calc(clamp(0, {CAT0} - var(--pst), 1) + {eq('var(--pst)', CAT0)} * var(--cfull))", f"calc(clamp(0, {CAT0} - var(--pst), 1) * (var(--pst) - {CATT}))",
-         2, f"mod({fp} + {R.TRAPDEF}, 32768)", f"if(style(--ts: 0): {yC}; else: {xB})", f"calc({R.TRAPDEF * 8192} + {pc})") + [
+         2, f"mod({fp} + {R.TRAPDEF}, 32768)", f"if(style(--ts: 0): {yC}; else: {xB})", f"calc({R.TRAPDEF * 8192} + {pc} / 2)") + [
     "--cnull: calc((1 - var(--tr)) * " + eq('var(--ci)', 'var(--ctn)') + ");",
     "--cmap: calc((1 - var(--tr)) * " + eq('var(--ci)', 'var(--ctn) + 1') + ");",
     "--clast: calc((1 - var(--tr)) * " + eq('var(--ci)', 'var(--ctn) + 2') + ");",
@@ -353,7 +353,7 @@ ARR_PRE = OPND + OPNDA + [
     trap(f"calc((1 - var(--xhand)) * {by_op({'GETX': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')})", f"mod({pst}, {XBACK})", by_op({'GETX': 2}, 3),
          by_op({'GETX': "var(--aA)"}, f"mod({fp} + {TRAPOFF}, 32768)"),
          by_op({'GETX': "if(style(--ts: 0): var(--Y); else: var(--X))"}, "if(style(--ts: 0): var(--E); style(--ts: 1): var(--Y); else: var(--X))"),
-         f"calc({by_op({'GETX': 'calc((var(--A) - 256) * 8192)'}, TRAPOFF * 8192)} + {pc} + 2)")
+         f"calc({by_op({'GETX': 'calc((var(--A) - 256) * 8192)'}, TRAPOFF * 8192)} + ({pc} + 2) / 2)")
 ARR_NX = {'pc': f"if(style(--xhand: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({'GETX': ENT['getx']}, ENT['setx'])}; else: {pc})",
           'fp': DYN_NX['fp'], 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--xhand))",
           'pst': f"if(style(--xhand: 1): mod(var(--X) + {OBJTAG}, 32768); style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--ts) + 1))"}
@@ -379,12 +379,12 @@ OBJ_PRE = OPND + OPNDA + [
     f"--oroom: clamp(0, 6 - mod({oq} - {HEAP0}, 8), 1);", f"--V: {by_op({'SETX': kv('C', 'e')}, kv('B', 'y'))};",
     f"--omw: {mapword(f'({HEAP0} + var(--vz))')};"] + \
     trap(f"{eq('var(--oc)', 3)}", "calc(var(--sst) * var(--pst))", 3, f"mod({fp} + {TRAPOFF}, 32768)",
-         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))", f"calc({TRAPOFF * 8192} + {pc} + 2)") + [
+         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)") + [
     f"--oaddr: if(style(--oc: 1): var(--aA); style(--oc: 3): var(--taddr); style(--oc: 4): {oq}; style(--oc: 6): calc({oq} + 1);"
     f" style(--oc: 7): calc({oq} + 2); style(--oc: 9) or style(--oc: 11): var(--aA); style(--pst: 0): calc({HEAP0} + var(--vz)); style(--pst: 1): var(--aA);"
     f" style(--pst: 2): var(--omw); else: {HP});",
     f"--oval: if(style(--oc: 1): calc(var(--ob) * var(--ohit) * var(--vh) + (1 - var(--ob) * var(--ohit)) * {R.UNDEF}); style(--oc: 3): var(--tval); style(--oc: 4): var(--okey);"
-    f" style(--oc: 6): var(--V); style(--oc: 7): 0; style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc}); style(--pst: 0): 0;"
+    f" style(--oc: 6): var(--V); style(--oc: 7): 0; style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc} / 2); style(--pst: 0): 0;"
     f" style(--pst: 1): calc(var(--vz) + {HEAP0 - OBJTAG}); style(--pst: 2): {mapset('var(--vr)', mapbitv(f'({HEAP0} + var(--vz))'))}; else: calc(var(--vz) + 8));",
     "--oen: if(style(--oc: 2) or style(--oc: 5) or style(--oc: 8) or style(--oc: 11): 0; else: 1);", f"--w2: {eq('var(--oc)', 4)};",
     f"--odone: calc({eq('var(--oc)', 1)} + {eq('var(--oc)', 4)} + {eq('var(--oc)', 5)} + {eq('var(--oc)', 6)} + {eq('var(--oc)', 10)} * {eq('var(--pst)', 3)});",
@@ -426,13 +426,14 @@ CLASSES = {
                   "--jc: if(style(--juser: 1) and style(--jok: 1): var(--jcu); else: var(--jcr));"],
                  reads=[("x", "var(--aB)", f"(1 - var(--kB)) * {opin('JLT', 'JNGE')}"), ("y", "var(--aC)", f"(1 - var(--kC)) * {opin('JLT', 'JNGE')}")],
                  write=None,
-                 nx={'pc': by_op({'HALT': pc, 'JMP': "var(--A)"}, f"if(style(--jho: 1): {pc}; else: calc(var(--jc) * var(--A) + (1 - var(--jc)) * ({pc} + 2)))"),
+                 nx={'pc': by_op({'HALT': pc, 'JMP': "calc(2 * var(--A))"}, f"if(style(--jho: 1): {pc}; else: calc(var(--jc) * 2 * var(--A) + (1 - var(--jc)) * ({pc} + 2)))"),
                      'steps': "calc(var(--steps) + 1 - var(--jho))", 'pst': f"calc(var(--jho) * {CATT})"}),
     'test': dict(ops=['JZ', 'JNZ'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--tstr: {isstr_v(xB)};"] + FALSY +
                  [f"--jc: {by_op({'JZ': 'var(--tz)'}, 'calc(1 - var(--tz))')};"],
                  reads=[("x", "var(--aB)", "1 - var(--kB)"), ("z", f"mod({xB} - 1, 32768)", "var(--tstr)")], write=None,
-                 nx={'pc': f"calc(var(--jc) * var(--A) + (1 - var(--jc)) * ({pc} + 2))"}, deps={'z': [('x', None)]}),
-    # CALL A, off: the return word (off * 8192 + the return address) at fp + off, fp += off. RET B: B over the return word
+                 nx={'pc': f"calc(var(--jc) * 2 * var(--A) + (1 - var(--jc)) * ({pc} + 2))"}, deps={'z': [('x', None)]}),
+    # CALL A, off: the return word (off * 8192 + the return address / 2) at fp + off, fp += off, pc = 2 A (code targets and return
+    # addresses count instruction pairs). RET B: B over the return word
     # (the caller's slot for the value), fp -= off. NOT A, B (reads a string's length, z, as JZ does). TENTER A: CALL A with
     # off TRAPOFF and the return address pst + 2 (PRINT's trap, through pstub)
     'call': dict(ops=['CALL', 'RET', 'NOT', 'TENTER'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};",
@@ -440,9 +441,9 @@ CLASSES = {
                  reads=[("x", "var(--aB)", f"(1 - {eq('var(--op)', OP['CALL'])} - {eq('var(--op)', OP['TENTER'])}) * (1 - var(--kB))"),
                         ("z", by_op({'NOT': f"mod({xB} - 1, 32768)"}, fp), f"calc({eq('var(--op)', OP['RET'])} + var(--tstr))")],
                  write=(by_op({'CALL': f"mod({fp} + var(--vg), 32768)", 'NOT': "var(--aA)", 'TENTER': f"mod({fp} + {TRAPOFF}, 32768)"}, fp),
-                        by_op({'CALL': f"calc(var(--vg) * 8192 + {pc} + 2)", 'NOT': f"calc(var(--tz) + {user} * ({R.FALSE} - 2 * var(--tz)))",
-                               'TENTER': f"calc({TRAPOFF * 8192} + var(--pst) + 2)"}, xB), None, "1"),
-                 nx={'pc': by_op({'CALL': "var(--A)", 'RET': "mod(var(--vz), 8192)", 'TENTER': "var(--A)"}, f"calc({pc} + 2)"),
+                        by_op({'CALL': f"calc(var(--vg) * 8192 + ({pc} + 2) / 2)", 'NOT': f"calc(var(--tz) + {user} * ({R.FALSE} - 2 * var(--tz)))",
+                               'TENTER': f"calc({TRAPOFF * 8192} + (var(--pst) + 2) / 2)"}, xB), None, "1"),
+                 nx={'pc': by_op({'CALL': "calc(2 * var(--A))", 'RET': "calc(2 * mod(var(--vz), 8192))", 'TENTER': "calc(2 * var(--A))"}, f"calc({pc} + 2)"),
                      'fp': by_op({'CALL': f"calc({fp} + var(--vg))", 'RET': f"calc({fp} - round(down, var(--vz) / 8192))", 'TENTER': f"calc({fp} + {TRAPOFF})"}, fp),
                      'pst': by_op({'RET': f"calc({WBACK} * {eq('round(down, var(--vz) / 8192)', TRAPDEF)})"}, "0")},
                  deps={'z': [('x', ['NOT'])]}),
@@ -478,7 +479,7 @@ CLASSES = {
                 nx=OBJ_NX, deps={'z': [('x', ['GETP', 'SETP'])]}),
 }
 JTRAP_CLASS = dict(ops=[], pre=OPND + trap("1", f"calc(var(--pst) - {CATT})", 2, f"mod({fp} + {TRAPOFF}, 32768)",
-                                             f"if(style(--ts: 0): {yC}; else: {xB})", f"calc({TRAPOFF * 8192} + {pc} + 2)"),
+                                             f"if(style(--ts: 0): {yC}; else: {xB})", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)"),
                    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)")],
                    write=("var(--taddr)", "var(--tval)", None, "1"),
                    nx={'pc': f"if(style(--tlast: 1): {ENT['jcmp']}; else: {pc})", 'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})",
@@ -612,7 +613,7 @@ AL_PRE = OPND + OPNDA + [
     f"--anext: if(style(--pst: 0): if(style(--ak: 2): 4; style(--ak: 3): 3; else: 1); style(--pst: 1): calc(3 - {eq('var(--ak)', 0)} * clamp(0, {xB} - 1, 1));"
     " style(--pst: 2): 3; else: 4);"] + \
     trap(f"calc(clamp(0, {pst} - {CATT - 1}, 1) + var(--afull))", f"calc(clamp(0, {pst} - {CATT - 1}, 1) * ({pst} - {CATT}))", 1, "var(--aA)",
-         "var(--anw)", f"calc((var(--A) - 256) * 8192 + {pc})") + [
+         "var(--anw)", f"calc((var(--A) - 256) * 8192 + {pc} / 2)") + [
     f"--adone: calc((1 - var(--tr)) * {eq(pst, 4)});",
     f"--aaddr: if(style(--tr: 1): var(--taddr); style(--pst: 0): {HP}; style(--pst: 1): var(--abase); style(--pst: 2): calc(var(--abase) + 2 + {xB});"
     " style(--pst: 3): var(--amw); else: var(--aA));",
@@ -639,7 +640,7 @@ NEWCLASSES['apush'] = dict(ops=['APUSH'], pre=OPND + [
     reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", fp, eq(pst, 2))],
     lines=[("p", f"mod({xB} - 3, 32768)", "var(--uarr)")],
     write=("var(--uaddr)", "var(--uval)", None, "calc(1 - var(--ufall))"),
-    nx={'pc': f"if(style(--ufall: 1): calc({pc} + 2); style(--pst: 2): mod(var(--vz), 8192); else: {pc})",
+    nx={'pc': f"if(style(--ufall: 1): calc({pc} + 2); style(--pst: 2): calc(2 * mod(var(--vz), 8192)); else: {pc})",
         'fp': f"if(style(--pst: 2): calc({fp} - round(down, var(--vz) / 8192)); else: {fp})",
         'steps': f"calc(var(--steps) + var(--ufall) + {eq(pst, 2)})", 'pst': "if(style(--ufall: 1): 0; style(--pst: 0): 1; style(--pst: 1): 2; else: 0)"},
     deps={'p': [('x', None)]})

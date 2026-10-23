@@ -278,7 +278,7 @@ function dlne(a, b) { return jsb(leqr(a, b) == 0); }
 // JLT ... JNE in user code on anything but two integers: the jump is decided here. The frame is at TRAPOFF and returns to
 // the instruction after the jump; a jump taken rewrites the return word to its target (A, from the instruction itself)
 function jcmp(a, b) {
-  var f = __fp(); var r = peek(f) % 8192; var w0 = peek(r - 2); var op = w0 / 8192; var c = 0; var t = 0;
+  var f = __fp(); var r = 2 * (peek(f) % 8192); var w0 = peek(r - 2); var op = w0 / 8192; var c = 0; var t = 0;
   if (op == __OP_JEQ__) { t = deqr(a, b); }
   else if (op == __OP_JNE__) { t = deqr(a, b) == 0; }
   else if (op == __OP_JLEQ__) { t = leqr(a, b); }
@@ -294,7 +294,7 @@ function jcmp(a, b) {
     if (op == __OP_JNLE__) { t = (c != 0 - 1) * (c != 0); }
     if (op == __OP_JNGE__) { t = (c != 0) * (c != 1); }
   }
-  if (t) { poke(f, peek(f) - r + w0 % 8192); }
+  if (t) { poke(f, peek(f) - r / 2 + w0 % 8192); }      // (a return word holds the address / 2, as a jump's target)
   return 0;
 }
 // s[k]: a one-character string, or undefined past the end
@@ -603,7 +603,7 @@ function parseint(d, s) {
 // PRINT of an array or an object (cc_ref.TRAPS): pstub's TENTER made this frame at the PRINT's fp + TRAPOFF; its flags (A) and
 // value (operand B) are decoded from the PRINT instruction, at the return address - 2
 function ptrap() {
-  var f = __fp(); var r = peek(f) % 8192; var cf = f - __TRAPOFF__; var w1 = peek(r - 1); var c = (w1 % 1024 + 1024) % 1024;
+  var f = __fp(); var r = 2 * (peek(f) % 8192); var cf = f - __TRAPOFF__; var w1 = peek(r - 1); var c = (w1 % 1024 + 1024) % 1024;
   var b = (w1 - c) / 1024 + 512; var v = b - 896;
   if (b >= 1016) { v = b - 1016 + __SPV0__; }
   if (b < 256) { v = peek(__DB__ + b); }

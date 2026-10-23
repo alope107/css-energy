@@ -36,11 +36,11 @@ def build(out):
     entries = {}
     for n in names:
         h = R.h1h2(n); f = next(f for f in c.fn[:c.nfn] if (f[0], f[1]) == h)
-        entries[n] = c.lab[f[2]]
+        entries[n] = 2 * c.lab[f[2]]                  # (code labels are instruction pairs: the address / 2)
     rom = [words.get(a, 0) for a in range(max(words) + 1)]
     assert len(rom) % 2 == 0
     entries['pstub'] = len(rom)                         # PRINT's trap: TENTER ptrap (cc_ref.TRAPS)
-    rom += [R.OP['TENTER'] * 8192 + entries['ptrap'], 0]
+    rom += [R.OP['TENTER'] * 8192 + entries['ptrap'] // 2, 0]
     missing = [t for t in R.TRAPS.values() if t not in entries]
     assert not missing, f'trap routines missing from lib_src.js: {missing}'
     assert len(rom) <= L['rom_size'], f'the ROM holds {L["rom_size"]} words, the library needs {len(rom)}'

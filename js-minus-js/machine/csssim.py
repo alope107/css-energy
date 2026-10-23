@@ -124,7 +124,7 @@ class Sim:
         hp, gl = rd(HP), rd(GCLIM)
         self.npst, self.cdone = 0, True
         if ps < CAT0 or (ps == CAT0 and hp + nw - 8 >= gl + HS - 7):
-            r = trap((self.st['fp'] + TRAPDEF) & AMASK, [x0, y0], TRAPDEF * 8192 + pc - 2, R.CATTRAPS[op], 0 if ps == CAT0 else ps - CATT)
+            r = trap((self.st['fp'] + TRAPDEF) & AMASK, [x0, y0], TRAPDEF * 8192 + (pc - 2) // 2, R.CATTRAPS[op], 0 if ps == CAT0 else ps - CATT)
             self.npst = self.npst_t + CATT if self.npst_t else 0; self.cdone = self.done_t; return r
         k = ps - CAT0; base = HEAP0 + hp - nw; i = k - 2; nk = k + 1
         if k == 0: wr(HP, hp + nw)
@@ -208,7 +208,7 @@ class Sim:
         elif op == 'GETFP': wr(addr(a), fp)
         elif op == 'LDI': x, y = val(b), val(c); wr(addr(a), rd(x + y))
         elif op == 'STI': x, y = val(b), val(c); z = val(a); wr(z + x, y)
-        elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + ps + 2); fp += TRAPOFF; pc = a
+        elif op == 'TENTER': wr(fp + TRAPOFF, TRAPOFF * 8192 + (ps + 2) // 2); fp += TRAPOFF; pc = 2 * a
         elif op == 'DADD' and ps >= CATT:               # the cat class (a string's +, below)
             x, y = val(b), val(c); pc = self.cat(op, a, x, y, ps, pc, trap, wr, addr); npst, done = self.npst, self.cdone
         elif op in R.DYNOPS and ps == WBACK:            # after the library's trap: its value (the frame's first word) into A
@@ -217,7 +217,7 @@ class Sim:
             x, y = val(b), val(c); r = None if ps else R.dyn_fast(op, x, y)     # the library, the frame at TRAPDEF, back here
             if r is not None: wr(addr(a), r)
             elif op == 'DADD' and not ps and R.catok(x, y): npst = CAT0; done = False; pc -= 2
-            else: pc = trap((fp + TRAPDEF) & AMASK, [x, y], TRAPDEF * 8192 + pc - 2, R.TRAPS[op], ps)
+            else: pc = trap((fp + TRAPDEF) & AMASK, [x, y], TRAPDEF * 8192 + (pc - 2) // 2, R.TRAPS[op], ps)
         elif op == 'GETX' and ps >= CATT:                # an object's probe, as GETP's, the key from C (+ KBIAS)
             o = val(b); key = s20(val(c) + STRTAG); q = ps; k, v = rd(q), rd(q + 1)
             if k == key or k == 0: wr(addr(a), v if k else R.UNDEF)
@@ -241,12 +241,12 @@ class Sim:
                 e = rd(ptr + y) if inb else R.UNDEF
                 if arr: wr(addr(a), e)
                 elif hand: npst = (x + OBJTAG) & AMASK; done = False; pc -= 2
-                else: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc, 'getx', ps)
+                else: pc = trap(addr(a), [x, y], (a - 256) * 8192 + pc // 2, 'getx', ps)
             else:
                 e = val(c)
                 if inb: wr(ptr + y, e)
                 elif hand: npst = (x + OBJTAG) & AMASK; done = False; pc -= 2
-                else: pc = trap(fp + TRAPOFF, [x, y, e], TRAPOFF * 8192 + pc, 'setx', ps % XBACK)
+                else: pc = trap(fp + TRAPOFF, [x, y, e], TRAPOFF * 8192 + pc // 2, 'setx', ps % XBACK)
         elif op == 'GETP':                               # one pair per execution (pst: the pair's address, 0 the first)
             o = val(b); key = DB + c
             if not R.isobj(o): wr(addr(a), R.UNDEF)
@@ -256,35 +256,35 @@ class Sim:
                 else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
         elif op == 'SETP':                               # pst: a pair's address (probing), + 1 (its terminator written), < HEAP0 a trap
             o, v = val(a), val(b); key = DB + c
-            if 0 < ps < HEAP0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc, 'setp', ps)
+            if 0 < ps < HEAP0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc // 2, 'setp', ps)
             elif R.isobj(o):
                 q = (ps - ps % 2) or (o + OBJTAG) & AMASK; k = rd(q); rd(q + 1)
                 if ps % 2: wr(q, key); wr(q + 1, v)
                 elif k == key: wr(q + 1, v)
                 elif k == 0 and (q - HEAP0) % 8 < 6: wr(q + 2, 0); npst = q + 1; done = False; pc -= 2
-                elif k == 0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc, 'setp', 0)
+                elif k == 0: pc = trap(fp + TRAPOFF, [o, key, v], TRAPOFF * 8192 + pc // 2, 'setp', 0)
                 else: npst = (k + OBJTAG) & AMASK if k < 0 else q + 2; done = False; pc -= 2
         elif op == 'NEW':                                # the chunk's first key, the value, then HP; full: the collector (NEW again)
             hp, gl = rd(HP), rd(GCLIM)
-            if not ps and s20(hp - (gl + HS - 7)) >= 0: pc = trap(addr(a), [], (a - 256) * 8192 + pc - 2, 'gcnew', 0)
+            if not ps and s20(hp - (gl + HS - 7)) >= 0: pc = trap(addr(a), [], (a - 256) * 8192 + (pc - 2) // 2, 'gcnew', 0)
             elif ps == 2: mw, bit = R.mapbit(HEAP0 + hp); wr(mw, self.rdu(mw) | 1 << bit); npst = 3; done = False; pc -= 2
             else:
                 wr((HEAP0 + hp, addr(a), None, HP)[ps], (0, hp + HEAP0 - OBJTAG, None, hp + 8)[ps])
                 if ps < 3: npst = ps + 1; done = False; pc -= 2
-        elif op == 'JMP': pc = a
-        elif op in ('JZ', 'JNZ'): pc = a if truthy(val(b)) == (op == 'JNZ') else pc
+        elif op == 'JMP': pc = 2 * a
+        elif op in ('JZ', 'JNZ'): pc = 2 * a if truthy(val(b)) == (op == 'JNZ') else pc
         elif op == 'HALT': pc -= 2; st['halt'] = True
         elif op[0] == 'J':                              # user code: two integers (and JEQ ... JLNE's identities) here, else a hand-off
             x, y = val(b), val(c); ng = op[1] == 'N' and op != 'JNE'       # to the jtrap class (pst CATT), which calls jcmp
-            if not user: pc = a if ALU[op[1:]](x, y) else pc
+            if not user: pc = 2 * a if ALU[op[1:]](x, y) else pc
             elif ps >= CATT:
-                pc = trap((fp + TRAPOFF) & AMASK, [x, y], TRAPOFF * 8192 + pc, 'jcmp', ps - CATT); npst = CATT + npst if npst else 0
+                pc = trap((fp + TRAPOFF) & AMASK, [x, y], TRAPOFF * 8192 + pc // 2, 'jcmp', ps - CATT); npst = CATT + npst if npst else 0
             else:
                 r = R.dyn_fast('D' + op[1 + ng:], x, y)
                 if r is None: npst = CATT; done = False; pc -= 2
-                elif (r == R.TRUE) != ng: pc = a
-        elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc); fp += w1; pc = a
-        elif op == 'RET': r = rd(fp); v = val(b); wr(fp, v); fp -= r // 8192; pc = r % 8192; npst = WBACK * (r // 8192 == TRAPDEF)
+                elif (r == R.TRUE) != ng: pc = 2 * a
+        elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
+        elif op == 'RET': r = rd(fp); v = val(b); wr(fp, v); fp -= r // 8192; pc = 2 * (r % 8192); npst = WBACK * (r // 8192 == TRAPDEF)
         elif op == 'PRINT' and (R.isarr(val(b)) or R.isobj(val(b))): npst = pc - 2; pc = st['ent']['pstub']
         elif op in ('PRINT', 'PRINTK'):
             v = val(b) if op == 'PRINT' else w1
@@ -301,7 +301,7 @@ class Sim:
         elif op == 'ALLOC':                              # pst: the phase (cc_ref.AP_*), CATT + a step: the trap
             n = val(b); k = c - 896; nw = R.allocw(k, n); hp, gl = rd(HP), rd(GCLIM)
             if ps >= CATT or (ps == 0 and hp + nw > gl + HS):
-                pc = trap(addr(a), [nw], (a - 256) * 8192 + pc - 2, 'galloc', ps - CATT if ps else 0)
+                pc = trap(addr(a), [nw], (a - 256) * 8192 + (pc - 2) // 2, 'galloc', ps - CATT if ps else 0)
                 npst = self.npst_t + CATT if self.npst_t else 0
             else:
                 base = HEAP0 + hp - (nw if ps else 0)
@@ -344,7 +344,7 @@ class Sim:
             if ps == 0 and not (R.isarr(x) and ln < cap): pass
             elif ps == 0: wr(ptr + ln, v); npst = 1; done = False; pc -= 2
             elif ps == 1: wr(q - 1, ln + 1); npst = 2; done = False; pc -= 2
-            else: wr(fp, ln); fp -= r // 8192; pc = r % 8192
+            else: wr(fp, ln); fp -= r // 8192; pc = 2 * (r % 8192)
         elif op == 'NET':                                # the answers come later on the page: it ends the pass, then runs first,
             x = val(b); P = 2 * R.LAYOUT['net_parts'] + 1           # once per write: the bytes, then part 0's answer into A
             if ps == 0 and not self.first: raise Stall()
