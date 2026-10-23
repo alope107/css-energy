@@ -649,10 +649,11 @@ def alloc_val(j):
 TRAP_NX = lambda routine, done: {'pc': f"if(style(--tlast: 1): {routine}; style(--{done}: 1): calc({pc} + 2); else: {pc})",
                                  'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': f"calc(var(--steps) + var(--tlast) + var(--{done}))"}
 NEWCLASSES = {}
-# CALLV A, off: x the callee (fp + off), l its block's first line [hdr code meta env] when it is a function: one with A
-# parameters is entered (the return word over x); anything else traps to callv (frame at TRAPOFF, its argument x)
+# CALLV A, off: x the callee (fp + off), l its block's first line [hdr code meta env] when it is a function: one whose meta is A
+# (or A - 32: a this given to one that doesn't use it; cc_ref callv_end) is entered (the return word over x); anything else
+# traps to callv (frame at TRAPOFF, its argument x)
 # (cvf, cvok: pooled names, the fdig class's gdl, gdc)
-CV_PRE = [f"--gdl: {isfun_v('var(--vx)')};", f"--gdc: calc(var(--gdl) * {eq('var(--lw2)', 'var(--A)')} * (1 - min(1, var(--pst))));"] + \
+CV_PRE = [f"--gdl: {isfun_v('var(--vx)')};", f"--gdc: calc(var(--gdl) * ({eq('var(--lw2)', 'var(--A)')} + {eq('var(--lw2) + 32', 'var(--A)')}) * (1 - min(1, var(--pst))));"] + \
     trap("calc(1 - var(--gdc))", "var(--pst)", 1, f"mod({fp} + {TRAPOFF}, 32768)", "var(--vx)", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)")
 NEWCLASSES['callv'] = dict(ops=['CALLV'], pre=CV_PRE,
     reads=[("x", f"mod({fp} + var(--vg), 32768)", "1")], lines=[("l", f"mod(var(--vx) + {R.FUNTAG - 1}, 32768)", "var(--gdl)")],

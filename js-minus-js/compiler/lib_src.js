@@ -108,7 +108,7 @@ function scan(s) {
   }
   x = 0 - 2 - h;
   if (x % 8 == 1) { fwdrange(s + 4, s + 4 + peek(s + 2), 0); }
-  if (x % 8 == 3) { poke(s + 3, fwd(peek(s + 3))); poke(s + 4, fwd(peek(s + 4))); poke(s + 5, fwd(peek(s + 5))); }     // (a function's env, name, props)
+  if (x % 8 == 3) { fwdrange(s + 3, s + 8, 0); }     // (a function's env, name, props; a bound one's target, this, argument)
   if (x % 8 == 4) { if (peek(s + 1) == s + 2) { fwdrange(s + 3, s + 3 + peek(s + 2), 0); } }      // (a closed env cell's frame)
   return x - x % 8;
 }
@@ -348,6 +348,7 @@ function numscan(s, i, e) {
 }
 // a number literal (NUMLIT, the first time it is read): its string's number
 function numlit(s, d) {
+  if (s == __GLOBK__) { return glob(); }
   if (s >= 1024) { return mkclo(s, __fp() - __TRAPDEF__); }
   if (s >= 16) { return mkfn(s - 16); }
   if (s >= 0) { return mkfn(s); }
@@ -381,25 +382,57 @@ function retc(v, e, fp) {
 // CALLV found no function with as many parameters as arguments (cc_ref CALLV): f is called anyway, entered through this frame's
 // return word. The callee's frame is the CALLV's (fp + off: its return word written here); missing parameters are undefined,
 // written last (MFILL: with many arguments that frame can reach this one's words); not a function: the TypeError
+// The frame: [return word][this][arguments] (cc_ref.th); CALLV's A: the arguments + 32 when this is given (a method call, f.call),
+// 63 for f.apply(t, a) (a's elements become the arguments). Without a this the callee's is the global object; a bound function
+// (meta 64 + its arguments, bind) puts its this and argument in and calls its target
 function callv(f) {
   var r = peek(__fp()) % 8192; var n = peek(2 * r - 2) % 8192; var off = peek(2 * r - 1); var fc = __fp() - __TRAPOFF__ + off; var np = 0;
+  var m = 0; var a = 0; var i = 0;
+  if (n == 63) { a = peek(fc + 2); n = 32; if (__kind(a, __K_ARR__)) { n = 32 + peek(a - 1); __mcpy(fc + 2, peek(a), peek(a - 1)); } }
   if (__kind(f, __K_FUN__) == 0) { m_uncaught(); m_typeerr(); m_notfn(); putc(10); halt(); }
-  np = peek(f + 1) % 16;
+  m = peek(f + 1);
+  while (m >= 64) {
+    if (m % 2) { i = n % 32; while (i > 0) { i = i - 1; poke(fc + 3 + i, peek(fc + 2 + i)); } poke(fc + 2, peek(f + 6)); n = n + 1; }
+    poke(fc + 1, peek(f + 5)); n = n % 32 + 32; f = peek(f + 2); m = peek(f + 1);
+  }
+  np = m % 16;
   poke(fc, off * 8192 + r);
   poke(__CVRET__, (__TRAPOFF__ - off) * 8192 + peek(f));
-  if (np > n) { __mfill(fc + 1 + n, __UNDEF__, np - n); }
-  if (peek(f + 1) >= 16) { poke(fc + 1 + np, peek(f + 2)); }      // (an inner function: its env in its local 1)
+  if (n < 32) { poke(fc + 1, glob()); }
+  if (np > n % 32) { __mfill(fc + 2 + n % 32, __UNDEF__, np - n % 32); }
+  if (m % 32 >= 16) { poke(fc + 2 + np, peek(f + 2)); }      // (an inner function: its env in its local 1)
   poke(__fp(), peek(__CVRET__));
   return 0;
 }
+// the global object (cc_ref GCELL: made the first time)
+function glob() {
+  var o = 0;
+  if (peek(__DB__ + __GCELL__) == __UNDEF__) { o = __alloc(8, __A_CHUNK__); poke(o, 0); poke(__DB__ + __GCELL__, o - __OBJTAG__); }
+  return peek(__DB__ + __GCELL__);
+}
+// f.bind(t, a, b): a bound function [hdr][0][64 + 1 if it binds an argument][f][f's name][props][t][a] (callv); a second argument
+// binds in turn
+function bind1(f, t) { return mkbound(f, t, 0, 0); }
+function bind2(f, t, a) { return mkbound(f, t, a, 1); }
+function bind3(f, t, a, b) { return mkbound(mkbound(f, t, a, 1), t, b, 1); }
+function mkbound(f, t, a, n) {
+  var g = 0;
+  if (__kind(f, __K_FUN__) == 0) { m_uncaught(); m_typeerr(); m_notfn(); putc(10); halt(); }
+  g = __alloc(8, __A_RAW__);
+  poke(g, 0 - 13); poke(g + 1, 0); poke(g + 2, 64 + n); poke(g + 3, f); poke(g + 4, peek(f + 3)); poke(g + 5, 0); poke(g + 6, t); poke(g + 7, a);
+  mark(g);
+  return g + 1 - __FUNTAG__;
+}
 // a function's value (NUMLIT's for a function's name, s its index k: cc_ref FTAB / FCACHE): an 8-word block (cc_ref.FUNTAG) from
 // its FTAB word (its body + 8192 * its parameters) and the instruction pair before its body ([MOV][its name]); a function never
-// declared: the ReferenceError
+// declared: the ReferenceError. [hdr][body][meta: parameters + 16 inner + 32 uses this (+ 64 bound)][env][name][props][..][..]
 function mkfn(k) {
-  var d = peek(__FTAB__ + k) % 8192; var f = 0;
+  var d = peek(__FTAB__ + k) % 8192; var f = 0; var w = 0; var u = 0;
   if (d == 0) { refstub(); }
+  w = peek(2 * (peek(2 * d - 4) % 8192) - 2);         // its last word (past it: the JMP before [MOV][its name]): RET A 32, or a thunk's JMP
+  if (w / 8192 == __JMPOP__) { u = 32; } else if (w % 1024 >= 32) { u = 32; }      // (it uses this: cc_ref close_block)
   f = __alloc(8, __A_RAW__);
-  poke(f, 0 - 13); poke(f + 1, d); poke(f + 2, peek(__FTAB__ + k) / 8192); poke(f + 3, 0); poke(f + 4, peek(2 * d - 1));
+  poke(f, 0 - 13); poke(f + 1, d); poke(f + 2, peek(__FTAB__ + k) / 8192 + u); poke(f + 3, 0); poke(f + 4, peek(2 * d - 1));
   poke(f + 5, 0); poke(f + 6, 0); poke(f + 7, 0);
   mark(f);
   return f + 1 - __FUNTAG__;

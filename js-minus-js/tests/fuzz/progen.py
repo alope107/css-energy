@@ -325,7 +325,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -334,6 +334,27 @@ class Gen:
         f = getattr(self, 's_' + k)
         out = f()
         return out if out is not None else self.s_log()
+    def s_this(self):
+        """an object with methods that use this, called as methods, through call / apply / bind, and by an arrow inside one
+        (its own statements: the object's type is none the others use)"""
+        r = self.r
+        if self.inswitch: return None
+        n = self.fresh()
+        if n is None: return None
+        kw = 'var' if len(self.scopes) == (2 if self.cur is not None else 1) else 'let'
+        self.scopes[-1][n] = Var(n, 'fobj')
+        i = lambda: str(r.randint(-9, 99))
+        top = self.cur is None                         # (functions nest two deep: the arrow in a method only at the top level)
+        if not top: self.cur.prints = True             # (it prints: README, console.log's arguments)
+        out = [f'{kw} {n} = {{a: {i()}, f: function (x) {{ return this.a * 2 + x; }},',
+               f'  g: function () {{ this.a++; return this.a; }}' + (',' if top else '};')]
+        if top: out.append(f'  h: function () {{ return (() => this.a - 1)(); }}}};')
+        out = ['\n'.join(out)]                         # (one entry: a function's definition may be inserted between entries)
+        for _ in range(r.randint(1, 3)):
+            out.append('console.log(' + r.choice([f'{n}.f({i()}), {n}.g()', f'{n}["f"]({i()}), {n}.' + ('h()' if top else 'a'), f'{n}.f.call({{a: {i()}}}, {i()})',
+                                                    f'{n}.f.apply({n}, [{i()}])', f'{n}.f.bind({{a: {i()}}})({i()})', f'{n}.f.bind({n}, {i()})()',
+                                                    f'{n}.g.call({n}), {n}.a']) + ')' + self.semi())
+        return out
     def s_decl(self):
         r = self.r
         if self.inswitch: return None                 # (a case's let is scoped to the whole switch: TDZ across cases)

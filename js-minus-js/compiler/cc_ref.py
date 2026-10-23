@@ -214,6 +214,9 @@ NOROOM = 32768                          # added to a string token's address when
 PARAM0 = 6144                           # parameter i's symbol address until its function's ')' (cc_dsl's encoding; above the globals)
 OBJTAG = LAYOUT['objtag']
 HEAP0 = LAYOUT['heap_lo']
+# the global object (this outside a function, or in one called without a receiver): an object made the first time, in global 1
+# (NUMLIT G1 with word1 GLOBK: the library's numlit makes it)
+GCELL, GLOBK = 1, -1
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)
 RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
 def netw(ans):
@@ -476,7 +479,7 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('toUpperCase', {0: 'upper'}, 2), ('toLowerCase', {0: 'lower'}, 2), ('split', {1: 'split'}, 0), ('trim', {0: 'trim'}, 2),
            ('startsWith', {1: 'startswith'}, 1), ('endsWith', {1: 'endswith'}, 1), ('repeat', {1: 'repeat'}, 2),
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
-           ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0)]
+           ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0), ('bind', {1: 'bind1', 2: 'bind2', 3: 'bind3'}, 0)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
 GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
            ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3)]       # the network (net/device.py)
@@ -484,9 +487,12 @@ ALLM = METHODS + GLOBALS
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
-                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in']
+                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply']
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
+# f.call( / f.apply( (pm PMFN + 0 / 1): f is called with this = the first argument (apply: the second's elements as arguments)
+FMETH = {KW['call']: 0, KW['apply']: 1}
+PMFN = 68
 GLOBAL_INDEX = {KW[m[0]]: len(METHODS) + i for i, m in enumerate(GLOBALS)}
 assert len(set(KW.values())) == len(KW), 'keyword hashes collide'
 # the literals that are words: their constant operands and static types
@@ -503,7 +509,7 @@ FCACHE = IMPC + NIMP
 # every global starts undefined (a read before its var runs: hoisting; so var x without a value is no code at the top level),
 # the caches too (FCACHE's, a double literal's: NUMLIT's 'not made yet'). The images hold it (the page's RAM groups with these
 # cells are live from the start, gen_css.py); a cell the program writes can't be an overlay
-GINIT = {LAYOUT['data_base'] + a: UNDEF for a in range(IMPC, SDATA)}
+GINIT = {LAYOUT['data_base'] + a: UNDEF for a in range(GCELL, SDATA)}
 WGLOB = (KW['window'], KW['globalThis'])
 RETC = (OP['DBIT'] - OP['RET']) * 8192 + 7 * 1024     # RET + it: DBIT k 7 (cc_ref.ret)
 # JavaScript's reserved words among the keywords: no variable, parameter or function may be named so. A declaration checks at
@@ -511,8 +517,10 @@ RETC = (OP['DBIT'] - OP['RET']) * 8192 + 7 * 1024     # RET + it: DBIT k 7 (cc_r
 RESERVED = tuple(KW[w] for w in ('var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'break', 'continue',
                                  'do', 'switch', 'case', 'default', 'typeof', 'true', 'false', 'null'))
 # punctuation that can start an expression statement (not a statement): ( [ ! - ~; at a statement's start the CSS compiler's
+T_THIS, T_NEW = 25, 26                  # this, new: the lexer makes them punctuation (variants of their own: no cost to other names)
+PKW = {KW['this']: T_THIS, KW['new']: T_NEW}
 # variants don't tell them apart (cc_dsl.variant_key: STMTM)
-XSTART = (40, 91, 33, 45, 126)
+XSTART = (40, 91, 33, 45, 126, T_THIS, T_NEW)
 
 # punctuation codes: single chars by ASCII; two-char ops: === 1, !== 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
 # += 9, -= 10, *= 11, /= 12, %= 13 (== and != as === and !== with tflag); NL 14: a newline after a token that can end a
@@ -651,6 +659,10 @@ class Compiler:
 
     # ---------------- helpers
     def frame_label(self): return self.flab if self.curf else None
+    def th(self):
+        """a user function's frame: [return word][this][parameters][env, locals][temps] (the library's: no this; a built-in
+        method's receiver is its first parameter, the same slot)"""
+        return int(self.curf > 0 and not self.rom)
     def fn_enter(self, k):
         """a function's body starts (k: its table index): the outer context saved (sv0 the top level's expression stacks, sv1 ... sv3
         a function's), a fresh one: no locals, empty stacks above the outer's (obase / dbase), a frame label"""
@@ -658,7 +670,7 @@ class Compiler:
         if self.curf == 0: self.sv0 = self.obase + 8 * self.dbase + 128 * self.tb
         else:
             self.sv1 = self.nloc + 64 * self.npar + 1024 * self.obase + 8192 * self.ca
-            self.sv2 = self.dbase + 16 * self.tb + 512 * self.fsym
+            self.sv2 = self.dbase + 16 * self.tb + 512 * self.fsym + 16384 * self.fmark
             self.sv3 = self.cfn + 16 * self.flab + 1024 * self.fcsp
         if self.curf == 1 and not self.rom: self.deflab(self.clab, RETC)     # (it makes closures)
         self.curf += 1; self.cfn = k; self.nloc = self.npar = self.tb = self.ca = 0; self.fsym = self.nsym; self.fmark = self.nlet
@@ -670,18 +682,18 @@ class Compiler:
         self.nsym = self.fsym; self.curf -= 1
         if self.curf == 0:
             v = self.sv0; self.obase, self.dbase, self.tb = v % 8, v // 8 % 16, v // 128
-            self.nloc = self.npar = self.fsym = self.cfn = self.flab = self.fcsp = self.ca = 0
+            self.nloc = self.npar = self.fsym = self.cfn = self.flab = self.fcsp = self.ca = self.fmark = 0
         else:
             self.nloc, self.npar, self.obase, self.ca = self.sv1 % 64, self.sv1 // 64 % 16, self.sv1 // 1024 % 8, self.sv1 // 8192
-            self.dbase, self.tb, self.fsym = self.sv2 % 16, self.sv2 // 16 % 32, self.sv2 // 512
+            self.dbase, self.tb, self.fsym, self.fmark = self.sv2 % 16, self.sv2 // 16 % 32, self.sv2 // 512 % 32, self.sv2 // 16384
             self.cfn, self.flab, self.fcsp = self.sv3 % 16, self.sv3 // 16 % 64, self.sv3 // 1024
     def closelab(self):
         """a top-level function's RETs carry its close label (RET + it is RETC once the function makes a closure: fn_enter)"""
         return self.clab if self.curf == 1 and not self.rom else None
-    def ret(self, b):
+    def ret(self, b, a=0):
         """RET b; a top-level function's: RET b, local 1 with its close label (cc_ref RETC)"""
         lab = self.closelab()
-        self.emit('RET', b=b, c=(L(self.npar + 1), 0) if lab is not None else (0, 0), label=lab)
+        self.emit('RET', (a, 0), b=b, c=(L(self.npar + 1 + self.th()), 0) if lab is not None else (0, 0), label=lab)
     # Closures: a function inside a function (curf 2) reads and writes its outer function's variables through that invocation's
     # env cell (the library's: its base word holds the frame's address while it runs, the cell's own copy of the frame after it
     # returned: RETC). Every function's local 1 holds an env cell: a top-level function's own (once it makes a closure), an inner
@@ -693,7 +705,7 @@ class Compiler:
                 and (NIMP <= j < self.fsym or j >= NS - self.fmark))
     def envbase(self, t):
         """t := the outer frame's base (the env cell's base word)"""
-        self.emit('LDI', t, (L(self.npar + 1), 0), (K(0), 0))
+        self.emit('LDI', t, (L(self.npar + 1 + self.th()), 0), (K(0), 0))
     def cread(self, j):
         """captured symbol j's value pushed (a temp)"""
         i = self.nd; t = self.tmp(i); self.envbase(t); self.emit('LDI', t, t, (K(self.var(j) - 256), 0)); self.push_od(TMP, self.sym[j][4])
@@ -734,13 +746,15 @@ class Compiler:
         self.ops[self.osp] = code; self.opv[self.osp] = val; self.osp += 1
     def top_op(self): return (self.ops[self.osp - 1], self.opv[self.osp - 1]) if self.osp > self.obase else (0, 0)
     def lookup(self, h):
-        """the latest block-scoped let / const of that name, else the latest other name (in a valid program a visible
-        block-scoped binding is always the innermost: a var of the same name in its block would be a redeclaration), else an
-        implicit global"""
-        for j in range(NS - self.nlet, NS):
-            if (self.sym[j][0], self.sym[j][1]) == h: return j
-        for j in range(self.nsym - 1, -1, -1):
-            if (j >= NIMP or j < self.nimp or self.rom) and (self.sym[j][0], self.sym[j][1]) == h: return j
+        """the current function's names first: its latest block-scoped let / const of that name, else its parameter or
+        variable; then outside it the latest block-scoped one, else the latest other name (in a valid program a visible
+        block-scoped binding is the innermost of its function: a var of the same name in its block would be a redeclaration);
+        else -1 (an implicit global)"""
+        hit = lambda j: (self.sym[j][0], self.sym[j][1]) == h and (j >= NIMP or j < self.nimp or self.rom)
+        for r in (range(NS - self.nlet, NS - self.fmark), range(self.nsym - 1, self.fsym - 1, -1), range(NS - self.fmark, NS),
+                  range(self.fsym - 1, -1, -1)):
+            for j in r:
+                if hit(j): return j
         return -1
     def settype(self, j, t):
         """symbol j's static type := t. (The CSS compiler writes one symbol per token: when this token wrote an implicit global's
@@ -805,8 +819,8 @@ class Compiler:
         """symbol j's operand: a global, or a frame slot (parameter k at fp + 1 + k, its table address PARAM0 + k; local k after
         the parameters)"""
         k, a = self.sym[j][2], self.sym[j][3]
-        return (L(a - PARAM0 + 1) if a >= PARAM0 else L(a)) if k == 2 else a
-    def tmp(self, i): return (L(1 + self.npar + self.tb + i - self.dbase), int(self.curf > 0))    # T(i): past the locals (+ the frame label)
+        return (L(a - PARAM0 + 1 + self.th()) if a >= PARAM0 else L(a + self.th())) if k == 2 else a
+    def tmp(self, i): return (L(1 + self.th() + self.npar + self.tb + i - self.dbase), int(self.curf > 0))    # T(i): past the locals (+ the frame label)
     def arg_end(self):
         """an argument or an array element ended: into its temp, which leaves the operand stack (the temps' base tb moves past it
         until the call is made)"""
@@ -844,7 +858,7 @@ class Compiler:
         for i in range(self.dbase, self.nd if n is None else n):
             d = self.desc(i)
             if d < 768 and hit(d):
-                tb = self.od[i] // 16384; f = (L(1 + self.npar + tb + i - self.dbase), int(self.curf > 0))
+                tb = self.od[i] // 16384; f = (L(1 + self.th() + self.npar + tb + i - self.dbase), int(self.curf > 0))
                 self.emit('MOV', f, (d, 0)); self.od[i] = tb * 16384 + self.otype(i) * 4096 + TMP
     def pend(self, i, cop, b, c):
         """descriptor i := the pending comparison b cop c (or ! b: cop NOT)"""
@@ -1118,16 +1132,40 @@ class Compiler:
         if last: self.arg_end()
         if self.fn[k][4] and self.fn[k][4] != argc + 1: return self.fail(76)
         self.fn[k][4] = argc + 1
-        self.tb -= argc; d0 = self.nd - 1; f = self.tmp(d0)
+        self.tb -= argc + 1 - self.rom; d0 = self.nd - 1; f = self.tmp(d0)     # (a user function's this)
         self.emit('CALL', label=self.fn[k][2], w1=(f[0] - 256, f[1]))
         self.nd = d0; self.push_od(TMP, (tv // self.FM) % 4)
 
     def callv_end(self, tv, last):
-        """a call of a value's ')': CALLV argc, its slot (the callee there, its arguments above)"""
-        argc = tv // 64 + last
+        """a call of a value's ')': CALLV A, its slot (the callee there, its this and arguments above). M_CALLV's value tv: 64 *
+        commas + 1 a method call (this: the receiver, A + 32) / 2 f.call (this: the first argument) / 4 f.apply (A 63)"""
+        argc, fl = tv // 64 + last, tv % 64
         if last: self.arg_end()
-        self.tb -= argc; d0 = self.nd - 1; f = self.tmp(d0)
-        self.emit('CALLV', (argc, 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0); self.mode = S_OPER
+        if fl & 4 and argc != 2: return self.fail(77)
+        self.tb -= argc + int(not fl & 6); d0 = self.nd - 1; f = self.tmp(d0)
+        a = 63 if fl & 4 else (argc + 31 if argc else 0) if fl & 2 else argc + 32 * (fl & 1)
+        self.emit('CALLV', (a, 0), w1=(f[0] - 256, f[1])); self.set_od(d0, TMP, 0); self.mode = S_OPER
+
+    def meth_call(self, dyn, key):
+        """o.f( / o[k]( : the callee into o's slot, o above it as its this (CALLV's method flag)"""
+        i = self.nd - 2 if dyn else self.nd - 1
+        if dyn:
+            if self.nd + self.tb >= TBMAX: return self.fail(22)
+            self.emit('GETX', self.tmp(i + 2), self.src(i), self.src(i + 1)); self.put(self.tmp(i + 1), i); self.emit('MOV', self.tmp(i), self.tmp(i + 2))
+        else: self.put(self.tmp(i + 1), i); self.emit('GETP', self.tmp(i), self.tmp(i + 1), (key - self.db, 0))
+        self.nd = i + 1; self.set_od(i, TMP, 0); self.snapshot(lambda q: q < 256); self.tb += 1
+        self.push_op(M_CALLV, 1); self.mode = S_OPND
+
+    def this_val(self):
+        """this: a function's own (frame slot 1; its entry's d |= 2: uthis); an arrow's is its outer function's (through the env,
+        that function's entry d |= 2); at the top level, and in an arrow there, the global object"""
+        f = self.cs[self.fcsp - 1] if self.curf else None
+        o = self.cs[self.sv3 // 1024 - 1] if self.curf == 2 else None
+        if f is not None and not f[4] & 1: f[4] |= 2; self.push_od(L(1), 0)
+        elif o is not None and not o[4] & 1:
+            o[4] |= 2; t = self.tmp(self.nd); self.envbase(t); self.emit('LDI', t, t, (K(1), 0)); self.push_od(TMP, 0)
+        else: self.emit('NUMLIT', (GCELL, 0), w1=GLOBK); self.push_od(GCELL, 0)
+        self.mode = S_OPER
     def mode_stmt(self): self.mode = S_STMT
     def asi_close(self, f):
         """'}' right after a statement without ';': end the statement (knowing the next token is not 'else'),
@@ -1223,7 +1261,8 @@ class Compiler:
             if self.kpos: self.sbyte(self.sdp + 1 + self.acc, c)      # (sdp itself: the length word)
             self.acc += 1
             if not (isal(cn) or isdg(cn)):
-                tok = ('ID', (self.h1, self.h2)); self.tkc = 0; self.tlen = self.acc; self.tparen = int(cn == 40)   # (a call follows)
+                h = (self.h1, self.h2); tok = ('P', PKW[h]) if h in PKW else ('ID', h)     # (this / new: punctuation)
+                self.tkc = 0; self.tlen = self.acc; self.tparen = int(cn == 40)   # (a call follows)
                 self.tid = self.sdp + 1 + NOROOM * int(self.sdp + 1 + self.acc >= SEND)    # its address (+ NOROOM: no room)
                 if self.kpos: self.inul = self.sdp + 1 + self.acc
                 if self.kpos == 2: self.sdp += self.acc + 2
@@ -1321,10 +1360,11 @@ class Compiler:
                     j = self.lookup(h); self.snapshot(lambda q: q < 256)
                     if self.captured(j): self.cread(j)
                     else: self.push_od(self.var(j), 0); self.to_temp(self.nd - 1)
-                    self.push_op(M_CALLV)
+                    self.push_op(M_CALLV); self.tb += 1             # (its this: a temp above its slot)
                 else:
                     self.snapshot(lambda q: q < 256)          # the callee may change a global still waiting on the stack
                     k = self.fnfind(h); self.push_op(M_CALL, k + self.FM * self.fn[k][3]); self.push_od(TMP, 0)   # its slot
+                    if not self.rom: self.tb += 1                    # (and its this)
                 self.mode = S_OPND; return
             if isP(7) or isP(8): return self.incdec(h, v, 2)
             if h in WGLOB and isP(46): self.pn = (0, 0); self.mode = S_WDOT; return     # window.x: x
@@ -1333,7 +1373,9 @@ class Compiler:
                 self.push_od(K(0), 0); self.mode = S_DOT; return
             tyo = self.top_op()[0] == TYPEOF
             k = self.fnlook(h) if j < 0 and not self.rom else -1
-            if k >= 0:                                         # a function's name as a value: its object (made once, cached)
+            if h in WGLOB and j < 0 and not self.rom:          # window / globalThis: the global object
+                self.emit('NUMLIT', (GCELL, 0), w1=GLOBK); self.push_od(GCELL, 0)
+            elif k >= 0:                                       # a function's name as a value: its object (made once, cached)
                 self.emit('NUMLIT', (FCACHE + k, 0), w1=k); self.push_od(FCACHE + k, 0)
             elif j < 0 and (tyo or self.rom):
                 if not tyo: return self.fail(4)
@@ -1480,13 +1522,18 @@ class Compiler:
                     if self.tid >= NOROOM: return self.fail(26)
                     self.datum(self.tid - 1, self.tlen); self.emit('MOV', w1=self.tid - STRTAG)
                 if fk == C_FUNCB:                              # its calls: CALL its label
-                    k = self.fnfind(v); self.deflab(self.fn[k][2], self.here()); self.nfdef += 1
+                    k = self.fnfind(v); self.nfdef += 1          # (its label: at its end, close_block; the body here, in c / d)
                 else:
                     if fk == C_FUNCN:                          # the local variable that holds it (cc_ref FUNCS)
                         self.nloc += 1; self.declare(v, 2, self.npar + self.nloc); self.cs[self.csp - 1][3] = self.nsym - 1
                     k = self.fnnew()
                 if self.err: return
-                self.fn_enter(k); self.mode = S_FPAREN; return
+                self.fn_enter(k)
+                if fk == C_FUNCB:
+                    r = self.here() - self.cb // 2; t = self.cs[self.csp - 1]
+                    if self.rom: t[3] = r
+                    else: t[3], t[4] = r % 64, 4 * (r // 64)
+                self.mode = S_FPAREN; return
         if m == S_FPAREN:
             if not isP(40): return self.fail(35)
             self.mode = S_FPARAM; return
@@ -1526,11 +1573,13 @@ class Compiler:
             if v == KW['length'] or (v in METHOD_INDEX and self.tparen): self.datum(self.tid - 1, self.tlen)   # (its committed bytes' length word)
             if v == KW['length']:                              # a string's or an array's length: the word before its value's address
                 i = self.nd - 1; self.emit('LDI', self.tmp(i), self.src(i), (K(-1), 0)); self.set_od(i, TMP, 3); self.mode = S_OPER; return
+            if v in FMETH and self.tparen and not self.rom: self.pn = (0, 0); self.pm = PMFN + FMETH[v]; self.mode = S_OPER; return
             if v in METHOD_INDEX and self.tparen:              # x.name( for a method's name: the call (S_OPER)
                 self.pn = (0, 0); self.pm = 4 + METHOD_INDEX[v]; self.mode = S_OPER; return
             ks = self.key_name(v)
             if ks < 0: return
-            self.pn = (ks, 0); self.pm = 4 + METHOD_INDEX[v] if v in METHOD_INDEX else 1; self.mode = S_OPER; return
+            self.pn = (ks, 0); self.mode = S_OPER                 # (a method's name, call or apply: decided at the next token, '(' or not)
+            self.pm = 4 + METHOD_INDEX[v] if v in METHOD_INDEX else PMFN + FMETH[v] if v in FMETH and not self.rom else 1; return
         if m == S_OKEY:                                        # { key : value, ... }
             if isP(125): self.osp -= 1; self.mode = S_OPER; return     # {} or a trailing comma (M_OBJ)
             if kind == 'ID': ks = self.key_name(v)
@@ -1558,6 +1607,7 @@ class Compiler:
                 self.push_od(KBIG, 2, e - STRTAG); self.mode = S_OPER; return
             if kind == 'ID' and v in LITK: self.push_od(*LITK[v]); self.mode = S_OPER; return
             if isK_('typeof'): self.push_op(TYPEOF); return
+            if isP(T_THIS) and not self.rom: return self.this_val()
             if isK_('function') and not self.rom:             # a function expression: its value (its name from a key it is the value of)
                 if self.curf >= 2: return self.fail(41)
                 t, tv = self.top_op()
@@ -1598,6 +1648,9 @@ class Compiler:
                 self.pm = 0
                 if isP(46) or isP(91): return self.fail(48)
             if self.pm >= 4:                                   # x.name for a method's name: a call (the receiver above its slot),
+                if isP(40) and self.pm >= PMFN:                # f.call( / f.apply(: f is the callee (callv_end)
+                    self.to_temp(self.nd - 1); self.snapshot(lambda q: q < 256)
+                    self.push_op(M_CALLV, 2 + 2 * (self.pm - PMFN)); self.pm = 0; self.mode = S_OPND; return
                 if isP(40):                                    # or else the property
                     i = self.nd - 1                            # (the receiver: an argument)
                     self.put(self.tmp(i + 1), i); self.set_od(i, TMP, 0); self.tb += 1
@@ -1621,6 +1674,7 @@ class Compiler:
                     off = 0 if dyn else key - self.db
                     self.cs[self.csp - 1][:5] = [C_PSET, int(dyn), COMPOUND.get(v, 0) if kind == 'P' else 0, off // 64, off % 64]
                     self.mode = S_OPND; return
+                if isP(40) and not self.rom: return self.meth_call(dyn, key)     # o.f(
                 if dyn: self.index_read(self.nd - 2)
                 else: self.prop_read(self.nd - 1, key)
             if cc and kind == 'P' and v in ACLOSE and not any(self.ops[k] >= 100 for k in range(self.obase, self.osp)):
@@ -1628,7 +1682,7 @@ class Compiler:
                 while not self.err and self.ca and self.osp == self.obase: self.arrow_close()     # token (x => y => x + y: both)
                 if self.err: return
             if isP(40) and not self.rom:                      # e(...): a call of e's value (CALLV: in its slot)
-                self.to_temp(self.nd - 1); self.snapshot(lambda q: q < 256); self.push_op(M_CALLV); self.mode = S_OPND; return
+                self.to_temp(self.nd - 1); self.snapshot(lambda q: q < 256); self.push_op(M_CALLV); self.tb += 1; self.mode = S_OPND; return
             if kind == 'P' and v in BIN:
                 op = BIN[v] + 2 * (v in (1, 2) and self.tflag)            # (== / !=: LEQ / LNE)
                 self.popops(prec(op))
@@ -1801,7 +1855,13 @@ class Compiler:
             if t[4] & 2: self.emit('JMP', label=t[3])
             self.deflab(t[2], self.here()); return self.complete_stmt(0)
         if k in FUNCS:                                     # (still inside: the RET's frame label)
-            self.ret((K(0 if self.rom else UNDEF), 0)); return self.fn_close(t)
+            self.ret((K(0 if self.rom else UNDEF), 0), 32 * (t[4] // 2 % 2))     # (A 32: it uses this; the library's mkfn)
+            if k == C_FUNCB:                               # its calls' entry: the body, or (it uses this) this := the global object; JMP body
+                body = self.cb // 2 + t[3] + 64 * (t[4] // 4); e = body
+                if t[4] & 2:
+                    e = self.here(); self.emit('NUMLIT', (GCELL, 0), w1=GLOBK); self.emit('MOV', (L(1), 0), (GCELL, 0)); self.emit('JMP', (body, 0))
+                self.deflab(self.fn[self.cfn][2], e)
+            return self.fn_close(t)
         return self.fail(55)
 
     def fn_close(self, t, frame=True):
@@ -1812,7 +1872,7 @@ class Compiler:
         fk = self.cfn; self.fn_exit()
         # its value: NUMLIT 16 + k (an inner function's: + 64 * (its index + 16 * the env's slot), + the frame's size: npar + the
         # frame label, which the linker adds: the library's mkclo makes the env cell). Word1 >= 16: a new value each time
-        w1 = (self.npar + 64 * fk + 1024 * (self.npar + 1), 1) if self.curf == 1 else 16 + fk
+        w1 = (self.npar + 1 + 64 * fk + 1024 * (self.npar + 2), 1) if self.curf == 1 else 16 + fk     # (+ 1: this)
         if k == C_FUNCN: self.emit('NUMLIT', (self.var(t[3]), 0), w1=w1)     # its local's value
         if k == C_FUNCE:                                   # its value
             self.osp -= 1; i = self.nd; self.push_od(TMP, 0); self.emit('NUMLIT', self.tmp(i), w1=w1); self.mode = S_OPER; return
@@ -1976,7 +2036,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'CALL': wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * a
         elif op == 'CALLV':                             # the callee in the frame's slot fp + off: a function with A parameters (as many
             f = rd(fp + w1); q = (f + FUNTAG) & AMASK   # as the arguments) is called; anything else goes to the library's callv
-            if isfun(f) and rd(q + 1) == a: wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * rd(q)
+            if isfun(f) and a in (rd(q + 1), rd(q + 1) + 32): wr(fp + w1, w1 * 8192 + pc // 2); fp += w1; pc = 2 * rd(q)
             else: trap('callv', TRAPOFF, [f], pc)
         elif op == 'RET': r = mem[fp]; wr(fp, val(b)); fp -= r // 8192; pc = 2 * (r % 8192); pst = WBACK * int(r // 8192 == TRAPDEF)
         elif op == 'PRINT' and (isarr(val(b)) or isobj(val(b)) or isdbl(val(b)) or isfun(val(b))): pst = pc - 2; pc = ent['pstub']      # (Node's form)
