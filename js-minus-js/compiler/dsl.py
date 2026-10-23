@@ -275,7 +275,72 @@ class Ctx:
             else: temps.append((n, x))
         self.temps = temps; self.cur = {k: rw(v) for k, v in self.cur.items()}
     def run_python(self, env):
-        """env: {('S', n): v, ('I', n): v} -> evaluates temps; returns new state dict."""
+        """env: {('S', n): v, ('I', n): v} -> evaluates temps; returns new state dict.
+        Runs the program compiled to a Python function (pyfn); DSLEVAL=interp evaluates the trees with ev() instead,
+        DSLEVAL=both runs both and stops at the first difference."""
+        if EVAL != 'interp':
+            if self._fn is None or self._fn[0] is not self.temps or self._fn[1] is not self.cur:
+                self._fn = (self.temps, self.cur, pyfn(self.temps, self.cur, self.state))
+            try: r = self._fn[2](env)
+            except KeyError: r = None                  # a leaf missing from env: ev() reads leaves only when it reaches them
+            if r is not None and EVAL != 'both': return r
         e = dict(env)
         for name, node in self.temps: e[('T', name)] = ev(node, e)
-        return {n: ev(self.cur[n], e) for n in self.state}, e
+        st = {n: ev(self.cur[n], e) for n in self.state}
+        if EVAL == 'both' and r is not None: assert r == (st, e), 'dsl.pyfn differs from ev()'
+        return st, e
+    _fn = None
+
+import os
+EVAL = os.environ.get('DSLEVAL', 'py')
+
+# ---------------- compiled evaluation (Ctx.run_python): one Python function per program, the same arithmetic as ev()
+def pyfn(temps, cur, state):
+    g = {}; exec(compile(pysrc(temps, cur, state), '<dsl.pyfn>', 'exec'), g)
+    return g['f']
+def pysrc(temps, cur, state, nest=40):
+    """temps [(name, node)], cur {state: node} -> the source of f(env) returning ({state: value}, env + {('T', name): value}).
+    A node used more than once (or nested deeper than `nest`) is computed once into a local, before the statement that
+    first needs it; the others are inlined, and ite() stays lazy, as in ev(). Every operation is total (division and
+    mod are by constants), so computing a shared node that an untaken branch needs is only a cost."""
+    uses, seen, stack = {}, set(), [x for _, x in temps] + [cur[n] for n in state]
+    for x in stack: uses[x] = uses.get(x, 0) + 1
+    while stack:
+        x = stack.pop()
+        if x in seen or not x.a: continue
+        seen.add(x)
+        for y in x.a: uses[y] = uses.get(y, 0) + 1; stack.append(y)
+    body, local, leaf = [], {}, {}
+    def name(x):
+        if x not in local: local[x] = f'h{len(local)}'; body.append(f' {local[x]} = {ex(x, 0, True)}')
+        return local[x]
+    def ex(x, d, top=False):
+        op = x.op
+        if op == 'K': return repr(x.v) if x.v >= 0 else f'({x.v})'
+        if op in ('S', 'I', 'T'):
+            if (op, x.v) not in leaf: leaf[(op, x.v)] = f'v{len(leaf)}'
+            return leaf[(op, x.v)]
+        if not top and (x in local or uses.get(x, 0) > 1 or d > nest): return name(x)
+        a = [ex(y, d + 1) for y in x.a] if op != '?' else None
+        if op == '+': return '(' + ' + '.join(a) + ')' if a else '0'
+        if op == '-': return f'({a[0]} - {a[1]})'
+        if op == '*': return f'({a[0]} * {a[1]})'
+        if op == '//': return f'({a[0]} // {x.v!r})'
+        if op == '%': return f'({a[0]} % {x.v!r})'
+        if op in ('min', 'max'): return f'{op}({", ".join(a)})' if len(a) > 1 else a[0]
+        if op == '==': return f'(1 if {a[0]} == {a[1]} else 0)'
+        if op == '<': return f'(1 if {a[0]} < {a[1]} else 0)'
+        if op == '!': return f'(1 - {a[0]})'
+        if op == '&': return f'(1 if {" and ".join(a)} else 0)' if a else '1'
+        if op == '|': return f'(1 if {" or ".join(a)} else 0)' if a else '0'
+        if op == '?':
+            c, t, f = (ex(y, d + 1) for y in x.a)
+            return f'({t} if {c} else {f})'
+        raise ValueError(op)
+    for n, x in temps:
+        v = ex(x, 0); leaf[('T', n)] = f'v{len(leaf)}'
+        body.append(f' {leaf[("T", n)]} = e[{("T", n)!r}] = {v}')
+    ret = ' return {' + ', '.join(f'{n!r}: {ex(cur[n], 0)}' for n in state) + '}, e'
+    tset = {('T', n) for n, _ in temps}
+    head = ['def f(env):', ' e = dict(env)'] + [f' {v} = env[{k!r}]' for k, v in leaf.items() if k not in tset]
+    return '\n'.join(head + body + [ret])

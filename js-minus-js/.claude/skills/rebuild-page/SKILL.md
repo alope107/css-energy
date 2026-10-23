@@ -4,7 +4,7 @@ description: Rebuild dist/js_in_css.xhtml from source and verify it end to end i
 ---
 # Rebuild and verify the page
 
-1. **Build**: `make page` (~40 s, reproducible). It rebuilds `compiler/lib.json` if `lib_src.js` changed, then
+1. **Build**: `make page` (~7 s, reproducible). It rebuilds `compiler/lib.json` if `lib_src.js` changed, then
    `build/ccimg.json` and `build/js_in_css.xhtml` (`machine/gen_css.py`: the CSS CPU, its ROM a table in the page).
    For a CPU change run `make test` (C1) and `make c2` first.
 2. **Smoke-test**: `make l5-smoke` (~30 s). Every line must say `"ok":true`. `initial` is FizzBuzz, compared with

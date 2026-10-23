@@ -22,9 +22,9 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 
 ```
 npm install && pip install -r requirements.txt     # once
-make page            # build/js_in_css.xhtml: lib -> image -> page (~40 s, reproducible)
-make test            # fast gate, no browser (~10 s): Node oracle, L1, quick fuzz, L2, C1
-make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~1.5 min; tests/fuzz/fuzz.py)
+make page            # build/js_in_css.xhtml: lib -> image -> page (~7 s; <1 s if the compiler didn't change)
+make test            # fast gate, no browser (~5 s): Node oracle, L1, quick fuzz, L2, C1
+make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~30 s; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~30 s)
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)

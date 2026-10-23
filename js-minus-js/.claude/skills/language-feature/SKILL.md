@@ -30,7 +30,7 @@ CSS). Both change together, in this order.
    label ports before and after. Ports are elements on all 400 levels, temps are CSS per level, and every rule is
    tested on every level: a jump needs a reason or a fix (fold constants, collect labels, prune unreachable blocks,
    keep tokens out of shared classes that multiply variants).
-5. **`make fuzz`** (~1.5 min: the DSL against the reference on generated, reformatted and mutated programs, rejected
+5. **`make fuzz`** (~30 s: the DSL against the reference on generated, reformatted and mutated programs, rejected
    ones included) and **`make l3`** (~40 s, in the background): every program must match the reference word for
    word. If the lexer or the page's chain changed, **`make fuzz-l3`** too (L3 on 300 fuzz programs).
 6. **If `lib_src.js` changed**, compare `python3 machine/csssim.py tests/suite/fizzbuzz.js` (and `tests/programs/t*.js`) before
