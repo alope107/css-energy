@@ -448,12 +448,19 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 | L2 | `make l2` | the DSL in Python level by level, with the page's specialised variants (`SPEC=1`; `make l2-generic` unspecialised) | the reference: parser state, tables, every word and label |
 | L3 | `make l3`, `make fuzz-l3` | the generated CSS compiler in Chrome (`build/suite_css.xhtml`, programs written into the latch cells) | the reference, word for word; `suite_err` must be rejected (any nonzero error) |
 | C1 | `make c1` | `csssim.py`, the CSS CPU pass by pass, runs every compiled image | Node output, cc_ref's steps |
-| C2 | `make c2` | a CPU-only page per program under 1,500 steps (`tests/csscpu_pages.py`) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
+| C2 | `make c2`, `make c2-all` | a CPU-only page per program under 1,500 steps (`c2-all`: every program, the collector tests too) runs to HALT in Chrome | Node output on the grid, cc_ref's steps |
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 9 × 16 grid |
 | L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
-- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 135 programs, `tests/suite_err/` 47;
+- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 139 programs, `tests/suite_err/` 49;
   `samples/` the picker's ten; `tests/programs/` the demos t1–t4.
+- **Collector tests** (`str_keys_gc`, `obj_gc`, `gc_rawblock`, `arr_gc`) fill the 3,072-word heap, which is most of
+  their time: a collection needs a full half, and each new 4-word line a program writes costs a cache-miss pass. They
+  fill with empty objects where the filler doesn't matter (an 8-word chunk, one line written), collect at most twice
+  (A to B, then B to A, where the live data's kind needs that direction), and declare the collections they cause, in
+  order, by the routine that called the collector (`// collections: galloc galloc`; galloc an ALLOC, gcnew a NEW,
+  gccat a string's +). L1 fails a program whose collections differ, so a layout change can't leave one quietly
+  weaker. Between them they cover every instruction of the collector the suite reaches and each trigger.
 - **Differential tests** (`tests/fuzz/fuzz.py`; `make test` runs a quick fixed-seed set, `make fuzz` the full one,
   `make fuzz-l3` 300 of them through L3 in Chrome). Node is the oracle; each program goes through L1, L1 on the
   page's padded text when it fits the editor, and optionally L2 (`--l2`) and C1 (`--c1`). Sources: `fmt` (every suite

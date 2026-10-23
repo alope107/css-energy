@@ -34,9 +34,9 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 ```
 npm install                       # playwright-core + @sparticuz/chromium (Linux x64), for the harnesses only
 pip install -r requirements.txt   # fontTools, brotli (the readback font)
-make page                         # -> build/js_in_css.xhtml (about 40 s; reproducible)
-make test                         # fast tests, no browser (about 10 s)
-make fuzz                         # differential tests against Node, no browser (about 1.5 min)
+make page                         # -> build/js_in_css.xhtml (about 7 s; reproducible)
+make test                         # fast tests, no browser (about 5 s)
+make fuzz                         # differential tests against Node, no browser (about 30 s)
 make l3                           # the CSS compiler in Chrome (about 40 s)
 make c2                           # the CSS CPU on CPU-only pages (about 30 s)
 make l5-smoke                     # the real page, typed like a user (about 30 s)
@@ -153,7 +153,8 @@ program's strings), so it finds the same property as the literal. Details:
   hundred to a thousand calls deep (a call takes its frame: the parameters, the locals and the expression's temps).
   The heap holds 3,072 words of live data: about 384 objects of up to 3 pairs, or strings (length + 3 words) and arrays
   (4 words + 1 per element), each rounded up to 8; more halts with `out of memory`.
-- **Numbers**: 20-bit integers (−524288 … 524287) that wrap; `/` truncates. Numbers in −255744 … −239761 are strings to
+- **Numbers**: 20-bit integers (−524288 … 524287) that wrap; `/` truncates. A literal may end in a dot (`1.` is 1, as
+  in JavaScript, so `1.x` is error 48 and a fraction such as `1.5` is rejected). Numbers in −255744 … −239761 are strings to
   the machine, in −475280 … −469137 objects and in 278384 … 284527 arrays: they print as those, and the collector may
   change them. Number keys must lie in −262143 … 262143.
 - **Booleans** are 0 / 1 at run time: they print as `1` / `0` when passed as a parameter, returned by a function called

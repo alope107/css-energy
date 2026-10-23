@@ -27,10 +27,11 @@ BCONF     = $(if $(filter-out $(NOBROWSER),$(MAKECMDGOALS)),$(call id,$(1),fontc
 L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
 UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
 C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
+C2ALL    := $(B)/c2-all.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
 CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
 
 .PHONY: help all lib image page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net net-demo c1 c2 fuzz fuzz-quick fuzz-l3 clean
+        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net net-demo c1 c2 c2-all fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> page: editor, compile chain, CSS CPU; ~7 s)"
@@ -41,6 +42,7 @@ help:
 	@echo "make test-ui-smoke  L5 on a few programs: the real page, typed like a user (~30 s)"
 	@echo "make test-ui        L5 on every quick program (~5.5 min)"
 	@echo "make c2             a CPU-only page per quick program runs to HALT (~30 s)"
+	@echo "make c2-all         the same for every program, the collector tests too (~5 min)"
 	@echo "make l5-net         L5 on the network programs, the page served with its gateway (net/server.js)"
 	@echo "make dist           copy the built page to dist/"
 
@@ -84,6 +86,13 @@ c2: $(C2)
 	$(call report,$<,3)
 $(C2): $(B)/c2/list.txt tests/csscpu_pages.js $(HARNESS) $(RERUN_IF)
 	SHARDS=$(SHARDS) $(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/csscpu_pages.js $(B)/c2
+# C2 on every program: the collector tests (str_keys_gc, obj_gc, gc_rawblock, arr_gc) run only here, minutes each
+$(B)/c2-all/list.txt: tests/csscpu_pages.py tests/csscpu_sim.py $(CSSCPU) $(PYSRC) $(SUITE)
+	$(PY) tests/csscpu_pages.py $(B)/c2-all 1000000
+c2-all: $(C2ALL)
+	$(call report,$<,3)
+$(C2ALL): $(B)/c2-all/list.txt tests/csscpu_pages.js $(HARNESS) $(RERUN_IF)
+	SHARDS=$(SHARDS) MAXMS=1200000 $(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/csscpu_pages.js $(B)/c2-all
 # differential tests against Node without a browser (tests/fuzz/fuzz.py): the suite reformatted, generated programs,
 # one-token mutations. fuzz-quick is part of `make test`; fuzz is the full run (L2 and C1 too, ~30 s)
 fuzz-quick: lib

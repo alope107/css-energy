@@ -19,5 +19,5 @@ var colors = {red: 1, green: 2};
 var r = keys[0].slice(0, 3);
 console.log(colors[keys[0]] + colors[keys[1]], colors[r]);
 var big = {};
-for (var i = 0; i < 40; i++) big["n" + (i % 5)] = i;
+for (var i = 0; i < 10; i++) big["n" + (i % 5)] = i;
 console.log(big.n0, big.n4, big["n" + 3]);

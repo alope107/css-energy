@@ -738,7 +738,8 @@ class Compiler:
                 self.icm = self.acc + 2 if self.kpos == 1 else 0
         elif isdg(c):
             self.acc = (self.acc * 10 if self.tkc == 2 else 0) + c - 48; self.tkc = 2
-            if not isdg(cn): tok = ('NUM', self.acc); self.tkc = 0
+            if not isdg(cn) and cn != 46: tok = ('NUM', self.acc); self.tkc = 0
+        elif c == 46 and self.tkc == 2: tok = ('NUM', self.acc); self.tkc = 0   # a number's trailing dot is part of it (1.x: NUM ID)
         elif (c, cn) in TWO: self.p2 = TWO[(c, cn)]
         else: tok = ('P', c)
         if self.pnl:                                      # the pending newline: decide on the next significant character
@@ -1402,12 +1403,12 @@ def image_mem(c, words, data, init=None):
     mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
 
-def compile_and_run(src, lib, max_steps=10 ** 6, strict=False):
+def compile_and_run(src, lib, max_steps=10 ** 6, strict=False, trace=None):
     c = Compiler(LAYOUT['data_base'], LAYOUT['code_base'], lib)
     words, data = c.compile(src)
     if c.err: return c, None
     mem = image_mem(c, words, data, lib.get('init', LAYOUT['init']))
-    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'))
+    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'), trace=trace)
 
 def image(src, lib, ram=False):
     """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero (the page's
