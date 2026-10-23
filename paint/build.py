@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Dictionary Paint, unlimited edition. No JavaScript.
+"""Dictionary Paint: click or drag to paint. No JavaScript.
 
-Every cell is a same-origin <object> document in the namespace /c/<k>/. _redirects serves all cells from shared
-files, and relative URLs inside a cell document resolve under /c/<k>/, so one file serves 480 cells.
+Every cell owns the namespace /c/<k>/. _redirects serves all cells from shared files, and relative URLs inside a
+cell's writer document resolve under /c/<k>/, so one file serves 480 cells.
 
   READ   the page shows 16 probes /c/k/r/<v>.png per cell (-> r/<v>.png), each compressed against
          dictionary v. Only the stored value's probe decodes; it decodes to a (v+1)x1 image, so the
@@ -14,29 +14,29 @@ files, and relative URLs inside a cell document resolve under /c/<k>/, so one fi
          second, /s.png?2, which queues behind what Chrome re-sent; 3 s after that every cell still blank shows
          a second probe row, /c/k/r/2/<v>.png (90 s after load if a sentinel fails).
          A cell never written pays its 16 probes twice.
-  START  each cell holds 16 <object>s, /c/k/p/<v>, all display:none except the one for the
-         value just read; a hidden <object> creates no frame and loads nothing. A never-written cell
-         shows /c/k/x. (Not iframes: every <iframe> element takes one of Chrome's 1000 frames
-         per page even while lazy and hidden, so 17 per cell stalls after ~59 cells.)
-  WRITE  p/<v>.html loads ../d/<v>.png twice: as a CSS mask-image (registers at once) and through
-         <link rel=compression-dictionary> (fetched when the network is idle, which can take ~30 s
-         while the page is still reading). _headers makes it the dictionary for /c/k/r/*. Painting
-         is a link to p/<u>: a new document, so writes are unlimited.
-  UNDO   each paint is a history entry; Back reloads the previous p/<v>.html, which registers v
-         again. Only the <link rel=compression-dictionary> does this: a history traversal serves
-         every CSS-initiated fetch (mask-image, @import, fonts, prefetch) from cache, and a cached
-         response never registers. Painting a cell its current colour is a same-URL navigation,
-         which replaces the history entry instead of adding an undo step.
-  INPUT  the <object> is (CELL + 1 + palette colour) px wide, clipped to CELL; the cell reads it
-         with @media.
-  LIMIT  undoing the first paint of a cell that was never written cannot erase it: x.html writes
-         nothing, because "never written" and "read failed" look the same.
+  INPUT  the page: a cell under the pointer while the grid is :active takes the palette colour, --L, held by
+         a transition with a 1e7 s delay. The cell shows it at once. (Cells can't be documents: a press is
+         captured by the frame it starts in, so a drag never reaches the next one.) Touch screens get a
+         layer of scroller handles, one per cell (css-physics); the dragged one names an anchor whose size
+         encodes (cell, drag), which a container around the canvas reads with anchor-size(). A follower gives
+         "finger down"; a handle returns to rest once still, a re-snap Chrome defers to the gesture's end.
+  STROKE the stroke's cell as numbers on .grid (mouse: :has(:hover) per row and column; touch: the anchor), the
+         last frame's in .gw (a 1 ms transition); every cell on the line between them paints, so a stroke
+         faster than a cell per frame leaves no gaps.
+  WRITE  three writer <object>s per cell, /c/k/w, hidden (no frame, nothing loaded) until the cell is first
+         painted. A shown writer is (CELL + L) x (CELL + slot) px and loads mask-image d/<L>.png?<slot>,
+         which _headers makes the dictionary for /c/k/r/*. A document fetches each URL once, so each change
+         needs a new slot: --W follows --L SETTLE ms late, a per-cell clock runs while they differ, and the
+         slot is the clock in TICKs. After SLOTS slots the next writer, a fresh document, takes over.
+  SAVING the page's spinner sits under the writer, whose square is masked by its write: a mask still loading
+         paints nothing, so the spinner shows until the write has loaded.
+  BLANK  a cell never written shows the grid's checkerboard, not colour 0.
+  UNDO   none: Back/Forward undo was each cell document's history (docs/HISTORY.md, 8).
 
-URLS   all page URLs are extensionless (/c/k/x, /c/k/p/5): Cloudflare Pages 308-redirects
-         *.html to the extensionless path, and a redirect inside a rewrite would leave the cell's
-         /c/<k>/ namespace. Files on disk keep .html; Pages serves p/5.html at /p/5.
+URLS   all page URLs are extensionless (/c/k/w): Cloudflare 308-redirects *.html to the extensionless path, and a
+         redirect inside a rewrite would leave the cell's /c/<k>/ namespace. Files on disk keep .html.
 
-Writes site/: cell.html, 16 p/*.html, 16 d/*.png, 16 r/*.png, s.png, index.html, _headers, _redirects.
+Writes site/: w.html, 16 d/*.png, 16 r/*.png, s.png, index.html, _headers, _redirects.
 usage: python3 build.py [W] [H]      (pip install zstandard)
 """
 import os, sys, struct, zlib, hashlib
@@ -47,6 +47,12 @@ import csslabel as lbl     # section and group comments in the output (../shared
 W = int(sys.argv[1]) if len(sys.argv) > 1 else 24
 H = int(sys.argv[2]) if len(sys.argv) > 2 else 20
 K, CELL = 16, 22
+SLOTS, WRITERS = 64, 3        # write URLs per colour in one writer document; writer documents per cell
+TICK, SETTLE = 40, 50         # ms per slot; a change runs its cell's clock at least SETTLE ms (> TICK: a new slot)
+HD = 3000                     # a touch handle scrolls up to this far from its rest offset
+PHASE = 10                    # ms: the stroke's two position latches swap this often while drawing
+WAIT = 400                    # ms after its first paint before a cell's first writer loads, on touch screens
+PUB, STILL = 8192, 100        # px per cell index in the publisher's width; ms still before a handle returns to rest
 N = W * H
 assert N <= 490, "Chrome keeps 500 dictionaries per top-level site"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site")
@@ -72,7 +78,7 @@ def dcz(dictionary, data):
             + zstandard.ZstdCompressor(dict_data=zd).compress(data))
 
 
-for sub in ("d", "r", "p"):
+for sub in ("d", "r"):
     os.makedirs(f"{OUT}/{sub}", exist_ok=True)
 for v in range(K):
     if not os.path.exists(f"{OUT}/d/{v}.png"):           # keep dictionaries stable across rebuilds
@@ -82,8 +88,7 @@ SENT = 8                                                  # the sentinel's width
 open(f"{OUT}/s.png", "wb").write(png(SENT, 1))
 
 open(f"{OUT}/_redirects", "w").write("""/c/:k/r/2/:v /r/:v 200
-/c/:k/x /cell 200
-/c/:k/p/:v /p/:v 200
+/c/:k/w /w 200
 /c/:k/r/:v /r/:v 200
 /c/:k/d/:v /d/:v 200
 """)
@@ -95,10 +100,8 @@ open(f"{OUT}/_headers", "w").write("""/c/:k/d/*
   Content-Encoding: dcz
   Cache-Control: no-store
   Vary: accept-encoding, available-dictionary
-/c/:k/x
+/c/:k/w
   Cache-Control: no-cache
-/c/:k/p/*
-  Cache-Control: no-store
 /s.png
   Cache-Control: no-store
 /
@@ -107,33 +110,31 @@ open(f"{OUT}/_headers", "w").write("""/c/:k/d/*
 
 lookup = lambda var: "if(" + "".join(f"style({var}:{v}):var(--p{v});" for v in range(K)) + "else:transparent)"
 
-# ------------------------------------------------------------------ shared cell CSS
-# (short labels, no notes: every cell loads one of these documents)
-cell_css = lbl.header("paint/build.py", "paint/docs/ARCHITECTURE.md") + "\n" + lbl.section("Cell document") + "\n:root{" + "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + "}" + f"""
-@property --bv{{syntax:'<integer>';inherits:false;initial-value:-1}}
-html,body{{margin:0;height:100%;overflow:hidden;background:transparent}}
-.px{{position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px}}
-a{{display:none;position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px;z-index:2;cursor:crosshair}}
-a:hover{{box-shadow:inset 0 0 0 2px var(--pc),inset 0 0 0 3px #fff8}}
-{lbl.group("INPUT: the paint link for the picked colour")}
-""" + "".join(f"@media (width:{CELL + 1 + v}px){{:root{{--pc:var(--p{v})}}a.a{v}{{display:block}}}}" for v in range(K))
-links = lambda prefix: "".join(f'<a class=a{v} href="{prefix}{v}" aria-label="paint colour {v}"></a>' for v in range(K))
-
-# cell.html: a cell that was never written: transparent, paint links only, writes nothing
-cell = f"""<!doctype html><meta charset=utf-8><title>cell</title><style>{cell_css}</style>{links('p/')}
+# ------------------------------------------------------------------ the writer
+# w.html, at /c/<k>/w: writes cell k. The page sizes it (CELL + L) x (CELL + slot) px, so its viewport says what to
+# write; relative URLs resolve under /c/<k>/, so this one file serves every cell. Each (colour, slot) URL is fetched
+# once per document, and the page moves to a fresh slot on every change (the clock below), so a cell can go back to
+# a colour it held before. The square shows only once its mask, the write, has loaded: until then the page's
+# spinner, under this document, shows through.
+urls = "if(" + "".join(f"style(--L:{v}):if(" + "".join(f"style(--s:{i}):url(d/{v}.png?{i});" for i in range(SLOTS))
+                       + "else:none);" for v in range(K)) + "else:none)"
+writer = f"""<!doctype html><meta charset=utf-8><title>cell writer</title><style>
+{lbl.header("paint/build.py", "paint/docs/ARCHITECTURE.md")}
+{lbl.section("Writer: colour from the viewport width, slot from its height")}
+@property --L{{syntax:'<integer>';inherits:true;initial-value:-1}}
+@property --s{{syntax:'<integer>';inherits:true;initial-value:-1}}
+:root{{""" + "".join(f"--p{v}:{c};" for v, c in enumerate(PALETTE)) + f"""--L:calc(100vw / 1px - {CELL});--s:calc(100vh / 1px - {CELL})}}
+html,body{{margin:0;overflow:hidden;background:transparent}}
+b{{position:fixed;left:0;top:0;width:{CELL}px;height:{CELL}px;background:{lookup('--L')};mask-image:{urls}}}
+</style><b></b>
 """
-lbl.check(cell, "cell.html")
-open(f"{OUT}/cell.html", "w").write(cell)
-
-# p/<v>.html: write v, show v, offer paint links
-for v in range(K):
-    open(f"{OUT}/p/{v}.html", "w").write(lbl.check(f"""<!doctype html><meta charset=utf-8><title>cell</title><style>{cell_css}
-{lbl.section(f"WRITE: dictionary {v}")}
-.px{{background:var(--p{v})}}
-.w{{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;mask-image:url(../d/{v}.png)}}
-</style><link rel=compression-dictionary href="../d/{v}.png">
-<b class=px></b><i class=w></i>{links('')}
-""", f"p/{v}.html"))
+lbl.check(writer, "w.html")
+open(f"{OUT}/w.html", "w").write(writer)
+for old in ["cell.html"] + [f"p/{v}.html" for v in range(K)]:       # the cell documents of the click-only canvas
+    if os.path.exists(f"{OUT}/{old}"):
+        os.remove(f"{OUT}/{old}")
+if os.path.isdir(f"{OUT}/p"):
+    os.rmdir(f"{OUT}/p")
 
 # ------------------------------------------------------------------ the page
 page_css = (lbl.header("paint/build.py", "paint/docs/ARCHITECTURE.md") + "\n" +
@@ -143,8 +144,23 @@ page_css = (lbl.header("paint/build.py", "paint/docs/ARCHITECTURE.md") + "\n" +
 @property --s{{syntax:'<number>';inherits:true;initial-value:1}}
 @property --bv{{syntax:'<integer>';inherits:false;initial-value:-1}}
 @property --go{{syntax:'<integer>';inherits:true;initial-value:0}}
-:root{{--bg:#ebe5d8;--ink:#1d1b1a;--mute:#7c766c;--frame:#c9c1b1;--gw:{W * CELL}px}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#141312;--ink:#ece6da;--mute:#8d867a;--frame:#3a3732}}}}
+@property --L{{syntax:'<integer>';inherits:true;initial-value:-1}}
+@property --W{{syntax:'<integer>';inherits:true;initial-value:-1}}
+@property --d{{syntax:'<integer>';inherits:true;initial-value:0}}
+@property --C{{syntax:'<number>';inherits:true;initial-value:0}}
+@property --g{{syntax:'<integer>';inherits:true;initial-value:0}}
+@property --ws{{syntax:'<integer>';inherits:true;initial-value:0}}
+@property --wj{{syntax:'<integer>';inherits:true;initial-value:0}}
+@property --wp{{syntax:'<integer>';inherits:true;initial-value:0}}
+@property --seen{{syntax:'<integer>';inherits:true;initial-value:0}}
+""" + "".join(f"@property --{n}{{syntax:'<integer>';inherits:false;initial-value:{iv}}}\n" for n, iv in
+              [("tdx", 0), ("tdy", 0), ("rw", 0), ("fox", 0), ("foy", 0), ("tgi", 0), ("held", 0), ("fr", 0),
+               ("fc", 0), ("dv", 0), ("hr", 0), ("hc", 0), ("hv", 0), ("qr", 0), ("qc", 0), ("qv", 0), ("or", 0), ("oc", 0), ("og", 0), ("mr", 0), ("mc", 0), ("pr", 0), ("pc", 0), ("pv", 0), ("ph", 0), ("pz", 0), ("fa", 0), ("fb", 0), ("wsh", 0), ("ar", 0), ("ac", 0), ("av", 0), ("br", 0), ("bc", 0), ("bv", 0), ("kc", 0), ("on", 0)]) + \
+    "".join(f"@property --{n}{{syntax:'<number>';inherits:false;initial-value:0}}\n" for n in
+              ["sx", "sy", "dx", "dy", "maj", "sg", "on1", "x0", "x1", "e1", "e2", "on0", "xl", "xh", "iny", "yc", "lo", "hi", "rr"]) + \
+    "".join(f"@property --{n}{{syntax:'<number>';inherits:true;initial-value:0}}\n" for n in
+              ["tx", "ty", "txd", "tyd", "tgx", "tgy", "tgl", "still"]) + f""":root{{--bg:#ebe5d8;--ink:#1d1b1a;--mute:#7c766c;--frame:#c9c1b1;--ck1:#ddd6c8;--ck2:#e9e3d6;--gw:{W * CELL}px}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#141312;--ink:#ece6da;--mute:#8d867a;--frame:#3a3732;--ck1:#262421;--ck2:#1d1b19}}}}
 html,body{{margin:0;background:var(--bg);color:var(--ink)}}
 body{{font:13px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace;min-height:100vh;display:grid;
   place-items:center;padding:28px 16px;box-sizing:border-box;overflow-x:hidden}}
@@ -164,9 +180,151 @@ header span{{color:var(--mute);font-size:12px;text-align:right}}
 .sig>i.s2{{display:none}}
 @container s1 (width<{W * CELL + SENT // 2}px){{.sig>i.s2{{display:block}}}}
 {lbl.section("The canvas: one .c per cell")}
-.grid{{display:grid;grid-template-columns:repeat({W},{CELL}px);width:var(--gw);background:var(--p0);outline:1px solid var(--frame);
-  box-shadow:0 12px 30px -18px rgba(0,0,0,.35)}}
+/* a cell never written shows the checkerboard behind it, so it can't be mistaken for colour 0 */
+.grid{{width:var(--gw);
+  background:repeating-conic-gradient(var(--ck1) 0 25%,var(--ck2) 0 50%) 0 0/{CELL}px {CELL}px;
+  cursor:crosshair;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}}
 .c{{position:relative;width:{CELL}px;height:{CELL}px;overflow:hidden;anchor-scope:--rd,--rt}}
+.c *{{pointer-events:none}}
+{lbl.section("INPUT: press and drag", "a cell under the pointer while the grid is pressed takes the palette colour")}
+/* --L, the colour painted in this page (-1: none), on .l inside each cell, holds for 1e7 s after the pointer leaves;
+   the cell shows it at once, before the write. (The latch sits on a child of the element that decides it, --on on
+   .c: a transition-delay from an if() on a value computed on the same element was sometimes left stale, and
+   a cell on a fast stroke never took its colour.) */
+.l{{--L:-1;transition:--L 0s 1e7s}}
+.grid:active .c:hover>.l{{--L:var(--pal);transition-delay:0s}}
+{lbl.group("Strokes: the cells between two frames' positions", "a fast stroke crosses several cells per frame; every cell on the segment from the last frame's position paints")}
+/* the stroke's cell (--qr, --qc; --qv: 1 while drawing) and where a stroke's first segment starts (--or, --oc: the
+   cell itself for the mouse, the cell the finger came down on for touch, whose first update comes past the slop) are
+   set on .grid, by the mouse rules below or the touch handles; .gx holds a recent earlier position (--pr, --pc, --pv,
+   below), and each cell paints if it is on the line
+   between them: one cell per step along the major axis, the nearest (as Bresenham). All non-inherited: .c takes them
+   with inherit, so nothing below it restyles. */
+""" + "".join(f".wrap:active:has(.y{r}:hover){{--hr:{r}}}" for r in range(H)) + "".join(
+    f".wrap:active:has(.x{c}:hover){{--hc:{c}}}" for c in range(W)) + f"""
+.wrap:active:has(.c:hover,.hd:hover){{--hv:1}}
+/* the pressed cell (:active stays on it through the press) starts a mouse stroke's first segments */
+""" + "".join(f".wrap:has(.y{r}:active){{--mr:{r}}}" for r in range(H)) + "".join(
+    f".wrap:has(.x{c}:active){{--mc:{c}}}" for c in range(W)) + f"""
+.R,.Rv{{--hr:inherit;--hc:inherit;--hv:inherit;--mr:inherit;--mc:inherit}}
+.grid{{--hr:inherit;--hc:inherit;--hv:inherit;--mr:inherit;--mc:inherit;--qr:var(--hr);--qc:var(--hc);--qv:var(--hv);
+  --or:var(--mr);--oc:var(--mc);--og:99}}
+/* the previous point: two latches, a and b, take turns following the stroke, swapping every {PHASE} ms (a clock
+   that runs only while drawing). The one not following holds where the stroke was when it stopped following:
+   1-2 frames ago. (A transition {"1 ms"} late failed: Chrome starts a transition only at a later frame, so a point
+   that moves every frame replaced it each time and the "previous" point stayed at the stroke's start.) */
+@keyframes ph{{0%{{--ph:0;animation-timing-function:step-end}}50%{{--ph:1;animation-timing-function:step-end}}100%{{--ph:1}}}}
+.gw{{--qr:inherit;--qc:inherit;--qv:inherit;--or:inherit;--oc:inherit;--og:inherit;
+  animation:ph {2 * PHASE}ms infinite;animation-play-state:if(style(--qv:1):running;else:paused)}}
+.gx{{--qr:inherit;--qc:inherit;--qv:inherit;--or:inherit;--oc:inherit;--og:inherit;--ph:inherit}}
+/* a latch: the stroke's position while following (no delay; both follow while nothing is drawn, so a stroke never
+   starts from the last one's end), -100 while holding (a 1e7 s delay holds the last
+   position). Changing the target is what starts the hold and ends it: with the same target, a running hold
+   carries on whatever its delay becomes. The phase is copied into --pz on .gx and read on .gy: an if() on the
+   animated --ph itself in transition-delay was never recomputed (as with the cell clock's play state), and a
+   style query on it restyled the whole grid every phase (100-700 ms frames). */
+.gx{{--pz:calc(var(--ph));--fa:max(1 - var(--pz),1 - var(--qv));--fb:max(var(--pz),1 - var(--qv))}}
+.gy{{display:grid;grid-template-columns:repeat({W},{CELL}px);
+  --qr:inherit;--qc:inherit;--qv:inherit;--or:inherit;--oc:inherit;--og:inherit;--pz:inherit;--fa:inherit;--fb:inherit;
+  --ar:if(style(--fa:1):var(--qr);else:-100);--ac:if(style(--fa:1):var(--qc);else:-100);
+  --av:if(style(--fa:1):var(--qv);else:-100);--br:if(style(--fb:1):var(--qr);else:-100);
+  --bc:if(style(--fb:1):var(--qc);else:-100);--bv:if(style(--fb:1):var(--qv);else:-100);
+  transition-property:--ar,--ac,--av,--br,--bc,--bv;transition-duration:0s;
+  transition-delay:if(style(--fa:1):0s,0s,0s;else:1e7s,1e7s,1e7s),if(style(--fb:1):0s,0s,0s;else:1e7s,1e7s,1e7s)}}
+/* each row (.r, display: contents) works out which of its columns the line covers, [--lo, --hi], so a cell only
+   compares its column: one cell per step along the major axis, the nearest (Bresenham's line, rounding half up).
+   x-major rows hold a run, y-major rows one cell. 20 row computations a recalc instead of 480. */
+.r{{display:contents;--qr:inherit;--qc:inherit;--qv:inherit;--or:inherit;--oc:inherit;--og:inherit;--pz:inherit;
+  --ar:inherit;--ac:inherit;--av:inherit;--br:inherit;--bc:inherit;--bv:inherit;
+  --pr:if(style(--pz:0):var(--br);else:var(--ar));--pc:if(style(--pz:0):var(--bc);else:var(--ac));
+  --pv:if(style(--pz:0):var(--bv);else:var(--av));
+  /* with no previous point (a stroke's first frames, before a latch has held a point of it, or after "drawing"
+     dropped for a frame) the segment starts at the origin: the pressed cell, or for touch the cell the finger came
+     down on if within --og cells (its first update comes a cell or two past the slop) */
+  --on1:calc(1 - sign(max(0,max(abs(var(--qr) - var(--or)),abs(var(--qc) - var(--oc))) - var(--og))));
+  --sx:if(style(--pv:1):var(--pc);style(--on1:1):var(--oc);else:var(--qc));
+  --sy:if(style(--pv:1):var(--pr);style(--on1:1):var(--or);else:var(--qr));
+  --dx:calc(var(--qc) - var(--sx));--dy:calc(var(--qr) - var(--sy));
+  --maj:sign(max(0,abs(var(--dx)) - abs(var(--dy)) + 0.5));--sg:sign(var(--dx) * var(--dy));
+  --x0:min(var(--sx),var(--qc));--x1:max(var(--sx),var(--qc));
+  --e1:calc((2 * (var(--rr) - var(--sy)) - 1) * var(--dx) / (2 * var(--dy) + 1 - abs(sign(var(--dy)))));
+  --e2:calc((2 * (var(--rr) - var(--sy)) + 1) * var(--dx) / (2 * var(--dy) + 1 - abs(sign(var(--dy)))));
+  --on0:calc(1 - min(1,abs(var(--rr) - var(--sy))));
+  --xl:if(style(--sg:1):calc(var(--sx) + round(up,var(--e1),1));style(--sg:-1):calc(var(--sx) + round(down,var(--e2),1) + 1);
+    else:if(style(--on0:1):var(--x0);else:1000));
+  --xh:if(style(--sg:1):calc(var(--sx) + round(up,var(--e2),1) - 1);style(--sg:-1):calc(var(--sx) + round(down,var(--e1),1));
+    else:if(style(--on0:1):var(--x1);else:-1000));
+  --iny:calc(1 - sign(max(0,(var(--rr) - var(--sy)) * (var(--rr) - var(--qr)))));
+  --yc:round(var(--sx) + (var(--rr) - var(--sy)) * var(--dx) / (var(--dy) + 1 - abs(sign(var(--dy)))));
+  --lo:if(style(--qv:1):if(style(--maj:1):max(var(--xl),var(--x0));else:if(style(--iny:1):var(--yc);else:1000));else:1000);
+  --hi:if(style(--qv:1):if(style(--maj:1):min(var(--xh),var(--x1));else:if(style(--iny:1):var(--yc);else:-1000));else:-1000)}}
+.c{{--lo:inherit;--hi:inherit;--on:calc((1 - sign(max(0,var(--lo) - var(--kc)))) * (1 - sign(max(0,var(--kc) - var(--hi)))))}}
+.l{{--on:inherit;--L:if(style(--on:1):var(--pal);else:-1);transition-delay:if(style(--on:1):0s;else:1e7s)}}
+.c:hover::after{{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;
+  box-shadow:inset 0 0 0 2px {lookup('--pal')},inset 0 0 0 3px #fff8}}
+{lbl.group("Touch: handles", "a finger drag gets no :hover, but it scrolls the handle it came down on (css-physics ARCHITECTURE.md, Touch)")}
+/* a layer of handles over the canvas, one per cell: a scroller resting mid-content. Each reads its own offset (an
+   anonymous scroll timeline, --tx/--ty: the drag) and, while off rest, names its publisher --drag: a box
+   (cell index + 1) * {PUB} + {HD} + tx px wide and {HD} + ty px tall. .R, around the canvas, is sized by
+   anchor-size(--drag) and .Rv decodes it, so the drag reaches every cell without a timeline-scope (960 animations
+   on scoped timelines made every layout cost ~90 ms). A handle snaps to an area around its offset (u: nothing moves
+   when the finger lifts) until its offset has been still for {STILL} ms, then to rest (i); while a gesture is active
+   Chrome defers that re-snap to the gesture's end. */
+.hds,.fo{{display:none}}
+@keyframes htx{{from{{--tx:{HD}}}to{{--tx:{-HD}}}}}
+@keyframes hty{{from{{--ty:{HD}}}to{{--ty:{-HD}}}}}
+@keyframes hgx{{0%,49.99%{{--tgx:1;animation-timing-function:step-start}}50.01%{{--tgx:0;animation-timing-function:step-start}}100%{{--tgx:1}}}}
+@keyframes hgy{{0%,49.99%{{--tgy:1;animation-timing-function:step-start}}50.01%{{--tgy:0;animation-timing-function:step-start}}100%{{--tgy:1}}}}
+@keyframes hdl{{from{{left:-40px}}to{{left:{2 * HD - 40}px}}}}
+@keyframes hdt{{from{{top:-40px}}to{{top:{2 * HD - 40}px}}}}
+.fo{{position:absolute;left:0;top:0;width:10px;height:10px;overflow:hidden;scroll-snap-type:both mandatory;
+  visibility:hidden;pointer-events:none;scroll-timeline:--Fx x,--Fy y}}
+.fo,.fo>i,.fo>i>b{{--tdx:inherit;--tdy:inherit}}
+.fo>i{{display:block;position:relative;width:{2 * HD + 10}px;height:{2 * HD + 10}px}}
+.fo>i>b{{position:absolute;width:10px;height:10px;scroll-snap-align:start;
+  left:calc(({HD} - var(--tdx)) * 1px);top:calc(({HD} - var(--tdy)) * 1px)}}
+@keyframes hfx{{from{{--fox:{HD}}}to{{--fox:{-HD}}}}}
+@keyframes hfy{{from{{--foy:{HD}}}to{{--foy:{-HD}}}}}
+.wrap{{position:relative;width:var(--gw);height:{H * CELL}px;overflow:clip;outline:1px solid var(--frame);
+  box-shadow:0 12px 30px -18px rgba(0,0,0,.35)}}
+.R{{position:absolute;left:0;top:0;width:anchor-size(--drag width,{HD}px);height:anchor-size(--drag height,{HD}px);
+  container-type:size}}
+.Rv{{width:var(--gw);--rw:calc(100cqw / 1px);--tgi:round(down,var(--rw) / {PUB});--tdx:calc(var(--rw) - var(--tgi) * {PUB} - {HD});
+  --tdy:calc(100cqh / 1px - {HD})}}
+@media (pointer:coarse){{
+  .c:hover::after{{display:none}}
+  .fo{{display:block}}
+  .hds{{display:grid;grid-template-columns:repeat({W},{CELL}px);position:absolute;left:0;top:0;z-index:5}}
+  .hd{{display:block;width:{CELL}px;height:{CELL}px;overflow:scroll;scrollbar-width:none;scroll-snap-type:both mandatory;
+    overscroll-behavior:contain;scroll-axis-lock:none;touch-action:pan-x pan-y;-webkit-tap-highlight-color:transparent}}
+  .hd::-webkit-scrollbar{{display:none}}
+  /* the content is hidden (it draws nothing): a full re-layerization, which every frame of a drag gets, cost a quarter */
+  .hd>b{{display:block;position:relative;width:{2 * HD + CELL}px;height:{2 * HD + CELL}px;visibility:hidden;pointer-events:none;
+    animation:htx linear both,hty linear both,hgx linear both,hgy linear both;
+    animation-timeline:scroll(nearest x),scroll(nearest y),scroll(nearest x),scroll(nearest y)}}
+  .hd em{{display:block;--tgl:max(var(--tgx),var(--tgy));--txd:var(--tx);--tyd:var(--ty);
+    transition:--txd 0s {STILL}ms,--tyd 0s {STILL}ms}}
+  .hd strong{{display:block;--still:calc(1 - sign(abs(var(--tx) - var(--txd)) + abs(var(--ty) - var(--tyd))))}}
+  .hd i{{position:absolute;left:{HD}px;top:{HD}px;width:{CELL}px;height:{CELL}px;
+    scroll-snap-align:if(style(--still:1):start;else:none)}}
+  .hd u{{position:absolute;left:0;top:0;width:{CELL + 80}px;height:{CELL + 80}px;
+    animation:hdl linear both,hdt linear both;animation-timeline:scroll(nearest x),scroll(nearest y);
+    scroll-snap-align:if(style(--still:1):none;else:start)}}
+  .hd p{{position:absolute;left:0;top:0;width:0;height:0;margin:0;overflow:clip}}
+  .hd s{{position:absolute;left:0;top:0;width:calc(var(--kk) * {PUB}px + {HD}px + var(--tx) * 1px);
+    height:calc({HD}px + var(--ty) * 1px);anchor-name:if(style(--tgl:1):--drag;else:none)}}
+  /* a drag needs a handle off rest and the finger down; the cell it came down on starts its first segment */
+  .grid{{--tdx:inherit;--tdy:inherit;--tgi:inherit;timeline-scope:--Fx,--Fy;
+    animation:hfx linear both,hfy linear both;animation-duration:auto;animation-timeline:--Fx,--Fy;
+    --held:sign(max(0,abs(var(--tdx) - var(--fox)) + abs(var(--tdy) - var(--foy)) - 0.01));
+    --fr:calc(round(down,(var(--tgi) - 1) / {W}) + round(var(--tdy) / {CELL}));
+    --fc:calc(mod(var(--tgi) - 1,{W}) + round(var(--tdx) / {CELL}));
+    --dv:calc(var(--held) * (1 - sign(max(0,0 - var(--fr),var(--fr) - {H - 1},0 - var(--fc),var(--fc) - {W - 1},1 - var(--tgi)))));
+    --qr:if(style(--dv:1):var(--fr);else:var(--hr));--qc:if(style(--dv:1):var(--fc);else:var(--hc));
+    --qv:max(var(--dv),var(--hv));
+    --or:if(style(--dv:1):round(down,(var(--tgi) - 1) / {W});else:var(--hr));
+    --oc:if(style(--dv:1):mod(var(--tgi) - 1,{W});else:var(--hc));--og:if(style(--dv:1):4;else:99)}}
+}}
 {lbl.section("READ: the probe rows", "the probe row is (stored value + 1) px wide; 0 = never written")}
 .rd{{position:absolute;left:0;top:0;display:flex;anchor-name:--rd;opacity:0;pointer-events:none}}
 .rd i{{display:block;flex:none}}
@@ -180,14 +338,37 @@ header span{{color:var(--mute);font-size:12px;text-align:right}}
 .rt i{{display:block;flex:none}}
 @container (width:0px){{.rt{{display:if(style(--go:1):flex;else:none)}}}}
 .w{{position:absolute;left:0;top:0;height:0;width:max(100cqw,anchor-size(--rt width,0px));container-type:inline-size}}
-.px{{position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px;--bv:calc(100cqw / 1px - 1);background:{lookup('--bv')}}}
-{lbl.section("START: the cell documents", "one object per value; only the one for the value read is shown")}
-/* the cell document's width carries the palette colour; only the object for the value read is
-   shown, and a hidden <object> never loads */
-.c object{{position:absolute;left:0;top:0;display:none;border:0;color-scheme:normal;
-  width:calc({CELL + 1}px + var(--pal) * 1px);height:{CELL}px}}
-@container (width:0px){{.c object.x{{display:block}}}}
-""" + "".join(f"@container (width:{v + 1}px){{.c object.f{v}{{display:block}}}}" for v in range(K)) + f"""
+/* the colour painted in this page if any, else the colour read (transparent if never written) */
+.px{{position:absolute;left:0;top:0;width:{CELL}px;height:{CELL}px;--bv:calc(100cqw / 1px - 1);
+  background:if(style(--L:-1):{lookup('--bv')};else:{lookup('--L')})}}
+{lbl.section("WRITE: a clock per cell and the writer documents", "every change of --L runs the clock for SETTLE ms, so each write gets a fresh slot")}
+/* --W follows --L SETTLE ms late; the clock runs while they differ. (The test reads --d on a grandchild:
+   on the element whose transition moved, animation-play-state isn't recomputed when it ends.) */
+.k{{--W:var(--L);transition:--W 0s {SETTLE}ms}}
+.q{{--d:calc(var(--L) - var(--W))}}
+.t{{animation:ck 1000000s linear infinite;animation-play-state:if(style(--d:0):paused;else:running)}}
+/* a cell's first writer loads only once the mouse is up: a document per newly painted cell, loaded mid-stroke, made
+   frames of 100-500 ms and the stroke lost its corners. A selector, so only press and release restyle .t (passing
+   "drawing" down to every cell's subtree cost more than the writers). A finger drag sets no :active: on touch
+   screens the first writer waits {WAIT} ms after the first paint instead. --seen keeps it once shown. */
+.q{{--wsh:calc(1 - min(1,abs(var(--L) + 1)))}}
+.wrap:active .q{{--wsh:0}}
+.t{{--wsh:inherit;--seen:if(style(--wsh:1):1;else:0);transition:--seen 0s if(style(--wsh:1):0s;else:1e7s)}}
+@media (pointer:coarse){{.t{{transition:--seen 0s if(style(--wsh:1):{WAIT}ms;else:1e7s)}}}}
+@keyframes ck{{from{{--C:0}}to{{--C:1000000}}}}
+/* slot --ws within writer --wj; the writer reads (colour, slot) from its size. A hidden <object> never
+   loads, so a cell gets its first writer when first painted, and the next one when the slots run out */
+.u{{display:if(style(--L:-1):none;else:block);--g:round(down,calc(var(--C) * 1000 / {TICK}));
+  --ws:mod(var(--g),{SLOTS});--wj:round(down,calc(var(--g) / {SLOTS}));--wp:mod(var(--g),2)}}
+.u object{{position:absolute;left:0;top:0;display:none;border:0;color-scheme:normal;
+  width:calc({CELL}px + var(--L) * 1px);height:calc({CELL}px + var(--ws) * 1px)}}
+""" + "".join(f".u object.w{j}{{display:if(style(--seen:1):if(style(--wj:{j}):block;else:none);else:none)}}" for j in range(WRITERS)) + f"""
+{lbl.group("Saving: a spinner under the writer, covered once its write has loaded", "it turns for 2 s from each slot (--wp), then stays still: 100 turning spinners made strokes drawn just after a big paint lose frames")}
+.sp{{position:absolute;left:5px;top:5px;width:12px;height:12px;border-radius:50%;mix-blend-mode:difference;
+  background:conic-gradient(#fff0,#fff);mask:radial-gradient(closest-side,#0000 55%,#000 60%);
+  animation:if(style(--wp:0):spa;else:spb) .7s linear 3}}
+@keyframes spa{{to{{rotate:1turn}}}}
+@keyframes spb{{to{{rotate:1turn}}}}
 {lbl.section("Palette picker and notes")}
 .pal{{display:grid;grid-template-columns:repeat(16,1fr);gap:4px;margin:14px 0 0}}
 .pal input{{position:absolute;opacity:0;pointer-events:none}}
@@ -198,14 +379,17 @@ p{{color:var(--mute);font-size:12px;margin:16px 0 0;max-width:62ch}}
 kbd{{font:inherit;border:1px solid var(--frame);border-radius:3px;padding:0 4px}}
 """ + "".join(f"html:has(#pc{v}:checked){{--pal:{v}}}" for v in range(K))
 
-cells = "".join('<div class=c><span class=rd>'
+cells = [(f'<div class="c y{k // W} x{k % W}" style="--kc:{k % W}"><div class=l><span class=rd>'
                 + "".join(f'<i style="content:url(/c/{k}/r/{v}.png)"></i>' for v in range(K))
                 + '</span><div class=v><span class=rt>'
                 + "".join(f'<i style="content:url(/c/{k}/r/2/{v}.png)"></i>' for v in range(K))
-                + f'</span><div class=w><b class=px></b><object class=x type=text/html data="/c/{k}/x" title="cell {k}"></object>'
-                + "".join(f'<object class=f{v} type=text/html data="/c/{k}/p/{v}" title="cell {k}"></object>' for v in range(K))
-                + '</div></div></div>'
-                for k in range(N))
+                + '</span><div class=w><b class=px></b></div></div><div class=k><div class=q><div class=t><div class=u><i class=sp></i>'
+                + "".join(f'<object class=w{j} type=text/html data="/c/{k}/w" title="cell {k}"></object>' for j in range(WRITERS))
+                + '</div></div></div></div></div></div>')
+         for k in range(N)]
+rows = "".join(f'<div class=r style="--rr:{r}">' + "".join(cells[r * W:(r + 1) * W]) + '</div>' for r in range(H))
+hds = "".join(f'<i class="hd y{k // W} x{k % W}" style="--kk:{k + 1}"><b><em><strong><i></i><u></u><p><s></s></p></strong></em></b></i>'
+              for k in range(N))
 pal = "".join(f'<input type=radio name=pal id=pc{v} autocomplete=off{" checked" if v == 1 else ""}>'
               f'<label for=pc{v} style="background:var(--p{v})" title="colour {v}"></label>' for v in range(K))
 html = f"""<!doctype html>
@@ -217,13 +401,13 @@ html = f"""<!doctype html>
 <style>{page_css}</style>
 <main>
 <header><h1>Dictionary Paint</h1><span>{W}×{H} · 16 colours · no JS</span></header>
-<div class=stage><div class=sig><div class=gd><div class=sig><div class=gd><div class=grid>{cells}</div></div><i class=s2 style="content:url(/s.png?2)"></i></div></div><i style="content:url(/s.png)"></i></div></div>
+<div class=stage><div class=sig><div class=gd><div class=sig><div class=gd><div class=wrap><div class=hds>{hds}</div><div class=R><div class=Rv><div class=grid><div class=fo><i><b></b></i></div><div class=gw><div class=gx><div class=gy>{rows}</div></div></div></div></div></div></div></div><i class=s2 style="content:url(/s.png?2)"></i></div></div><i style="content:url(/s.png)"></i></div></div>
 <div class=pal>{pal}</div>
-<p>Pick a colour and paint. Everything is saved as you go and survives reloads and restarts.
-The browser's Back button is undo, Forward is redo.</p>
+<p>Pick a colour, then click or drag to paint. A cell shows its colour at once and spins until the
+browser has stored it; the picture survives reloads and restarts. Unpainted cells are checkered.</p>
 </main>
 </html>
 """
 lbl.check(html, "index.html")
 open(f"{OUT}/index.html", "w").write(html)
-print(f"{W}x{H}: index.html {len(html)/1e3:.0f} KB, cell.html {len(cell)} B, data files {2*K}, pages {K+1}")
+print(f"{W}x{H}: index.html {len(html)/1e3:.0f} KB, w.html {len(writer)/1e3:.0f} KB, data files {2*K}")

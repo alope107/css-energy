@@ -6,10 +6,8 @@
   Content-Encoding: dcz
   Cache-Control: no-store
   Vary: accept-encoding, available-dictionary
-/c/:k/x
+/c/:k/w
   Cache-Control: no-cache
-/c/:k/p/*
-  Cache-Control: no-store
 /s.png
   Cache-Control: no-store
 /
