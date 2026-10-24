@@ -28,6 +28,10 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
   3.2 s after Run.
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- An X-ray page, which shows the work as it happens (the scan, lexing a line at a time, parsing a token at a time,
+  each pass's instructions, registers, caches and RAM) at a speed you pick, is on branch `xray` (`26f9a4d`, off
+  `lxym` at `0908314`; `make xray`). It isn't maintained: a predecessor to rebuild from later. Its mechanisms are in
+  that branch's ARCHITECTURE §7 and ENGINE_NOTES 60 and 65.
 
 ## Quick start
 
