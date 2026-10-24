@@ -35,9 +35,21 @@ def font_b64(P):
 def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 REGS = ['tp', 'sc', 'sr', 'rd']
+BLOCKS = ('p, pre, li, h1, h2, h3, h4, h5, h6, blockquote, dt, dd, tr, ul, ol, dl, table, thead, tbody, tfoot, caption, '
+          'section, article, header, footer, aside, nav, main, figure, figcaption, address, details, summary, fieldset, '
+          'legend, center, form')     # pasted block elements: each shows as a row of its own
 
 def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
     NG = P // GS; GSW = GS * 10
+    # The rows' names (--rbs<k>, rows 0 .. L-1), from the sentinels' view progress in the editor's frame. Rows are 24px
+    # from the editor's 12px top padding, and a sentinel's box (16px: the probe font's content area) starts at its row's
+    # top, 12 + 24r (measured), so a name changes halfway between two rows' boxes. RX cuts the scrollport to the rows
+    # read: the progress of a box of height SH at top t is (RX - t) / (RX + SH).
+    RX, SH = 24 * L + 36, 16
+    edge = lambda r: (RX - 24 * r) / (RX + SH)     # the progress where row r begins
+    segs = [(0, edge(L), 'none')] + [(edge(r + 1), edge(r), f'--rbs{r}') for r in range(L - 1, -1, -1)] + [(edge(0), 1, 'none')]
+    rowkeys = '@keyframes rbrow {\n' + '\n'.join(f'  {max(0, a * 100 + .001):.4f}%, {min(100, b * 100 - .001):.4f}% {{ anchor-name: {n}; }}'
+                                                  for a, b, n in segs) + '\n}'
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
                           for n in REGS) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
@@ -61,6 +73,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
 @keyframes rbclkk {{ from {{ --rbclk: 0; }} to {{ --rbclk: 4096; }} }}
 @keyframes rbwidth {{ from {{ --rbp: 0; }} to {{ --rbp: 1; }} }}
 {regkeys}
+{rowkeys}
 /* scan driver, frame-locked: a register holds last frame's clock, so --rbfresh is 1 on the first pass of each frame and
    the scan counter advances exactly one column per frame (columns 1..R, R = the columns the editor is wide).
    It runs only after Run: one full sweep (--rbsr counts frames since Run), then it stops and raises --rbrd, which
@@ -103,20 +116,42 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
   white-space: nowrap; width: max-content; min-width: 100%; box-sizing: border-box; min-height: {L * 24 + 24}px;
   padding: 12px 14px; outline: none; caret-color: var(--accent); color: var(--ink);
 }}
-/* No rule may match the line divs: Chrome copies the properties of matched rules into style="" on every copied line,
-   and pasting such lines nests them inside the line at the caret. Pasted rich text (p, b, span, ...) shows inline and
-   unstyled; a div nested in a line (Chrome makes one on Enter in a line typed straight into the empty editor, or when
-   lines are pasted into an empty line) shows inline too, so the line looks the way the scan reads it (.nested says so). */
-.ed :not(div, br) {{ all: unset; display: inline; }}
-.ed div div {{ display: inline; unicode-bidi: normal; }}   /* a div isolates (UA style): its own shaping run, unread */
-/* a <br> in a line would start a second row that the scan doesn't read (the line's sentinel is on its last row): Chrome's
-   placeholder in an empty line made it two rows tall and put everything below one row off, Shift+Enter inserts one,
-   and so does a nest. The sentinel gives an empty line its height. */
-.ed div br {{ display: none; }}
-.ed::before, .ed > div::after {{ content: "\\2058"; }}
+/* No rule may match the line divs: Chrome copies the properties of matched rules into style="" on every copied line.
+   Pasted rich text shows in the editor's font and style: !important beats the style attribute a paste brings (a font,
+   white-space: pre: the line would show one way and read another), and `all` leaves unicode-bidi: a <pre> or a div
+   isolates (UA style), which makes its text a shaping run of its own, unread (ENGINE_NOTES 75). Blocks stay blocks, each
+   a row with its own sentinel: a div nested in a line (lines pasted in the wrapper VS Code copies them in, and Chrome's
+   editing in an empty line) shows as the line it is and reads as one. Whitespace collapses as in typed lines: a newline
+   kept in pasted text (a <pre> code block) would start a row with no sentinel, so a code block shows and reads as one
+   line (.merged says so). Embedded content shows nothing. */
+.ed :not(div, br) {{ all: unset !important; display: inline !important; unicode-bidi: normal !important; }}
+.ed div div, .ed > div[style] {{ all: unset !important; display: block !important; unicode-bidi: normal !important; }}
+.ed :is({BLOCKS}) {{ display: block !important; }}
+.ed :is(img, svg, video, audio, iframe, object, embed, canvas, input, select, textarea, button, hr, math) {{ display: none !important; }}
+/* a <br> would start a second row that the scan doesn't read (a block's sentinel is on its last row): Chrome's
+   placeholder in an empty line made it two rows tall, Shift+Enter inserts one, and so do pastes. The sentinel gives an
+   empty line its height. */
+.ed br {{ display: none; }}
+/* The sentinels: line 0's leads the text typed straight into the editor, every block that holds no block ends its row
+   (a wrapper's would show as a blank row of its own after its lines; Chrome leaves no text beside the lines it nests).
+   Each is named by the row it shows in (--rbs<k>, read by probe k): a discrete animation of anchor-name on a view
+   timeline, whose progress is where the sentinel is in the editor's frame (ENGINE_NOTES 77). The inset cuts the frame's
+   scrollport to the rows read, so a frame that grows keeps every row's name; the rows below have none. (Positional
+   selectors could only name the editor's children, and a paste or a deletion restyled every rule that named one.) */
+.ed::before, .ed :is(div, {BLOCKS}):not(:has(> :is(div, {BLOCKS})))::after {{ content: "\\2058"; animation: rbrow auto linear;
+  animation-timeline: view(block 0px calc(100% - {RX}px)); }}
+/* an empty block after the lines: line 0 then sits in a block of its own even when it is all the editor holds. Without
+   one, line 0's sentinel had another box (its progress put it 12px higher) and read as no row at all. */
+.ed::after {{ content: ""; display: block; }}
 .rbout {{ anchor-name: --rbout; height: 0; visibility: hidden; }}
+/* the probes' contents lay out only from Run on (#app's --rbrun, a style query): while the user edits nothing reads
+   them. content-visibility, not display: none, keeps their boxes, so Run doesn't build ~6,000 of them (ENGINE_NOTES 76;
+   BENCHMARKS §18). The probe of a row that isn't there is 0px wide (its width is its sentinel's height, which the scan
+   doesn't change, times P * 10), and its cells aren't laid out: 64 cells per probe, every frame of the scan, made a
+   compile of FizzBuzz (9 rows of 24) 1.37x as long (BENCHMARKS §18). */
 .probe {{ position: absolute; top: calc(anchor(--rbout top) + var(--rbk) * 24px); left: anchor(--rbout left);
-  width: calc({P} * 10px); container-type: size; visibility: hidden; }}
+  container-type: size; visibility: hidden; content-visibility: hidden; }}
+@container (width: 0px) {{ .row {{ display: none; }} }}
 .row {{ position: absolute; left: 0; top: 0; max-width: 100cqw; overflow: hidden; visibility: hidden; font: 15px/24px monospace; white-space: pre; }}
 .row > b {{ font-weight: inherit; --rbglive: calc(min(1, var(--rbgj)) * (100cqh / 1px + 31 * sign(100cqh))); }}
 .row i {{
@@ -128,20 +163,17 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
 }}
 .row i::before {{ content: counter(rbch, rbascii); }}
 """)
-    g.append(lbl.group('Line probes: one per editor line', 'each line\'s end is an anchor; its probe is as tall as the line is long'))
-    g.append('.ed::before { anchor-name: --rbs0; }')
-    for k in range(1, L):
-        g.append(f'.ed > div:nth-of-type({k})::after {{ anchor-name: --rbs{k}; }}')
+    g.append(lbl.group('Line probes: one per editor row', 'probe k is as tall as the sentinel of row k is wide'))
     for k in range(L):
-        g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); }}')
+        g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); '
+                 f'width: calc(min(1px, anchor-size(--rbs{k} height, 0px)) * {P * 10}); }}')
+    g.append('@container rbscan style(--rbrun: 1) { .probe { content-visibility: visible; } }')
     # (:has() on the editors' section with child combinators: on #app it searched ~10,000 elements, per rule and editor,
     # and the picker's eleven editors made a compile ~1.7 s slower)
     for e in range(EDS):
         pane = f'#pk{e}:checked ~ #app > .pane' if EDS > 1 else '#app > .pane'
-        for k in range(1, L):
-            g.append(f'{pane}:not(:has(> .frame > .ed{e} > div:nth-of-type({k}))) ~ .probes .probe:nth-child({k + 1}) {{ display: none; }}')
         g.append(f'{pane}:has(> .frame > .ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
-        g.append(f'{pane}:has(> .frame > .ed{e} div div) .nested {{ display: block; }}')
+        g.append(f'{pane}:has(> .frame > .ed{e} pre) .merged {{ display: block; }}')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1

@@ -430,12 +430,18 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 - The scan is frame-locked (one column per frame at any frame rate) over a fixed 64 columns.
 - It runs only after Run: while editing, `SCAN` is 0 and the registers are frozen (`--rbfrz`). After Run the editors
   are read-only, one sweep raises `--rbrd`, and `--ccgo` (from the `--rbrdT` timeline) shows the compile chain.
-- Lines: line 0 is text directly in the editor, line `k` its `k`-th `div`, each with a sentinel. Nested divs show
-  inline, `<br>` is hidden, `white-space: nowrap` with `&nbsp;`, and no CSS rule may match the line divs (ENGINE_NOTES
-  44–49). Hidden editors are `display: none`, so the anchors are the shown one's; the per-line checks (`:has`) are
-  per editor, under its radio button, on the editors' section with child combinators (on `#app` each searched its
-  ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan reads what the editor shows; `tests/picker.js`
-  the picker. An editor's initial text starts at its line 1, so a sample has at most 23 lines.
+- Rows: line 0 is text directly in the editor (a leading `::before` sentinel), and every block that holds no block is
+  a row ending in an `::after` sentinel, nested or not: Chrome nests lines (Enter in line 0, pastes into an empty
+  line) and formatted pastes bring wrappers (VS Code's `<div style>` around a `<div>` per line). A sentinel is named
+  for the row it shows in, `--rbs<k>`, by a discrete `anchor-name` animation on a view timeline (ENGINE_NOTES 77);
+  probe `k` reads `--rbs<k>`, and the probe of an absent row is 0px tall and reads spaces. `<br>` is hidden,
+  `white-space: nowrap` with `&nbsp;`; pasted elements take the editor's style (`!important`, ENGINE_NOTES 75), so a
+  `<pre>`'s newlines collapse and the page says the block shows as one line (`.merged`). No CSS rule may match the
+  line divs (ENGINE_NOTES 44–49). Hidden editors are `display: none`, so the anchors are the shown one's; the per-editor
+  checks (`:has`: the line limit, a `<pre>`) are under its radio button, on the editors' section with child combinators
+  (on `#app` each searched its ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan reads what the
+  editor shows; `tests/picker.js` the picker. An editor's initial text starts at its line 1, so a sample has at most 23
+  lines.
 
 ---
 

@@ -234,3 +234,29 @@ chats.
     the loop and 34 without (99–142 `BeginMainFrame`s), for the same style work. The page has no script, so time it
     without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §16's earlier times).
     *(measured 2026-10-22)*
+75. **Formatted text pasted into a contenteditable keeps its style attributes, and they beat author rules**: VS Code
+    pastes `<div style="font-family: …; white-space: pre">` around a `<div>` per line, a web page a `<pre>` with
+    highlighting spans, Google Docs `<p>`s in a `<b>`. With the editor's `.ed :not(div, br) { all: unset }` the pasted
+    font and white-space still applied (inline style wins over a normal author rule): the line showed one way and the
+    probe font read another, and every such paste gave a syntax error. `!important` beats the style attribute; `all`
+    leaves `unicode-bidi`, and a `<pre>` (or a div, UA style) isolates: its text is a shaping run of its own, which a
+    probe font's sentinel doesn't see. `unicode-bidi: normal !important` with it reads the paste as shown.
+    *(measured 2026-10-23; tests/editor_input.js "paste formatted …")*
+76. **Replacing many lines of a contenteditable costs one forced style and layout update per line, and positional
+    selectors make each restyle all following siblings**: pasting 400 lines over 400 ran ~406 style recalcs, each over
+    every remaining line and its `::after` (824, 822, … elements: the `.ed > div:nth-of-type(k)::after` rules), plus
+    the probes the `:has(> … > div:nth-of-type(k))` rules hide: 4.3 s, and 24.9 s for 1,600 over 1,600. Rules inside an
+    `@container style()` query that is false still do it (Chrome matches their selectors, and :has() still invalidates);
+    leaving the probes' contents out (`content-visibility: hidden` while editing) cut a 200-over-200 formatted paste
+    from 3.5 s to 1.2 s. *(measured 2026-10-23; BENCHMARKS §18)*
+77. **A discrete animation of `anchor-name` on a view timeline names a box by where it shows**: `@keyframes` with
+    `anchor-name: --r0`, `--r1`, … over ranges of view progress, run on `animation-timeline: view(block …)`, gives each
+    `::before` / `::after` the name of the row it is laid out in, however deep its element is nested, and
+    `anchor-size()` reads the animated name (a probe per row). It takes a layout to apply: the names are last frame's.
+    A view inset of `calc(100% - X)` cuts the scrollport to a fixed X, so a scroller that grows doesn't move the
+    progress of the rows above X. Measured in the editor: a sentinel's box (16px, the probe font's content area at
+    16px) starts at its 24px row's top, and progress is `(X - top) / (X + 16)`; except a `::before` in a block that
+    holds only inline content, whose progress put it 12px higher (line 0 alone in the editor read as no row) until a
+    `display: block` `::after` put the inline content in an anonymous block. Positional selectors can name only an
+    element's siblings, and each line a paste adds or removes restyles every one of them (76).
+    *(measured 2026-10-23; readback/ui_rb.py; tests/editor_input.js)*
