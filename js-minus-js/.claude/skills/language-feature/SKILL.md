@@ -22,7 +22,8 @@ CSS). Both change together, in this order.
    - Same effects in the same order, predicated with `with self.when(...)`. Call `done()` wherever the reference
      `return`s; not where it falls through (`m = self.mode = X`).
    - New state goes into `LEX_STATE` / `parse_state_names()` and `ref_state()` in `tests/cmp_dsl.py`; a new mode
-     fallthrough into the `FALL` map in `token()`.
+     fallthrough into the `FALL` map in `token()`; a new mode also needs a family in `ccpage5.FAMILIES`, the
+     `parser-<family>.css` sheet its variants go in (the page build fails until it has one).
    - Don't name locals after DSL helpers (`le`, `lt`, `eq`, `add`, …).
    - `make l2` until `ALL OK`. On a failure, `SPEC=1 python3 tests/cmp_dsl.py tests/suite/<feature>.js` names the
      first diverging state variable.

@@ -15,7 +15,7 @@ project's `node_modules`.
 | `js/freeze.js` | the wobbling-constant clock that freezes a page's state for profiling | css-physics `freeze3.js`, `freezegrab.js` |
 | `py/ablate.py` | copies of a page with families of `@container` blocks removed (string/comment-aware, never overwrites the source) | css-physics `tools/ablate.py`; any js-minus-js page |
 | `py/passprof.py` | passes per frame, style+layout ms and shaping ms from a saved trace | js-minus-js `machine/passprof.py`; css-physics `TRACE=… tools/tr.js` |
-| `py/csslabel.py` | section and group comments in generated CSS, and the outline of a built page ([below](#labels-in-generated-css)) | every generator: css-physics `src/gen3d.py`, `src/build3d.py`; js-minus-js `machine/gen_fvm4.py`, `compiler/ccpage5.py`, `readback/ui_rb.py`; paint `build.py` |
+| `py/csslabel.py` | section and group comments in generated CSS, and the outline of a built page, its linked stylesheets included ([below](#labels-in-generated-css)) | every generator: css-physics `src/gen3d.py`, `src/build3d.py`; js-minus-js `machine/gen_fvm4.py`, `compiler/ccpage5.py`, `readback/ui_rb.py`; paint `build.py` |
 | `make/checks.mk`, `make/logged.sh`, `make/report.sh`, `js/runid.js` | checks as make targets (below) | every project's Makefile |
 | `android/` | Chromium for Android on the emulator under software emulation (no KVM): setup, start/stop, kernel-level touch, a CDP client; touch semantics, not timing (`android/README.md`) | css-physics `experiments/touch/android.js` |
 | `test/` | unit tests: `make test-shared` at the repo root | |

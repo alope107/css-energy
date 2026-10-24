@@ -1,5 +1,5 @@
 """python3 shared/test/test_py.py — unit tests of shared/py (no browser). Exits 1 on a failure."""
-import os, sys, runpy, tempfile
+import os, sys, runpy, subprocess, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'py'))
 import ablate as A
@@ -59,6 +59,17 @@ t('check passes a page whose rules all follow a section, and returns it',
 t('check fails on a rule before the first section, in any style element',
   lambda: (raises(L.check, 'a{b:1}\n' + SHEET, 't'), raises(L.check, f'<style>{SHEET}</style><style>z{{}}</style>', 't'),
            eq(L.unlabelled('/* a comment is not a label */ a{b:1}' + SHEET), 'a{b:1}')))
+t('linked: the sheets a page links, in its order, relative to the page',
+  lambda: eq(L.linked('b/p.xhtml', '<link rel="icon" href="i.png"/><link rel="stylesheet" href="p/cpu.css"/>'
+                      '<link rel="stylesheet" href="p/ram.css"/>'), ['b/p/cpu.css', 'b/p/ram.css']))
+def cli_linked():
+    with tempfile.TemporaryDirectory() as d:
+        os.mkdir(os.path.join(d, 'p'))
+        open(os.path.join(d, 'p', 'a.css'), 'w').write(SHEET)
+        open(os.path.join(d, 'p.xhtml'), 'w').write('<head><link rel="stylesheet" href="p/a.css"/></head>')
+        out = subprocess.run([sys.executable, L.__file__, '--check', os.path.join(d, 'p.xhtml')], capture_output=True, text=True)
+        eq(out.returncode, 0); eq(out.stdout, '      2  One\n      5    Two\n')
+t('the command line outlines a page\'s linked sheets', cli_linked)
 
 print(f'{n - bad}/{n} pass')
 sys.exit(1 if bad else 0)

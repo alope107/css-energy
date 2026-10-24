@@ -716,3 +716,29 @@ animations at Run, or dropping their `:has()` leaf filter, changed nothing (1.41
 **Leading sentinels, shown `<br>`s, the unread-rows note (2026-10-24, branch `editor-quirks`).** Against `main`,
 interleaved, unleased (other agents' runs alongside): compile of FizzBuzz 0.981 (IQR 0.923–1.062; A-vs-A 0.995), 200
 formatted lines over 200 1.000 (0.926–1.067): no cost above the noise.
+
+## 19. The page's CSS in linked stylesheets (2026-10-24, branch `css-split`)
+
+The 13.8 MB inline `<style>` became 15 linked sheets in `js_in_css/` (ARCHITECTURE §6), and the parser variants moved
+into one section per family of modes. The rules are the same (5,764, each section's in its order but the variants').
+Against `main`'s inline page, three variants (A, A again, the split page), 9 rounds interleaved with `ab.js`,
+unleased (other agents' runs alongside, load average ~12), FizzBuzz on the editor page (`ui_seq.js`):
+
+| ratio to A (median, range) | A again | split page |
+|---|---|---|
+| load (`p.goto` to `load`; A 714 ms) | 1.020 (0.80–1.15) | 0.654 (0.55–0.75): 481 ms |
+| compile (`compiledMs`; A 2,443 ms) | 0.987 (0.88–1.13) | 1.000 (0.91–1.08) |
+| Run → HALT (`haltMs`; A 3,506 ms) | 0.991 (0.89–1.09) | 0.991 (0.91–1.04) |
+
+Compile and run cost the same. The page loads in two thirds of the time, every round. Not explained: the XML parser
+no longer holds 13.8 MB of CDATA, and the sheets load in parallel, but no trace separates those.
+
+On `lxym` (merged 2026-10-24, 1d2ad55): 16 sheets (lxym's arrow functions made `parser-functions`), the largest
+`parser-names.css` at 9.2 MB, the page 4.3 MB; the same 6,520 rules as lxym's inline page. Against that page, the
+same three variants, 21 rounds (9 + 12) interleaved, unleased (load average 2–9):
+
+| ratio to A (median, IQR) | A again | split page |
+|---|---|---|
+| load (A 987 ms) | 0.998 (0.97–1.03) | 0.709 (0.67–0.72): 703 ms |
+| compile (A 2,724 ms) | 1.004 (0.98–1.07) | 1.009 (0.98–1.05) |
+| Run → HALT (A 3,840 ms) | 0.998 (0.98–1.07) | 1.005 (0.98–1.05) |

@@ -1,8 +1,8 @@
 # js-minus-js
 
-JavaScript compiled and run by CSS. `dist/js_in_css.xhtml` is a static page: CSS reads back the text typed into its
-editor (or a sample picked above it), CSS compiles it to register code, and a CPU made of style rules executes it, a
-chain of instructions per layout pass. (Until 2026-10-21 the machine was a stack machine, last at `212175a`; until
+JavaScript compiled and run by CSS. `dist/js_in_css.xhtml` is a static page (its stylesheets in `dist/js_in_css/`):
+CSS reads back the text typed into its editor (or a sample picked above it), CSS compiles it to register code, and a
+CPU made of style rules executes it, a chain of instructions per layout pass. (Until 2026-10-21 the machine was a stack machine, last at `212175a`; until
 2026-10-19 the CPU was a GSUB font run while Chrome shaped text, last at `181cbb7`.)
 `README.md` has the language, limits and error codes; `docs/` has ARCHITECTURE (how it works), ENGINE_NOTES (the
 Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead ends, open leads).
@@ -22,7 +22,7 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 
 ```
 npm install && pip install -r requirements.txt     # once
-make page            # build/js_in_css.xhtml: lib -> image -> page (~7 s; <1 s if the compiler didn't change)
+make page            # build/js_in_css.xhtml + its sheets build/js_in_css/*.css (~7 s; <1 s if the compiler didn't change)
 make test            # fast gate, no browser (~5 s): Node oracle, L1, quick fuzz, L2, C1
 make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~30 s; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
@@ -34,7 +34,7 @@ make c2-all          # the same for every program, the collector tests too (~5 m
 node tests/picker.js build/js_in_css.xhtml [sample...]   # the sample picker on the page (default: three quick ones)
 make l5-net          # the network programs (tests/suite/net_*) on the page, served with the gateway (~1 min)
 node net/server.js .. 8767   # serve the repo root with the network gateway (fetch / read need it; README Network)
-make dist            # copy the built page to dist/
+make dist            # copy the built page and its stylesheets to dist/
 python3 machine/csssim.py tests/suite/fizzbuzz.js  # steps and passes, how passes end (no browser)
 python3 tools/romprof.py tests/suite/x.js          # where the passes go: user code, the ROM routine it called, the innermost
 python3 compiler/cc_ref.py prog.js                 # compile and run one program
@@ -169,6 +169,10 @@ net/       server.js (web server + network gateway: the modem's documents and pr
 - A fuzz failure is in `build/fuzz/`; `python3 tests/fuzz/show.py build/fuzz/<name>` replays it. Check it is inside
   the language (README Limits) before fixing the compiler: the shrinker drops lines, which can remove a declaration
   the generator relied on. A real one becomes a `tests/suite` regression test.
+- The page links its CSS: `<page>/<sheet>.css` beside `<page>.xhtml`, one sheet per run of sections (`gen_css.py`
+  `SHEETS`; ARCHITECTURE §6). A copied page still loads the original's sheets, so build each A/B page under its own
+  name (`gen_css.py … a.xhtml` writes `a/`) and don't copy one. A new parser mode needs a family in
+  `ccpage5.FAMILIES` (its sheet).
 - Label the CSS you add (`lbl.section` / `lbl.group` in gen_css.py, ccpage5.py, ui_rb.py;
   `../shared/README.md#labels-in-generated-css`). `python3 ../shared/py/csslabel.py build/js_in_css.xhtml` prints the
   page's outline.

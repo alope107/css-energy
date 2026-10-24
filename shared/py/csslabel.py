@@ -5,7 +5,8 @@
   css = [L.header('css-physics/src/gen3d.py', 'css-physics/docs/ARCHITECTURE.md'),
          L.section('Registered properties', 'every engine value: syntax, inheritance, initial value'), ...]
   L.check(text, 'gen3d.py')               # the generator fails if a rule comes before the first section
-  python3 shared/py/csslabel.py page.html # the outline: line, level, title (--check: exit 1 if unlabelled)
+  python3 shared/py/csslabel.py page.html # the outline: line, level, title (--check: exit 1 if unlabelled);
+                                          # a page's linked stylesheets are outlined in its place
 
 The conventions (what gets a label and how it reads) are in shared/README.md#labels-in-generated-css.
 """
@@ -82,8 +83,20 @@ def check(text, who):
     return text
 
 
+def linked(path, text):
+    """The stylesheets a page links (<link rel="stylesheet" href="…">), as paths relative to the page's."""
+    import os
+    return [os.path.join(os.path.dirname(path), h) for h in re.findall(r'<link rel="stylesheet" href="([^"]+)"', text)]
+
+
 if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if a != '--check']
+    args = []
+    for a in sys.argv[1:]:
+        if a == '--check':
+            continue
+        text = open(a, encoding='utf-8', errors='replace').read()
+        sheets = linked(a, text)     # a page whose CSS is in linked sheets: outline those, in the page's order
+        args += ([a] if not sheets or '<style' in text else []) + sheets
     if not args:
         sys.exit(__doc__)
     rc = 0

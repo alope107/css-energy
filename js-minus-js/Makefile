@@ -44,7 +44,7 @@ help:
 	@echo "make c2             a CPU-only page per quick program runs to HALT (~30 s)"
 	@echo "make c2-all         the same for every program, the collector tests too (~5 min)"
 	@echo "make l5-net         L5 on the network programs, the page served with its gateway (net/server.js)"
-	@echo "make dist           copy the built page to dist/"
+	@echo "make dist           copy the built page and its stylesheets (js_in_css/) to dist/"
 
 all: page
 
@@ -63,8 +63,9 @@ page: $(B)/js_in_css.xhtml
 $(B)/js_in_css.xhtml: $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
 	UI=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
 
+# the page links its stylesheets in js_in_css/ beside it (machine/gen_css.py SHEETS): copy the two together
 dist: page
-	cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
+	rm -rf dist/js_in_css && cp -r $(B)/js_in_css dist/js_in_css && cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
 
 # ---- tests (see docs/ARCHITECTURE.md#5-tests)
 expect:                                   # Node is the oracle: writes tests/suite/*.out
@@ -138,7 +139,7 @@ l5-net: $(B)/l5-net.$(UICONF).log
 $(B)/ui_exp/net-args.txt: tests/suite_ui.py $(PYSRC) $(SUITE)
 	@mkdir -p $(@D); NET=1 $(PY) tests/suite_ui.py > $@.tmp && mv $@.tmp $@
 $(B)/l5-net.$(UICONF).log: $(B)/ui_exp/net-args.txt $(UI) $(NET)
-	rm -rf $(B)/net-www && mkdir -p $(B)/net-www && cp -r tests/net/. $(B)/net-www/ && ln -s ../js_in_css.xhtml $(B)/net-www/js_in_css.xhtml
+	rm -rf $(B)/net-www && mkdir -p $(B)/net-www && cp -r tests/net/. $(B)/net-www/ && ln -s ../js_in_css.xhtml ../js_in_css $(B)/net-www/
 	SHARDS=$(SHARDS) NETROOT=$(B)/net-www EXP1=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ $(UIOK) -- $(NODE) machine/ui_seq.js $(B)/net-www/js_in_css.xhtml $$(cat $<)
 # a demo page with the modem showing (NETSHOW=1) and net/demo.js in the editor: serve build/net-demo with net/server.js
 net-demo: $(B)/net-demo/net_demo.xhtml

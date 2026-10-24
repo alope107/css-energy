@@ -1,7 +1,8 @@
 # JavaScript, compiled and run by a stylesheet
 
-`dist/js_in_css.xhtml` is one static XHTML page, and no script runs on it. You type a JavaScript program into its
-editor (or pick one of twelve samples) and press Run. The program then goes through four stages:
+`dist/js_in_css.xhtml` is one static XHTML page (its stylesheets in `dist/js_in_css/`), and no script runs on it. You
+type a JavaScript program into its editor (or pick one of twelve samples) and press Run. The program then goes
+through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
