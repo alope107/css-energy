@@ -1,4 +1,4 @@
-// a function declared in a block (sloppy mode: hoisted to the function)
+// a function declared in a block: hoisted to its function
 if (1) { function f() { return 1; } }
 console.log(f());
 function g(x) {

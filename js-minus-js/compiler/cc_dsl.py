@@ -1516,9 +1516,11 @@ class Prog(Base):
                 inpr = self.m(eq(tc, R.M_PRINT), 'inpr'); npc = self.m(fdiv(tvv, 4), 'npc')
                 piece = self.m(and_(eq(binop, R.ADD), inpr, or_(ne(npc, 0), eq(ty, 2)), lt(tvv, 4 * (R.PIECES - 1))), 'piece')     # a piece, kept on the stack
                 with self.when(piece): self.set_top_op(R.M_PRINT, add(tvv, 4))
-                full = self.m(and_(eq(binop, R.ADD), inpr, ge(tvv, 4 * (R.PIECES - 1))), 'pfull')     # (cc_ref: joined, then +)
+                full0 = and_(eq(binop, R.ADD), inpr, ge(tvv, 4 * (R.PIECES - 1)))
+                tail = self.m(and_(full0, eq(ty, 2)), 'ptail')     # (cc_ref: the last piece a string takes the rest of the chain)
+                full = self.m(and_(full0, not_(eq(ty, 2))), 'pfull')     # (cc_ref: joined, then +)
                 plus = self.m(and_(not_(piece), not_(full), eq(binop, R.ADD)), 'plus')
-                with self.when(plus): self.push_op(ite(inpr, R.M_CADD, R.ADD), ty)
+                with self.when(plus): self.push_op(ite(and_(inpr, not_(tail)), R.M_CADD, R.ADD), ty)
                 rest = self.m(and_(not_(piece), not_(plus)), 'brest')
                 with self.when(and_(rest, not_(gt(self.prec(binop), 10)))): self.join_pieces()     # (* / % bind tighter: they end no piece)
                 nd2 = self.m(self.v('nd'), 'bnd2'); ty2 = self.otype(nd2 - 1)

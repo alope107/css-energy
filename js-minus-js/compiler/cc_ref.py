@@ -1774,7 +1774,9 @@ class Compiler:
                 if op == ADD and t == M_PRINT and (tv >= 4 or self.otype(self.nd - 1) == 2) and tv < 4 * (PIECES - 1):   # "..." + x in console.log: a piece
                     self.opv[self.osp - 1] = tv + 4; self.mode = S_OPND; return
                 full = op == ADD and t == M_PRINT and tv >= 4 * (PIECES - 1)     # (no piece left: the pieces joined, then +)
-                if op == ADD and not full: self.push_op(M_CADD if t == M_PRINT else ADD, self.otype(self.nd - 1)); self.mode = S_OPND; return
+                tail = full and self.otype(self.nd - 1) == 2   # (unless the last is a string: the rest of the chain joins it, one piece)
+                if tail: full = False
+                if op == ADD and not full: self.push_op(M_CADD if t == M_PRINT and not tail else ADD, self.otype(self.nd - 1)); self.mode = S_OPND; return
                 if prec(op) <= prec(ADD): self.join_pieces()   # (* / % bind tighter: they end no piece)
                 if op in (AND, OR):                           # a: tested in its temp; b joins it there (popops)
                     i = self.nd - 1; lt = self.otype(i); l = self.newlab(); self.to_temp(i); self.snapshot(lambda q: True, i)
