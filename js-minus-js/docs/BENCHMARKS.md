@@ -669,6 +669,9 @@ medians (ms) and the median per-round ratio, at `a6a745c`:
   compiles in ~2.8 s against main's 2.4 (+14%).
 - The final page (`0908314`) against main, eight interleaved rounds each, unleased on a busy machine (runs up to 10 s):
   compiled 1.147 (IQR 1.105–1.348), HALT 1.151 (1.096–1.207).
+- After merging main (`3d9f039`, with §18: rows named by where they show, so the per-line checks are gone from both
+  pages and two per editor are left for the one set), against that main, eight interleaved rounds each, unleased on a
+  quiet machine: compiled 2,256 → 2,614 ms (1.168, IQR 1.152–1.216), HALT 3,238 → 3,781 ms (1.164, 1.156–1.193).
 
 **Compile time** (`tests/suite_css.js`, the L3 page, the 186 programs both compile, one browser, main / lxym / lxym /
 main): median per-program ratio 1.178 (IQR 1.115–1.252), total 119.0 → 146.2 s. The parser evaluates 454 temps per

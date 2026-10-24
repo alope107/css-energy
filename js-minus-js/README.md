@@ -27,8 +27,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
   code cache since 2026-10-22 (BENCHMARKS §15). The language above costs it time (BENCHMARKS §17): against the machine
   before it, CPU-only pages run 1.20× longer (geometric mean of 16 programs) and programs compile 1.18× longer (median
   of 186).
-- On the page, FizzBuzz 1–15 compiles in about 2.8 s from Run (including the 1.2 s readback sweep) and halts about
-  3.8 s after Run (main: 2.4 and 3.3 s; BENCHMARKS §17).
+- On the page, FizzBuzz 1–15 compiles in about 2.6 s from Run (including the 1.2 s readback sweep) and halts about
+  3.8 s after Run (before the language: 2.3 and 3.2 s; BENCHMARKS §17).
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
