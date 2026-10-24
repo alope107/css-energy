@@ -112,7 +112,7 @@ the labels through `py/csslabel.py` (stdlib only), in every build, minified ones
 /* === State read-back (#LS) ===
    animates the registers into each body's state; sleep and wake flags */
 #LS{…}
-/* === Solver levels (#L0–#L18) === … */
+/* === Input overrides === … */
 /* --- Shake --- */
 @container style(--kick: 1){#L0{…}}
 ```

@@ -13,7 +13,7 @@ A change under `deploy/` or to the workflow deploys all three; `shared/`, `engin
 
 | Project | Site | Worker |
 |---|---|---|
-| css-physics | built in CI: `src/build3d.py` → `index.html` + `index-N.html` (~35 s) | `css-physics` |
+| css-physics | built in CI: `src/build3d.py` → `index.html` + `index-N.html`, stylesheets in `index/` (~45 s) | `css-physics` |
 | js-minus-js | the committed `dist/js_in_css.xhtml` and its stylesheets `dist/js_in_css/` (`/` redirects to the page); CI warns if `make dist` no longer reproduces them | `js-minus-js` |
 | paint | the committed `site/`, unchanged | `paint` |
 

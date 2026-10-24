@@ -13,7 +13,7 @@ out=$(cd "$out" && pwd)
 
 case "$project" in
   css-physics)
-    # the 16-body page as index.html, linking index-N.html for 8–64 (~35 s, stdlib Python)
+    # the 16-body page as index.html, linking index-N.html for 8–64, their stylesheets in index/ (~45 s, stdlib Python)
     (cd "$root/css-physics" && python3 src/build3d.py "$out/index.html")
     # the face-widgets experiment the pages link to (widgets.html + widgets-tv.webm)
     (cd "$root/css-physics" && python3 experiments/widgets/build.py "$out/widgets.html")
