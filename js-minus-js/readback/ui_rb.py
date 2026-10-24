@@ -15,6 +15,12 @@ Changes from the original:
   - several editors (.ed: #ed, the page's program, then the sample programs), one shown at a time by the picker's radio
     buttons (#pk<i>, each right before its editor in .frame): a hidden editor is display: none, so the line anchors are
     the shown one's, and the per-line checks (:has) look at the editor after the checked radio button.
+  - the REPL's page (repl): no Run. The scan runs again from its start whenever the editor's row count (rows with a sentinel:
+    --rbcnt, a register) differs from the one the sweep started with (nl, taken while the sweep counter is 0), and the
+    sweep's start also takes the lines the compiler may skip, plus one (dn: the line count the last finished run read, the
+    display's --rn, or 0 if the editor now has fewer or a run was going on, --rbz; machine/replui.py). dn is 0 from the moment
+    the sweep stops until the next starts: the frame --ccgo drops in still had the last sweep's value, and a clear for it
+    (dn 1: from line 0) blanked the console of a run that kept it. Its last row, the prompt, isn't read.
 XHTML-safe output.
 """
 import base64, html, subprocess, os, re
@@ -35,12 +41,13 @@ def font_b64(P):
 def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 REGS = ['tp', 'sc', 'sr', 'rd']
+RREGS = REGS + ['nl', 'dn']     # (the REPL's page)
 BLOCKS = ('p, pre, li, h1, h2, h3, h4, h5, h6, blockquote, dt, dd, tr, ul, ol, dl, table, thead, tbody, tfoot, caption, '
           'section, article, header, footer, aside, nav, main, figure, figcaption, address, details, summary, fieldset, '
           'legend, center, form')     # pasted block elements: each shows as a row of its own
 
-def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
-    NG = P // GS; GSW = GS * 10
+def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
+    NG = P // GS; GSW = GS * 10; REGS_ = RREGS if repl else REGS
     # The rows' names (--rbs<k>, rows 0 .. L-1), from the sentinels' view progress in the editor's frame. Rows are 24px
     # from the editor's 12px top padding, and a sentinel's box (16px: the probe font's content area) starts at its row's
     # top, 12 + 24r (measured), so a name changes halfway between two rows' boxes. RX cuts the scrollport to the rows
@@ -52,9 +59,9 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
                                                   for a, b, n in segs) + '\n}'
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
-                          for n in REGS) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
-                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz'))
-    regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS)
+                          for n in REGS_) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
+                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz') + (('rbcnt',) if repl else ()))
+    regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS_ + (['cnt'] if repl else []))
     ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
     g = [lbl.group('Probe font, scan clock and latches', 'the readback font, the scan\'s driver state and the per-row latches')]
     g.append(f"""
@@ -80,10 +87,10 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
    lets the compiler see the text. The latches keep their values. */
 #app {{
   container-name: rbscan;
-  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT;
-  animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both;
-  animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT;
-  animation-range: normal, cover, normal, normal, normal;
+  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT{', --rbnlT, --rbcntT' if repl else ''};
+  animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both{', rbknl auto linear both, rbkdn auto linear both, rbkcnt auto linear both, krn auto linear both, krbz auto linear both' if repl else ''};
+  animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT{', --rbnlT, --rbdnT, --rbcntT, --rnT, --rbzT' if repl else ''};
+  animation-range: normal, cover, normal, normal, normal{', normal' * 5 if repl else ''};
   --rbng: clamp(1, round(up, (10000 * var(--rbp) / (1 - var(--rbp)) - 30) / {GSW}, 1), {NG});
   --rbR: {P};   /* fixed: the editor's width includes the trailing sentinel, whose width is the code being read, so a
                     width-derived range flickers between frames and the scan would skip columns */
@@ -102,7 +109,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
   --rbdet: calc(var(--rbrun) * clamp(0, var(--rbsr) - {SWEEPS * DWELL} * var(--rbR) - 7, 1));    /* a few frames after the compiler took the text */
 }}
 #run:checked ~ #app {{ --rbrun: 1; }}
-#run:checked ~ #app .ed {{ -webkit-user-modify: read-only; opacity: .75; }}
+{repl_run() if repl else ''}#run:checked ~ #app .ed {{ -webkit-user-modify: read-only; opacity: .75; }}
 .rbreg {{ position: absolute; left: 0; top: 0; width: 1px; height: 4096px; overflow: hidden; visibility: hidden; }}
 .rbreg > div {{ display: block; width: 1px; }} .rbreg > .rbsp {{ height: calc(var(--rbin) * 1px); }} .rbreg > .rbsub {{ height: 1px; }} .rbreg > .rbpad {{ height: 4096px; }}
 .width-reader {{ position: absolute; left: 0; bottom: 100%; width: 1px; height: anchor-size(--rbed width, 0px);
@@ -165,9 +172,10 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
 .row i::before {{ content: counter(rbch, rbascii); }}
 """)
     g.append(lbl.group('Line probes: one per editor row', 'probe k is as tall as the sentinel of row k is wide'))
+    # (the REPL's page: row k is read only if row k + 1 is there, so the last row, the prompt, isn't)
     for k in range(L):
-        g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); '
-                 f'width: calc(min(1px, anchor-size(--rbs{k} height, 0px)) * {P * 10}); }}')
+        there = f'min(1px, anchor-size(--rbs{k + repl} height, 0px))' if k + repl < L else '0px'
+        g.append(f'.probe:nth-child({k + 1}) {{ --rbk: {k}; height: anchor-size(--rbs{k} width, 0px); width: calc({there} * {P * 10}); }}')
     g.append('@container rbscan style(--rbrun: 1) { .probe { content-visibility: visible; } }')
     # (:has() on the editors' section with child combinators: on #app it searched ~10,000 elements, per rule and editor,
     # and the picker's eleven editors made a compile ~1.7 s slower. The editor that shows is the one after the checked
@@ -193,10 +201,26 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
     g.append(C.cell_css())
     return '\n'.join(g)
 
-def regs_html():
-    """the scan registers (inside #app). --rbrdT is read outside #app (by the compiler's wrapper), so it is scoped on body."""
+def repl_run():
+    """the REPL's page: the scan runs while the editor's row count (--rbcnt) is the one the sweep started with (the nl register),
+    and a sweep's start takes it and the lines the compiler may skip + 1 (dn: the last finished run's line count, --rn, unless
+    the editor now has fewer lines or a run was going on; 0 while the sweep is stopped)"""
+    return ('#app { --rbrun: calc(1 - min(1, abs(var(--rbcnt) - var(--rbnl))));\n'
+            '  --rbn-nl: calc(var(--rbnl) + (1 - min(1, var(--rbsr))) * (var(--rbcnt) - var(--rbnl)));\n'
+            '  --rbn-dn: calc(var(--rbrun) * (var(--rbdn) + (1 - min(1, var(--rbsr))) * (1 + max(0, var(--rn)) * (1 - clamp(0, var(--rn) - var(--rbcnt) + 1, 1)) * (1 - var(--rbz)) - var(--rbdn)))); }\n')
+
+def rcnt_html(L):
+    """the REPL's page: the editor's row count as a register (inside #app): a box as wide as the rows with a sentinel are many
+    (each 16px tall, an absent one 0), whose register reads its width"""
+    w = ' + '.join(f'min(1px, anchor-size(--rbs{k} height, 0px))' for k in range(L))
+    return (f'<div class="rcntw" style="position: absolute; left: 0; top: 0; height: 1px; visibility: hidden; container-type: inline-size; width: calc({w})">'
+            '<div class="rbreg" style="--rbin: round(100cqi / 1px)"><div class="rbsp"></div><div class="rbsub" style="view-timeline-name: --rbcntT"></div><div class="rbpad"></div></div></div>')
+
+def regs_html(repl=False):
+    """the scan registers (inside #app). --rbrdT is read outside #app (by the compiler's wrapper), so it is scoped on body
+    (and the REPL's --rbdnT: by the compiler's, RAM's and the CPU's wrappers)."""
     return ''.join(f'<div class="rbreg" style="--rbn-{n}: inherit; --rbin: var(--rbn-{n})"><div class="rbsp"></div><div class="rbsub" style="view-timeline-name: --rb{n}T"></div><div class="rbpad"></div></div>'
-                   for n in REGS)
+                   for n in (RREGS if repl else REGS))
 
 def editor_html(text):
     """the first line straight in the editor (line 0, after #ed::before), every other line in its own div. (Enter in

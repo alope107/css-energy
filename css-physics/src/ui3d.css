@@ -150,6 +150,10 @@ header a{color:var(--acc)}
 .grp input:checked+label{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
 .grp input:focus-visible+label{outline:2px solid var(--acc);outline-offset:2px}
 .grp label:active,.grp button:active{transform:translateY(1px);border-color:var(--acc)}
+/* the body counts are links to each count's page */
+.counts a{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:4px 10px;text-decoration:none}
+.counts a.on{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
+.counts a:hover{border-color:var(--dim)}
 .hint{color:var(--dim);margin:6px 0 0}
 .nosda{display:none;margin:0 0 12px;padding:8px 12px;border:1px solid var(--acc);border-radius:4px}
 @supports not (animation-timeline: --a){.nosda{display:block}}
@@ -159,9 +163,8 @@ footer code{color:var(--ink)}
 .artfx{position:absolute;width:0;height:0;overflow:hidden}
 
 /* === Engines: shared wrappers, pointer and controls state === */
-/* engines: one complete solver per body count; the unselected ones are display:none, so the
-   style engine never looks at them */
-.eng{position:absolute;inset:0;display:none;pointer-events:none}
+/* the engine: one complete solver for this page's body count (each count is its own page) */
+.eng{position:absolute;inset:0;pointer-events:none}
 .ini,.ptr{position:absolute;inset:0}
 /* the pointer and the camera live on .ptr (below the scene's initial values on .ini), so moving
    the mouse or orbiting the camera doesn't recompute the start positions of every body */

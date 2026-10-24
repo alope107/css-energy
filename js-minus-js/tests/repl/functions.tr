@@ -1,0 +1,34 @@
+> function sq(x) {
+...   return x * x
+... }
+undefined
+> sq(9)
+81
+> sq
+[Function: sq]
+> var add = (a, b) => a + b
+undefined
+> add(2, 3)
+5
+> (function () { return "iife" })()
+'iife'
+> [1, 2, 3]
+[ 1, 2, 3 ]
+> function Pt(x, y) { this.x = x; this.y = y }
+undefined
+> new Pt(1, 2).y
+2
+> var mk = function (n) {
+...   return function () { return n + 1 }
+... }
+undefined
+> mk(41)()
+42
+> var p = {
+...   name: "p",
+...   hi: function () { return "hi " + this.name }
+... }
+undefined
+> p.hi()
+'hi p'
+>

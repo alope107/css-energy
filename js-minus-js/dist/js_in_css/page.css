@@ -16,6 +16,7 @@
   .regs { height: 0; overflow: hidden; }
   .reg { position: relative; overflow: hidden; width: 1px; }
   .sub { position: absolute; left: 0; width: 1px; height: 1px; }
+  .rcons { display: none; position: fixed; left: 0; top: 0; width: 1px; height: 1px; contain: strict; }
   .cons { position: fixed; left: 16px; top: 16px; width: 115px; height: 336px; contain: strict; }
   .con { position: absolute; inset: 0; background: #151515; border-radius: 6px; }
   .oc { position: fixed; height: 20px; container-type: inline-size; visibility: hidden; font: 16px/20px ui-monospace, monospace; color: #eee; }

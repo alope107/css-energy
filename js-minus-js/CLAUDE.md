@@ -2,7 +2,8 @@
 
 JavaScript compiled and run by CSS. `dist/js_in_css.xhtml` is a static page (its stylesheets in `dist/js_in_css/`):
 CSS reads back the text typed into its editor (or a sample picked above it), CSS compiles it to register code, and a
-CPU made of style rules executes it, a chain of instructions per layout pass. (Until 2026-10-21 the machine was a stack machine, last at `212175a`; until
+CPU made of style rules executes it, a chain of instructions per layout pass. `dist/repl.xhtml` (its stylesheets in `dist/repl/`) is a REPL on the same
+machinery. (Until 2026-10-21 the machine was a stack machine, last at `212175a`; until
 2026-10-19 the CPU was a GSUB font run while Chrome shaped text, last at `181cbb7`.)
 `README.md` has the language, limits and error codes; `docs/` has ARCHITECTURE (how it works), ENGINE_NOTES (the
 Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead ends, open leads).
@@ -29,6 +30,7 @@ make l3              # the generated CSS compiler in Chrome vs the reference (~4
 make l5-smoke        # the real page typed like a user, 6 programs + 2 errors (~30 s)
 make l5              # every program under 1,500 steps (~5.5 min; run in the background)
 make l5-input        # the editor under user input: edits, pastes, selection (~30 s)
+make l5-repl         # the REPL's page (build/repl.xhtml): each tests/repl session typed, its transcript vs Node's REPL's (~2 min)
 make c2              # a CPU-only page per program under 1,500 steps runs to HALT (~30 s)
 make c2-all          # the same for every program, the collector tests too (~5 min; before merging a runtime change)
 node tests/picker.js build/js_in_css.xhtml [sample...]   # the sample picker on the page (default: three quick ones)
@@ -63,9 +65,11 @@ compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same 
            mkimage.py (machine images: the page's, or `--ram` with the program in RAM)
 machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compiler)  csssim.py (its pass-by-pass model)
            cssref.py (the ISA as a stepper)  memtree.py (RAM)  uipage.py (editor page parts)  uarch.py (ISA constants)
+           replui.py (the REPL's page: its gating, its kept state and its display over the editor)
            ui_seq.js halttime.js trace.js (browser harnesses)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
+           repl/*.js + .out .tr (REPL sessions; Node's REPL, repl_expect.js, is their oracle)  repl_ui.js (the REPL on the page)
            picker.js (the sample picker on the page)
 samples/   the picker's programs (at most 24 lines, the editor's; output = Node's, 9 columns)
 tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof.py (passes by ROM routine)
@@ -139,7 +143,8 @@ net/       server.js (web server + network gateway: the modem's documents and pr
 ## Done means
 
 - `make test` passes; `make l3` and `make fuzz` for any compiler change; `make l5-smoke` for any change that reaches
-  the page; `make l5-net` for any change to `NET`, the modem (`gen_css.py`'s net class and slot) or `net/`.
+  the page, and `make l5-repl` for one that reaches the REPL (the compiler's REPL mode, the console, the scan,
+  `replui.py`); `make l5-net` for any change to `NET`, the modem (`gen_css.py`'s net class and slot) or `net/`.
 - `dist/` is rebuilt if the page changed.
 - Measured effects are in `docs/BENCHMARKS.md`; new Chrome behaviour is in `docs/ENGINE_NOTES.md`.
 - Paste the tests' summary lines as evidence; don't just say they pass.
@@ -181,6 +186,17 @@ net/       server.js (web server + network gateway: the modem's documents and pr
   `212175a`.
   The font CPU (`gen_fvm4.py`, `cpu4.py`, `cpugen.py`, `otl.py`, `fvm_build.py`, `uarch4.py`, `hbtest.py`, `traps.py`, L4)
   last exists at `181cbb7`.
+- The REPL (ARCHITECTURE §3.10) is a page of its own (`build/repl.xhtml`, `UI=1 REPL=1`) and a mode of the same
+  compiler: `cc_ref.Compiler(repl=True, rdone=…)` and the DSL's `repl` / `rdone` inputs change together like the rest,
+  and L1, L2 and C1 run `tests/repl` in that mode (a directory named `repl`), replayed and typed a line at a time (each
+  run on the memory the last left). It relies on the compiler being one pass: lines already run must compile to the
+  same code, strings and globals, or the kept RAM means something else. Its CPU writes the cache back once halted
+  (csssim `flush_pass`). A REPL test is a session Node's REPL can run (no timers, no uncaught errors; `make expect`
+  writes its `.out` and `.tr`). `WAIT=1 node tests/repl_ui.js build/repl.xhtml tests/repl/x.js` types it as a user
+  would, waiting for each entry's run.
+- The console's RAM is `console_words` (1,536): its trees decode in radix 4 only if each bank's leaves are a small number
+  times a power of 4 (384 = 6 × 4³). A size like 1,312 made a radix-82 level that every console write restyles: +17.6%
+  on FizzBuzz (BENCHMARKS §20). The grid's size is the CPU's `--ocols` / `--osize` on the editor page.
 - The network (`NET`, ARCHITECTURE §3.8): the gateway's words exist four times, `net/server.js` (the page),
   `net/device.py` (cc_ref, csssim, the fuzzer), `net/shim.js` (Node) and `lib_src.js`; change them together.
   The modem's answer is a fragment scroll, which crosses same-origin documents only: keep the modem on the page's

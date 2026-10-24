@@ -101,6 +101,28 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   strings skip `prim`, a name skips `canint`: steps −6.6%); and the picker's radio buttons moved next to their editors,
   so one set of readback rules serves all thirteen (`.pkr:checked + .ed`; per editor they had cost ~10% of a compile).
   Two tests from the start, `fn_in_block` and `nested_function`, became programs: the branch compiles them.
+- **18, the REPL (2026-10-24, branch `repl`, from `lxym`).** A chip that turns the editor into a Node-style session:
+  Enter runs it, and each entry's output and value show under it (ARCHITECTURE §3.10, README REPL). No script presses
+  Run, so the page sees the editor's line count change (`:has`) and restarts the scan; CSS keeps no machine state
+  between runs, so each Enter replays the whole session. The compiler got a REPL mode (entries end where a top-level
+  statement starts a line: an echo of the entry's value, and a mark of where the output stands), the console a larger
+  grid for the REPL and the marks, and the display latches what the last finished run showed. Then (the same day) a
+  page of its own, which keeps the machine's state: Enter still reads and compiles the whole session, but the run
+  starts at the first entry after the lines the last run read (the compiler's `rdone`, its start `--ccstart`), on the
+  RAM that run left. That took three things the replay didn't need: the CPU writes its cache back once halted (a line
+  a pass; a new run's CPU starts with an empty cache), the console's cursor starts at the last end mark, and the
+  compiler is one pass, so lines already run compile to the same addresses. A session with fewer lines, or whose Enter
+  came while a run was going (part of an entry's writes may be in RAM), runs from its start on cleared RAM. Two traps
+  on the way: lxym's editor names rows by where their sentinels show, and moving the lines down for the output with
+  `position: relative` moved the names too (ENGINE_NOTES 81: a transform doesn't); and in the frame Enter drops the
+  compiler, the scan's 'run from line 0' flag still held the last sweep's value, which cleared a kept console.
+  A CSS CPU bug surfaced on the way. The echo's cell moved every global a word, and the bank sample printed `wd ??`:
+  `ops[i]` read a word of the wrong array. On the page an instruction makes all its reads at once and keeps (latches)
+  the ones that hit for its re-execution, a read only if the reads its address came from hit too; but GETX's element
+  `e` (address from `z`, the array's header, whose address is from `x`) checked `z`'s miss, not `x`'s. With `x` missing,
+  `z` and `e` were read at garbage addresses that hit, and `e` was kept. csssim reads in order and stops at the first
+  miss, so it never did. A read is good now only if every read its address came from was, transitively
+  (`tests/suite/latch_chain.js` fails without it).
 
 ## Dead ends and superseded approaches
 
@@ -140,7 +162,7 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 32 | Readers with value, scroller, spacer and pad per size container | ~1,300 restyles inside layout per pass | one scroller, positioned subjects |
 | 33 | 3 or 4 issues per frame | wrong output | 2 issues |
 | 34 | Code / data cache partition (model) | suite shapings +5% | one ring |
-| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K (2026-10-24: likely an unmasked address; masked, with explicit `inherit`, only the paths restyle: `exp/ram`, ENGINE_NOTES 79) | sparse RAM groups |
+| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K (2026-10-24: likely an unmasked address; masked, with explicit `inherit`, only the paths restyle: `exp/ram`, ENGINE_NOTES 82) | sparse RAM groups |
 | 36 | 13-bit addresses, ROM 0 … 4095 for a 93-word lib | RAM capped at 4K words | 15-bit, 1K ROM |
 | 37 | Object instructions with 3-way selectors everywhere | 531 subtables per cycle; export dropped | gated rule groups, merged digits |
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
@@ -184,6 +206,13 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 76 | The lexer's `this` / `new` test on one combined hash (h1 × 65519 + h2) | exact in Python (L2 passed), but a registered integer keeps 6 significant digits (ENGINE_NOTES 2): the page took `this` for a name | each half compared |
 | 77 | GETP's string trap with its arguments in its frame at A | the frame (and the routine's locals) overwrite the slot above A, a method call's `this` | no arguments (the key decoded from the instruction) and one unused parameter (the locals start a slot higher) |
 | 78 | Inner functions' calls through the library's `callv` every time | closure_gc +5% passes, func_expr +15% after `this` added cases to `callv` | open lead: a CALLV fast path for them |
+| 79 | A 40 × 32 console for every program | FizzBuzz +24% on the page: the console box lays out every reader on each write | the grid's size a property: 9 × 16 for a program, 40 × 32 for the REPL |
+| 80 | The console's RAM as 1,312 words (the REPL's grid and its marks) | its trees decoded in radix 82 × 4: every console write restyled 82 group nodes per bank, FizzBuzz's CPU-only page +17.6% | 1,536 words, radix 6 × 4 × 4 × 4 |
+| 81 | The REPL's latches gated by an animated property in the transition's delay | no transition ever started (ENGINE_NOTES 79): Enter blanked the transcript | the gate as a container style query |
+| 82 | A newline token's line as a property of each line's compile levels (`--lnum`, inline or on the line source) | the levels of different lines no longer shared Chrome's matched properties cache: FizzBuzz compiled 29% slower | the line added where the token is written (`.trl<k>`), only on the REPL |
+| 83 | The REPL's line count from 24 `#app:has()` rules | `#app` restyles every frame of the scan: a program's compile +1% | `.pane:has()` into a register |
+| 84 | The REPL as a chip in the program page's picker, replaying the session on each Enter | programs compiled ~6% slower for the REPL's page parts; an entry cost the whole session's run (13 s at 19 lines) | a page of its own that keeps the machine's state (ARCHITECTURE §3.10) |
+| 85 | The REPL's output room opened by moving the lines with `position: relative` | the rows' names (their sentinels' view progress) moved with the lines: the probes read the wrong rows (ENGINE_NOTES 81) | `transform: translateY()` |
 
 ## Open leads (untried)
 

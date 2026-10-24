@@ -24,10 +24,10 @@ groups that are live from the start.
 import os
 GROUP = int(os.environ.get("MEMGROUP", 256))    # leaves per group (words of one bank: 4 x this of address space); 256 measured best
 
-def group_level(R):
-    """the tree level whose nodes become groups: the deepest level with at least GROUP leaves below it"""
+def group_level(R, group=None):
+    """the tree level whose nodes become groups: the deepest level with at least GROUP (or group) leaves below it"""
     S = _strides(R)
-    return max([l for l in range(len(R)) if S[l] >= GROUP] or [0])
+    return max([l for l in range(len(R)) if S[l] >= (group or GROUP)] or [0])
 
 def radix(n):
     r = []
@@ -39,28 +39,32 @@ def _strides(R):
     for l in range(len(R) - 2, -1, -1): S[l] = S[l + 1] * R[l + 1]
     return S
 
-def css(CH, wregs, n, WOFF, prefix='', ni=False, reads=None):
-    """CH: channel letters; wregs: {name: (H, OFF)} for wa{prefix}*/wd{prefix}*; n: cells in this tree. Returns (props, rules).
+def css(CH, wregs, n, WOFF, prefix='', group=None, chan=None, bound=False, ni=False, reads=None):
+    """CH: channel letters; wregs: {name: (H, OFF)} for wa{chan}*/wd{chan}*; n: cells in this tree; group: leaves per group
+    (default GROUP; html() must get the same). chan: the channels' prefix, if another tree already has them (its registers are
+    then registered and their keyframes made: this tree only reads them); bound: a write past this tree's cells is none of
+    its (a smaller tree over the first cells of another's channels). Returns (props, rules).
     ni: the trees' properties don't inherit; each node takes its parent's parity by explicit inherit, so a node whose
-    computed values didn't change stops the restyle at its children (ENGINE_NOTES 79). reads: {q: (enable, leaf index)},
+    computed values didn't change stops the restyle at its children (ENGINE_NOTES 82). reads: {q: (enable, leaf index)},
     expressions on #mem<prefix>: read paths down the same tree; the leaf at the index (if enabled) is named --r<q><prefix>
     (an unnamed leaf: html()'s named; a named leaf keeps its own name)."""
-    R = radix(n); D = len(R); S = _strides(R); p = prefix; reads = reads or {}
+    R = radix(n); D = len(R); S = _strides(R); p = prefix; q = prefix if chan is None else chan; reads = reads or {}
     inh = "false" if ni else "true"
     reg = lambda nm, inh: f'@property --{nm} {{ syntax: "<integer>"; inherits: {inh}; initial-value: 0; }}'
-    props = [reg(f"m{nm}", "false") for nm in wregs]
+    props = [reg(f"m{nm}", "false") for nm in wregs] if chan is None else []
     props += [reg(f"{x}{p}{c}{P}", inh) for c in CH for P in "AB" for x in "ead"]
-    props += [reg(f"r{p}{q}{x}{P}", inh) for q in reads for P in "AB" for x in "ea"]
+    props += [reg(f"r{p}{rq}{x}{P}", inh) for rq in reads for P in "AB" for x in "ea"]
     def take(P, cell=False):
         """ni: a node's explicit inherit of its parent's parity P (a leaf takes the write enables and data only)"""
         if not ni: return ""
         return " ".join([f"--{x}{p}{c}{P}: inherit;" for c in CH for x in ("ed" if cell else "ead")] +
-                        ([] if cell else [f"--r{p}{q}{x}{P}: inherit;" for q in reads for x in "ea"]))
-    out = [f"@keyframes m-{nm} {{ from {{ --m{nm}: {H - OFF}; }} to {{ --m{nm}: {-1 - OFF}; }} }}" for nm, (H, OFF) in wregs.items()]
+                        ([] if cell else [f"--r{p}{rq}{x}{P}: inherit;" for rq in reads for x in "ea"]))
+    out = [f"@keyframes m-{nm} {{ from {{ --m{nm}: {H - OFF}; }} to {{ --m{nm}: {-1 - OFF}; }} }}" for nm, (H, OFF) in wregs.items()] if chan is None else []
+    on = lambda c: f"clamp(0, {n + 1} - var(--mwa{q}{c}), 1)" if bound else "1"
     out.append(f"#mem{p} {{ animation-name: " + ", ".join(f"m-{nm}" for nm in wregs) + "; animation-timeline: " + ", ".join("--" + nm for nm in wregs) +
                "; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both;\n  " +
-               " ".join(f"--e{p}{c}A: min(1, var(--mwa{p}{c})); --a{p}{c}A: max(0, calc(var(--mwa{p}{c}) - 1)); --d{p}{c}A: var(--mwd{p}{c});" for c in CH) +
-               "".join(f" --r{p}{q}eA: {e}; --r{p}{q}aA: {a};" for q, (e, a) in reads.items()) + " }")
+               " ".join(f"--e{p}{c}A: calc(min(1, var(--mwa{q}{c})) * {on(c)}); --a{p}{c}A: max(0, calc(var(--mwa{q}{c}) - 1)); --d{p}{c}A: var(--mwd{q}{c});" for c in CH) +
+               "".join(f" --r{p}{rq}eA: {e}; --r{p}{rq}aA: {a};" for rq, (e, a) in reads.items()) + " }")
     for l in range(D):
         X, Y = ("A", "B") if l % 2 == 0 else ("B", "A")
         decl = []
@@ -68,32 +72,35 @@ def css(CH, wregs, n, WOFF, prefix='', ni=False, reads=None):
             dig = f"mod(round(down, var(--a{p}{c}{X}) / {S[l]}), {R[l]})"
             decl.append(f"--e{p}{c}{Y}: calc(var(--e{p}{c}{X}) * (1 - min(1, max({dig} - var(--dg), var(--dg) - {dig}))));"
                         f" --a{p}{c}{Y}: calc(var(--e{p}{c}{Y}) * var(--a{p}{c}{X})); --d{p}{c}{Y}: calc(var(--e{p}{c}{Y}) * var(--d{p}{c}{X}));")
-        for q in reads:
-            dig = f"mod(round(down, var(--r{p}{q}a{X}) / {S[l]}), {R[l]})"
-            hit = f"calc(var(--r{p}{q}e{X}) * (1 - min(1, max({dig} - var(--dg), var(--dg) - {dig}))))"
-            if l < D - 1: decl.append(f"--r{p}{q}e{Y}: {hit}; --r{p}{q}a{Y}: calc(var(--r{p}{q}e{Y}) * var(--r{p}{q}a{X}));")
-            else: decl.append(f"--mr{q}: {hit};")
+        for rq in reads:
+            dig = f"mod(round(down, var(--r{p}{rq}a{X}) / {S[l]}), {R[l]})"
+            hit = f"calc(var(--r{p}{rq}e{X}) * (1 - min(1, max({dig} - var(--dg), var(--dg) - {dig}))))"
+            if l < D - 1: decl.append(f"--r{p}{rq}e{Y}: {hit}; --r{p}{rq}a{Y}: calc(var(--r{p}{rq}e{Y}) * var(--r{p}{rq}a{X}));")
+            else: decl.append(f"--mr{rq}: {hit};")
         if reads and l == D - 1:
-            decl.append("anchor-name: if(" + " ".join(f"style(--mr{q}: 1): --r{q}{p};" for q in reads) + " else: none);")
+            decl.append("anchor-name: if(" + " ".join(f"style(--mr{rq}: 1): --r{rq}{p};" for rq in reads) + " else: none);")
         out.append(f".L{p}_{l} {{ {take(X)} {' '.join(decl)} }}")
     Z = "B" if D % 2 == 1 else "A"
     out.append(f".cell{p} {{ {take(Z, cell=True)} --hit: calc(" + " + ".join(f"var(--e{p}{c}{Z})" for c in CH) + "); --wv: calc(" + " + ".join(f"var(--e{p}{c}{Z}) * var(--d{p}{c}{Z})" for c in CH) + ");\n"
-               f"  content-visibility: if(style(--hit: 1): visible; else: hidden); width: if(style(--hit: 1): calc((var(--wv) + {WOFF}) * 1px); else: fit-content); }}")
+               f"  content-visibility: if(style(--hit: 1) or style(--rclr: 1): visible; else: hidden);"
+               f" width: if(style(--rclr: 1): var(--rclw, {WOFF}px); style(--hit: 1): calc((var(--wv) + {WOFF}) * 1px); else: fit-content); }}")
     # groups: the node at level G sees a write to its subtree as one of its own channel enables; the latch holds it forever
-    G = group_level(R); YG = "B" if G % 2 == 0 else "A"
+    G = group_level(R, group); YG = "B" if G % 2 == 0 else "A"
     # (min: two channels may reach the group in one pass, and display: if(style(--live: 1)) must still match)
     if ni: out.append(f".gc{p} {{ {take(YG)} }}")     # the group's wrapper passes the group node's parity on
     out.append(f".g{p} {{ --wnow: min(1, calc(" + " + ".join(f"var(--e{p}{c}{YG})" for c in CH) + ")); --live: var(--wnow);"
                f" transition: --live 0s calc((1 - var(--wnow)) * 1000000s); }}")
     return props, out
 
-def html(ram, cells, WOFF, prefix='', live=None, named=None):
+def html(ram, cells, WOFF, prefix='', live=None, group=None, cg=(), named=None):
     """cells: global RAM indices in this tree, in tree order (leaf i of the tree = cells[i]). live: cells whose groups are
-    rendered from the start (None: all groups; a set: only the groups holding one of these). named: the cells whose leaf
-    is the anchor --c<cell> (None: all; the others are read through css()'s read paths)."""
-    R = radix(len(cells)); D = len(R); S = _strides(R); p = prefix; G = group_level(R)
+    rendered from the start (None: all groups; a set: only the groups holding one of these). group: as css()'s. cg: cells
+    that get the class cg too (a page's own clearing value, --rclw). named: the cells whose leaf is the anchor --c<cell>
+    (None: all; the others are read through css()'s read paths)"""
+    R = radix(len(cells)); D = len(R); S = _strides(R); p = prefix; G = group_level(R, group)
+    cg = set(cg)
     nm = lambda c: f' style="anchor-name: --c{c}"' if named is None or c in named else ''
-    leaf = lambda i, cls: (f'<div class="w{cls}"{nm(cells[i])}><i class="cell cell{p} c{cells[i]}" '
+    leaf = lambda i, cls: (f'<div class="w{cls}"{nm(cells[i])}><i class="cell cell{p} c{cells[i]}{" cg" if cells[i] in cg else ""}" '
                            f'style="contain-intrinsic-size: auto {ram[cells[i]] + WOFF}px"></i></div>')
     def tree(l, base):
         if l == D - 1: return "".join(leaf(base + x, f" L{p}_{l} d{x}") for x in range(R[l]))
@@ -109,7 +116,9 @@ def html(ram, cells, WOFF, prefix='', live=None, named=None):
 def shared():
     """Rules every tree uses (emit once)."""
     reg = lambda nm: f'@property --{nm} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
-    return ([reg(nm) for nm in ("dg", "hit", "wv", "wnow", "mrx", "mry")] + ['@property --live { syntax: "<integer>"; inherits: true; initial-value: 0; }'],
+    # --rclr: 1 clears a cell (to --rclw, its width; WOFF: 0), as a page wants it (the REPL: while its scan runs)
+    return ([reg(nm) for nm in ("dg", "hit", "wv", "wnow", "mrx", "mry")] + ['@property --live { syntax: "<integer>"; inherits: true; initial-value: 0; }',
+             '@property --rclr { syntax: "<integer>"; inherits: true; initial-value: 0; }'],
             [f".d{x} {{ --dg: {x}; }}" for x in range(16)] + [".tn { display: contents; }", ".tn.gn { display: block; height: 0; }",   # a group node has a box: its --live transition (the latch) must run
              ".tn.glive { --live: 1; transition: none; }",   # two classes: wins over the per-bank .g<p> rule; no latch delay on the initial 0 -> 1
                                                            ".gc { display: if(style(--live: 1): contents; else: none); }"])

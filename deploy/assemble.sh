@@ -13,14 +13,15 @@ out=$(cd "$out" && pwd)
 
 case "$project" in
   css-physics)
-    # the 16-body page as index.html, linking index-N.html for 8–64 (~35 s, stdlib Python)
+    # the 16-body page as index.html, linking index-N.html for 8–64, their stylesheets in index/ (~45 s, stdlib Python)
     (cd "$root/css-physics" && python3 src/build3d.py "$out/index.html")
     # the face-widgets experiment the pages link to (widgets.html + widgets-tv.webm)
     (cd "$root/css-physics" && python3 experiments/widgets/build.py "$out/widgets.html")
     ;;
   js-minus-js)
-    # dist/ is the released page and its stylesheets (make page && make l5-smoke, then make dist); serve it at /
+    # dist/ is the released pages and their stylesheets (make page && make l5-smoke, then make dist); serve the program's at /
     cp -R "$root/js-minus-js/dist/js_in_css.xhtml" "$root/js-minus-js/dist/js_in_css" "$out/"
+    cp -R "$root/js-minus-js/dist/repl.xhtml" "$root/js-minus-js/dist/repl" "$out/"     # the REPL's page, which the program page links to
     printf '/ /js_in_css.xhtml 302\n' > "$out/_redirects"
     ;;
   paint)

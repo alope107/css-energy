@@ -44,8 +44,8 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 12289 | the global object (`GCELL`: `this` outside a method, `window`; made the first time, NUMLIT word1 −1) | the program |
 | 12290 … 12293 | implicit globals (`IMPC`, 4: names read or assigned before any declaration) | the program |
 | 12294 … 12309 | `FCACHE`: the 16 functions' values, made the first time a name is read as a value | the program |
-| 12310 … 12312 | the timers' queue (`TCELL`), `Math.random`'s state (`RCELL`), `String.prototype` (`SPCELL`) | the library |
-| 12313 … 12543 | globals (231 words; a double literal's cache takes one) | the program |
+| 12310 … 12313 | the timers' queue (`TCELL`), `Math.random`'s state (`RCELL`), `String.prototype` (`SPCELL`), the REPL's entry value (`ECELL`) | the library, the REPL's statements |
+| 12314 … 12543 | globals (230 words; a double literal's cache takes one) | the program |
 | 12544 | `STR0`: the empty marker; then `FTAB` (16 words: each function's body pair + 8192 × (its parameters + 16 if it is an inner function)) | compiler overlays |
 | 12561 … 13311 | strings and property names, `[length][bytes…][0]` each (768 words with `FTAB`) | compiler overlays (the length: the parser) |
 | 13312 … 14334 | code (`code_base`, 1,023 words: 511 instructions) | compiler overlays |
@@ -53,9 +53,9 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 14336 … | `bstr`: the built-in strings (the specials' names, `typeof`'s), 12 words apart | compiler `.fin` |
 | 14591 | `strend`: the string area's end | compiler `.fin` |
 | 14592 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 14640 (`map_base`) and its powers of two; the FPU's 14 scratch number lines at 14720 (`fpu_base`) and its digit buffer | instructions, ROM routines |
-| 14848 … 22383 | stack (`sp0`) | program |
-| 22384 … 28527 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ALLOC, the cat class, ROM routines, the collector |
-| 28528 … 28671 | console: the last `cols × rows` = 144 words | output instructions |
+| 14848 … 20991 | stack (`sp0`, 6,144 words) | program |
+| 20992 … 27135 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ALLOC, the cat class, ROM routines, the collector |
+| 27136 … 28671 | console (`console_words`, 1,536): the grid, `cols × rows` = 9 × 16 from its start (the REPL's `repl_cols × repl_rows` = 40 × 32), then the REPL's 32 marks from +1,280 (§3.10) | output instructions; marks: PUTC with A > 0 |
 
 Every global word (12289 … 12543) starts `undefined` in the images (`cc_ref.GINIT`; NUMLIT's caches take undefined
 for 'not made yet'), and on the page their RAM groups are live from the start (they hold a value before any write), so
@@ -493,6 +493,63 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 
 ---
 
+### 3.10 The REPL (`machine/replui.py`, 2026-10-24)
+
+The REPL is a page of its own (`repl.xhtml`, `gen_css.py` with `UI=1 REPL=1`): one editor, run by Enter. Each Enter
+compiles the whole session again, but runs only the entries after the lines the last run read, on the memory that run
+left.
+
+- **Enter.** The editor's row count is a register (`--rbcnt`: a box as wide as the rows with a sentinel are many, each
+  sentinel 16px tall and an absent row's anchor-size 0, read through 100cqi); a scan register (`nl`) takes the count each
+  sweep starts with, and while they differ the sweep counter is held at 0 (`ui_rb.repl_run`). So a new line restarts the
+  scan, which drops `--rbrd` and `--ccgo`: the compile chain and the CPU go away (its registers restart). The editor stays
+  editable; its last row, the prompt, isn't read (probe k reads only if row k + 1 is there).
+- **What the run skips.** A sweep's start also takes `dn` = 1 + the lines the compiler may skip (0 from the moment the
+  sweep stops: in the frame `--ccgo` dropped `dn` still held the last sweep's value, and a clear for it blanked a kept
+  console). They are the line count the last finished run read (the display's latched `--rn`), or none if the editor now
+  has fewer lines, or if the scan started while a run was going (`--rbz`, a latch from the CPU's start, `ccok`, to its
+  end, `hdone`: that run may have written part of an entry, through evictions). Then the latched count is forced to 0 too
+  (`--rres`), so a session that doesn't compile after it starts over as well.
+- **The compiler's REPL mode** (`cc_ref.Compiler(repl=True, rdone=…)`, the DSL's inputs `repl` and `rdone`, `--repl` and
+  `--rdone` on `#ccw`). The lexer leaves every newline pending, not only one after a token that can end a statement, and a
+  line that starts with `(` `[` `+` `-` starts a statement (`CONTR`); each `T_NL` carries the line its next token is on
+  (`th1`: on the page each newline level's `.trl<k>`). A `T_NL` that leaves the parser at a top-level statement start (no
+  control entry, no function) ends the entry before that line (`entry_end`): `CALL echo` if any token came since the last
+  end (`rpend`), then `PUTC` with A = 1 + the line, a mark. An `if` waiting for `else` there ends. The first such end
+  before a line ≥ `rdone` (between the echo and the mark; else the program's end) is where the run starts: the parser's
+  `rst` (an instruction pair's index), which `.fin` publishes as `--ccstart` and the CPU reads (`ccpc`) for its first
+  pass (`init` stays 0 until the compiler is done). The compiler is one pass, so the lines already run compile to the same
+  code, strings and globals each time, and what RAM holds still means what it meant. Top-level expression statements,
+  assignments and `++` / `--` statements copy their value into `ECELL` (`echo_val`); the library's `echo` prints it as
+  Node's REPL does (`insel`: strings quoted) and resets it to `undefined`. The program's end writes the end mark
+  (`MARKEND`) after the timers; so does every library halt (`halt()` is `PUTC` end mark, `HALT`), so a run-time error
+  ends a run too.
+- **Memory kept.** RAM is cleared (the globals to `undefined`, `--rclr`, memtree.py) only while the scan of a run from line
+  0 runs. The data cache is write-back, and a new run's CPU starts with an empty one: so once halted, the REPL page's CPU
+  writes its dirty lines back, the last one each pass through the fill's write set (`xk1`; csssim `flush_pass`), and
+  `hdone` (halted, no dirty line at the chain's end) says when it is done. The console's cursor starts at the latched end
+  mark − 1 (`--optr0`; 0 for a run from line 0).
+- **Marks.** `PUTC A, #0` with A > 0 writes the output position + 1 (optr + 1) into console cell `1280 + A − 1`, in the
+  console's write set, and leaves optr; the out class's `--pmk` / `--pmo` pick that cell and its bank (csssim: `('mark', k)`).
+  Marks go through the console's channels because the page reads RAM leaves, and the console isn't cached. The console is
+  1,536 words, its banks 384 leaves (radix 6 × 4 × 4 × 4, groups of 16): with 1,312 the trees were radix 82 × 4, and every
+  console write restyled 82 group nodes per bank, which made FizzBuzz's CPU-only page 17.6% slower (BENCHMARKS §20). The
+  program page renders only its grid's trees. The grid's size is a property, `--ocols` × `--osize`, which the out class
+  reads: 9 × 16 for a program, 40 × 32 for the REPL.
+- **The display.** Readers must share a containing block with the leaves they read, so the REPL's are in the console box,
+  which lies over the editor (`position: absolute`, anchored to the editor's `--rbed`). They latch: a reader's value is
+  −1 while the gate is shut, and a 1,000,000 s transition keeps showing the last one; the gate is a container query,
+  `style(--rg: 1) and style(--ccgo: 1)` (a change an animation makes doesn't start a transition: ENGINE_NOTES 79), where
+  `--rg` is a register of `--ccgo` × `hdone` (the end mark can't say a run ended: the last run's stays in RAM). It shuts
+  with `--ccgo` and opens a frame after the write-back: so Enter doesn't blank the transcript, and a session that doesn't
+  compile keeps the last one. The latched marks and the line count the run read (`--rcl`, from `nl` less the prompt) are
+  registers (view timelines scoped on body), animated onto the display (`.rdisp`) and onto the editor's frame. From them:
+  `t_L`, the rows before line L's entry (a running maximum over the marks' rows: a line without a mark goes on an entry),
+  and the end's rows. Line L (the editor's L-th div; line 0 is its own text) moves down by the rows above it with a
+  transform: the rows' names come from their sentinels' view progress, which a transform doesn't move and
+  `position: relative` on the line does (ENGINE_NOTES 81). Row r shows above line `L(r) = #{L < n : t_L ≤ r}`, at
+  y = 12 + 24 (r + L(r)); a prompt is `>` where an entry starts (a mark, and line 0) and `...` where one goes on.
+
 ## 4. Editor readback (`readback/ui_rb.py`)
 
 - The editors use the AsciiProbe font (`mkfont2.py`): axis `SCAN = j + 1` activates, through FeatureVariations,
@@ -558,8 +615,8 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 ## 6. Build
 
 ```
-make page   # compiler/lib.json (if lib_src.js or cc_ref.py changed) -> build/ccimg.json -> build/js_in_css.xhtml
-make dist   # copy it and its stylesheets (build/js_in_css/) to dist/
+make page   # compiler/lib.json (if lib_src.js or cc_ref.py changed) -> build/ccimg.json -> build/js_in_css.xhtml, build/repl.xhtml
+make dist   # copy them and their stylesheets (build/js_in_css/, build/repl/) to dist/
 ```
 
 - The page's CSS is in 16 stylesheets in `build/js_in_css/`, which the page links in cascade order (`gen_css.py`
@@ -570,12 +627,13 @@ make dist   # copy it and its stylesheets (build/js_in_css/) to dist/
   a family (the build fails until it has one), and split a family that outgrows the limit. A rule shared by modes of two
   families (S_ABODY's with S_OPND's) goes in its lowest mode's, the one the others rename. The variants sit in their
   families' sections, not in the order they were built; that is safe because each (mode, token code) has one rule
-  (asserted). The tokens that change nothing come before all of them, in `parser`.
+  (asserted). The tokens that change nothing come before all of them, in `parser`. The REPL's page (§3.10) has its own
+  directory of sheets (`build/repl/`), with a `repl` sheet after `scan`.
 
 - Reproducible (the Makefile pins `PYTHONHASHSEED` and `SOURCE_DATE_EPOCH`). The image (`mkimage.py tests/fizz.js`)
   supplies the ROM and the editor's initial program; `samples/*.js` the picker's.
 - The compile chain's ~1,000 parser variants are built on every CPU (`JOBS`), and the chain is reused while the
   compiler doesn't change (`build/ccpage5/`, §5): a page takes ~7 s, or under a second after a machine-only change.
-- `gen_css.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
+- `gen_css.py`: `UI=1` builds the product page (`REPL=1` too: the REPL's); `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
   the compiler's readable property names; `K` the levels per pass (32); `INLINE=0` (cc_dsl) keeps every temp.
   Without `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`).

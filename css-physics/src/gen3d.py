@@ -1561,31 +1561,65 @@ def owner(gn):
 # flags tested against a value other than 0 or 1 somewhere are not 0/1 flags: BOOLQ must not shorten their gates
 _MULTI = {gt[0] for _l, gt, _n, _e in g.decl if isinstance(gt, tuple) and len(gt) == 2 and isinstance(gt[1], (int, float))
           and gt[1] not in (0, 1)}
-w(lbl.section(f'Solver levels (#L0–#L{NLEV - 1})', f'one element per level: L0 predict and broadphase, L1 narrowphase, '
-                f'L{LB}–L{LFIN - 1} the Gauss–Seidel batches, L{LFIN} the next state'))
-# the blocks in cascade order: what every step computes, then the input overrides (reset last)
-_GROUPS = {0: 'The step: predict, contacts, solve, next state', 1: 'Grab: pointer down', 1.1: 'Touch hold', 1.2: 'Holding: the held body\'s state, one block per body',
+# the blocks in cascade order: what every step computes, a section per stage of the step, then the input overrides
+# (reset last). Each section is a stylesheet of its own on the published pages (build3d.py SHEETS). A rule only ever
+# matches its own level (#L<lev>), so grouping the step's blocks by level keeps each level's order.
+_GROUPS = {1: 'Grab: pointer down', 1.1: 'Touch hold', 1.2: 'Holding: the held body\'s state, one block per body',
            1.5: 'Pick: the ray cast on the first pass of a press', 1.6: 'Touch pick', 2: 'Shake', 3: 'Reset (last in the cascade)'}
+
+
+def _rule(lev, gate, ds):
+    rule = f'#L{lev}{{{";".join(ds)}}}'
+    if gate is None:
+        return rule
+    gn, gv = gate if isinstance(gate, tuple) else (gate, 1)
+    own = owner(gn) if lev <= OWNLEV and lev >= 1 else None
+    if own is not None:
+        assert decl_level.get(gn, -1) <= 1, gn
+    # style(--flag) is true iff the registered flag differs from its initial 0: the same test as
+    # style(--flag: 1) for a 0/1 flag, at about 0.4 us per rule instead of 0.7
+    # (only for real 0/1 flags: GIr holds the held body's index + 1, and style(--GIr) for body 0's block was true
+    # whenever ANY body was held, so dragging anything also pulled body 0; tools/statcheck.py, grabtest.js)
+    q = f'style(--{gn})' if BOOLQ and gv == 1 and gn not in _MULTI and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
+    return f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}'
+
+
+_step = OrderedDict((lev, []) for lev in range(NLEV))
+for (lev, gate), ds in _ord:
+    if _ord_key(((lev, gate), ds)) == 0:
+        _step[lev].append(_rule(lev, gate, ds))
+assert LFIN == NLEV - 1, (LFIN, NLEV)
+w(lbl.section('Predict and broadphase (#L0)', 'the solver\'s first level'))
+out.extend(_step[0])
+w(lbl.section('Narrowphase (#L1)', 'the contacts of each near pair and plane'))
+out.extend(_step[1])
+# the Gauss–Seidel batches, cut into runs of levels of about SOLVE_SHEET bytes each (a stylesheet each: 64 bodies'
+# batches are 26 MB, and Cloudflare serves at most 25 MiB per file)
+_bsz = [sum(len(r) + 1 for r in _step[lev]) for lev in range(LB, LFIN)]
+_nrun = max(1, -(-sum(_bsz) // int(float(os.environ.get('SOLVE_SHEET', 10e6)))))
+_cuts, _acc = [LB], 0
+for lev, sz in zip(range(LB, LFIN), _bsz):
+    if _acc >= sum(_bsz) * len(_cuts) / _nrun and lev > _cuts[-1]:
+        _cuts.append(lev)
+    _acc += sz
+for lo, hi in zip(_cuts, _cuts[1:] + [LFIN]):
+    w(lbl.section(f'Gauss–Seidel batches (#L{lo}–#L{hi - 1})', f'batches {lo - LB}–{hi - LB - 1} of {NBT}, one per level: '
+                  + ('batch 0 every body against the tray planes, then ' if lo == LB else '')
+                  + 'round-robin rounds in which each body meets at most one other'))
+    for lev in range(lo, hi):
+        out.extend(_step[lev])
+w(lbl.section(f'Next state (#L{LFIN})', 'the solver\'s last level: the state the registers are written from'))
+out.extend(_step[LFIN])
+w(lbl.section('Input overrides', 'grab, touch, pick, shake and reset: blocks that replace the step\'s values while they apply, after every step rule'))
 _grp = None
 for (lev, gate), ds in _ord:
     _k = _ord_key(((lev, gate), ds))
+    if _k == 0:
+        continue
     if _k != _grp:
         _grp = _k
         w(lbl.group(_GROUPS[_k]))
-    rule = f'#L{lev}{{{";".join(ds)}}}'
-    if gate is None:
-        w(rule)
-    else:
-        gn, gv = gate if isinstance(gate, tuple) else (gate, 1)
-        own = owner(gn) if lev <= OWNLEV and lev >= 1 else None
-        if own is not None:
-            assert decl_level.get(gn, -1) <= 1, gn
-        # style(--flag) is true iff the registered flag differs from its initial 0: the same test as
-        # style(--flag: 1) for a 0/1 flag, at about 0.4 us per rule instead of 0.7
-        # (only for real 0/1 flags: GIr holds the held body's index + 1, and style(--GIr) for body 0's block was true
-        # whenever ANY body was held, so dragging anything also pulled body 0; tools/statcheck.py, grabtest.js)
-        q = f'style(--{gn})' if BOOLQ and gv == 1 and gn not in _MULTI and g.props.get(gn, ('', '', '0'))[2] == '0' else f'style(--{gn}: {gv})'
-        w(f'@container {f"b{own} " if own is not None else ""}{q}{{{rule}}}')
+    w(_rule(lev, gate, ds))
 _names = ' '.join(f'var(--A{i})' for i in range(N))
 w(lbl.section('Container names (named gates)', 'body i\'s rules name container bi, which the levels carry only while it is awake or near an awake body'))
 w('#L0{' + ''.join(f'--A{i}:if(style(--ac{i}: 1): b{i}; style(--nb{i}: 1): b{i}; else: );' for i in range(N)) + f'--AN:q {_names}}}')
