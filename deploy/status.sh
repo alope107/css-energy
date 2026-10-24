@@ -11,7 +11,7 @@ for _ in $(seq 18); do   # a run appears a few seconds after the push
   sleep 10
 done
 if [ -z "$id" ]; then
-  echo "no deploy run for ${sha:0:7}: not pushed, or it changes nothing under css-physics/, js-minus-js/, paint/, deploy/" >&2
+  echo "no deploy run for ${sha:0:7}: not pushed, not on main or a preview* branch, or it changes nothing under css-physics/, js-minus-js/, paint/, deploy/" >&2
   exit 1
 fi
 

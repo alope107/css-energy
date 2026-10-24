@@ -56,8 +56,10 @@ turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec v
 ## Deploys
 
 - `.github/workflows/deploy.yml` deploys to Cloudflare Workers (`*.auberon.workers.dev`): `main` → production,
-  any other branch → a preview of the projects it changed. `deploy/README.md` has the setup and the trust model.
-- **Pushing a branch publishes a public preview: push only when the user asks.** Then `deploy/status.sh` waits for
+  a branch named `preview…` → a preview of the projects it changed, other branches → nothing. `deploy/README.md`
+  has the setup and the trust model.
+- **Push only when the user asks.** To preview a branch, push it under a `preview` name
+  (`git push origin <branch>:preview-<branch>`), which publishes a public preview. Then `deploy/status.sh` waits for
   the run and prints the preview URLs; give the user the `<version>` URL along with the local link.
 - `deploy/assemble.sh <project> <dir>` builds exactly what CI deploys.
 - Stop every server you start except the ones you hand to the user. Stray ports make VS Code stop auto-forwarding.

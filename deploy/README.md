@@ -6,10 +6,12 @@ script). `deploy/assemble.sh <project> <dir>` builds exactly what CI uploads.
 | Event | Result |
 |---|---|
 | push to `main` | production deploy of each changed project: `https://<worker>.auberon.workers.dev` |
-| push to any other branch | a preview version (no production traffic) of each project changed since leaving `main`: `https://<version>-<worker>.auberon.workers.dev` (this commit) and `https://<branch>-<worker>.auberon.workers.dev` (latest) |
-| Actions → deploy → Run workflow | the projects you name, from the branch you pick |
+| push to a branch whose name starts with `preview` (`preview-x`, `preview/x`) | a preview version (no production traffic) of each project changed since leaving `main`: `https://<version>-<worker>.auberon.workers.dev` (this commit) and `https://<branch>-<worker>.auberon.workers.dev` (latest) |
+| push to any other branch | nothing (no run) |
+| Actions → deploy → Run workflow | the projects you name, from the branch you pick (any branch) |
 
-A change under `deploy/` or to the workflow deploys all three; `shared/`, `engine/` and top-level docs deploy nothing.
+To preview a branch, push it under a `preview` name: `git push origin <branch>:preview-<branch>`. A change under
+`deploy/` or to the workflow deploys all three; `shared/`, `engine/` and top-level docs deploy nothing.
 
 | Project | Site | Worker |
 |---|---|---|
