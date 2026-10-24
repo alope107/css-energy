@@ -26,7 +26,9 @@ until 2026-10-19 the CPU was a GSUB font, §3.8.)
 ```
 
 Run and Edit are one checkbox (`#run`, first in `body`), read through sibling selectors (`#run:checked ~ …`). Edit
-clears the CPU's registers and zeroes RAM. The picker's radio buttons (`#pk<i>`) follow it.
+clears the CPU's registers and zeroes RAM, but for the globals, which it sets to `undefined` (cc_ref `GINIT`, as the
+CPU-only images start them: hoisting and the function cache's sentinel). The picker's radio buttons (`#pk<i>`) sit in
+`.frame`, each right before its editor.
 
 ---
 
@@ -37,20 +39,30 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 
 | Range | Contents | Written by |
 |---|---|---|
-| 0 … 6143 | ROM: the runtime library (`lib_src.js` compiled by `cc_ref` in rom mode, 4,460 words), then `pstub` (2) | the page's static ROM table |
-| 6144 | `data_base`: `STRTAG` = 262144, the untag constant (and the object key bias) | compiler `.fin` (an overlay) |
-| 6145 … 6399 | globals (255 words) | the program |
-| 6400 | `STR0`: the empty marker; then `"true"` and `"false"` (`SEED`) | compiler `.fin` |
-| 6414 … 7167 | strings and property names, `[length][bytes…][0]` each (768 words with `SEED`) | compiler overlays (the length: the parser) |
-| 7168 … 8190 | code (`code_base`, 1,023 words: 511 instructions) | compiler overlays |
-| 8191 | count of global words (the collector's roots) | compiler `.fin` |
-| 8447 | `strend`: the string area's end | compiler `.fin` |
-| 8448 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 8496 (`map_base`: a bit per 8 heap words, 48 words for both semi-spaces) and its powers of two at 8544 (16) | instructions, ROM routines |
-| 8704 … 16239 | stack (`sp0`) | program |
-| 16240 … 22383 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, the cat class, ROM routines, the collector |
-| 22384 … 22527 | console: the last `cols × rows` = 144 words | output instructions |
+| 0 … 12287 | ROM: the runtime library (`lib_src.js` compiled by `cc_ref` in rom mode, 10,692 words), then `pstub` (2) | the page's static ROM table |
+| 12288 | `data_base`: `STRTAG` = 262144, the untag constant (and the object key bias) | compiler `.fin` (an overlay) |
+| 12289 | the global object (`GCELL`: `this` outside a method, `window`; made the first time, NUMLIT word1 −1) | the program |
+| 12290 … 12293 | implicit globals (`IMPC`, 4: names read or assigned before any declaration) | the program |
+| 12294 … 12309 | `FCACHE`: the 16 functions' values, made the first time a name is read as a value | the program |
+| 12310 … 12312 | the timers' queue (`TCELL`), `Math.random`'s state (`RCELL`), `String.prototype` (`SPCELL`) | the library |
+| 12313 … 12543 | globals (231 words; a double literal's cache takes one) | the program |
+| 12544 | `STR0`: the empty marker; then `FTAB` (16 words: each function's body pair + 8192 × (its parameters + 16 if it is an inner function)) | compiler overlays |
+| 12561 … 13311 | strings and property names, `[length][bytes…][0]` each (768 words with `FTAB`) | compiler overlays (the length: the parser) |
+| 13312 … 14334 | code (`code_base`, 1,023 words: 511 instructions) | compiler overlays |
+| 14335 | count of global words (the collector's roots) | compiler `.fin` |
+| 14336 … | `bstr`: the built-in strings (the specials' names, `typeof`'s), 12 words apart | compiler `.fin` |
+| 14591 | `strend`: the string area's end | compiler `.fin` |
+| 14592 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 14640 (`map_base`) and its powers of two; the FPU's 14 scratch number lines at 14720 (`fpu_base`) and its digit buffer | instructions, ROM routines |
+| 14848 … 22383 | stack (`sp0`) | program |
+| 22384 … 28527 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ALLOC, the cat class, ROM routines, the collector |
+| 28528 … 28671 | console: the last `cols × rows` = 144 words | output instructions |
 
-RAM is 16,384 words from 6144; the compile chain names cell `k` = address − 6144 `--c<k>`. Everything the program
+Every global word (12289 … 12543) starts `undefined` in the images (`cc_ref.GINIT`; NUMLIT's caches take undefined
+for 'not made yet'), and on the page their RAM groups are live from the start (they hold a value before any write), so
+a `var` read before its assignment runs is `undefined`. (The ROM was 6,144 words, then 10,240; the library outgrew that
+with `Math` and the timers.)
+
+RAM is 16,384 words from 12288; the compile chain names cell `k` = address − 12288 `--c<k>`. Everything the program
 reads but never writes (code, strings, `data_base`'s constant) is an overlay, so nothing is copied at start.
 
 **RAM on the page** (`machine/memtree.py`): one leaf per word, a `content-visibility: hidden` element whose
@@ -76,17 +88,21 @@ lists them in class order (the CSS CPU's class is a range of opcodes).
 | mov | MOV NEG LOADK GETFP KIND | A = B, −B, word1, fp; KIND A, B, k: A = kind test k of B (`cc_ref.KINDS`: the kind's code, string, array, object, array or object, a string not the program's own, its decimal length, any reference, a heap string) |
 | jump | JMP, JLT … JNE, HALT | to A (if B op C) |
 | test | JZ JNZ | to A if B is false / true: 0 and the empty string are false (a string's length word is read) |
-| call | CALL RET NOT TENTER | CALL A, off: the return word (off × 8192 + return address) at fp + off, fp += off. RET B: B over the return word (the caller's slot for the value), fp −= off. TENTER A: CALL A with off = TRAPOFF and the return address pst + 2 (PRINT's trap) |
+| call | CALL RET NOT TENTER | CALL A, off: the return word (off × 8192 + the return address / 2: targets count instruction pairs) at fp + off, fp += off. RET B: B over the return word (the caller's slot for the value), fp −= off (its A: 32 if the function uses this, for `mkfn`; a label may turn it into DBIT k7, RETC). TENTER A: CALL A with off = TRAPOFF and the return address pst + 2 (PRINT's trap) |
 | mem | LDI STI | A = mem[B + C]; mem[A + B] = C (raw memory: the runtime library's `peek`, `poke`, `p[i]`) |
-| dyn | DADD DADDL DADDR, DLT … DNE | numbers here; `+` with a string goes on to the cat class (L / R: that side is a boolean); with an array or object, and `==` / `!=` of two strings, the library |
+| dyn | DADD … DMOD, DLT … DLNE, DBIT, DNEG, NUMLIT | two integers whose result is an integer here (DBIT: `& | ^ << >> >>>` by its A's 1024s); `+` with a string goes on to the cat class; anything else (doubles, specials, strings compared) the library, whose value the instruction moves into A (pst WBACK). NUMLIT A: A's cached value, or (undefined, or word1 ≥ 16) the library's `numlit` makes it: a double literal, a function's value, a closure, the global object |
 | arr | GETX SETX | A = B[C], A[B] = C: an array inside its length here; an object whose key is a number or the program's own string goes to the obj class's probe (pst: its first pair); anything else the library (an array grows, a string's character, a key built at run time) |
-| obj | GETP SETP NEW | A = B.key, A.key = B (C: the key's string-area offset), probing one pair per execution; SETP adds a pair in place (a full chunk: the library); NEW: a chunk |
+| obj | GETP SETP NEW | A = B.key, A.key = B (C: the key's string-area offset), probing one pair per execution and following chunk links and the prototype's link; SETP stops at the prototype's link and adds a pair in place, carrying the link on (a full chunk: the library); GETP of a string: the library's `getps` (String.prototype); NEW: a chunk |
+| callv | CALLV | A = arguments + 32 if a this is given (63: apply): calls the value in slot fp + off when it is a function whose meta (parameters + 32 if it uses this) is A or A − 32, as CALL; anything else (padding, a closure's environment, this for a plain call, natives, bound functions) the library's `callv`, which enters the function through its own return word |
 | out | PRINT PRINTK PUTC | up to 4 console cells per execution (§3.2); PRINT of an array or object jumps to `pstub` |
 | alloc | ALLOC | A = a new block of n words (B) of kind k (C: `cc_ref.ALLOCK`: a string of n bytes, its header, length and NUL written, A its value; an array of capacity n, its first line written; n raw words; an object chunk), marked in the collector's map (but raw ones) (§3.5) |
 | apush | APUSH | the ROM's `push` routine's first instruction: B.push(C) and return (no array, or a full one: on to the routine) |
 | mcpy | MCPY MUPPER MLOWER MFILL NPUT | C words from B to A (A ≤ B if they overlap; mapping letters' case); B into C words at A; B's digits at A: a line per execution |
 | mcmp | MCMP MFEQ MFREF MWALK | A = the first i < A where B[i] ≠ C[i] / = C / refers into the from-space at C, else A: a line per execution; MWALK: the offset from B of the first `[len][bytes][0]` string of length A, or of the first at or past C, a string per execution |
 | net | NET | A = the network gateway's answer to the word B, every part's bytes in RBUF0 … (§3.8) |
+| fpu | FLD FADD … FTAN, FNORM FINT FCMP FEXPO FLOG10 FDIGIT | the runtime library's FPU: the number line at A := op of the numbers B and C (an integer, a special, a double's value, or a scratch line), one `calc()` in IEEE doubles; the value ops (FNORM: a line as a value or 'box it', FCMP, …) write A |
+| fdig | FCOK FCDIG | number printing: a candidate digit count tested in one instruction; the digits written as 5-digit limbs |
+| fbit | FAND … FUSHR | the bitwise operators on two doubles (ToInt32), for DBIT's trap |
 | cat | (a DADD with pst ≥ 1024) | a string's `+`, a line per execution (§3.6) |
 
 **Traps.** A trapping instruction calls a ROM routine (`cc_ref.TRAPS`) as CALL would. A destination trap (the dynamic
@@ -100,10 +116,15 @@ class has no memory write): it jumps to `pstub` with its own address in pst; `ps
 `galloc`) return to the instruction, which executes again; a string's `+` that finds the heap full calls `gccat` (`cc_ref.CATTRAPS`),
 which collects and joins.
 
-**Values** (`cc_ref.isstr` / `isarr` / `isobj`). A string is its first byte's address − `STRTAG`, an array its ptr word's
-address + `ARRTAG` (2^18), an object its chunk's address − `OBJTAG` (491,520). The tags are multiples of 2^15, so the
-15-bit address registers untag a value for free: `LDI x, #-1` is a string's or an array's length. Numbers in
-−255744 … −239761 are strings to the machine, in −475280 … −469137 objects and in 278384 … 284527 arrays.
+**Values** (`cc_ref.isstr` / `isarr` / `isobj` / `isfun` / `kind`). A word's slot of 2^15 says what it is: integers
+in −229,376 … 262,143 (slots −7 … 7) are numbers; a string is its first byte's address − `STRTAG` (slot −8), an array
+its ptr word's address + `ARRTAG` (2^18, slot 8), an object its chunk's address − `OBJTAG` (491,520, slot −15), a
+function its block's second word − `FUNTAG` (slot −14), a boxed double its number line − `DBLTAG` (slot −13), a
+closure's environment cell − `ENVTAG` (slot −12); slot 15's last eight words are the specials (`SPV0`: Infinity,
+−Infinity, true, false, null, undefined, NaN, −0), and words just below them are keys no probe takes (`PKPROTO`,
+`PKPT`, `PKSTAT`…). Inside an object's chunks, a link to a prototype is its chunk's address − 2^19 (slot −16). The
+tags are multiples of 2^15, so the 15-bit address registers untag a value for free: `LDI x, #-1` is a string's or an
+array's length. The runtime library sees raw words; user code's arithmetic is JavaScript's (the dyn class).
 
 ---
 
@@ -128,7 +149,7 @@ collapsed arguments, `TBMAX` = 24); symbols `NS` = 32; functions `NF` = 16; labe
 `EMAX` = 7 instructions per step; `PIECES` = 4 printed pieces; `NI` = 32 interned strings and names; `SDATA` = 256
 words of globals, `str_size` = 768 of strings, 1,023 of code; the page: 24 × 64 characters, 400 tokens (`TMAX`).
 
-**Parser structure.** 27 modes (`S_STMT`, `S_OPND`, …). Control-stack kinds: bodies (`C_IFB`, `C_LOOPB`, `C_SWITCH`,
+**Parser structure.** 38 modes (`S_STMT`, `S_OPND`, …; `cc_ref` lists them). Control-stack kinds: bodies (`C_IFB`, `C_LOOPB`, `C_SWITCH`,
 …), pending headers and statements (`C_IFC`, `C_SWITCHC`, `C_FORINIT`, `C_ASSIGN`, `C_PSET`, `C_CASE`, …), braceless
 bodies (`kind + BRACELESS`, closed by `complete_stmt`). Entries pack as `kind × 4096 + a × 64 + b` and
 `e × 4096 + c × 64 + d` (`e` = block-scope mark).
@@ -159,9 +180,40 @@ only on top, for a branch to fuse). So `x = a + b * c` is `MUL T1, b, c` then `A
 - `&&` / `||`: `a → T(i); JZ/JNZ L, T(i); b → T(i); L:`. `c ? a : b`: `c Jfalse L1; a → T(i); JMP L2; L1: b → T(i);
   L2:`; `?` pushes `M_TERN`, `:` swaps in `M_TELSE` (lowest precedence), which defines `L2` when popped; an else branch's
   ternary reuses the outer `L2`. The value's static type merges both sides'.
-- Calls: `CALL f, off` with the frame at the call's slot `T(d)`: the return word there, the arguments in `T(d + 1)` ….
-  A function's parameters are `fp + 1 + k`, its locals after them, its temps after the locals (the frame label). A
-  call passes exactly as many arguments as the definition has parameters (error 76).
+- Calls: `CALL f, off` with the frame at the call's slot `T(d)`: the return word there, `this` in `T(d + 1)` (a
+  reserved collapsed temp, written only when needed), the arguments in `T(d + 2)` …. A user function's frame is
+  `[return word][this][parameters][local 1: an env cell][locals][temps]` (the library's functions have no this slot: a
+  built-in method's receiver is its first parameter, the same slot). A call by name passes exactly as many arguments as
+  the definition has parameters (error 76); a call of a value (`f(x)`, `o.m(x)`, `(e)(x)`) is CALLV, any number.
+- Function values: a function is an 8-word heap block `[hdr][body pair][meta][env][name][prototype][..][..]` the
+  library's `mkfn` makes from `FTAB` and the descriptor before the body (`[MOV][its name]`, after a `JMP` past the
+  function). A top-level function's value is cached in `FCACHE` (NUMLIT k); a function expression's is made each time
+  (NUMLIT 16 + k; an inner function's: its frame size, index and env slot, which `mkclo` uses). meta = parameters + 16
+  (an inner function: its env in local 1) + 32 (it uses `this`: its last RET has A 32, or for a declaration a thunk
+  after it, which its by-name calls enter: `this` := the global object).
+- Nested functions and closures: the parser keeps two levels of context (`curf`; `fn_enter` saves the outer one in
+  `sv0` … `sv3`; a body's stacks start above the outer's at `obase` / `dbase`). An inner function reads and writes its
+  outer function's variables through the env cell in its local 1 (`LDI t, local1, #0; LDI t, t, #slot`): while the
+  outer function runs, the cell's base is its frame; a top-level function that made a closure returns through RETC (its
+  RETs carry a label that turns RET into DBIT k7, the library's `retc`), which copies the frame into the cell. Names
+  are looked up in the current function first (its block-scoped names, then its parameters and variables), then
+  outside.
+- Arrows: `=>` is a token. `(x)` leaves `x` pending in `S_NAMEE`, so `x =>` and `(x) =>` are one case; `(a,` switches to
+  a parameter list (`S_APAR1`); `()` to `S_AARROW0`. After `=>` a tentative `C_RETURN` waits: `{` drops it (a block
+  body), anything else is an expression body (`ca`). In one, S_OPER / S_NAMEE are S_OPERC / S_NAMEEC (a remap at the
+  end of each step), whose variants for `)` `,` `;` `}` and a line end close the function (`arrow_close`: RET, the
+  function's value) before the token acts in the outer context; their other variants are S_OPER's own rules (below).
+- `this`: in a function its frame slot 1 (and its entry's `d` bit: it uses this); in an arrow inside a function the
+  outer frame's slot 1 through the env; elsewhere the global object. Method calls (`o.f(`, `o[k](`) copy `o` into the
+  this slot and the callee into `o`'s slot, CALLV with A + 32; `f.call(t, ...)`, `f.apply(t, a)` (A 63) keep `f` as
+  the callee and `t` collapses into the this slot; `f.bind` is a library method.
+- Prototypes: `new F(` is F's value, then `CALL mknew` with its frame at the this slot (a new object whose prototype
+  is `F.prototype`), the arguments, CALLV, and the object as the value. `x.__proto__` and `x.prototype` are `x[a
+  hidden key]` (GETX / SETX, which trap to the library); `Math.PI`, `Math.min`, `Object.create` as values likewise.
+  `Math.` and `Object.` lead to `S_MATHDOT`, whose methods are a table of their own (`MATHM`), not methods of anything
+  else; `new Number(` / `String(` / `Object(` are library calls on a dummy receiver (wrappers).
+- Timers: `setTimeout` / `setInterval` are library calls (a queue in `TCELL`); a program that sets one ends with
+  `L: CALL nexttimer -> T(0); JZ T(0), end; CALLV 0, T(0); JMP L` before HALT (absolute targets: no labels).
 - Methods: `x.name(` copies the receiver above its slot as the first argument; the `)` emits `CALL` of the ROM routine
   for that name and argument count (`ALLM`). `parseInt(` `Number(` `String(` pass an unused receiver. A method's name not
   followed by `(` is a property (it was interned then).
@@ -192,15 +244,18 @@ in-flow overlays `.ovs` named after their RAM cell.
 
 - One source element per 32 tokens animates their four values.
 - Level `t + 1` parses token `t` with the variant chosen by `@container style(--vh: mode) and style(--tcq: token)`.
-  `tools/vsz.py` counts 338 variants and 79,100 temps. Every rule costs time on every token level whether it applies or
-  not (BENCHMARKS §4c). With a known starting mode, `Prog` folds away unreachable blocks (`FALL`).
+  `tools/vsz.py` counts 463 variants; they make 227 rules. Every rule costs time on every token level whether it
+  applies or not (BENCHMARKS §4c), so variants whose CSS is identical share one rule, also across modes: a rule's
+  condition lists every (mode, token codes) it serves. That makes the modes that only rename another (S_OPERC, S_NAMEEC,
+  S_ABODY) cost a rule only where their CSS differs. With a known starting mode, `Prog` folds away unreachable blocks
+  (`FALL`).
 - State alternates between parity copies (`--p-<name>-A/B`); temps share a small pool of names (`qp<i>`).
 - Tables (symbols, functions, interned strings) are delayed writes: at most one entry per table per step through a
   port (`o_y*`, `o_f*`), applied by the next level with a container query.
 - Instructions: up to 7 per level, two overlays each (`.ov.k<s>`, `.ov.j<s>`: word0 and word1), `anchor-name:
   --c<index>`, width `word + 2^20` plus a label's value (`anchor-size(--l<j> width)`: a jump target, or the frame label
   times its multiplier for a temp in a function). Each code record's word0 is one temp (`ew0`), which the 7 slots mux.
-- Labels: in-flow anchors `.lp<k>` (22 ports per level) named `--l<j>`, width = the label's value.
+- Labels: in-flow anchors `.lp<k>` (24 ports per level) named `--l<j>`, width = the label's value.
 - The last live level shows `.fin`: the globals' count word, `STRTAG` at `data_base`, the `SEED` strings, the string
   area's end at `strend`, `--ccdone` and `--ccinfo` (width `done + 2·err + 1024·words`, for the status line).
 
@@ -216,8 +271,9 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
   `--pst`, steps, halt, the pending miss, the data cache (32 tags with dirty bits, 16 victim bits, 128 words), the code
   cache (16 tags, 64 words), the read ports' eight words, the latches, the RAM and console write channels. Two passes
   per frame.
-- **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers; a dirty
-  victim's words go out through the RAM write channels. The next block is prefetched into its own set if it is absent
+- **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers, unless it is
+  already in the set (a pending miss seen again after its fill under load; two ways holding one block stall the CPU:
+  HISTORY 17); a dirty victim's words go out through the RAM write channels. The next block is prefetched into its own set if it is absent
   there and the victim is clean. A miss of the fetch (`--pic`) fills the code cache instead, and prefetches the next line
   there if it is absent and code.
 - **Chain**: 32 levels of three nested `display: contents` elements, styled once per pass:
@@ -273,8 +329,8 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 - `UI=1` adds the editors, the readback scan, the compile chain and Run / Edit (`uipage.py`). Gating:
   `--go = compiled (ccok) × run × …`; nothing runs until `--ccgo`. Edit sets `--run` to 0, zeroing every register and
   RAM leaf; the compile chain's overlays hold code and strings, and read ports read them as RAM.
-- The picker: eleven editors (`#ed`, the page's own program, then `samples/*.js`), one shown (`#pk<i>:checked ~ #app
-  .ed<i>`); each keeps its edits. It is disabled while running (the scan reads the editor that shows).
+- The picker: thirteen editors (`#ed`, the page's own program, then `samples/*.js`), one shown (`.pkr:checked + .ed`:
+  each radio button is right before its editor); each keeps its edits. It is disabled while running (the scan reads the editor that shows).
 
 ### 3.5 Runtime library
 
@@ -288,8 +344,13 @@ routines). It is a static table in the page (in tiers of 1,024 words), so a chan
   (`cc_ref.INTR`, below). No globals or string literals (they would land in the program's data area). A routine's frame
   holds tagged values, which the collector updates; a raw address must not be kept across an allocation.
 - `lib_src.js`: the collector and its stubs (`gcnew`, `galloc`, `gccat`), strings (`newstr`, `tostr`, `cat`, `scmp`), the
-  dynamic operators' routines, arrays (`newarr`, `grow`, `push`, `pop`, `join`), `getx` / `setx` / `setp`, `mkarrN`, the
-  methods, printing arrays and objects (`pval`, `ptrap`), run-time string keys (`okey`).
+  dynamic operators' routines (`arith` and the FPU, `dcmp`, `leqr`, `jcmp`, `dbit`), numbers (`numstr`: the shortest
+  digits, `numscan`, `numlit`), arrays (`newarr`, `grow`, `push`, `pop`, `join`), `getx` / `setx` / `pset`, `mkarrN`,
+  the methods, printing (`pval`, `ptrap`, `ins`), run-time string keys (`okey`), functions (`mkfn`, `mkclo`, `newenv`,
+  `retc`, `callv`, `bind1` …, natives), prototypes (`mknew`, `getdp` / `setdp`, `getpt` / `setpt`, `ocreate`,
+  `hasown`, `getps`, wrappers), the global object (`glob`), timers (`addtimer`, `nexttimer`, `cleartimer`), `Math`
+  (`mabs` …, `mm`, `mrandom`), `refstub` (address 0: a function never declared, a ReferenceError) and `rstub`
+  (address 2, RET: where `retc` returns).
 
 **The runtime's primitives** (from branch `rom-css`, on the stack machine, redone for the register machine). The ROM's
 work on memory is instructions that take a cache line per execution, `--pst` holding their progress, where a loop of
@@ -317,8 +378,16 @@ block of its own, which has no header and isn't in the collector's map); `hdr` =
 array).
 
 **Objects.** An 8-word chunk `[k0 v0 k1 v1 k2 v2 L pad]`. A key is a string's address in the string area (a value +
-2^18), a number `n` is `n + 2^18`; 0 ends the keys (NEW zeroes `k0`; SETP's new pair writes the 0 after it first); `L`
-is 0 or a link to an overflow chunk (negative). GETP / SETP probe one pair per execution (`--pst`: the pair's address),
+2^18), a number `n` is `n + 2^18`; 0 ends the keys (NEW zeroes `k0`; SETP's new pair writes the end after it first);
+`L` is 0 or a link to an overflow chunk (negative). **Prototypes**: instead of 0 the keys may end with a link to the
+prototype's first chunk, its address − 2^19 (slot −16, below every chunk link). A probe follows any negative word
+(masked to 15 bits it is the chunk's address), so GETP / GETX read inherited properties without leaving the machine;
+SETP / SETX stop at it (a slot −16 word ends the keys for them) and the new pair's end word is the old one, so the link
+moves on. `new`, `Object.create` and `x.__proto__ = p` write it (the library's `mknew`, `ocreate`, `setdp`); a
+function's prototype object is its block's word 5, made the first time it is read. Printing, `hasOwnProperty` and the
+library's `pset` walk the own keys only; `for (k in o)` lists the chain's keys, each once (a key past a link is dropped
+if a nearer object has it). A wrapper object (`new Number(12)`) has the primitive under key 1 (`PKVAL`), which
+ToPrimitive (`prim`) takes. GETP / SETP probe one pair per execution (`--pst`: the pair's address),
 and so do GETX / SETX when the key is a number or the program's own string (SETX hands a full chunk back to the arr
 class, `--pst` 512, whose trap calls `setx`). Strings and names are interned by content hash, so a key is a
 compile-time constant and `o[s]` finds `o.x` when `s` is `"x"`. A key built at run time (a heap string, or one of
@@ -344,8 +413,11 @@ a stale word keeps a dead block alive at worst. (Until 2026-10-22 the bitmap was
 from-space by its headers, a miss per block, 14–31% of the GC programs' passes; and a grown array's raw block, which
 has no header, could misguide the walk into a loop: `tests/suite/gc_rawblock.js`.) MFREF finds the next word that refers
 into from-space a line at a time, so roots and elements that are numbers cost nothing; copies are MCPY. The scan follows
-an object's keys and values up to its first free pair (and its link if all three are used) and an array's elements up to
-its length. HP and GCLIM are offsets from `heap_lo`; GCLIM is the current space's offset, so zeroed RAM is space A and
+an object's keys and values up to its first free pair (and its link if all three are used; a prototype's link where the
+keys end, which is also how a chunk may start: `Object.create`'s, so a chunk whose first word is a slot −16 link is an
+object, not a block header) and an array's elements up to its length; a function's block from its env word (a bound
+function's target, this and argument); a closed env cell's copy of its frame. The global object, the timers' queue
+and `String.prototype` are globals, so roots. HP and GCLIM are offsets from `heap_lo`; GCLIM is the current space's offset, so zeroed RAM is space A and
 needs no setup.
 
 ### 3.7 The stack machine (replaced 2026-10-21; last at `212175a`)
@@ -432,18 +504,19 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
   are read-only, one sweep raises `--rbrd`, and `--ccgo` (from the `--rbrdT` timeline) shows the compile chain.
 - Rows: line 0 is text directly in the editor, where an editor's initial text starts, and every block that holds no
   block is a row, nested or not: Chrome nests lines (Enter in line 0, pastes into an empty line) and formatted pastes
-  bring wrappers (VS Code's `<div style>` around a `<div>` per line). A wrapper whose first element is a `<br>` has a row
-  of its own before its lines (Enter at the end of line 0). Each row starts with a `::before` sentinel, named for the
-  row it shows in, `--rbs<k>`, by a discrete `anchor-name` animation on a view timeline (ENGINE_NOTES 77); probe `k`
-  reads `--rbs<k>`, and the probe of an absent row is 0px wide and has no cells. `<br>` shows, so an empty line keeps a
-  caret position (ENGINE_NOTES 78); a `<br>` inside a line (Shift+Enter, a paste) starts a row with no sentinel, and
-  `.unread` (as tall as any gap between named rows) says so. `white-space: nowrap` with `&nbsp;`; pasted elements take
-  the editor's style (`!important`, ENGINE_NOTES 75), so a `<pre>`'s newlines collapse and the page says the block shows
-  as one line (`.merged`). No CSS rule may match the line divs (ENGINE_NOTES 44–49). Hidden editors are `display: none`,
-  so the anchors are the shown one's; the per-editor checks (`:has`: the line limit, a `<pre>`) are under its radio
-  button, on the editors' section with child combinators (on `#app` each searched its ~10,000 elements: BENCHMARKS
-  §14). `make l5-input` checks that the scan reads what the editor shows; `tests/picker.js` the picker. A sample has at
-  most 24 lines. Tab moves focus out of the editor: without script the page can't keep it (ENGINE_NOTES 78).
+  bring wrappers (VS Code's `<div style>` around a `<div>` per line). A wrapper whose first element is a `<br>` has a
+  row of its own before its lines (Enter at the end of line 0). Each row starts with a `::before` sentinel, named for
+  the row it shows in, `--rbs<k>`, by a discrete `anchor-name` animation on a view timeline (ENGINE_NOTES 77); probe
+  `k` reads `--rbs<k>`, and the probe of an absent row is 0px wide and has no cells. `<br>` shows, so an empty line
+  keeps a caret position (ENGINE_NOTES 78); a `<br>` inside a line (Shift+Enter, a paste) starts a row with no
+  sentinel, and `.unread` (as tall as any gap between named rows) says so. `white-space: nowrap` with `&nbsp;`; pasted
+  elements take the editor's style (`!important`, ENGINE_NOTES 75), so a `<pre>`'s newlines collapse and the page says
+  the block shows as one line (`.merged`). No CSS rule may match the line divs (ENGINE_NOTES 44–49). Hidden editors
+  are `display: none`, so the anchors are the shown one's; the per-editor checks (`:has`: the line limit, a `<pre>`)
+  look at the editor after the checked radio button, one set for every editor, on the editors' section with child
+  combinators (on `#app` each searched its ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan
+  reads what the editor shows; `tests/picker.js` the picker. A sample has at most 24 lines. Tab moves focus out of the
+  editor: without script the page can't keep it (ENGINE_NOTES 78).
 
 ---
 
@@ -460,8 +533,8 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 9 × 16 grid |
 | L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
-- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 139 programs, `tests/suite_err/` 49;
-  `samples/` the picker's ten; `tests/programs/` the demos t1–t4.
+- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 180 programs, `tests/suite_err/` 49;
+  `samples/` the picker's twelve; `tests/programs/` the demos t1–t4.
 - **Collector tests** (`str_keys_gc`, `obj_gc`, `gc_rawblock`, `arr_gc`) fill the 3,072-word heap, which is most of
   their time: a collection needs a full half, and each new 4-word line a program writes costs a cache-miss pass. They
   fill with empty objects where the filler doesn't matter (an 8-word chunk, one line written), collect at most twice
@@ -489,12 +562,13 @@ make page   # compiler/lib.json (if lib_src.js or cc_ref.py changed) -> build/cc
 make dist   # copy it and its stylesheets (build/js_in_css/) to dist/
 ```
 
-- The page's CSS is in 15 stylesheets in `build/js_in_css/`, which the page links in cascade order (`gen_css.py`
+- The page's CSS is in 16 stylesheets in `build/js_in_css/`, which the page links in cascade order (`gen_css.py`
   `SHEETS`). Each one is a run of consecutive `===` sections: `page`, `machine-properties`, `cpu`, `memory`, `console`,
   `scan`, `compiler-properties`, `lexer`, `parser`, then one `parser-<family>` per family of parser modes
-  (`ccpage5.FAMILIES`: statements, declarations, names, operands, operators, console). Cloudflare serves at most
-  25 MiB per file, and the build fails past 20 MiB. The parser variants grow with the language, so give a new mode a
-  family (the build fails until it has one), and split a family that outgrows the limit. The variants sit in their
+  (`ccpage5.FAMILIES`: statements, declarations, functions, names, operands, operators, console). Cloudflare serves at
+  most 25 MiB per file, and the build fails past 20 MiB. The parser variants grow with the language, so give a new mode
+  a family (the build fails until it has one), and split a family that outgrows the limit. A rule shared by modes of two
+  families (S_ABODY's with S_OPND's) goes in its lowest mode's, the one the others rename. The variants sit in their
   families' sections, not in the order they were built; that is safe because each (mode, token code) has one rule
   (asserted). The tokens that change nothing come before all of them, in `parser`.
 

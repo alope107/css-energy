@@ -1,0 +1,12 @@
+5
+42 hello world!
+true
+43
+Hello world!
+43
+[Function: myFunc]
+true
+Hello world!
+43 true
+5
+6 { myString: 'Hello world!' } {}

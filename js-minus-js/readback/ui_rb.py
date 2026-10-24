@@ -13,8 +13,8 @@ Changes from the original:
     --rbrd, which shows the compiler. Edit lowers it again. While the user edits, the editor's font axis stays at 0
     (scanning reshapes the text every frame, which made a selection's highlight jump) and the registers are frozen.
   - several editors (.ed: #ed, the page's program, then the sample programs), one shown at a time by the picker's radio
-    buttons (#pk<i>, after #run): a hidden editor is display: none, so the line anchors are the shown one's, and the
-    per-line checks (:has) are made per editor, under its radio button.
+    buttons (#pk<i>, each right before its editor in .frame): a hidden editor is display: none, so the line anchors are
+    the shown one's, and the per-line checks (:has) look at the editor after the checked radio button.
 XHTML-safe output.
 """
 import base64, html, subprocess, os, re
@@ -170,11 +170,11 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
                  f'width: calc(min(1px, anchor-size(--rbs{k} height, 0px)) * {P * 10}); }}')
     g.append('@container rbscan style(--rbrun: 1) { .probe { content-visibility: visible; } }')
     # (:has() on the editors' section with child combinators: on #app it searched ~10,000 elements, per rule and editor,
-    # and the picker's eleven editors made a compile ~1.7 s slower)
-    for e in range(EDS):
-        pane = f'#pk{e}:checked ~ #app > .pane' if EDS > 1 else '#app > .pane'
-        g.append(f'{pane}:has(> .frame > .ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
-        g.append(f'{pane}:has(> .frame > .ed{e} pre) .merged {{ display: block; }}')
+    # and the picker's eleven editors made a compile ~1.7 s slower. The editor that shows is the one after the checked
+    # radio button, so one set of rules serves every editor: per editor they cost ~10% of a compile with twelve samples)
+    ed = '> .frame > .pkr:checked + .ed'
+    g.append(f'#app > .pane:has({ed} > div:nth-of-type({L})) .limit {{ display: block; }}')
+    g.append(f'#app > .pane:has({ed} pre) .merged {{ display: block; }}')
     # a row with no sentinel above one with a sentinel: row k absent while row k + 1 is there (a sentinel is 16px tall,
     # an absent row's anchor-size is 0). .unread is that tall, times 1.5, so it shows only then.
     gaps = ', '.join(f'anchor-size(--rbs{k + 1} height, 0px) - anchor-size(--rbs{k} height, 0px)' for k in range(L - 1))

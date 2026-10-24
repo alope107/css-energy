@@ -178,28 +178,8 @@
 .probe:nth-child(23) { --rbk: 22; height: anchor-size(--rbs22 width, 0px); width: calc(min(1px, anchor-size(--rbs22 height, 0px)) * 640); }
 .probe:nth-child(24) { --rbk: 23; height: anchor-size(--rbs23 width, 0px); width: calc(min(1px, anchor-size(--rbs23 height, 0px)) * 640); }
 @container rbscan style(--rbrun: 1) { .probe { content-visibility: visible; } }
-#pk0:checked ~ #app > .pane:has(> .frame > .ed0 > div:nth-of-type(24)) .limit { display: block; }
-#pk0:checked ~ #app > .pane:has(> .frame > .ed0 pre) .merged { display: block; }
-#pk1:checked ~ #app > .pane:has(> .frame > .ed1 > div:nth-of-type(24)) .limit { display: block; }
-#pk1:checked ~ #app > .pane:has(> .frame > .ed1 pre) .merged { display: block; }
-#pk2:checked ~ #app > .pane:has(> .frame > .ed2 > div:nth-of-type(24)) .limit { display: block; }
-#pk2:checked ~ #app > .pane:has(> .frame > .ed2 pre) .merged { display: block; }
-#pk3:checked ~ #app > .pane:has(> .frame > .ed3 > div:nth-of-type(24)) .limit { display: block; }
-#pk3:checked ~ #app > .pane:has(> .frame > .ed3 pre) .merged { display: block; }
-#pk4:checked ~ #app > .pane:has(> .frame > .ed4 > div:nth-of-type(24)) .limit { display: block; }
-#pk4:checked ~ #app > .pane:has(> .frame > .ed4 pre) .merged { display: block; }
-#pk5:checked ~ #app > .pane:has(> .frame > .ed5 > div:nth-of-type(24)) .limit { display: block; }
-#pk5:checked ~ #app > .pane:has(> .frame > .ed5 pre) .merged { display: block; }
-#pk6:checked ~ #app > .pane:has(> .frame > .ed6 > div:nth-of-type(24)) .limit { display: block; }
-#pk6:checked ~ #app > .pane:has(> .frame > .ed6 pre) .merged { display: block; }
-#pk7:checked ~ #app > .pane:has(> .frame > .ed7 > div:nth-of-type(24)) .limit { display: block; }
-#pk7:checked ~ #app > .pane:has(> .frame > .ed7 pre) .merged { display: block; }
-#pk8:checked ~ #app > .pane:has(> .frame > .ed8 > div:nth-of-type(24)) .limit { display: block; }
-#pk8:checked ~ #app > .pane:has(> .frame > .ed8 pre) .merged { display: block; }
-#pk9:checked ~ #app > .pane:has(> .frame > .ed9 > div:nth-of-type(24)) .limit { display: block; }
-#pk9:checked ~ #app > .pane:has(> .frame > .ed9 pre) .merged { display: block; }
-#pk10:checked ~ #app > .pane:has(> .frame > .ed10 > div:nth-of-type(24)) .limit { display: block; }
-#pk10:checked ~ #app > .pane:has(> .frame > .ed10 pre) .merged { display: block; }
+#app > .pane:has(> .frame > .pkr:checked + .ed > div:nth-of-type(24)) .limit { display: block; }
+#app > .pane:has(> .frame > .pkr:checked + .ed pre) .merged { display: block; }
 .scanpos { anchor-name: --rbscanpos; }
 .unread { position: absolute; left: anchor(--rbscanpos left); top: calc(anchor(--rbscanpos top) - 4px); overflow: hidden; white-space: nowrap; font: .8rem/24px system-ui, sans-serif; color: #b00; height: calc(1.5 * max(0px, anchor-size(--rbs1 height, 0px) - anchor-size(--rbs0 height, 0px), anchor-size(--rbs2 height, 0px) - anchor-size(--rbs1 height, 0px), anchor-size(--rbs3 height, 0px) - anchor-size(--rbs2 height, 0px), anchor-size(--rbs4 height, 0px) - anchor-size(--rbs3 height, 0px), anchor-size(--rbs5 height, 0px) - anchor-size(--rbs4 height, 0px), anchor-size(--rbs6 height, 0px) - anchor-size(--rbs5 height, 0px), anchor-size(--rbs7 height, 0px) - anchor-size(--rbs6 height, 0px), anchor-size(--rbs8 height, 0px) - anchor-size(--rbs7 height, 0px), anchor-size(--rbs9 height, 0px) - anchor-size(--rbs8 height, 0px), anchor-size(--rbs10 height, 0px) - anchor-size(--rbs9 height, 0px), anchor-size(--rbs11 height, 0px) - anchor-size(--rbs10 height, 0px), anchor-size(--rbs12 height, 0px) - anchor-size(--rbs11 height, 0px), anchor-size(--rbs13 height, 0px) - anchor-size(--rbs12 height, 0px), anchor-size(--rbs14 height, 0px) - anchor-size(--rbs13 height, 0px), anchor-size(--rbs15 height, 0px) - anchor-size(--rbs14 height, 0px), anchor-size(--rbs16 height, 0px) - anchor-size(--rbs15 height, 0px), anchor-size(--rbs17 height, 0px) - anchor-size(--rbs16 height, 0px), anchor-size(--rbs18 height, 0px) - anchor-size(--rbs17 height, 0px), anchor-size(--rbs19 height, 0px) - anchor-size(--rbs18 height, 0px), anchor-size(--rbs20 height, 0px) - anchor-size(--rbs19 height, 0px), anchor-size(--rbs21 height, 0px) - anchor-size(--rbs20 height, 0px), anchor-size(--rbs22 height, 0px) - anchor-size(--rbs21 height, 0px), anchor-size(--rbs23 height, 0px) - anchor-size(--rbs22 height, 0px))); }
 #run:checked ~ #app .unread { display: none; }

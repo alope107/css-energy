@@ -3,8 +3,7 @@
 A program is generated once as a tree and rendered twice from the same tree, with the same layout (line breaks,
 optional semicolons, comments):
 - for our compiler ('o'), as written;
-- for Node ('n'), with the machine's integer semantics spelled out: + - * and unary - wrap to 20 bits (W), / truncates
-  and gives 0 for a zero divisor (D), % gives 0 for a zero divisor (M). PRELUDE defines them.
+- for Node ('n'), the same (the machine's numbers are JavaScript's: integers in range, doubles beyond; PRELUDE is empty).
 So Node's output is what the program must print on our machine.
 
 The generator stays inside the documented language (README "The language" and "Limits"), so any difference is a bug:
@@ -18,7 +17,9 @@ The generator stays inside the documented language (README "The language" and "L
   what Node prints on several lines), number keys never meet the string spelling of the same number;
 - loops terminate: counters are reserved names that only their loop changes, continue is used only where the counter
   still advances, calls form a DAG except self-recursion on a decreasing depth parameter;
-- every typed function ends with a return; a function's value is used only if it has a type.
+- every typed function ends with a return; a function's value is used only if it has a type. Some functions are
+  values: const f = (a, b) => { ... } (or a => e when the body is one return), var f = function (...) { ... }; those
+  aren't hoisted, so they come before every statement.
 Limits the compiler enforces with an error (labels, code size, nesting, strings) are not avoided: fuzz.py skips such
 programs and counts them.
 """
@@ -27,8 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import cc_ref as _R
 TAGGED = [(_R.STRV_LO, _R.STRV_HI), (_R.HEAP0 - _R.OBJTAG, _R.HEAP_HI - _R.OBJTAG), (_R.HEAP0 + _R.ARRTAG, _R.HEAP_HI + _R.ARRTAG)]
 
-PRELUDE = ('function W(x){x=((x%1048576)+1048576)%1048576;return x>=524288?x-1048576:x}'
-           'function D(a,b){return b===0?0:W(Math.trunc(a/b))}function M(a,b){return b===0?0:a%b}')
+PRELUDE = ''
 
 STRS = ['"a"', '"hi"', "'x y'", '""', '"Fizz"', '"it\'s"', "'q\\\"t'", '"t\\tx"', '"n\\\\m"', "'ok!'", '"A\\nB"']
 NAMES = ['a', 'b', 'c', 'd', 'e', 'g', 'h', 'x', 'y', 'z', 'u', 'v', 'w', 'p', 'q', 'r', 's', 't', 'k', 'm', 'n2', 'val',
@@ -36,8 +36,9 @@ NAMES = ['a', 'b', 'c', 'd', 'e', 'g', 'h', 'x', 'y', 'z', 'u', 'v', 'w', 'p', '
 KEYS = ['a', 'b', 'k', 'len', 'next', 'v2']
 URLS = ['"hello.txt"', '"n.txt"', '"nope.txt"', '"/data/lines.txt"', '"http://x/"']     # fetch's (tests/net/)
 SKEYS = ['"c d"', '"x"', "'k'"]          # string keys ('k' is the same property as the identifier key k)
-PREC = {'||': 2, '&&': 3, '==': 4, '!=': 4, '===': 4, '!==': 4, '<': 5, '>': 5, '<=': 5, '>=': 5, '+': 6, '-': 6,
-        '*': 7, '/': 7, '%': 7}
+PREC = {'||': 2, '&&': 3, '|': 3.2, '^': 3.4, '&': 3.6, '==': 4, '!=': 4, '===': 4, '!==': 4, '<': 5, '>': 5, '<=': 5, '>=': 5,
+        '<<': 5.5, '>>': 5.5, '>>>': 5.5, '+': 6, '-': 6, '*': 7, '/': 7, '%': 7}
+BITS = ['&', '|', '^', '<<', '>>', '>>>']
 
 # ---------------- expressions: (kind, ...) tuples; render(e, t) -> (text, precedence)
 def lit(v): return ('lit', v)
@@ -48,17 +49,16 @@ def rend(e, t):
     if k == 'raw': return e[1], 9                     # a name, a string literal, a call already rendered
     if k == 'neg':
         s, p = rend(e[1], t)
-        if t == 'n': return f'W(-{paren(s, p < 9)})', 9
         return '-' + (f'({s})' if p < 9 or s.startswith('-') else s), 8
     if k == 'not':
         s, p = rend(e[1], t)
         return '!' + (f'({s})' if p < 8 else s), 8
+    if k == 'bnot':
+        s, p = rend(e[1], t)
+        return '~' + (f'({s})' if p < 8 else s), 8
     if k == 'bin':
         op, a, b = e[1], e[2], e[3]
         sa, pa = rend(a, t); sb, pb = rend(b, t)
-        if t == 'n' and op in '+-*': return f'W({paren(sa, pa < 9)} {op} {paren(sb, pb < 9)})', 9
-        if t == 'n' and op == '/': return f'D({sa}, {sb})', 9
-        if t == 'n' and op == '%': return f'M({sa}, {sb})', 9
         p = PREC[op]
         return f'{paren(sa, pa < p)} {op} {paren(sb, pb <= p)}', p
     if k == 'tern':
@@ -93,7 +93,9 @@ class Var:
 class Fn:
     def __init__(self, name, params, ret, depth):
         self.name, self.params, self.ret, self.depth = name, params, ret, depth     # params: [(name, ty)]
-        self.prints = False                           # its body (or a function it calls) prints
+        self.style = 'decl'                           # decl: function f() {}; arrow / expr: a value (Gen.program)
+        self.prints = False                           # its body (or a function it calls) prints, or changes an array or object
+                                                      # (an argument printed before the call would show it in Node)
 
 # ---------------- statements render to lines; layout decisions are made at generation time and stored
 class Gen:
@@ -102,6 +104,7 @@ class Gen:
         self.scopes = [{}]; self.fns = []; self.cur = None; self.loops = 0; self.inswitch = 0; self.nctr = 0
         self.budget = int(self.r.randint(8, 40) * size); self.strs = self.r.sample(STRS, self.r.randint(2, 6))
         self.hide = None; self.selfcalls = 0; self.contok = False; self.inlog = False; self.nst = {}      # nst: statements so far per scope (by id)
+        self.labels = []; self.nlabs = 0                  # the labeled loops around (break / continue name them)
 
     # ---- scope
     def vars(self, pred=lambda v: True):
@@ -127,16 +130,17 @@ class Gen:
         if k == 'lit':
             x = r.random()
             v = r.randint(0, 9) if x < .5 else r.randint(10, 999) if x < .8 else r.randint(1000, 9000) if x < .95 else r.randint(8192, 300000)
-            v = v if not any(lo <= v < hi for lo, hi in TAGGED) else 8192              # (numbers there are arrays to our machine)
-            return ('raw', f'{v}.') if x > .97 else lit(v)                             # (1. is 1: the dot is the number's)
+            if x > 0.985: return ('raw', f'{v}.')                                      # (1. is 1: the dot is the number's)
+            if x > 0.97: return lit(r.choice(['0.5', '1.5', '0.1', '2.25', '3.14', '1e3', '2.5e-3', '1e21', '0.125', '7.5']))
+            return lit(v)
         if k == 'var':
             vs = self.vars(lambda v: v.ty == 'num')
             return ('raw', r.choice(vs).name) if vs else lit(r.randint(0, 20))
         if k == 'bin':
-            op = r.choice('+-*+-*/%')
+            op = r.choice('+-*+-*/%') if r.random() < .85 else r.choice(BITS)
             a, b = self.num(d + 1), self.num(d + 1)
             return ('bin', op, a, b)
-        if k == 'neg': return ('neg', self.num(d + 1))
+        if k == 'neg': return ('neg' if r.random() < .9 else 'bnot', self.num(d + 1))
         if k == 'tern': return ('tern', self.cond(d + 1), self.num(d + 1), self.num(d + 1))
         if k == 'par': return ('par', self.num(d + 1))
         if k == 'logic': return ('bin', r.choice(['&&', '||']), self.num(d + 1), self.num(d + 1))
@@ -168,7 +172,9 @@ class Gen:
             if x < 0.4: return ('meth', a[0], 'indexOf', [self.num(d + 1)])
             if x < 0.7: return ('meth', ('arr', [self.num(d + 1), self.num(d + 1)]), 'pop', [])
             vs = self.vars(lambda v: v.ty == 'arr' and not v.counter)
-            if vs and not self.inlog: return ('meth', ('raw', r.choice(vs).name), 'push', [self.num(d + 1)])
+            if vs and not self.inlog:
+                if self.cur is not None: self.cur.prints = True
+                return ('meth', ('raw', r.choice(vs).name), 'push', [self.num(d + 1)])
             return ('dot', a[0], 'length')
     def index(self, ln, d):
         """an index expression in 0 .. ln - 1 (ln known) or, for an array of unknown length, 0"""
@@ -320,7 +326,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this', 'proto', 'alog']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -329,6 +335,65 @@ class Gen:
         f = getattr(self, 's_' + k)
         out = f()
         return out if out is not None else self.s_log()
+    def s_this(self):
+        """an object with methods that use this, called as methods, through call / apply / bind, and by an arrow inside one
+        (its own statements: the object's type is none the others use)"""
+        r = self.r
+        if self.inswitch: return None
+        n = self.fresh()
+        if n is None: return None
+        kw = 'var' if len(self.scopes) == (2 if self.cur is not None else 1) else 'let'
+        self.scopes[-1][n] = Var(n, 'fobj')
+        i = lambda: str(r.randint(-9, 99))
+        top = self.cur is None                         # (functions nest two deep: the arrow in a method only at the top level)
+        if not top: self.cur.prints = True             # (it prints: README, console.log's arguments)
+        out = [f'{kw} {n} = {{a: {i()}, f: function (x) {{ return this.a * 2 + x; }},',
+               f'  g: function () {{ this.a++; return this.a; }}' + (',' if top else '};')]
+        if top: out.append(f'  h: function () {{ return (() => this.a - 1)(); }}}};')
+        out = ['\n'.join(out)]                         # (one entry: a function's definition may be inserted between entries)
+        for _ in range(r.randint(1, 3)):
+            out.append('console.log(' + r.choice([f'{n}.f({i()}), {n}.g()', f'{n}["f"]({i()}), {n}.' + ('h()' if top else 'a'), f'{n}.f.call({{a: {i()}}}, {i()})',
+                                                    f'{n}.f.apply({n}, [{i()}])', f'{n}.f.bind({{a: {i()}}})({i()})', f'{n}.f.bind({n}, {i()})()',
+                                                    f'{n}.g.call({n}), {n}.a']) + ')' + self.semi())
+        return out
+    def s_alog(self):
+        """an arrow whose body is console.log (or a function returning it), called as a statement, as a value (undefined, alone
+        in a console.log: README) and as a timer's callback (its own statements, as s_this)"""
+        r = self.r
+        if self.inswitch or self.cur is not None: return None     # (the top level: functions nest two deep)
+        n = self.fresh()
+        if n is None: return None
+        kw = 'var' if len(self.scopes) == 1 else 'let'
+        self.scopes[-1][n] = Var(n, 'fobj')
+        i = lambda: str(r.randint(-9, 99))
+        out = [r.choice([f'{kw} {n} = (x) => console.log("{n}", x * 2)', f'{kw} {n} = x => console.log(x + {i()})',
+                         f'{kw} {n} = function (x) {{ return console.log(x, "{n}"); }}', f'{kw} {n} = (x) => {{ return console.log(-x) }}']) + self.semi()]
+        for _ in range(r.randint(1, 2)):
+            out.append(r.choice([f'{n}({i()})', f'console.log({n}({i()}))', f'console.log(typeof {n}({i()}))',
+                                 f'setTimeout(() => console.log({i()}), {r.randint(0, 3) * 10})', f'setTimeout(() => {n}({i()}))']) + self.semi())
+        return out
+    def s_proto(self):
+        """a constructor with a method on its prototype, an object made by Object.create and given another prototype, read through
+        the chain, hasOwnProperty, for (k in o) over the chain (its own statements, as s_this)"""
+        r = self.r
+        if self.inswitch: return None
+        ns = [self.fresh() for _ in range(4)]
+        if None in ns or len(set(ns)) < 4: return None
+        C, c, b, d = ns
+        kw = 'var' if len(self.scopes) == (2 if self.cur is not None else 1) else 'let'
+        for n in ns: self.scopes[-1][n] = Var(n, 'fobj')
+        if self.cur is not None: self.cur.prints = True
+        i = lambda: str(r.randint(-9, 99))
+        out = ['\n'.join([f'{kw} {C} = function (v) {{ this.v = v; }};', f'{C}.prototype.dbl = function () {{ return this.v * 2; }};',
+                          f'{kw} {c} = new {C}({i()}), {b} = {{base: {i()}, f: function () {{ return this.base + 1; }}}};',
+                          f'{kw} {d} = Object.create({b});', f'{d}.own = {i()};'])]
+        for _ in range(r.randint(1, 3)):
+            out.append(r.choice([f'console.log({c}.dbl(), {c}.v, {c}.hasOwnProperty("v"), {c}.hasOwnProperty("dbl"))',
+                                 f'console.log({d}.f(), {d}.base, {d}.own, {d}.hasOwnProperty("base"))',
+                                 f'for (var {C}k in {d}) console.log({C}k, typeof {d}[{C}k])',
+                                 f'{d}.__proto__ = Object.create({b}); {d}.__proto__.z = {i()}; console.log({d}.z, {d}.base, {d}.f())',
+                                 f'{b}.base = {i()}; console.log({d}.base, {d}.f())']) + self.semi())
+        return out
     def s_decl(self):
         r = self.r
         if self.inswitch: return None                 # (a case's let is scoped to the whole switch: TDZ across cases)
@@ -377,7 +442,7 @@ class Gen:
         v = r.choice(vs)
         if v.ty == 'str': return [('ASG', v.name, '=', self.strx())]
         if v.ty == 'bool': return [('ASG', v.name, '=', self.cond())]
-        op = r.choice(['=', '=', '+=', '-=', '*=', '/=', '%='])
+        op = r.choice(['=', '=', '+=', '-=', '*=', '/=', '%=', r.choice(['=', '&=', '|=', '^=', '<<=', '>>=', '>>>='])])
         return [('ASG', v.name, op, self.num())]
     def s_inc(self):
         vs = self.vars(lambda v: v.ty == 'num' and not v.const and not v.counter)
@@ -385,6 +450,7 @@ class Gen:
         n = self.r.choice(vs).name; op = self.r.choice(['++', '--'])
         return self.simple(self.r.choice([n + op, op + n]))
     def s_aset(self):
+        if self.cur is not None: self.cur.prints = True
         r = self.r
         cs = [v for v in self.vars(lambda v: v.ty == 'arr' and v.ln)]
         if not cs: return None
@@ -394,14 +460,19 @@ class Gen:
         op = r.choice(['=', '=', '+=', '-=', '*='])
         return [('ASET', v.name, i, op, self.num())]
     def s_push(self):
+        if self.cur is not None: self.cur.prints = True
         """an array grows: push, or a store at its length (its known minimum length stays valid)"""
         r = self.r
         cs = self.vars(lambda v: v.ty in ('arr', 'sarr') and not v.counter)
         if not cs: return None
         v = r.choice(cs); e = self.num() if v.ty == 'arr' else self.strx()
+        if r.random() < 0.15 and v.ln:                    # splice that keeps the length: n elements from i replaced
+            i = r.randint(0, v.ln - 1); n = r.randint(0, min(3, v.ln - i))
+            return [('EXPR', ('meth', ('raw', v.name), 'splice', [lit(i), lit(n)] + [self.num() if v.ty == 'arr' else self.strx() for _ in range(n)]), self.semi())]
         if r.random() < 0.7: return [('EXPR', ('meth', ('raw', v.name), 'push', [e]), self.semi())]
         return [('ASET', v.name, ('dot', ('raw', v.name), 'length'), '=', e)]
     def s_pset(self):
+        if self.cur is not None: self.cur.prints = True
         r = self.r
         cs = self.vars(lambda v: v.ty == 'obj')
         if not cs: return None
@@ -456,10 +527,12 @@ class Gen:
     def s_ret(self):
         e = self.num() if self.cur.ret == 'num' else self.strx()
         return [('RET', e)]
-    def s_break(self): return [('IFJ', self.cond(), 'break')] if self.r.random() < 0.8 else self.simple('break')
+    def s_break(self):
+        w = 'break' + (' ' + self.r.choice(self.labels) if self.labels and self.r.random() < 0.3 else '')
+        return [('IFJ', self.cond(), w)] if self.r.random() < 0.8 else self.simple(w)
     def s_cont(self):
         if not self.contok: return None
-        return [('IFJ', self.cond(), 'continue')]
+        return [('IFJ', self.cond(), 'continue' + (' ' + self.r.choice(self.labels) if self.labels and self.r.random() < 0.3 else ''))]
     def s_if(self):
         x = self.r.random(); c = self.cond() if x < 0.8 else self.num() if x < 0.9 else self.strx()      # (a string: its truth)
         th = self.body(); els = []
@@ -473,9 +546,21 @@ class Gen:
         r = self.r
         if self.nctr >= 8: return None
         ctr = f'i{self.nctr}'; self.nctr += 1; K = r.randint(0, 5)
-        kind = r.choice(['for', 'for', 'forv', 'fordown', 'while', 'do'])
+        kind = r.choice(['for', 'for', 'forv', 'fordown', 'while', 'do', 'forof', 'forin'])
+        lab = f'L{self.nlabs}' if r.random() < 0.2 else None
+        if lab: self.nlabs += 1; self.labels.append(lab)
         self.loops += 1; savec = getattr(self, 'contok', False)
-        if kind in ('for', 'forv', 'fordown'):
+        objs = self.vars(lambda v: v.ty == 'obj')
+        if kind == 'forin' and not objs: kind = 'forof'
+        if kind in ('forof', 'forin'):                    # the elements of a number array / an object's keys
+            self.contok = True
+            if kind == 'forof':
+                a = self.arrexpr(need=0); src = R(a[0]) if a else '[1, 2]'; ty = 'num'
+            else: src = r.choice(objs).name; ty = 'str'
+            dk = r.choice(["let", "const", "var"])
+            self.scopes.append({ctr: Var(ctr, ty, const=dk == 'const')}); b = self.body(); self.scopes.pop()
+            out = [('LOOP', f'for ({dk} {ctr} {"of" if kind == "forof" else "in"} {src})', b, None)]
+        elif kind in ('for', 'forv', 'fordown'):
             self.contok = True
             if kind == 'forv' and (self.cur is not None or len(self.scopes) > 1): kind = 'for'
             sc = {ctr: Var(ctr, 'num', counter=True)}
@@ -491,6 +576,8 @@ class Gen:
             if kind == 'while': out = [('RAWL', decl), ('LOOP', f'while ({ctr} < {K})', b, None)]
             else: out = [('RAWL', decl), ('LOOP', 'do', b, f'while ({ctr} < {K})')]
         self.loops -= 1; self.contok = savec
+        if lab:
+            self.labels.pop(); _, hdr, b, tail = out[-1]; out[-1] = ('LOOP', f'{lab}: {hdr}', b, tail)
         return out
     def s_alloc(self):
         """a loop that allocates an object per iteration and keeps a few: enough to run the garbage collector"""
@@ -538,6 +625,7 @@ class Gen:
             ps = [('dep', 'num')] if r.random() < 0.4 else []
             ps += [(pn, r.choice(['num', 'num', 'str', 'arr', 'objp'])) for pn in r.sample(['p1', 'p2', 'p3', 'pa'], r.randint(0, 3))]
             self.fns.append(Fn(f'f{i}', ps, r.choice(['num', 'num', 'str', None]), bool(ps and ps[0][0] == 'dep')))
+            x = r.random(); self.fns[-1].style = 'arrow' if x < 0.25 else 'expr' if x < 0.4 else 'decl'
         defs = []
         for f in self.fns:
             self.cur = f; self.selfcalls = 0
@@ -555,8 +643,10 @@ class Gen:
             defs.append(('FN', f, body))
         rest = []
         while self.budget > 0: rest += self.stmt()
-        for d in defs: rest.insert(r.randint(0, len(rest)), d)
-        return top + rest
+        vals = [d for d in defs if d[1].style != 'decl']            # (values: defined before any call, in order)
+        for d in defs:
+            if d[1].style == 'decl': rest.insert(r.randint(0, len(rest)), d)
+        return top + vals + rest
 
 # ---------------- layout: statements -> text (t: 'o' ours, 'n' Node)
 class Layout:
@@ -582,7 +672,6 @@ class Layout:
             elif k == 'ASET': _, n, i, op, e = s; tgt = f'{n}[{self.e(i)}]'
             else: _, t_, op, e = s; tgt = self.e(t_)
             end = self.end()
-            if self.t == 'n' and op != '=': return [f'{p}{tgt} = {self.e(("bin", op[0], ("raw", tgt), e))}{end}']
             return [f'{p}{tgt} {op} {self.e(e)}{end}']
         if k == 'LOG':
             parts = []
@@ -624,8 +713,14 @@ class Layout:
                 else: out += [head] + body
             return out + [p + '}']
         if k == 'FN':
-            _, f, body = s
-            return [f'{p}function {f.name}({", ".join(pn for pn, _ in f.params)}) {{'] + self.lines(body, ind + 1) + [p + '}']
+            _, f, body = s; ps = ", ".join(pn for pn, _ in f.params)
+            if f.style == 'decl': return [f'{p}function {f.name}({ps}) {{'] + self.lines(body, ind + 1) + [p + '}']
+            kw = r.choice(['const', 'let', 'var'])
+            if f.style == 'expr': return [f'{p}{kw} {f.name} = function ({ps}) {{'] + self.lines(body, ind + 1) + [p + '}' + self.end()]
+            head = f.params[0][0] if len(f.params) == 1 and r.random() < 0.5 else f'({ps})'
+            if len(body) == 1 and isinstance(body[0], tuple) and body[0][0] == 'RET':     # an expression body
+                return [f'{p}{kw} {f.name} = {head} => {self.e(body[0][1])}{self.end()}']
+            return [f'{p}{kw} {f.name} = {head} => {{'] + self.lines(body, ind + 1) + [p + '}' + self.end()]
         raise ValueError(k)
     def body(self, head, b, ind):
         p = '  ' * ind

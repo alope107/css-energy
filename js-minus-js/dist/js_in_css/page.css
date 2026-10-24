@@ -37,10 +37,10 @@
   .label { font: 600 .72rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .scanpos { font: .8rem ui-monospace, monospace; color: var(--muted); }
   .frame { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }
-  .frame:focus-within { border-color: var(--accent); }
+  .frame:has(> .ed:focus) { border-color: var(--accent); }   /* (not a picker radio's focus: they sit in .frame) */
   .ed { background: linear-gradient(to right, transparent 654px, var(--rule) 0, var(--rule) 655px, transparent 0); }
   /* --- Sample picker ---
-   radio buttons beside #run (#pk0, #pk1, ...) pick the editor that shows; each keeps its own edits */
+   radio buttons (#pk0, #pk1, ...), each right before its editor in .frame, pick the editor that shows; each keeps its own edits */
   .pkr { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }
   .picker { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 .7rem; }
   .picker label { cursor: pointer; user-select: none; font: 500 .8rem/1 system-ui, sans-serif; padding: .38rem .72rem; border-radius: 999px;
@@ -48,11 +48,11 @@
   .picker label::before { content: attr(data-icon); margin-right: .35em; }
   .picker label:hover { border-color: var(--accent); color: var(--ink); }
   .ed { display: none; }
-  #pk0:checked ~ #app .ed0, #pk1:checked ~ #app .ed1, #pk2:checked ~ #app .ed2, #pk3:checked ~ #app .ed3, #pk4:checked ~ #app .ed4, #pk5:checked ~ #app .ed5, #pk6:checked ~ #app .ed6, #pk7:checked ~ #app .ed7, #pk8:checked ~ #app .ed8, #pk9:checked ~ #app .ed9, #pk10:checked ~ #app .ed10 { display: block; }
-  #pk0:checked ~ #app label[for=pk0], #pk1:checked ~ #app label[for=pk1], #pk2:checked ~ #app label[for=pk2], #pk3:checked ~ #app label[for=pk3], #pk4:checked ~ #app label[for=pk4], #pk5:checked ~ #app label[for=pk5], #pk6:checked ~ #app label[for=pk6], #pk7:checked ~ #app label[for=pk7], #pk8:checked ~ #app label[for=pk8], #pk9:checked ~ #app label[for=pk9], #pk10:checked ~ #app label[for=pk10] { background: var(--accent); border-color: var(--accent); color: #fff; }
-  #pk0:focus-visible ~ #app label[for=pk0], #pk1:focus-visible ~ #app label[for=pk1], #pk2:focus-visible ~ #app label[for=pk2], #pk3:focus-visible ~ #app label[for=pk3], #pk4:focus-visible ~ #app label[for=pk4], #pk5:focus-visible ~ #app label[for=pk5], #pk6:focus-visible ~ #app label[for=pk6], #pk7:focus-visible ~ #app label[for=pk7], #pk8:focus-visible ~ #app label[for=pk8], #pk9:focus-visible ~ #app label[for=pk9], #pk10:focus-visible ~ #app label[for=pk10] { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .pkr:checked + .ed { display: block; }
+  .pane:has(> .frame > #pk0:checked) > .picker > label[for=pk0], .pane:has(> .frame > #pk1:checked) > .picker > label[for=pk1], .pane:has(> .frame > #pk2:checked) > .picker > label[for=pk2], .pane:has(> .frame > #pk3:checked) > .picker > label[for=pk3], .pane:has(> .frame > #pk4:checked) > .picker > label[for=pk4], .pane:has(> .frame > #pk5:checked) > .picker > label[for=pk5], .pane:has(> .frame > #pk6:checked) > .picker > label[for=pk6], .pane:has(> .frame > #pk7:checked) > .picker > label[for=pk7], .pane:has(> .frame > #pk8:checked) > .picker > label[for=pk8], .pane:has(> .frame > #pk9:checked) > .picker > label[for=pk9], .pane:has(> .frame > #pk10:checked) > .picker > label[for=pk10], .pane:has(> .frame > #pk11:checked) > .picker > label[for=pk11], .pane:has(> .frame > #pk12:checked) > .picker > label[for=pk12] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pane:has(> .frame > #pk0:focus-visible) > .picker > label[for=pk0], .pane:has(> .frame > #pk1:focus-visible) > .picker > label[for=pk1], .pane:has(> .frame > #pk2:focus-visible) > .picker > label[for=pk2], .pane:has(> .frame > #pk3:focus-visible) > .picker > label[for=pk3], .pane:has(> .frame > #pk4:focus-visible) > .picker > label[for=pk4], .pane:has(> .frame > #pk5:focus-visible) > .picker > label[for=pk5], .pane:has(> .frame > #pk6:focus-visible) > .picker > label[for=pk6], .pane:has(> .frame > #pk7:focus-visible) > .picker > label[for=pk7], .pane:has(> .frame > #pk8:focus-visible) > .picker > label[for=pk8], .pane:has(> .frame > #pk9:focus-visible) > .picker > label[for=pk9], .pane:has(> .frame > #pk10:focus-visible) > .picker > label[for=pk10], .pane:has(> .frame > #pk11:focus-visible) > .picker > label[for=pk11], .pane:has(> .frame > #pk12:focus-visible) > .picker > label[for=pk12] { outline: 2px solid var(--ink); outline-offset: 2px; }
   #run:checked ~ #app .picker { opacity: .45; pointer-events: none; }   /* the scan reads the editor that shows: no switching while it runs */
-  #run:checked ~ .pkr { visibility: hidden; }
+  #run:checked ~ #app .pkr { visibility: hidden; }
   /* --- Run / Edit button --- */
   .runbtn { position: relative; display: inline-block; cursor: pointer; font: 600 .9rem/1 system-ui, sans-serif; color: #fff; background: var(--accent);
     border-radius: 6px; padding: .55rem 1rem; user-select: none; }

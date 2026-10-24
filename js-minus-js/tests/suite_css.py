@@ -14,7 +14,7 @@ exp = {}
 for f in sorted(f for d in dirs for f in glob.glob(d + '/*.js')):
     src = open(f).read().rstrip('\n')
     c = R.Compiler(R.LAYOUT['data_base'], R.LAYOUT['code_base'], lib); words, data = c.compile(C.padded_source(src, L, P))
-    im = R.image_mem(c, {}, data, lib['init'])
+    im = {a: v for a, v in R.image_mem(c, {}, data, lib['init']).items() if a not in R.GINIT}     # (the globals' undefined: the RAM image's)
     lines = src.split('\n')
     exp[os.path.basename(f)[:-3]] = dict(lines=[[ord(ch) for ch in ln] for ln in lines], err=c.err,
                                          code={str(a): w for a, w in words.items()}, data={str(a): v for a, v in im.items()})

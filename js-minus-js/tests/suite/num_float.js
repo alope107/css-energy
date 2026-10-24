@@ -1,0 +1,14 @@
+console.log(1.5, 0.1 + 0.2, 5 / 2, 18.5 % 7, 3.14);
+console.log(1 / 3, 2 / 3, -2.5 * 2, 7 / -0.5, 1e21, 1e-7);
+console.log(0.000123, 123.456, 1e15 + 0.3, 100 / 3, 2e-5);
+var x = 262143; x++;
+console.log(x, x * 2, x - 0.5, -x);
+var big = 1e6 * 1e6;
+console.log(big, big * big, -big, big / 7);
+console.log(1 / 0, -1 / 0, 0 / 0, 1e308 * 10, 5 % 0);
+console.log(0.1 * 3, 0.3 === 0.1 * 3, 0.5 + 0.5 === 1);
+console.log(typeof 1.5, 1.5 > 1, 1.5 < 1, 2.5 == "2.5");
+var s = "v=" + 2.5;
+console.log(s, s.length, String(0.1), "" + 1e21);
+console.log([1.5, 2, 1e21], Number("3.25"), Number("1e3"));
+console.log(parseInt("12.7"), Number(" 4 "), Number("x"));

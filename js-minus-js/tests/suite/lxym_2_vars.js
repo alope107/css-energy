@@ -1,0 +1,24 @@
+// learnxinyminutes 2: variables, arrays and objects
+var someVar = 5;
+someOtherVar = 10;
+var someThirdVar;
+var someFourthVar = 2, someFifthVar = 4;
+someVar += 5; console.log(someVar);
+someVar *= 10; console.log(someVar);
+someVar++; console.log(someVar);
+someVar--; console.log(someVar);
+var myArray = ["Hello", 45, true];
+console.log(myArray[1], someOtherVar, someThirdVar);
+myArray.push("World"); console.log(myArray.length);
+myArray[3] = "Hello";
+myArray.unshift(3); someVar = myArray.shift();
+myArray.push(3); someVar = myArray.pop();
+console.log(someVar, myArray);
+var myArray0 = [32, false, "js", 12, 56, 90];
+console.log(myArray0.join(";"), myArray0.slice(1, 4));
+console.log(myArray0.splice(2, 4, "hi", "wr", "ld"), myArray0);
+var myObj = {key1: "Hello", key2: "World"};
+var myObj = {myKey: "myValue", "my other key": 4};
+console.log(myObj["my other key"], myObj.myKey);
+myObj.myThirdKey = true;
+console.log(myObj.myFourthKey, myObj);
