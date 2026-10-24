@@ -93,6 +93,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   them, always at the same LDI, with nothing pending and the same block in both ways of its set. The data fill had no
   check that its block was absent (the prefetch has one); a pending miss seen again after its fill, as when a register
   lands a frame late under load, filled the other way too. With the check, 30 of 30 such runs halt.
+  Against main, measured last (BENCHMARKS §17): CPU-only pages 1.20× slower (geometric mean of 16 programs: more passes
+  where frames grew or strings compare, and each pass costs more, the instruction classes carrying doubles, specials
+  and calls), compiles 1.18× slower (median of 186 programs: 21% more temps per token). Three cuts on the way: a
+  `console.log` chain past its pieces keeps the rest on its last piece when that is a string (`hanoi` had become three
+  heap strings per line: 63 → 35 passes, main 33); the runtime takes its common cases first (two numbers or two
+  strings skip `prim`, a name skips `canint`: steps −6.6%); and the picker's radio buttons moved next to their editors,
+  so one set of readback rules serves all thirteen (`.pkr:checked + .ed`; per editor they had cost ~10% of a compile).
+  Two tests from the start, `fn_in_block` and `nested_function`, became programs: the branch compiles them.
 
 ## Dead ends and superseded approaches
 
@@ -179,6 +187,16 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 
 ## Open leads (untried)
 
+- **Two strings' equality in the machine.** `==`, `===` and `switch` on two strings always trap (`jcmp` or `deq`, then
+  `leqr` / `deqr`: ~37 steps, `primes` +30% passes against main). Same address is equal and different lengths unequal:
+  a stage after the dyn class that reads both length words (as the cat class does) would decide most of them.
+- **Compile time against main** (+18%, BENCHMARKS §17): `popops` chooses a dynamic operator in each of its ten
+  iterations (`dop`, `bty`, `picmp`: ~80 temps an operator token), and `(` after an operand carries value and method
+  calls in every variant. Choosing the operator once at push time, or variants for the common binary operators (a
+  smaller `popcap`), would cut the temps; §14 found new variants cost more than their temps, so measure both.
+- **A pass of the CPU** costs ~15% more than main's (`collatz`: the same passes in the model, 1.155× on the page): 63
+  more registered properties and 53% more `if()`. Which classes' declarations every pass pays for is
+  unmeasured.
 - **Per-iteration `let`.** `for (let i ...)` has one `i`: closures made in the loop see its last value (README
   Limits). An env cell is per frame, and a top-level function's variables are globals, so a binding per iteration
   needs a block's own env chained to the frame's; the one-pass compiler doesn't know at the loop's head whether the

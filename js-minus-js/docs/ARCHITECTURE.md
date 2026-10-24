@@ -27,7 +27,8 @@ until 2026-10-19 the CPU was a GSUB font, §3.8.)
 
 Run and Edit are one checkbox (`#run`, first in `body`), read through sibling selectors (`#run:checked ~ …`). Edit
 clears the CPU's registers and zeroes RAM, but for the globals, which it sets to `undefined` (cc_ref `GINIT`, as the
-CPU-only images start them: hoisting and the function cache's sentinel). The picker's radio buttons (`#pk<i>`) follow it.
+CPU-only images start them: hoisting and the function cache's sentinel). The picker's radio buttons (`#pk<i>`) sit in
+`.frame`, each right before its editor.
 
 ---
 
@@ -328,8 +329,8 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 - `UI=1` adds the editors, the readback scan, the compile chain and Run / Edit (`uipage.py`). Gating:
   `--go = compiled (ccok) × run × …`; nothing runs until `--ccgo`. Edit sets `--run` to 0, zeroing every register and
   RAM leaf; the compile chain's overlays hold code and strings, and read ports read them as RAM.
-- The picker: eleven editors (`#ed`, the page's own program, then `samples/*.js`), one shown (`#pk<i>:checked ~ #app
-  .ed<i>`); each keeps its edits. It is disabled while running (the scan reads the editor that shows).
+- The picker: thirteen editors (`#ed`, the page's own program, then `samples/*.js`), one shown (`.pkr:checked + .ed`:
+  each radio button is right before its editor); each keeps its edits. It is disabled while running (the scan reads the editor that shows).
 
 ### 3.5 Runtime library
 
@@ -503,9 +504,10 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
   are read-only, one sweep raises `--rbrd`, and `--ccgo` (from the `--rbrdT` timeline) shows the compile chain.
 - Lines: line 0 is text directly in the editor, line `k` its `k`-th `div`, each with a sentinel. Nested divs show
   inline, `<br>` is hidden, `white-space: nowrap` with `&nbsp;`, and no CSS rule may match the line divs (ENGINE_NOTES
-  44–49). Hidden editors are `display: none`, so the anchors are the shown one's; the per-line checks (`:has`) are
-  per editor, under its radio button, on the editors' section with child combinators (on `#app` each searched its
-  ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan reads what the editor shows; `tests/picker.js`
+  44–49). Hidden editors are `display: none`, so the anchors are the shown one's; the per-line checks (`:has`) look at
+  the editor after the checked radio button, one set for every editor (per editor they cost ~10% of a compile with twelve
+  samples: BENCHMARKS §17), on the editors' section with child combinators (on `#app` each searched its ~10,000
+  elements: BENCHMARKS §14). `make l5-input` checks that the scan reads what the editor shows; `tests/picker.js`
   the picker. An editor's initial text starts at its line 1, so a sample has at most 23 lines.
 
 ---
@@ -523,8 +525,8 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 9 × 16 grid |
 | L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
-- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 139 programs, `tests/suite_err/` 49;
-  `samples/` the picker's ten; `tests/programs/` the demos t1–t4.
+- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 180 programs, `tests/suite_err/` 49;
+  `samples/` the picker's twelve; `tests/programs/` the demos t1–t4.
 - **Collector tests** (`str_keys_gc`, `obj_gc`, `gc_rawblock`, `arr_gc`) fill the 3,072-word heap, which is most of
   their time: a collection needs a full half, and each new 4-word line a program writes costs a cache-miss pass. They
   fill with empty objects where the filler doesn't matter (an 8-word chunk, one line written), collect at most twice

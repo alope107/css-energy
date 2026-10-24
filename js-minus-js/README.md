@@ -14,18 +14,21 @@ editor (or pick one of twelve samples) and press Run. The program then goes thro
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-22).**
+**Status (2026-10-24).**
 
-- Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, the ten
+- Every test level passes: 180 programs checked against Node's output and 49 the compiler must reject, the twelve
   samples through the compiler in Chrome and on the page, plus differential tests that check thousands of generated,
   reformatted and mutated programs against Node (`make fuzz`). The CPU's checks: C1 (its model, every program) and C2
-  (a CPU-only page per program, under 1,500 steps); all the programs as CPU-only pages, objects included.
+  (a CPU-only page per program; `make c2-all` every program, the collector's tests included).
+- The language covers everything in the [learnxinyminutes JavaScript tutorial](https://learnxinyminutes.com/javascript/)
+  ([The language](#the-language)): JavaScript's numbers as doubles, `true` / `null` / `undefined` as values, functions
+  as values, closures, arrows, `this`, prototypes and `new`, timers, `Math`.
 - The machine is a register machine since 2026-10-21, with the runtime's work on memory as machine instructions and a
-  code cache since 2026-10-22. On 25 programs on CPU-only pages it is 1.74× faster than the register machine before it
-  and 1.53× than the stack machine with those instructions (geometric means; strings, arrays and objects up to 7.6×,
-  compute as fast; BENCHMARKS §15), with compile time unchanged.
-- On the page, FizzBuzz 1–15 compiles in about 2.3 s from Run (including the 1.2 s readback sweep) and halts about
-  3.2 s after Run.
+  code cache since 2026-10-22 (BENCHMARKS §15). The language above costs it time (BENCHMARKS §17): against the machine
+  before it, CPU-only pages run 1.20× longer (geometric mean of 16 programs) and programs compile 1.18× longer (median
+  of 186).
+- On the page, FizzBuzz 1–15 compiles in about 2.8 s from Run (including the 1.2 s readback sweep) and halts about
+  3.8 s after Run (main: 2.4 and 3.3 s; BENCHMARKS §17).
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
