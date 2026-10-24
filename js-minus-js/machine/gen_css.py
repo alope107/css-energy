@@ -55,16 +55,17 @@ WOFF = M20 = 1 << 20; A15 = 32768
 NSET, NWAY = 16, 2; NL = NSET * NWAY
 CH = 'ABCDEFGHIJKL'[:2 * ISSUE]; sp0 = image['sp0']; CODE0 = image['codeBase']; DB = R.LAYOUT['data_base']
 # RAMNI=1: the RAM trees' properties don't inherit (explicit inherit per node: the restyle stops one level off a write's
-# path, ENGINE_NOTES 82). RAMDEC=1: the leaves past the named area are unnamed; each bank's tree has two read paths that
+# path, ENGINE_NOTES 82; the default, RAMNI=0 for the inherited trees). RAMDEC=1: the leaves past the named area are unnamed; each bank's tree has two read paths that
 # name the missing block's leaf --rx<bank> and the next one's --ry<bank>, the block arriving through layout (the box .ab
 # at the chain's end, a fixed size container .memx around the RAM: exp/ram/README.md)
-RAMNI = os.environ.get('RAMNI') == '1'; RAMDEC = os.environ.get('RAMDEC') == '1'
+RAMNI = os.environ.get('RAMNI', '1') == '1'; RAMDEC = os.environ.get('RAMDEC') == '1'
 if RAMDEC: RAMNI = True
 # STAGE=s[,s2...] (exp/ram; csssim MIDS=... MIDW=<stages + 1> MIDPF=0 MIDIC=0): a fill stage between levels s - 1 and s. A data
 # miss above it is filled there in the same pass: two fixed size containers as wide and tall as the missing block's four words
 # (anchor-size() of its leaves, the names picked by a style query on the block's high digit), then .fl's line update; the
 # stalled instruction re-executes at level s with its latches. Stage j's dirty victim leaves through write set j (CHS[j]).
-STAGES = [int(x) for x in os.environ.get('STAGE', '').split(',') if x and x != '0']
+# The default is one stage at level 16 (K/2; none for K < 4); STAGE=0 for none (BENCHMARKS 21).
+STAGES = [int(x) for x in os.environ.get('STAGE', str(K // 2) if K >= 4 else '0').split(',') if x and x != '0']
 CHS = ['MNOPQRST', 'UVWXYZab', 'cdefghij'][:len(STAGES)]; CHS = [c[:2 * ISSUE] for c in CHS]
 CHW = CH + ''.join(CHS)
 

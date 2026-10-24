@@ -123,6 +123,16 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `z` and `e` were read at garbage addresses that hit, and `e` was kept. csssim reads in order and stops at the first
   miss, so it never did. A read is good now only if every read its address came from was, transitively
   (`tests/suite/latch_chain.js` fails without it).
+- **2026-10-24 — A fill stage in the chain; RAM trees not inherited** (`exp/ram/README.md`, BENCHMARKS 21). A catalog
+  of ~40 ways to build RAM, probed, led to two changes. In the first, a RAM whose cost doesn't grow with its size,
+  only the non-inherited trees (`RAMNI`, now the default) were kept. They cut the RAM's restyles ~3× (arr_gc ~790 → ~260
+  elements per layout) but saved no time. The rest of it (unnamed leaves read through paths, the miss address through
+  layout: `RAMDEC`) lost on the page, 0.95–1.29. The second, misses filled inside the pass, won. A data miss above
+  level 16 is filled there through two nested size containers (the missing block's four leaves' widths and heights)
+  and re-executed with its latches. The model gave 0.78 of the passes (geomean of 180 programs). On CPU-only pages it
+  was 0.84 of the time (deep_recursion 0.62, closure_gc 0.80), and on the editor page deep_recursion 0.71 and
+  closure_gc 0.81; short programs pay ~1–3% in compile. Two and three stages saved more passes but cost each pass more
+  (the register subjects restyle in every stage's containers), so they lost on the GC programs and the compile.
 
 ## Dead ends and superseded approaches
 
@@ -213,6 +223,8 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 83 | The REPL's line count from 24 `#app:has()` rules | `#app` restyles every frame of the scan: a program's compile +1% | `.pane:has()` into a register |
 | 84 | The REPL as a chip in the program page's picker, replaying the session on each Enter | programs compiled ~6% slower for the REPL's page parts; an entry cost the whole session's run (13 s at 19 lines) | a page of its own that keeps the machine's state (ARCHITECTURE §3.10) |
 | 85 | The REPL's output room opened by moving the lines with `position: relative` | the rows' names (their sentinels' view progress) moved with the lines: the probes read the wrong rows (ENGINE_NOTES 81) | `transform: translateY()` |
+| 86 | Read paths down the RAM trees, the miss address through layout, unnamed leaves (`RAMDEC`) | the size container around the RAM is resolved in layout, and the tree under it restyled there each pass: 0.95–1.29 on CPU-only pages (arr_gc layout 9.8 → 16.7 ms) | the named leaves and the read ports' mux |
+| 87 | Two or three fill stages (`STAGE=11,22`, `8,16,24`) | fewer passes, but each stage costs every pass: the GC programs 0.85–0.95 against one stage's 0.80–0.82, the compile 1.05× | one stage at level 16 |
 
 ## Open leads (untried)
 
@@ -262,10 +274,9 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   chained 8 shapings in one layout).
 - **Allocation loops** (`obj_gc.js`: 18 shapings per iteration, 14 misses evicting the loop's code): LRU, or writes to
   fresh heap lines that bypass the cache.
-- **A RAM that scales, and misses filled inside the pass** (`exp/ram/README.md`, 2026-10-24): unnamed two-word leaves read
-  through non-inherited decode trees fed through layout (2.5–4.4 ms vs 10.7–14 at 16K dense, 13.7 vs 87 at 64K), and
-  mid-chain read stages with a size-query name mux (~0.13–0.24 ms per dependent read). Probes only; the catalog lists
-  ~40 other ways and why they lose.
+- **A cheaper fill stage** (`exp/ram/README.md`): the one stage (2026-10-24) costs every pass, since the register
+  subjects restyle again in its two containers. One container holding all four words, or the registers kept outside
+  the stage, would make two stages pay (the model: 0.71 of the passes against one stage's 0.78).
 - **RAM group size 16 or 64** instead of 256: measured, not adopted. Both halted ~6% sooner in two rounds (BENCHMARKS §8);
   re-check with `ab.js` and the L5 suite before switching.
 - **More shapings per frame**: chain dependent shapings in one lifecycle update with container-query
