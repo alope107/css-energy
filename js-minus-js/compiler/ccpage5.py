@@ -82,17 +82,19 @@ class Names:
 
 PR = set(range(32, 127))
 CLASSES = [{32}, D.ALPHA, D.DIGIT, {34}, {92}, {47}, PR - D.ALPHA - D.DIGIT - {32, 34, 92, 47}, {10}, {0}]
-CL_NL, CL_NUL = 7, 8
+CL_NL, CL_NUL, CL_PAD = 7, 8, 9
+PAD = os.environ.get('PAD', '1') == '1'           # padding levels pass the lexer state through (CL_PAD)
+HASGATE = os.environ.get('HASGATE', '1') == '1'   # token levels wait for their tokens
 HC = 128                 # character register height
 HT = 1 << 20             # token register height
 TOKF = [('c', 'tc'), ('v', 'tv'), ('h', 'th1'), ('g', 'th2')]
 
-def ccl_css(prop):
-    """class of the printable code held in the registered property prop (CSS expression)"""
+def ccl_css(prop, pad=None):
+    """class of the printable code held in the registered property prop (CSS expression); CL_PAD where pad holds"""
     v = f'var(--{prop})'
     al = f'clamp(0, {v} - 64, 1) * clamp(0, 91 - {v}, 1) + clamp(0, {v} - 96, 1) * clamp(0, 123 - {v}, 1)'
     dg = f'clamp(0, {v} - 47, 1) * clamp(0, 58 - {v}, 1)'
-    return (f'if(style(--{prop}: 32): 0; style(--{prop}: 34): 3; style(--{prop}: 92): 4; style(--{prop}: 47): 5; style(--{prop}: 95): 1; style(--{prop}: 36): 1;'
+    return (f'if({f"{pad}: {CL_PAD};" if pad else ""}style(--{prop}: 32): 0; style(--{prop}: 34): 3; style(--{prop}: 92): 4; style(--{prop}: 47): 5; style(--{prop}: 95): 1; style(--{prop}: 36): 1;'
             f' else: calc(6 - 5 * ({al}) - 4 * ({dg})))')
 
 def mux_name(prop, n, fmt):
@@ -154,7 +156,7 @@ def variant_rules(data_base, code_base, lib):
 def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     import hashlib
     lib = {k: lib[k] for k in ('init', 'entries') if k in lib}      # all the chain reads of the ROM
-    h = hashlib.sha256(json.dumps([lib, L, P, TMAX, code_base, data_base, short, D.INLINE, D.SPEC_LEVEL], sort_keys=True).encode())
+    h = hashlib.sha256(json.dumps([lib, L, P, TMAX, code_base, data_base, short, D.INLINE, D.SPEC_LEVEL, PAD, HASGATE], sort_keys=True).encode())
     here = os.path.dirname(os.path.abspath(__file__))
     D.sources_hash(h, sys.modules[__name__])
     d = os.path.join(here, '..', 'build', 'ccpage5'); path = os.path.join(d, h.hexdigest()[:16] + '.json')
@@ -201,9 +203,17 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                # base values: a line whose probe is hidden (past the end of the text) has no registers, so its
                # animations are inactive; it must read as spaces, not inherit the previous line's characters
                + ''.join(f' --lc{j}: 32;' for j in range(P)) + ' }')
-    # every level: the class of the next character, for its child's lexer dispatch (static slots set it inline)
-    css.append(f'.lvA, .lvB {{ --ncl: {ccl_css("cn")}; }}')
-    for n in ('c', 'cn', 'ncl'): N.add(n, False)
+    # every level: the class of the next character, for its child's lexer dispatch (static slots set it inline). Class
+    # CL_PAD: a space whose next character is blank, met with the lexer idle (no string, no two-character operator
+    # pending, no identifier's NUL to write: this level's own output state). cc_ref.char does nothing then, so the child
+    # copies the state over (its pass-through rule) instead of running the space lexer: most levels are such padding
+    # (the rest of every line up to its 64 columns, the empty lines).
+    for rd in 'AB':
+        wr = OTH[rd]
+        pad = (f'style(--cn: 32) and style(--s-p2-{wr}: 0) and style(--s-inul-{wr}: 0) and (style(--cn2: 32) or style(--cn2: 10))'
+               f' and (style(--s-lx-{wr}: 0) or style(--s-lx-{wr}: 2) or style(--s-lx-{wr}: 4))')
+        css.append(f'.lv{rd} {{ --ncl: {ccl_css("cn", pad if PAD else None)}; }}')
+    for n in ('c', 'cn', 'cn2', 'ncl'): N.add(n, False)
     # the chain exists only once the editor's scan says the text is complete (--rbrdT, raised one sweep after Run)
     # (the sources keep running: an animation created paused does not reliably take its timeline's value, and a pause
     # driven by an animated flag is ignored, since Blink reads animation-play-state from the base style)
@@ -239,6 +249,10 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
             if ci == CL_NL: css.append(f'.kn{rd} {{ {body} }}')
             elif ci == CL_NUL: css.append(f'.kz{rd} {{ {body} }}')
             else: css.append(f'@container style(--ncl: {ci}) {{ .kc{rd} {{ {body} }} }}')
+        if ci == 0 and PAD:     # the padding rule: no token, no string byte, the state as it was
+            for rd in 'AB':
+                css.append(f'@container style(--ncl: {CL_PAD}) {{ .kc{rd} {{ '
+                           + ' '.join(f'--s-{n}-{OTH[rd]}: var(--s-{n}-{rd});' for n in lst) + ' --l-o_tkany: 0; --l-o_sv: 0; } }')
     for n in lst + ['nt']:
         for x in 'AB': N.add(f's-{n}-{x}', True)
     css.append(lbl.group('Character levels: token count and index'))
@@ -274,7 +288,8 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         st = []
         if sl[0] == 'col': st.append(f'--c: var(--lc{sl[2]})')
         else: st.append(f'--c: {10 if sl[0] == "nl" else 0}')
-        if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]})')
+        nxt2 = slots[i + 2] if i + 2 < NC else ('nul',)
+        if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]}); --cn2: ' + (f'var(--lc{nxt2[2]})' if nxt2[0] == 'col' else '10'))
         else: st.append(f'--cn: {10 if nxt[0] == "nl" else 0}; --ncl: {CL_NL if nxt[0] == "nl" else CL_NUL}')
         # a line's source opens just before the previous line's newline level, whose --cn must be this line's first
         # character (the lexer's lookahead at a newline decides semicolon insertion; that level's own --c is 10)
@@ -310,6 +325,9 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append('.tlA, .tlB {'
                ' --tlive: clamp(0, var(--ntf) - var(--ti) + 1, 1); --tlast: calc(1 - min(1, abs(var(--ntf) - var(--ti))));'
                ' display: if(style(--tlive: 0): none; else: contents); }')
+    # a level whose token hasn't come yet (its register not laid out: the first pass after the lexer wrote it) shows
+    # nothing: the token chain waits for its tokens instead of running every level's step on zeros
+    if HASGATE: css.append('.tpA, .tpB { display: if(style(--tlive: 0): none; style(--has: 0): none; else: contents); }')
 
     for n, i in (('ti', False), ('tlive', False), ('tlast', True), ('tcq', False), ('vh', False), ('has', False)): N.add(n, i)
     # level 0: initial parser state

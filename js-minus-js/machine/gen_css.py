@@ -1350,7 +1350,7 @@ else:
                f'<span class="unread">A line break from Shift+Enter or a paste isn\'t read: use Enter.</span></div>')
         editors = f'<div class="frame">{PKR(0)}<div id="ed" class="ed ed0" {edattr} aria-labelledby="in-label">{ui_rb.editor_html(replui.DEMO)}<div><br/></div></div></div>'
         cons_box = f'<div class="rcons">{con_q}' + replui.html_cons(UIL, R.LAYOUT['repl_cols'], R.LAYOUT['repl_rows'], lambda k: OUT_BASE - ROM + k, WOFF) + '</div>'
-        app_regs = ui_rb.regs_html(repl=True) + replui.html_app() + ui_rb.rcnt_html(UIL)
+        app_regs = ui_rb.regs_html(repl=True) + replui.html_app() + ui_rb.rcnt_html(UIL) + ui_rb.rsum_html(UIL)
     else:
         title, lede = 'JavaScript in CSS', 'Type a program and press Run. No JavaScript runs on this page. Or try <a href="repl.xhtml">the REPL</a>.'
         bar = (f'<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span>'
@@ -1359,7 +1359,7 @@ else:
         editors = (f'<div class="frame">{PKR(0)}<div id="ed" class="ed ed0" {edattr} aria-labelledby="in-label">{ui_rb.editor_html(image.get("source", ""))}</div>'
                    + "".join(f'{PKR(e + 1)}<div class="ed ed{e + 1}" {edattr} aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC))) + '</div>')
         cons_box = f'<div class="cons">{con_html}<div class="con"></div>\n{console}</div>'
-        app_regs = ui_rb.regs_html()
+        app_regs = ui_rb.regs_html() + ui_rb.rsum_html(UIL)
     page_css = f"""{static}
 {uipage.static(COLS, ROWS, UIL, UIP, WOFF, EDS, repl=REPLP)}
 {chr(10).join(props)}
