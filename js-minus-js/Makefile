@@ -13,7 +13,7 @@ export SOURCE_DATE_EPOCH := 0
 # make re-runs it only when something it depends on is newer than its last pass, or with RERUN=1. <config> is a hash
 # of the Node, Python, browser and environment variables it runs with (build/<py|fontcpu|ui>.<config>.id).
 include ../shared/make/checks.mk
-SUITE   := tests/suite tests/suite_err tests/fizz.js $(wildcard tests/suite/*.js tests/suite/*.out tests/suite_err/*.js)
+SUITE   := tests/suite tests/suite_err tests/repl tests/fizz.js $(wildcard tests/suite/*.js tests/suite/*.out tests/suite_err/*.js tests/repl/*.js tests/repl/*.out)
 PYSRC   := $(wildcard $(CC)/*.py $(CC)/*.json machine/*.py readback/*.py) net/device.py $(SHARED)/py/csslabel.py
 NET     := net/server.js net/shim.js $(wildcard tests/net/* tests/net/*/*)   # the network gateway and its test files
 HARNESS := $(wildcard tools/*.js $(SHARED)/js/*.js)
@@ -67,14 +67,16 @@ dist: page
 	cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
 
 # ---- tests (see docs/ARCHITECTURE.md#5-tests)
-expect:                                   # Node is the oracle: writes tests/suite/*.out
+expect:                                   # Node is the oracle: writes tests/suite/*.out, and Node's REPL tests/repl/*.out
 	$(NODE) tests/suite_expect.js tests/suite
-l1: lib                                   # reference compiler + 20-bit simulator vs Node
+	$(NODE) tests/repl_expect.js tests/repl
+l1: lib                                   # reference compiler + 20-bit simulator vs Node (the REPL sessions vs Node's REPL)
 	$(PY) tests/suite_ref.py
+	$(PY) tests/suite_ref.py tests/repl
 l2: $(L2)                                 # DSL (page's specialised variants) vs reference, level by level
 	$(call report,$<,3)
 $(L2): tests/cmp_dsl.py tests/par.py $(PYSRC) $(SUITE) $(RERUN_IF)
-	SPEC=1 SPECK=$(SPECK) $(LOGGED) $@ -t 3 -p '^ALL OK' -- $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js
+	SPEC=1 SPECK=$(SPECK) $(LOGGED) $@ -t 3 -p '^ALL OK' -- $(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js tests/repl/*.js
 l2-generic:                               # same, unspecialised parser (slower)
 	$(PY) tests/cmp_dsl.py tests/suite/*.js tests/suite_err/*.js | tail -3
 c1: lib                                   # the CSS CPU's design (machine/csssim.py) runs every compiled image vs Node

@@ -11,9 +11,10 @@
  "repl_cols": 40,
  "repl_rows": 32,
  "marks": 32,
+ "console_words": 1536,
  "rt_base": 14592,
  "vec_base": 12272,
- "heap_lo": 21216,
+ "heap_lo": 20992,
  "map_base": 14640,
  "fpu_base": 14720,
  "heap_size": 3072,
@@ -80,5 +81,5 @@
  ],
  "str_size": 768,
  "strend": 14591,
- "_doc": "The memory map (words; addresses are 15-bit). ROM 0..rom_size-1 holds the lib; RAM starts at rom_size (= data_base: globals, then strings at +256 (str_size words), code at code_base, the globals' count at init-1, the built-in strings from bstr (cc_ref BSTRS: the specials' names, typeof's names; .fin overlays), the stack from sp0 up); the console is the last repl_cols*repl_rows + marks words of RAM: the grid (cols x rows from its start, or repl_cols x repl_rows on the REPL), then the REPL's output marks (cc_ref NMARK). Read by cc_ref.py (LAYOUT), libbuild.js, uarch.py and the page generator. Objects (cc_ref.py): rt_base.. holds the runtime cells (rt_cells: HP, GCLIM, ..., G_FLO, G_FREE; then the collector's bitmap and its powers of two, rtlib.py MAP / POWT; fpu_base: the runtime's scratch number lines, cc_ref FLINES); vec_base and vectors are unused by the register machine (its traps call lib.json's entries); the heap is two semi-spaces of heap_size words from heap_lo, below the console; an object value is its address - objtag. rt_cells names the runtime cells from rt_base, vectors the jump table's entries from vec_base. A heap string is [hdr][len][bytes][0] (value: the first byte's address - STRTAG, like a literal's), an array [hdr][cap][len][ptr][elements] (value: the ptr word's address + arrtag; ptr points at the elements, inline until the array grows); hdr = -2 - words - kind (0 string, 1 array). strend (the last staging word, never staged: globals are at most 255) holds the string area's end, for the runtime's key lookups. The string area starts with \"true\" and \"false\" (cc_ref SEED: overlays on the page), for booleans made strings."
+ "_doc": "The memory map (words; addresses are 15-bit). ROM 0..rom_size-1 holds the lib; RAM starts at rom_size (= data_base: globals, then strings at +256 (str_size words), code at code_base, the globals' count at init-1, the built-in strings from bstr (cc_ref BSTRS: the specials' names, typeof's names; .fin overlays), the stack from sp0 up); the console is the last console_words words of RAM (4 x 6 x 4^3: its write trees decode in radix 4): the grid (cols x rows from its start, or repl_cols x repl_rows on the REPL), then the REPL's output marks (cc_ref NMARK). Read by cc_ref.py (LAYOUT), libbuild.js, uarch.py and the page generator. Objects (cc_ref.py): rt_base.. holds the runtime cells (rt_cells: HP, GCLIM, ..., G_FLO, G_FREE; then the collector's bitmap and its powers of two, rtlib.py MAP / POWT; fpu_base: the runtime's scratch number lines, cc_ref FLINES); vec_base and vectors are unused by the register machine (its traps call lib.json's entries); the heap is two semi-spaces of heap_size words from heap_lo, below the console; an object value is its address - objtag. rt_cells names the runtime cells from rt_base, vectors the jump table's entries from vec_base. A heap string is [hdr][len][bytes][0] (value: the first byte's address - STRTAG, like a literal's), an array [hdr][cap][len][ptr][elements] (value: the ptr word's address + arrtag; ptr points at the elements, inline until the array grows); hdr = -2 - words - kind (0 string, 1 array). strend (the last staging word, never staged: globals are at most 255) holds the string area's end, for the runtime's key lookups. The string area starts with \"true\" and \"false\" (cc_ref SEED: overlays on the page), for booleans made strings."
 }

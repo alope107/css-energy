@@ -192,7 +192,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # (a pause driven by an animated flag does not work: Blink reads animation-play-state from the base style)
     css.append(lbl.group('Chain switch', 'the chain exists only once the editor scan is complete'))
     css.append('@property --ccgo { syntax: "<integer>"; inherits: true; initial-value: 0; } @keyframes kccgo { from { --ccgo: 4096; } to { --ccgo: -1; } }'
-               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; }'
+               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; --repl: 0; --x-repl: var(--repl); }'
                ' #cc { display: if(style(--ccgo: 1): block; else: none); contain: strict; position: relative; height: 0; }'
                ' .ls, .lvA, .lvB, .gs0, .gs1 { display: contents; }'
                )
@@ -254,6 +254,8 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         st = []
         if sl[0] == 'col': st.append(f'--c: var(--lc{sl[2]})')
         else: st.append(f'--c: {10 if sl[0] == "nl" else 0}')
+        # the line a level reads (the lexer's lnum: a T_NL's line), inherited down the chain from a line's first level and its newline's
+        if sl[0] == 'nl' or (sl[0] == 'col' and sl[2] == 0): st.append(f'--lnum: {sl[1]}')
         if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]})')
         else: st.append(f'--cn: {10 if nxt[0] == "nl" else 0}; --ncl: {CL_NL if nxt[0] == "nl" else CL_NUL}')
         # a line's source opens just before the previous line's newline level, whose --cn must be this line's first

@@ -44,6 +44,10 @@ K = int(os.environ.get('K', 32)); ISSUE = int(os.environ.get('ISSUE', 2))
 ROM, RAMN, WB = image['romSize'], image['ramSize'], 4
 BANKN = RAMN // WB; BLKS = (ROM + RAMN) // WB; RB0 = ROM // WB
 OUT_BASE, ROWS, COLS = image['outBase'], image['rows'], image['cols']; OUT_SIZE = ROWS * COLS
+# the console's RAM holds the REPL's larger grid, then its marks (cc_ref.NMARK). On the editor page the grid's size is a
+# property: --ocols x --osize / --ocols, 9 x 16 for a program, the REPL's for the REPL; a CPU-only page has its image's
+OUTMAX, NMARK = R.OUTMAX, R.NMARK
+OCOLS, OSIZE = ("var(--ocols)", "var(--osize)") if UI else (str(COLS), str(OUT_SIZE))
 assert OUT_BASE % 4 == 0 and ROM % 4 == 0
 WOFF = M20 = 1 << 20; A15 = 32768
 NSET, NWAY = 16, 2; NL = NSET * NWAY
@@ -73,9 +77,9 @@ regs += [(f"T{k}", 16384, 0, f"var(--T{k})") for k in range(NL)] + [(f"F{s}", 2,
 regs += [(f"W{k}_{j}", M20, M20 // 2, f"var(--W{k}_{j})") for k in range(NL) for j in range(4)]
 WREGS = [(f"wa{w}{c}", BANKN + 1, 0, f"var(--nwa{w}{c})") for w in range(WB) for c in CH] + \
         [(f"wd{w}{c}", 1 << 21, 1 << 20, f"var(--nwd{w}{c})") for w in range(WB) for c in CH]
-KN = OUT_SIZE // WB
+KN = R.LAYOUT['console_words'] // WB; CGROUP = 16     # (console groups of 16 leaves: a program's page renders little past its grid)
 WREGS += [(f"wak{w}{c}", KN + 1, 0, f"var(--nwak{w}{c})") for w in range(WB) for c in CH] + \
-         [(f"wdk{w}{c}", 256, 0, f"var(--nwdk{w}{c})") for w in range(WB) for c in CH]
+         [(f"wdk{w}{c}", 2048, 0, f"var(--nwdk{w}{c})") for w in range(WB) for c in CH]     # (a character, or a mark: an output position + 1)
 regs += [(f"mv{i}", M20, M20 // 2, None) for i in range(2 * WB)]
 if UI: regs.append(("ccok", 2, 0, None))     # compiled without error: a reader of the compile chain's done anchor, in .ex
 regs += [("rLm", 256, 0, "var(--Lm)")] + [(f"rL{n}", M20, M20 // 2, f"var(--L{n})") for n in LATCH if n != "p"] + \
@@ -562,7 +566,10 @@ for c, k in CLASSES.items():
 # prints nothing here: it jumps to pstub with its own address in pst (TENTER, then the library's ptrap)
 pv = "var(--pv)"
 isputc = eq("var(--op)", OP['PUTC'])
-pr = OPND + read("x", "var(--aB)") + [
+# PUTC with A = 1 + k is a REPL mark (cc_ref.NMARK): one cell, mark k past the grid, := optr + 1 (B is #0, so it takes one
+# cell, no newline); optr stays. --pmo: the console cell the chunk starts at
+pr = OPND + [f"--pmk: calc({isputc} * min(1, var(--A)));", f"--pmo: calc(var(--pmk) * ({OUTMAX - 1} + var(--A)) + (1 - var(--pmk)) * var(--optr));"] + \
+     read("x", "var(--aB)") + [
     f"--mx: calc((1 - var(--kB)) * (1 - {eq('var(--op)', OP['PRINTK'])}) * {miss('x')});",
     f"--pv: {by_op({'PRINTK': 'var(--vg)'}, xB)};",
     f"--prLN: {eq('round(down, mod(var(--A), 8) / 2)', 2)};", f"--prSP: {eq('round(down, mod(var(--A), 8) / 2)', 1)};",
@@ -599,7 +606,7 @@ pr += ["--pe: calc((1 - var(--pdone)) * (var(--pr0) + var(--pr1) + var(--pr2) + 
        f"--ptNL: calc((1 - var(--pdone)) * var(--pvE) * {eq('var(--pbE)', 10)});",
        # the console banks this pass has written (cw, a mask): the run of free ones from optr's (pf) takes a chunk, cut there
        # (pcut: a string's characters, or its separator, past it; a number's, by pf alone)
-       ] + [f"--pfr{j}: calc(1 - mod(round(down, var(--cw) / pow(2, mod(var(--optr) + {j}, 4))), 2));" for j in range(4)] + [
+       ] + [f"--pfr{j}: calc(1 - mod(round(down, var(--cw) / pow(2, mod(var(--pmo) + {j}, 4))), 2));" for j in range(4)] + [
        "--pf: calc(var(--pfr0) * (1 + var(--pfr1) * (1 + var(--pfr2) * (1 + var(--pfr3)))));",
        f"--pcut: calc(var(--isStr) * (clamp(0, var(--pe) - var(--pf), 1) + {eq('var(--pe)', 'var(--pf)')} * var(--ptNul) * var(--prSP)));",
        f"--pn0: if(style(--op: {OP['PUTC']}): calc(1 - {eq(pv, 10)}); else: calc(var(--isStr) * (var(--pe) + var(--ptNul) * var(--prSP)) + (1 - var(--isStr)) * clamp(0, var(--ptot) - var(--pbase), 4)));",
@@ -611,7 +618,7 @@ pr += ["--pe: calc((1 - var(--pdone)) * (var(--pr0) + var(--pr1) + var(--pr2) + 
        # nothing fits this pass: the chain stops (no fill)
        f"--pblk: calc((1 - var(--ptrap)) * if(style(--op: {OP['PUTC']}): clamp(0, var(--pn0) - var(--pf), 1); else: calc((1 - min(1, var(--pn))) * (1 - var(--pfin)) * (1 - var(--pnl)))));"]
 for i in range(4):
-    pr.append(f"--pch{i}: " + (f"if(style(--op: {OP['PUTC']}): {pv}; else: " if i == 0 else "") +
+    pr.append(f"--pch{i}: " + (f"if(style(--op: {OP['PUTC']}): calc({pv} + var(--pmk) * (var(--optr) + 1)); else: " if i == 0 else "") +
               f"calc(var(--isStr) * (var(--pr{i}) * var(--pb{i}) + {eq('var(--pe)', i)} * var(--ptNul) * var(--prSP) * (1 - var(--pcut)) * 32)"
               f" + (1 - var(--isStr)) * clamp(0, var(--pn) - {i}, 1) * var(--pnb{i}))" + (")" if i == 0 else "") + ";")
 pr += ["--ok: calc((1 - min(1, calc(var(--mx) + var(--mpp)))) * (1 - var(--pblk)));",
@@ -621,10 +628,11 @@ pr += nexts({'pc': f"if(style(--ptrap: 1): {ENT['pstub']}; else: calc({pc} + 2 *
 # cell i of the chunk goes to optr + i, bank (optr + i) mod 4 (OUT_BASE is a multiple of 4)
 pr += ["--pout: calc(var(--ok) * (1 - var(--ptrap)));",
        "--ncw: calc(" + " + ".join(f"{1 << w} * max(mod(round(down, var(--cw) / {1 << w}), 2), var(--dp{w}))" for w in range(WB)) + ");",
-       f"--noptr: mod(var(--pnl) * (round(down, (var(--optr) + var(--pn)) / {COLS}) + 1) * {COLS} + (1 - var(--pnl)) * (var(--optr) + var(--pn)), {OUT_SIZE});"]
+       f"--noptr: calc(var(--pmk) * var(--optr) + (1 - var(--pmk)) * mod(var(--pnl) * (round(down, (var(--optr) + var(--pn)) / {OCOLS}) + 1) * {OCOLS}"
+       f" + (1 - var(--pnl)) * (var(--optr) + var(--pn)), {OSIZE}));"]
 for w in range(WB):
-    pr += [f"--pi{w}: mod({w} - var(--optr), 4);", f"--dp{w}: clamp(0, var(--pn) - var(--pi{w}), 1);",
-           f"--nwA{w}: calc(var(--dp{w}) * (round(down, mod(var(--optr) + var(--pi{w}), {OUT_SIZE}) / 4) + 1));",
+    pr += [f"--pi{w}: mod({w} - var(--pmo), 4);", f"--dp{w}: clamp(0, var(--pn) - var(--pi{w}), 1);",
+           f"--nwA{w}: calc(var(--dp{w}) * (round(down, (var(--pmk) * var(--pmo) + (1 - var(--pmk)) * mod(var(--optr) + var(--pi{w}), {OSIZE})) / 4) + 1));",
            f"--nwD{w}: calc(" + " + ".join(f"{eq(f'var(--pi{w})', i)} * var(--pch{i})" for i in range(4)) + ");"]
 cls_rules['out'] = (['PRINT', 'PRINTK', 'PUTC'], pr)
 # ---------------- the runtime's primitives (cc_ref.OPN's comment; csssim.py has them execution by execution). --pst holds the
@@ -955,7 +963,7 @@ def rom_of(x): return f"calc(clamp(0, {ROM} - {x}, 1) * (1 + round(down, {x} / {
 P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
      "fon", "fb", "fs", "fv", "fk", "fT", "fabs", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "A", "B", "C", "cls", "rom", "rh", "rl", "vf", "vg", "mf", "ok", "mb", "npc", "nfp", "nsteps", "nstop", "nhalt",
-     "kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv",
+     "kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv", "pmk", "pmo",
      "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "pp", "isStr", "isNum", "pq", "pdone", "pj0",
      "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pf", "pcut", "pn0", "pblk", "pfr0", "pfr1", "pfr2", "pfr3", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
      "wval2", "vh", "vj"]
@@ -1145,7 +1153,7 @@ for w in range(WB):
     _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"{w}{c}" for c in CH)}, BANKN, WOFF, prefix=str(w))
     props += _mp; css += [lbl.group(f'Bank {w}')] + _mc
 for w in range(WB):
-    _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"k{w}{c}" for c in CH)}, KN, WOFF, prefix=f"k{w}")
+    _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"k{w}{c}" for c in CH)}, KN, WOFF, prefix=f"k{w}", group=CGROUP)
     props += _mp; css += [lbl.group(f'Console bank {w}')] + _mc
 css.append(lbl.section('Console', f'one reader per console cell ({COLS} x {ROWS}), drawn with the ascii counter style'))
 for i in range(OUT_SIZE):
@@ -1225,7 +1233,9 @@ STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init'
 LIVE = (set() if UI else STATIC_CELLS) | {a - ROM for a in R.GINIT}     # on the editor page the compile chain's overlays hold code, strings and staging; the globals start undefined
 mem_html = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
-con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
+# (the cells past the program's grid, the REPL's and its marks, are rendered once written: a program's page pays for its grid)
+con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + 4 * KN, WB)), WOFF, prefix=f"k{w}",
+                                live=set(range(OUT_BASE - ROM, OUT_BASE - ROM + OUT_SIZE)), group=CGROUP) for w in range(WB))
 # no ROM leaves: instructions come from the fetch table, and a data read below RAM gives 0 (a read port's leaf name --rom
 # names nothing). ~6,000 leaves cost ~8 ms a frame, which the readback scan (one column per frame) and every pass pay
 rom_html = ''
@@ -1271,7 +1281,8 @@ else:
         # (Edit: the globals back to undefined, as the CPU-only image starts them, cc_ref GINIT: hoisting, FCACHE's sentinel)
         f'#run:not(:checked) ~ .mem :is({", ".join(f".c{a - ROM}" for a in sorted(R.GINIT))}) {{ width: {R.UNDEF + WOFF}px; }}',
         f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
-                                     '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }']
+                                     '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }',
+        f'#clkw {{ --ocols: {COLS}; --osize: {OUT_SIZE}; }}   /* the console\'s grid (OCOLS, OSIZE) */']
     notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back (a variable axis makes HarfBuzz "
              f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "
              f"stylesheet, runs over those characters: a lexer on a chain of one element per character, then a parser on a chain of one element "

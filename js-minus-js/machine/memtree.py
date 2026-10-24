@@ -24,10 +24,10 @@ groups that are live from the start.
 import os
 GROUP = int(os.environ.get("MEMGROUP", 256))    # leaves per group (words of one bank: 4 x this of address space); 256 measured best
 
-def group_level(R):
-    """the tree level whose nodes become groups: the deepest level with at least GROUP leaves below it"""
+def group_level(R, group=None):
+    """the tree level whose nodes become groups: the deepest level with at least GROUP (or group) leaves below it"""
     S = _strides(R)
-    return max([l for l in range(len(R)) if S[l] >= GROUP] or [0])
+    return max([l for l in range(len(R)) if S[l] >= (group or GROUP)] or [0])
 
 def radix(n):
     r = []
@@ -39,8 +39,9 @@ def _strides(R):
     for l in range(len(R) - 2, -1, -1): S[l] = S[l + 1] * R[l + 1]
     return S
 
-def css(CH, wregs, n, WOFF, prefix=''):
-    """CH: channel letters; wregs: {name: (H, OFF)} for wa{prefix}*/wd{prefix}*; n: cells in this tree. Returns (props, rules)."""
+def css(CH, wregs, n, WOFF, prefix='', group=None):
+    """CH: channel letters; wregs: {name: (H, OFF)} for wa{prefix}*/wd{prefix}*; n: cells in this tree; group: leaves per group
+    (default GROUP; html() must get the same). Returns (props, rules)."""
     R = radix(n); D = len(R); S = _strides(R); p = prefix
     reg = lambda nm, inh: f'@property --{nm} {{ syntax: "<integer>"; inherits: {inh}; initial-value: 0; }}'
     props = [reg(f"m{nm}", "false") for nm in wregs]
@@ -61,16 +62,16 @@ def css(CH, wregs, n, WOFF, prefix=''):
     out.append(f".cell{p} {{ --hit: calc(" + " + ".join(f"var(--e{p}{c}{Z})" for c in CH) + "); --wv: calc(" + " + ".join(f"var(--e{p}{c}{Z}) * var(--d{p}{c}{Z})" for c in CH) + ");\n"
                f"  content-visibility: if(style(--hit: 1): visible; else: hidden); width: if(style(--hit: 1): calc((var(--wv) + {WOFF}) * 1px); else: fit-content); }}")
     # groups: the node at level G sees a write to its subtree as one of its own channel enables; the latch holds it forever
-    G = group_level(R); YG = "B" if G % 2 == 0 else "A"
+    G = group_level(R, group); YG = "B" if G % 2 == 0 else "A"
     # (min: two channels may reach the group in one pass, and display: if(style(--live: 1)) must still match)
     out.append(f".g{p} {{ --wnow: min(1, calc(" + " + ".join(f"var(--e{p}{c}{YG})" for c in CH) + ")); --live: var(--wnow);"
                f" transition: --live 0s calc((1 - var(--wnow)) * 1000000s); }}")
     return props, out
 
-def html(ram, cells, WOFF, prefix='', live=None):
+def html(ram, cells, WOFF, prefix='', live=None, group=None):
     """cells: global RAM indices in this tree, in tree order (leaf i of the tree = cells[i]). live: cells whose groups are
-    rendered from the start (None: all groups; a set: only the groups holding one of these)."""
-    R = radix(len(cells)); D = len(R); S = _strides(R); p = prefix; G = group_level(R)
+    rendered from the start (None: all groups; a set: only the groups holding one of these). group: as css()'s"""
+    R = radix(len(cells)); D = len(R); S = _strides(R); p = prefix; G = group_level(R, group)
     leaf = lambda i, cls: (f'<div class="w{cls}" style="anchor-name: --c{cells[i]}"><i class="cell cell{p} c{cells[i]}" '
                            f'style="contain-intrinsic-size: auto {ram[cells[i]] + WOFF}px"></i></div>')
     def tree(l, base):

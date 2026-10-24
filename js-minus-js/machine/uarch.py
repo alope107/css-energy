@@ -14,7 +14,7 @@ OPN, OP = R.OPN, R.OP
 STRTAG = R.STRTAG                           # a string value is its address - STRTAG
 STR_LO = LAYOUT['data_base'] + 256; STR_HI = STR_LO + LAYOUT['str_size']   # the string area (cc_ref STR0 .. SEND); STR_LO itself is the DONE marker
 OUT_COLS, OUT_ROWS = LAYOUT['cols'], LAYOUT['rows']
-OUT_BASE = LAYOUT['rom_size'] + LAYOUT['ram_size'] - LAYOUT['repl_cols'] * LAYOUT['repl_rows'] - LAYOUT['marks']   # console: the last words of RAM (then the REPL's marks)
+OUT_BASE = LAYOUT['rom_size'] + LAYOUT['ram_size'] - LAYOUT['console_words']   # console: the last words of RAM (the grid, the REPL's marks)
 OBJTAG = LAYOUT['objtag']
 RT = LAYOUT['rt_base']; CELL = {n: RT + i for i, n in enumerate(LAYOUT['rt_cells'])}; HP, GCLIM, GCSP, KEYCELL, RETCELL = (CELL[n] for n in ('HP', 'GCLIM', 'GCSP', 'KEYCELL', 'RETCELL'))
 HEAP0 = LAYOUT['heap_lo']

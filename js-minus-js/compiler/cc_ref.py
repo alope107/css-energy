@@ -39,7 +39,8 @@ from device import Device
 # the memory map (compiler/layout.json): ROM 0..rom_size-1 (the lib); RAM from rom_size = data_base; see layout.json's _doc
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
 OUTMAX = LAYOUT['repl_cols'] * LAYOUT['repl_rows']    # the console's grid: cols x rows, on the REPL repl_cols x repl_rows
-LAYOUT['out_base'] = LAYOUT['rom_size'] + LAYOUT['ram_size'] - OUTMAX - LAYOUT['marks']
+LAYOUT['out_base'] = LAYOUT['rom_size'] + LAYOUT['ram_size'] - LAYOUT['console_words']
+assert OUTMAX + LAYOUT['marks'] <= LAYOUT['console_words']
 # the REPL's output marks follow the console's largest grid (PUTC with A = 1 + k: mark k := the output position + 1): mark L for the
 # entry that starts on line L, MARKEND for the program's end
 NMARK = LAYOUT['marks']; MARKEND = NMARK - 1
