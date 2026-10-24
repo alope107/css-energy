@@ -198,6 +198,73 @@ names on the hot half). First test: the model. `csssim.py` with a fill every M l
 program (`deep_recursion`, `arr_gc`, FizzBuzz). Then one stage at level 16 on a CPU-only page, `make c2`, and
 `halttime.js`.
 
+## What we built (2026-10-24)
+
+Both changes are in `gen_css.py` behind flags; the default page is unchanged. C2 passes 149/149 for each variant
+below. Timings are CPU-only pages (`halttime.js`, `runMs`, median ratio to `base` per round), interleaved and
+unleased. The 1/2/3-stage run had the machine quiet (load ~1), with tight ranges. An earlier loaded run (load 3–10)
+had an A-vs-A control that moved 0.93–1.39.
+
+**`RAMNI=1`: non-inherited write trees.** Each tree node takes its parent's parity by explicit `inherit`. A write
+restyles one level off its path instead of two: arr_gc ~790 → ~260 RAM elements per layout. Alone it is worth
+little: deep_recursion 0.85–0.89, the rest ~1.0 within the noise. The RAM's restyle was never the big cost; layout
+and the registers are.
+
+**`RAMDEC=1`: unnamed leaves, read paths, miss address through layout.** This loses (0.95–1.29). The read paths
+put the RAM tree's restyle inside layout. The `.memx` size container is resolved during layout, and its subtree is
+restyled there, so arr_gc's layout went 9.8 → 16.7 ms. The probe (§1) had the tree alone. On the page, the tree
+sits under a container whose size changes every pass. One more pitfall: `.ab` has to come before the 2²¹-px register
+boxes, because after them LayoutUnit saturates and the anchor reads height 0.
+
+**`STAGE=s[,s2…]`: a fill stage at each listed chain level.** A stalled instruction re-executes at the stage with
+the missing block named through a size-query mux (`.sr1`/`.sr2`, nested fixed size containers). Each stage has its
+own write set for a dirty victim. A block written back earlier in the same pass counts as stale. The model
+(`csssim.py MIDS=…`, 180 programs, data misses only) gives these passes per program (geomean, total):
+
+| stages | geomean | total |
+|---|---|---|
+| 16 | 0.779 | 0.670 |
+| 11, 22 | 0.709 | 0.576 |
+| 8, 16, 24 | 0.682 | 0.532 |
+
+On the page (all with `RAMNI=1`; ratio of run time to base):
+
+| program | 16 | 11, 22 | 8, 16, 24 |
+|---|---|---|---|
+| fizzbuzz | 0.899 | 0.803 | 0.797 |
+| fib | 0.946 | 0.923 | 0.974 |
+| primes | 0.852 | 0.873 | 0.865 |
+| array_sort | 0.905 | 0.746 | 0.594 |
+| str_table | 0.778 | 0.696 | 0.578 |
+| obj_keys | 0.969 | 0.962 | 1.050 |
+| deep_recursion | 0.620 | 0.557 | 0.534 |
+| closure_gc | 0.796 | 0.837 | 0.954 |
+| arr_gc | 0.819 | 0.848 | 0.941 |
+| geomean | 0.836 | 0.796 | 0.787 |
+
+Every stage costs each pass. The register subjects (~390 `.sub`) restyle again inside each stage's two containers,
+and the CSS grows ~0.9 MB per stage. Passes saved pay for that on the miss-heavy programs (deep_recursion,
+array_sort, str_table). On the GC programs, the third stage saves fewer passes than it costs. Without `RAMNI`, one stage
+lost on the heavy programs in the loaded run (deep_recursion 1.68 with a 0.95–7.2 range, closure_gc 1.12). The
+likely cause is that the stage's write set adds write channels to trees that restyle two levels off every path. This
+wasn't re-measured quiet.
+
+Two stages (`STAGE=11,22 RAMNI=1`) is the best balance: no program slower, geomean 0.80.
+
+**The editor page** (`UI=1`, `ui_seq.js`, Run → HALT with the compile included, 6 rounds, quiet). Compile is
+1.03× slower with one stage and 1.05× with two (fizzbuzz's `compiledMs`): the compile chain pays for the extra
+registers (+32 per stage) every pass. A short program's ~1 s run can't win that back. Long ones do:
+
+| program | base | 16 | 11, 22 |
+|---|---|---|---|
+| fizzbuzz | 3.78 s | 1.028 | 1.056 |
+| array_sort | 3.81 s | 1.010 | 1.047 |
+| str_table | 3.19 s | 0.987 | 1.068 |
+| deep_recursion | 64.9 s | 0.711 | 0.619 |
+| closure_gc | 89.7 s | 0.810 | 0.809 |
+
+Making it the default would trade a few percent on every short program for 20–40% on the long ones.
+
 ## Reproducing
 
 ```

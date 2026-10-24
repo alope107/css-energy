@@ -785,3 +785,21 @@ editor's text (it reshapes every line every frame).
 15.5 s at 19 (the replay: 3.2, 9.8, 20, 36, 57.5). The 19th entry, two runs: the scan restarts 1.35 s after Enter, ends
 at 12.2–12.7 s, the compile at 13.8–14.5 s, the output shows at 16.5–17.3 s (37 steps). So the scan is the cost now: 64
 columns a frame each, every frame reshaping every line, though the lines already run keep their latched characters.
+
+## 21. RAM: non-inherited trees, read paths, fill stages (2026-10-24, branch `ram-explore`)
+
+Flags in `gen_css.py`, default off; the catalog and probes are `exp/ram/README.md`. P-cores, unpinned, interleaved with
+`../shared/js/ab.js`, unleased; the stage runs had the machine quiet (load ~1, IQRs within ±3%). Ratios per round
+against the default page; C2 149/149 for every variant.
+
+| Change | CPU-only pages (`halttime.js runMs`, 9 programs) | Editor page (Run → HALT) |
+|---|---|---|
+| `RAMNI=1`: the RAM trees' properties not inherited | ~1.0; deep_recursion 0.85–0.89 (loaded) | |
+| `RAMDEC=1`: unnamed leaves, read paths, the miss address through layout | 0.95–1.29: loses (arr_gc layout 9.8 → 16.7 ms) | |
+| `STAGE=16 RAMNI=1`: one fill stage | geomean 0.836, 0.620 (deep_recursion) – 0.969 | short 0.99–1.03, deep_recursion 0.711, closure_gc 0.810 |
+| `STAGE=11,22 RAMNI=1` | geomean 0.796, 0.557 – 0.962 | short 1.05–1.07, deep_recursion 0.619, closure_gc 0.809 |
+| `STAGE=8,16,24 RAMNI=1` | geomean 0.787, 0.534 – 1.050 (obj_keys); GC programs 0.94–0.95 | |
+
+A stage costs every pass: the register subjects restyle again in its two size containers, +32 registers, ~0.9 MB of
+CSS. The compile chain pays that too, so compile is 1.03× (one stage) and 1.05× (two) slower. `RAMDEC` loses because
+its size container is resolved during layout, and the RAM tree under it is restyled there each pass.
