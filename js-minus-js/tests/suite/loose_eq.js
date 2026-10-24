@@ -1,0 +1,14 @@
+console.log("5" == 5, "5" === 5, 5 != "5", 5 !== "5");
+console.log(null == undefined, null === undefined);
+console.log(null == 0, undefined == 0, null == false);
+console.log(true == 1, false == 0, true == "1", 0 == "");
+console.log([1] == 1, [1, 2] == "1,2", "a" == "a");
+var x = null;
+if (x == undefined) console.log("nullish");
+var s = "ab";
+s += "c";
+if (s == "abc") console.log("eq");
+if (s != "abd") console.log("ne");
+var n = 0;
+while (n != 3) n++;
+console.log(n, NaN == NaN, -0 == 0);

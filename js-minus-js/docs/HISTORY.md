@@ -74,6 +74,33 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   faster than a user sees it (64), and a server-wide cap on held loads starved `make l5-net`'s 6 browsers (the cap is
   per browser now, by cookie).
   `NET` moved to the register machine with the hybrid's merge (2026-10-23): `NET A, B` (ARCHITECTURE §3.8).
+- **17, the learnxinyminutes language (2026-10-23, branch `lxym`).** Everything in the learnxinyminutes JavaScript
+  tutorial, one phase at a time, each through every test level: specials and `typeof`; doubles in an FPU of `calc()`
+  (IEEE in Chrome, bit for bit) with JavaScript's shortest printing; bitwise operators; expression statements,
+  implicit globals, labels, for of / in; functions as values, function expressions, nested functions and closures
+  (an env cell per frame, closed on return by a label that turns RET into a trap); arrows; hoisting; `this`, method
+  calls, `call` / `apply` / `bind`; prototypes as a link where an object's keys end, which the machine's probes follow;
+  `new`; timers; `Math`; wrappers and `String.prototype`. The ROM grew to 12,288 words. Two new mechanisms carried
+  most of it: a library call can find its operands in the instruction that trapped (as `jcmp` already did), and keys
+  no probe takes (`x[hidden]`) send rare properties (`__proto__`, `prototype`, `Math.PI`) to the library without new
+  instructions. Compile time +3–4% (arrows' rules and ports), run time +2.4% passes over the suite (the `this` slot,
+  `callv`'s new cases), then −2.6% with CALLV entering closures itself (BENCHMARKS §17).
+  Two page bugs surfaced on the way. The editor page started every program with its globals at 0 (Edit zeroes RAM),
+  where hoisting and the function cache need `undefined`: a declared function used as a value (`new F`, `var g = f`)
+  was a number there, and only the editor page showed it (C2 builds its pages from images); Edit now sets the global
+  cells to `undefined`. And C2 pages stalled under load (arrows at step 786, once at `a02921a`; three pages per run once
+  closures made `mkfn`, which reads code words through the data cache, common): six browsers on one page stalled half of
+  them, always at the same LDI, with nothing pending and the same block in both ways of its set. The data fill had no
+  check that its block was absent (the prefetch has one); a pending miss seen again after its fill, as when a register
+  lands a frame late under load, filled the other way too. With the check, 30 of 30 such runs halt.
+  Against main, measured last (BENCHMARKS §17): CPU-only pages 1.20× slower (geometric mean of 16 programs: more passes
+  where frames grew or strings compare, and each pass costs more, the instruction classes carrying doubles, specials
+  and calls), compiles 1.18× slower (median of 186 programs: 21% more temps per token). Three cuts on the way: a
+  `console.log` chain past its pieces keeps the rest on its last piece when that is a string (`hanoi` had become three
+  heap strings per line: 63 → 35 passes, main 33); the runtime takes its common cases first (two numbers or two
+  strings skip `prim`, a name skips `canint`: steps −6.6%); and the picker's radio buttons moved next to their editors,
+  so one set of readback rules serves all thirteen (`.pkr:checked + .ed`; per editor they had cost ~10% of a compile).
+  Two tests from the start, `fn_in_block` and `nested_function`, became programs: the branch compiles them.
 
 ## Dead ends and superseded approaches
 
@@ -151,15 +178,54 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 70 | The answer as a quirks-mode stylesheet (`rx`, `application/json`) per load | one more request per load; the gateway writes the documents anyway | the answer in the document (`#t`'s position) |
 | 71 | 4 modems, one answer each | each document costs the page two forced style passes (ENGINE_NOTES 63): 8 per word | 2 modems, two answers each (x and y) |
 | 72 | A render-blocking stylesheet arriving after the parse, to skip `FinishedParsing`'s forced update | still forced, at 0 and 15 ms | — |
+| 73 | `const` assignment as a run-time TypeError through a getter-like slot | +91 temps in the hottest variants | compile error 64, as before |
+| 74 | An arrow's expression body closed by S_OPER's own closer variants | the close's code in every `)` `;` `,` level of every program | modes of their own (S_OPERC / S_NAMEEC) whose other variants share S_OPER's rules (ccpage5 merges identical CSS across modes) |
+| 75 | The global object as a static chunk outside the heap | `isobj` is a heap-range test: GETP / SETP saw no object | a heap object made on first use, kept in global 1 |
+| 76 | The lexer's `this` / `new` test on one combined hash (h1 × 65519 + h2) | exact in Python (L2 passed), but a registered integer keeps 6 significant digits (ENGINE_NOTES 2): the page took `this` for a name | each half compared |
+| 77 | GETP's string trap with its arguments in its frame at A | the frame (and the routine's locals) overwrite the slot above A, a method call's `this` | no arguments (the key decoded from the instruction) and one unused parameter (the locals start a slot higher) |
+| 78 | Inner functions' calls through the library's `callv` every time | closure_gc +5% passes, func_expr +15% after `this` added cases to `callv` | open lead: a CALLV fast path for them |
 
 ## Open leads (untried)
+
+- **Two strings' equality in the machine.** `==`, `===` and `switch` on two strings always trap (`jcmp` or `deq`, then
+  `leqr` / `deqr`: ~37 steps, `primes` +30% passes against main). Same address is equal and different lengths unequal:
+  a stage after the dyn class that reads both length words (as the cat class does) would decide most of them.
+- **Compile time against main** (+18%, BENCHMARKS §17): `popops` chooses a dynamic operator in each of its ten
+  iterations (`dop`, `bty`, `picmp`: ~80 temps an operator token), and `(` after an operand carries value and method
+  calls in every variant. Choosing the operator once at push time, or variants for the common binary operators (a
+  smaller `popcap`), would cut the temps; §14 found new variants cost more than their temps, so measure both.
+- **A pass of the CPU** costs ~15% more than main's (`collatz`: the same passes in the model, 1.155× on the page): 63
+  more registered properties and 53% more `if()`. Which classes' declarations every pass pays for is
+  unmeasured.
+- **Per-iteration `let`.** `for (let i ...)` has one `i`: closures made in the loop see its last value (README
+  Limits). An env cell is per frame, and a top-level function's variables are globals, so a binding per iteration
+  needs a block's own env chained to the frame's; the one-pass compiler doesn't know at the loop's head whether the
+  body will capture `i`. Copying the frame into a fresh cell at each iteration's end would be wrong for the other
+  variables the closures share.
+- **Smaller frames.** A user function's frame is `[ret][this][params][env][locals][temps]`, two words more than
+  before `this` and closures (`deep_recursion` 560 → 963 passes against main, its stack misses). The env slot could
+  exist only in a function that makes a closure, as the last local (its RETC operand and `mkclo`'s word1 relative to
+  the frame label): in the model `deep_recursion` 963 → 760, `fib` −4%, the rest under 1%; it needs a parser state
+  bit (does this function make closures). The `this` slot can't go without every caller knowing the callee.
+- **Making a function value** costs ~87 steps (`mkfn`: an ALLOC, 8 pokes, `mark`) and a closure ~230 (`newenv`, `mkfn`,
+  two `mark`s): an ALLOC kind for function and env blocks (the header and the map bit written by the machine, as for
+  object chunks) would make most of it one instruction.
+- **Labels.** 64 per program (6-bit fields, and each level's label multiplexers grow with the count); a function takes
+  3–4 (the close label for RETC whether or not it makes a closure). The generator's programs hit error 20 a third of
+  the time.
+- **Names from variables.** Node prints `var f = function () {}` as `[Function: f]`; the machine names functions only
+  from declarations and object keys (the variable's name bytes aren't in the string area).
+- **Callbacks from the library.** `map`, `forEach`, `sort` with a function: the library can't call user code except by
+  returning into it (as `callv` does); the timers' loop is user code that asks the library for the next callback, a
+  pattern that would also do for these.
 
 - **What a register costs.** ~20 µs a pass each, changing or not (BENCHMARKS §15: 80 unused registers +2.3% on FizzBuzz),
   about four times the style cost measured for a subject alone: the 358 registers are ~2 ms of a light pass, and a
   cheaper register would pay for a 32-line code cache (caesar 24% faster) on everything else.
 - **An intermittent early HALT** (the register machine's tree, 110 of 2,273 steps, on 2026-10-21; the hybrid's
-  obj_keys, 218 of 313, once in ~370 runs): with a fresh browser per run, never twice. A harness that dumps pc, fp and
-  the cache when HALT comes early would tell a HALT executed from one read wrongly.
+  obj_keys, 218 of 313, once in ~370 runs): with a fresh browser per run, never twice. Likely the duplicate cache line
+  that stalled C2 pages (timeline 17): a lookup that matches both ways of a set reads a wrong word. Not seen since that
+  fix, but it was rare before it too.
 
 - **Fewer traps.** Suite traps are mostly misses (1,309) and arithmetic EXT (1,104; 160 in `primes.js`): MOD / DIV,
   SHL13 and small-constant multiply in the font; dirty lines above SP treated as clean; an eviction buffer; next-line
@@ -178,8 +244,8 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each
   new set of axis values a new font instance, 47–106 µs (its BENCHMARKS §3).
-- **Language**: a wider console; printing objects, `undefined`, `in` / `delete`, prototypes; booleans as parameters;
-  specific error codes on the page.
+- **Language**: a wider console; `in` / `delete`, `instanceof`, classes, template literals, `try` / `catch`, default
+  and rest parameters, destructuring; specific error codes on the page.
 - **More in CSS**: string comparison (`DEQ` / `DLT` on two strings go to `scmp` in ROM, which compares with MCMP); a
   console write set of two cells per bank (output-bound programs fill the four cells of every pass).
 - **Compile time**: the register compiler writes 53K characters of CSS per token level against the stack machine's

@@ -82,7 +82,7 @@ net/       server.js (web server + network gateway: the modem's documents and pr
    codes; new state in `parse_state_names()` / `LEX_STATE` and `ref_state()` in `tests/cmp_dsl.py`) until `make l2`
    reports `ALL OK`. Teach the program generator (`tests/fuzz/progen.py`) the feature, within what the language
    guarantees, and run `python3 tests/fuzz/fuzz.py gen -n 2000`, `fmt` and `mut -n 2000`.
-3. Note `tools/vsz.py` before and after (now 338 variants, 79,100 temps). Every temp (a declaration: its text size
+3. Note `tools/vsz.py` before and after (now 492 variants, 152,295 temps). Every temp (a declaration: its text size
    counts too, BENCHMARKS §14), every rule (applied or not) and every label port costs on each of 400 token levels.
 4. `make fuzz` and `make l3` (`make fuzz-l3` too if the lexer or the page changed), then `make page && make l5-smoke`,
    then `make dist`.

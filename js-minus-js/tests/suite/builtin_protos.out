@@ -1,0 +1,7 @@
+true number
+object false
+wrapped numbers: truthy
+13 abc [Number: 12]
+a x undefined
+1 function
+{} [String: 'q'] true

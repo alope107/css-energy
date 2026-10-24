@@ -18,14 +18,32 @@ assert MAP >= L['rt_base'] + len(L['rt_cells']) and POWT + 16 <= SP0
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=R.SDATA, STR_LO=U.STR_LO, HEAP0=U.HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=R.STRTAG, OBJTAG=U.OBJTAG, ARRTAG=U.ARRTAG,
-             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT)
+             INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, FUNTAG=R.FUNTAG, ENVTAG=R.ENVTAG, RSTUB=2, FTAB=R.FTAB, FCACHE=R.FCACHE, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT,
+             GCELL=R.GCELL, GLOBK=R.GLOBK, JMPOP=R.OP['JMP'], PKPROTO=R.PKPROTO, PKPT=R.PKPT, TCELL=R.TCELL, RCELL=R.RCELL, SPCELL=R.SPCELL, PKVAL=R.PKVAL, PKSTAT=R.PKSTAT, NSTAT=len(R.MATHK) + len(R.MATHV), NMATHK=len(R.MATHK))
     k.update(CELL); k['NETPARTS'] = L['net_parts']; k['NBUF'] = 2 * L['net_parts']
     k.update({f'K_{n.upper()}': i for i, n in enumerate(R.KINDS)}); k.update({f'A_{n.upper()}': i for i, n in enumerate(R.ALLOCK)})
+    k.update({n: v for n, v in zip(R.SPECIALS, range(R.SPV0, R.SPV0 + 8))}); k.update(SPV0=R.SPV0, TRAPDEF=R.TRAPDEF)
+    k.update({f'S_{n}': R.BSTRV(i) for n, i in (('ZERO', R.BS_ZERO), ('EMPTY', R.BS_EMPTY))}); k['BSTRV0'] = R.BSTRV(0)
+    k.update({f'OP_{n}': i for i, n in enumerate(R.OPN)})
+    # the FPU: ops by index (__fl / __fv's constant), the scratch number lines F0 ... (as doubles' values), the digit buffer
+    k.update({f'FL_{n}': i for i, n in enumerate(R.FLINE_I)}); k.update({f'FV_{n}': i for i, n in enumerate(R.FVAL_I)})
+    k.update({f'FC_{n.upper()}': i for i, n in enumerate(R.FCONSTS)})
+    FB = L['fpu_base']; k.update({f'F{i}': R.FSCR + i for i in range(R.NFLINES)}); k.update(FSCR=R.FSCR, FPU=FB)
+    k.update(DIGS=R.DIGS, CLO=R.DIGS + 20, NEND=R.DIGS + 21, DBLTAG=R.DBLTAG, SMI_LO=R.SMI_LO, SMI_HI=R.SMI_HI)
     return k
+
+# the runtime's messages (it has no string literals): m_<name>() prints one, a putc per character
+MSGS = {'uncaught': 'Uncaught ', 'referr': 'ReferenceError', 'typeerr': 'TypeError: ', 'notfn': 'not a function',
+        'fnname': '[Function: ', 'fnanon': '[Function (anonymous)]'}
+# and fixed texts it writes into strings: w_<name>(p) writes one at p
+WSTRS = {'fnhead': 'function ', 'fntail': '() { [native code] }'}
+def msgs():
+    return (''.join(f"function m_{n}() {{ {' '.join(f'putc({ord(ch)});' for ch in t)} return 0; }}\n" for n, t in MSGS.items()) +
+            ''.join(f"function w_{n}(p) {{ {' '.join(f'poke(p + {i}, {ord(ch)});' for i, ch in enumerate(t))} return 0; }}\n" for n, t in WSTRS.items()))
 
 def build(out):
     k = consts()
-    src = re.sub(r'__([A-Z0-9_]+)__', lambda m: str(k[m.group(1)]), open(os.path.join(HERE, 'lib_src.js')).read())
+    src = re.sub(r'__([A-Z0-9_]+)__', lambda m: str(k[m.group(1)]), open(os.path.join(HERE, 'lib_src.js')).read()) + msgs()
     c = R.Compiler(DB, 0, None, rom=True)
     words, data = c.compile(src)
     if c.err: raise SystemExit(f'lib_src.js: compile error {c.err} (instruction {c.cp})')
@@ -33,11 +51,13 @@ def build(out):
     entries = {}
     for n in names:
         h = R.h1h2(n); f = next(f for f in c.fn[:c.nfn] if (f[0], f[1]) == h)
-        entries[n] = c.lab[f[2]]
+        entries[n] = 2 * c.lab[f[2]]                  # (code labels are instruction pairs: the address / 2)
     rom = [words.get(a, 0) for a in range(max(words) + 1)]
     assert len(rom) % 2 == 0
+    rom[0:2] = [R.OP['JMP'] * 8192 + entries['refstub'] // 2, 0]     # address 0 (undefined labels: cc_ref.NIMP): to refstub
+    assert entries['rstub'] == 2, 'rstub (RET F1) must be the first routine: retc returns through it'
     entries['pstub'] = len(rom)                         # PRINT's trap: TENTER ptrap (cc_ref.TRAPS)
-    rom += [R.OP['TENTER'] * 8192 + entries['ptrap'], 0]
+    rom += [R.OP['TENTER'] * 8192 + entries['ptrap'] // 2, 0]
     missing = [t for t in R.TRAPS.values() if t not in entries]
     assert not missing, f'trap routines missing from lib_src.js: {missing}'
     assert len(rom) <= L['rom_size'], f'the ROM holds {L["rom_size"]} words, the library needs {len(rom)}'

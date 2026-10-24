@@ -119,8 +119,12 @@ cpu = ["--first: calc(1 - var(--init));",
        "--fv: " + sel("fs", NSET, lambda s: f"var(--F{s})") + ";", "--fk: calc(2 * var(--fs) + var(--fv));",
        "--fT: " + sel("fk", NL, lambda k: f"var(--T{k})") + ";",
        "--dfon: calc(var(--fon) * (1 - var(--pic)));", "--ifon: calc(var(--fon) * var(--pic));",
-       "--fd: calc(var(--dfon) * mod(var(--fT), 2));", "--fvb: calc(round(down, var(--fT) / 2) - 1);",
-       "--fk1: calc(var(--dfon) * (var(--fk) + 1));", "--pend0: calc((1 - var(--fon)) * var(--pend));",
+       # (no fill when the block is already in its set: a pending miss seen again after its fill, as a register can land a
+       # frame late under load, would put it in the other way too, and a lookup that matches both ways neither hits nor
+       # misses: the CPU stalls with nothing pending. csssim's passes are atomic, so it never sees one)
+       "--fabs: " + sel("fs", NSET, lambda s: f"calc(1 - {eq(f'round(down, var(--T{2 * s}) / 2)', 'var(--fb) + 1')} - {eq(f'round(down, var(--T{2 * s + 1}) / 2)', 'var(--fb) + 1')})") + ";",
+       "--fd: calc(var(--dfon) * var(--fabs) * mod(var(--fT), 2));", "--fvb: calc(round(down, var(--fT) / 2) - 1);",
+       "--fk1: calc(var(--dfon) * var(--fabs) * (var(--fk) + 1));", "--pend0: calc((1 - var(--fon)) * var(--pend));",
        # a fetch's miss: its line in the code cache, and the next (if absent there, and code)
        f"--ik1: calc(var(--ifon) * (mod(var(--fb), {ISET}) + 1));", "--igb: calc(var(--fb) + 1);",
        "--igblo: mod(var(--igb), 8);", f"--igbhi: mod(round(down, var(--igb) / 8), {ISET // 8});",
@@ -198,10 +202,14 @@ def oaddr(o):
     """an operand's cell: data_base + o for a global (o < 256), else fp + o - 256"""
     g = f"clamp(0, 256 - {o}, 1)"
     return f"calc({g} * ({DB} + {o}) + (1 - {g}) * mod({fp} + {o} - 256, 32768))"
-# operands B and C: constant (o >= 768: o - 896) or a cell's value (read x / y)
+# operands B and C: constant (o >= 768: o - 896, and from 1016 the specials, cc_ref.kval) or a cell's value (read x / y)
+SPK = R.SPV0 - (1016 - 896)
+def kconst(o): return f"(var(--{o}) - 896 + {SPK} * clamp(0, var(--{o}) - 1015, 1))"
 OPND = ["--kB: clamp(0, var(--B) - 767, 1);", "--kC: clamp(0, var(--C) - 767, 1);", f"--aB: {oaddr('var(--B)')};", f"--aC: {oaddr('var(--C)')};",
-        "--xB: calc(var(--kB) * (var(--B) - 896) + (1 - var(--kB)) * var(--vx));",
-        "--yC: calc(var(--kC) * (var(--C) - 896) + (1 - var(--kC)) * var(--vy));"]
+        f"--xB: calc(var(--kB) * {kconst('B')} + (1 - var(--kB)) * var(--vx));",
+        f"--yC: calc(var(--kC) * {kconst('C')} + (1 - var(--kC)) * var(--vy));"]
+# user code (pc at code_base or above) has JavaScript's semantics; the runtime library's words are raw
+user = f"clamp(0, {pc} - {CODE0 - 1}, 1)"
 z1 = eq(yC, 0)
 BINE = {'ADD': s20(f"{xB} + {yC}"), 'SUB': s20(f"{xB} - {yC}"), 'MUL': s20(f"{xB} * {yC}"),
         'DIV': f"calc((1 - {z1}) * round(to-zero, {xB} / ({yC} + {z1})))",
@@ -213,14 +221,21 @@ BINOPS = ['MOD', 'ADD', 'SUB', 'MUL', 'LT', 'EQ', 'LE', 'GT', 'GE', 'NE', 'DIV']
 def isstr_v(x): return f"calc(clamp(0, {x} - {STR_LO - STRTAG - 1}, 1) * clamp(0, {STRP_HI - STRTAG} - {x}, 1))"
 def isarr_v(x): return f"calc(clamp(0, {x} - {ARRTAG + HEAP0 - 1}, 1) * clamp(0, {ARRTAG + HEAP_HI} - {x}, 1))"
 def isobj_v(x): return f"calc(clamp(0, {x} + {OBJTAG - HEAP0 + 1}, 1) * clamp(0, {HEAP_HI - OBJTAG} - {x}, 1))"
-def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)})"
-def own_v(x): return f"calc(clamp(0, {x} + {STRTAG - R.STRP0 + 1}, 1) * clamp(0, {HEAP0 - STRTAG} - {x}, 1))"     # (a string: the program's own)
+def isdbl_v(x): return f"calc(clamp(0, {x} + {R.DBLTAG + 1}, 1) * clamp(0, {32768 - R.DBLTAG} - {x}, 1))"     # (cc_ref.isdbl)
+def isfun_v(x): return f"calc(clamp(0, {x} + {R.FUNTAG + 1}, 1) * clamp(0, {32768 - R.FUNTAG} - {x}, 1))"     # (cc_ref.isfun)
+def isref_v(x): return f"calc({isstr_v(x)} + {isarr_v(x)} + {isobj_v(x)} + {isdbl_v(x)} + {isfun_v(x)})"
+def own_v(x): return f"calc(clamp(0, {x} + {STRTAG - R.STRP0 + 1}, 1) * clamp(0, {R.SEND - STRTAG} - {x}, 1))"     # (a string: the program's own)
+def special_v(x): return f"clamp(0, {x} - {R.SPV0 - 1}, 1)"
+def smi_v(x): return f"calc(clamp(0, {x} - {R.SMI_LO - 1}, 1) * clamp(0, {R.SMI_HI + 1} - {x}, 1))"
+def catv_v(x):
+    """cc_ref.catv: a special as its name (a built-in string; -0 as "0"), anything else as it is"""
+    return f"calc({x} + {special_v(x)} * ({R.BSTRV(0)} + 12 * ({x} - {R.SPV0} + {eq(x, R.MZERO)}) - {x}))"
 XBACK = 512                    # a SETX's pst: its probe found the chunk full, so the arr class's trap (setx), from its first step
 ENT = image.get('entries') or json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))['entries']
 TRAPOFF, HS = R.TRAPOFF, R.LAYOUT['heap_size']
 def kv(o, n):
     """operand o's value: a constant, or read n's word"""
-    return f"calc(var(--k{o}) * (var(--{o}) - 896) + (1 - var(--k{o})) * var(--v{n}))"
+    return f"calc(var(--k{o}) * {kconst(o)} + (1 - var(--k{o})) * var(--v{n}))"
 OPNDA = ["--kA: clamp(0, var(--A) - 767, 1);", f"--aA: {oaddr('var(--A)')};"]
 # A trap writes its frame one word per execution (csssim.py): with n arguments, step s (pst, but SETP's first is in its probe)
 # writes argument n - 1 - s at F + n - s, and step n the return word at F, fp = F, pc = the routine (tr: a trap's execution,
@@ -228,19 +243,68 @@ OPNDA = ["--kA: clamp(0, var(--A) - 767, 1);", f"--aA: {oaddr('var(--A)')};"]
 def trap(tr, s, n, F, args, retw):
     return [f"--tr: {tr};", f"--ts: {s};", f"--tlast: calc(var(--tr) * {eq('var(--ts)', n)});", f"--tF: {F};",
             f"--taddr: mod(var(--tF) + {n} - var(--ts), 32768);", f"--tval: if(style(--tlast: 1): {retw}; else: {args});"]
-# the dynamic operators: numbers here, a string, array or object in the library (== / != of two strings; the others with one)
-DYNOPS = ['DADD', 'DADDL', 'DADDR', 'DLT', 'DGT', 'DLE', 'DGE', 'DEQ', 'DNE']
-DYNE = {o: BINE['ADD' if o[1] == 'A' else o[1:]] for o in DYNOPS}
+# The dynamic operators (cc_ref.dyn_fast): two integers here (a result in range, not -0), DEQ / DNE identities, DLEQ / DLNE
+# that and null == undefined and booleans as 1 / 0; a string's + to the cat class; anything else traps to the library, its
+# frame at TRAPDEF, and returns to the instruction with pst WBACK, which moves the routine's value (read z) into A
+DYNOPS = list(R.DYNOPS)
+TRAPDEF, WBACK = R.TRAPDEF, R.WBACK
 bothstr = f"calc({isstr_v(xB)} * {isstr_v(yC)})"
+anydbl = f"min(1, calc({isdbl_v(xB)} + {isdbl_v(yC)}))"
 # A string's + (no array or object, pst 0) goes to the cat class: pst CAT0 from the next execution (dcat)
 CATT, CAT0 = 1024, 2048
 NOCAT = os.environ.get('NOCAT') == '1'     # (measurement only: a string's + traps to the ROM's cat, as before the cat class)
-anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)}))"
-DYN_PRE = (OPND + [f"--aA: {oaddr('var(--A)')};", f"--dslow: {by_op({'DEQ': bothstr, 'DNE': bothstr}, f'min(1, calc({isref_v(xB)} + {isref_v(yC)}))')};",
-                   f"--dcat: calc({opin('DADD', 'DADDR')} * (1 - min(1, var(--pst))) * var(--dslow) * (1 - {anyao}) * {0 if NOCAT else 1});"] +
-           trap("min(1, calc(var(--pst) + var(--dslow) * (1 - var(--dcat))))", "var(--pst)", 2, "var(--aA)", f"if(style(--pst: 0): {yC}; else: {xB})",
-                f"calc((var(--A) - 256) * 8192 + {pc} + 2)"))
-DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({o: ENT[R.TRAPS[o]] for o in DYNOPS[:-1]}, ENT[R.TRAPS[DYNOPS[-1]]])}; else: {pc})",
+anyao = f"min(1, calc({isarr_v(xB)} + {isobj_v(xB)} + {isarr_v(yC)} + {isobj_v(yC)} + {anydbl} + {isfun_v(xB)} + {isfun_v(yC)}))"     # (a double or a function too: the library)
+def neg_v(x): return f"clamp(0, -1 * {x}, 1)"
+def nz_v(x): return f"calc({x} * (1 - {eq(x, R.MZERO)}))"                    # -0 as 0
+def nul_v(x): return f"calc({eq(x, R.NULL)} + {eq(x, R.UNDEF)})"
+def norm_v(x): return f"calc({x} - ({x} - 1) * {eq(x, R.TRUE)} - {x} * ({eq(x, R.FALSE)} + {eq(x, R.MZERO)}))"   # booleans as 1 / 0
+# the comparisons user code makes (D... and J...): (fast: the machine decides, the condition 0 / 1), by the operator's suffix;
+# they read --dix / --diy (integers), --cqs (a string on either side), --cao (an array or object on one side only)
+CMP_SUFFIX = ['LT', 'GT', 'LE', 'GE', 'EQ', 'NE', 'LEQ', 'LNE']
+_ceq = f"calc((1 - {eq(xB, R.NAN)}) * {eq(nz_v(xB), nz_v(yC))})"
+_cleq = (f"calc(min(1, calc({nul_v(xB)} + {nul_v(yC)})) * {nul_v(xB)} * {nul_v(yC)} + (1 - min(1, calc({nul_v(xB)} + {nul_v(yC)})))"
+         f" * (1 - {eq(xB, R.NAN)}) * {eq(norm_v(xB), norm_v(yC))})")
+CMP_FAST = {**{o: "calc(var(--dix) * var(--diy))" for o in ('LT', 'GT', 'LE', 'GE')}, 'EQ': "calc((1 - var(--cbs)) * (1 - var(--cdb)))",
+            'NE': "calc((1 - var(--cbs)) * (1 - var(--cdb)))",
+            'LEQ': "calc((1 - var(--cqs)) * (1 - var(--cao)) * (1 - var(--cdb)))", 'LNE': "calc((1 - var(--cqs)) * (1 - var(--cao)) * (1 - var(--cdb)))"}
+CMP_COND = {**{o: BINE[o] for o in ('LT', 'GT', 'LE', 'GE')}, 'EQ': _ceq, 'NE': f"calc(1 - {_ceq})", 'LEQ': _cleq, 'LNE': f"calc(1 - {_cleq})"}
+# the jumps: J<suffix>, and JN<relation>, the relation's negation (NaN: false either way)
+JFAST = {**{'J' + o: CMP_FAST[o] for o in CMP_SUFFIX}, **{'JN' + o: CMP_FAST[o] for o in ('LT', 'GT', 'LE', 'GE')}}
+JCOND = {**{'J' + o: CMP_COND[o] for o in CMP_SUFFIX}, **{'JN' + o: f"calc(1 - {CMP_COND[o]})" for o in ('LT', 'GT', 'LE', 'GE')}}
+CMP_PRE = [f"--dix: {smi_v(xB)};", f"--diy: {smi_v(yC)};", f"--cbs: {bothstr};", f"--cdb: {anydbl};", f"--cqs: min(1, calc({isstr_v(xB)} + {isstr_v(yC)}));",
+           f"--cao: max(calc({isarr_v(xB)} + {isobj_v(xB)} - {isarr_v(yC)} - {isobj_v(yC)}), calc({isarr_v(yC)} + {isobj_v(yC)} - {isarr_v(xB)} - {isobj_v(xB)}));"]
+zy = eq(yC, 0)
+# DBIT (A's 1024s: the operator k) of two integers: their bits from the two's complement, an integer's 19 (bit 18 its sign)
+_dk = "round(down, var(--A) / 1024)"
+def _bit(x, i): return f"mod(round(down, {x} / {2 ** i}), 2)"
+_dand = "calc(" + " + ".join(f"{2 ** i} * {_bit(xB, i)} * {_bit(yC, i)}" for i in range(18)) + f" - {2 ** 18} * {_bit(xB, 18)} * {_bit(yC, 18)})"
+_dsh = f"pow(2, mod({yC}, 32))"
+_dbit = (f"calc(clamp(0, 3 - {_dk}, 1) * (({_dand}) * (1 - 2 * min(1, {_dk}) - {eq(_dk, 2)}) + ({xB} + {yC}) * min(1, {_dk}))"     # & | ^
+         f" + {eq(_dk, 3)} * {xB} * {_dsh} + {eq(_dk, 4)} * round(down, {xB} / {_dsh})"
+         f" + {eq(_dk, 5)} * round(down, ({xB} + 4294967296 * clamp(0, -1 * {xB}, 1)) / {_dsh}))")
+_dr = {'DADD': f"calc({xB} + {yC})", 'DSUB': f"calc({xB} - {yC})", 'DMUL': f"calc({xB} * {yC})",
+       'DDIV': f"calc(({xB}) / ({yC} + {zy}))", 'DMOD': f"rem({xB}, {yC} + {zy})", 'DBIT': _dbit, 'DNEG': f"calc(-1 * {xB})"}
+_dsb = "calc(var(--dix) * var(--diy))"
+_dok = {'DADD': f"calc({_dsb} * {smi_v('var(--dr)')})", 'DSUB': f"calc({_dsb} * {smi_v('var(--dr)')})",
+        'DMUL': f"calc({_dsb} * {smi_v('var(--dr)')} * (1 - {eq('var(--dr)', 0)} * min(1, calc({neg_v(xB)} + {neg_v(yC)}))))",
+        'DDIV': f"calc({_dsb} * (1 - {zy}) * {eq(f'rem({xB}, {yC} + {zy})', 0)} * (1 - {eq(xB, 0)} * {neg_v(yC)}))",
+        'DMOD': f"calc({_dsb} * (1 - {zy}) * (1 - {eq('var(--dr)', 0)} * {neg_v(xB)}))",
+        'DNEG': f"calc(var(--dix) * (1 - {eq(xB, 0)}) * {smi_v('var(--dr)')})", 'DBIT': f"calc({_dsb} * {smi_v('var(--dr)')} * clamp(0, 6 - {_dk}, 1))",
+        **{'D' + o: CMP_FAST[o] for o in CMP_SUFFIX}}
+_dval = {**{o: "var(--dr)" for o in _dr}, **{'D' + o: f"calc({R.FALSE} - {CMP_COND[o]})" for o in CMP_SUFFIX}}
+# NUMLIT A, word1 (a number literal: A its cache, a global): A read as x; defined, it stays (written back as it is); undefined, the library's
+# numlit parses the string word1 (the trap's arguments: word1, 0) and the instruction moves its value into A; word1 >= 16 (a function
+# expression's value) always traps
+DYNC = DYNOPS + ['NUMLIT']
+_dok['NUMLIT'] = "calc((1 - " + eq('var(--vx)', R.UNDEF) + ") * clamp(0, 16 - var(--vg), 1))"; _dval['NUMLIT'] = "var(--vx)"     # (word1 >= 16: a function's value, always made)
+DYN_PRE = (OPND + CMP_PRE + [f"--aA: {oaddr('mod(var(--A), 1024)')};", f"--dwb: {eq('var(--pst)', WBACK)};", f"--dnl: {eq('var(--op)', OP['NUMLIT'])};",
+                   f"--dr: {by_op({o: _dr[o] for o in list(_dr)[:-1]}, _dr['DNEG'])};", f"--dok: {by_op({o: _dok[o] for o in DYNC[:-1]}, _dok[DYNC[-1]])};",
+                   f"--dcat: calc({eq('var(--op)', OP['DADD'])} * (1 - min(1, var(--pst))) * (1 - var(--dok)) * var(--cqs) * (1 - {anyao}) * {0 if NOCAT else 1});",
+                   f"--dval: {by_op({o: _dval[o] for o in DYNC[:-1]}, _dval[DYNC[-1]])};"] +
+           trap("calc((1 - var(--dwb)) * min(1, calc(var(--pst) + (1 - var(--dok)) * (1 - var(--dcat)))))", "var(--pst)", 2,
+                f"mod({fp} + {TRAPDEF}, 32768)", f"if(style(--dnl: 1): if(style(--pst: 0): 0; else: var(--vg)); style(--pst: 0): {yC}; else: {xB})",
+                f"calc({TRAPDEF * 8192} + {pc} / 2)"))
+DYN_NX = {'pc': f"if(style(--dcat: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({**{o: ENT[R.TRAPS[o]] for o in DYNOPS}, 'NUMLIT': ENT['numlit']}, 0)}; else: {pc})",
           'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--dcat))",
           'pst': f"if(style(--dcat: 1): {CAT0}; style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--pst) + 1))"}
 # the collector's map of block starts (cc_ref.MAP): a block's word and bit, and the word with the bit set
@@ -249,7 +313,7 @@ MAPB = R.MAP
 def mapword(base): return f"calc({MAPB} + round(down, ({base} - {HEAP0}) / 128))"
 def mapbitv(base): return f"pow(2, mod(round(down, ({base} - {HEAP0}) / 8), 16))"
 def mapset(v, bit): return f"calc({v} + {bit} * (1 - mod(round(down, {v} / {bit}), 2)))"     # (bit set: unchanged)
-# The cat class (DADD, DADDL, DADDR with pst >= CATT; csssim.Sim.cat): pst CAT0 + k: k 0 HP += nw (the heap full: the ROM's
+# The cat class (DADD with pst >= CATT; csssim.Sim.cat): pst CAT0 + k: k 0 HP += nw (the heap full: the ROM's
 # gccat through a trap, pst CATT + its step), 1 the header and the length, 2 + i the characters from i (a line of them, from X or
 # from Y: to the end of the source, of the written line, of a string's line; the NUL with the last if it fits), n + 2 the NUL,
 # n + 3 the map's bit, n + 4 A. Reads: x, y; z, e: X's and Y's length words (strings); k, j: HP and GCLIM; line p: a string's
@@ -259,29 +323,24 @@ def numch(v, g):
     """character g of number v's decimal form"""
     a = f"max({v}, -1 * {v})"; ng = f"clamp(0, -1 * {v}, 1)"
     return (f"calc({ng} * {eq(g, 0)} * 45 + (1 - {ng} * {eq(g, 0)}) * (48 + mod(round(down, {a} / pow(10, {ndig(v)} - 1 - {g})), 10)))")
-def boolch(v, g):
-    T_, F_ = [ord(c) for c in 'true'], [ord(c) for c in 'false']
-    return "calc(" + " + ".join(f"{eq(g, kk)} * ({v} * {T_[kk] if kk < 4 else 0} + (1 - {v}) * {F_[kk]})" for kk in range(5)) + ")"
-def bool01(v): return f"calc({eq(v, 0)} + {eq(v, 1)})"
-CAT_PRE = OPND + [f"--aA: {oaddr('var(--A)')};",
-    f"--csx: {isstr_v(xB)};", f"--csy: {isstr_v(yC)};",
-    f"--cbx: calc({eq('var(--op)', OP['DADDL'])} * {bool01(xB)});", f"--cby: calc({eq('var(--op)', OP['DADDR'])} * {bool01(yC)});",
-    f"--cla: if(style(--csx: 1): var(--vz); style(--cbx: 1): calc(5 - {xB}); else: {ndig(xB)});",
-    f"--clb: if(style(--csy: 1): var(--ve); style(--cby: 1): calc(5 - {yC}); else: {ndig(yC)});",
+CAT_PRE = OPND + [f"--aA: {oaddr('var(--A)')};", f"--cX: {catv_v(xB)};", f"--cY: {catv_v(yC)};",
+    "--csx: " + isstr_v("var(--cX)") + ";", "--csy: " + isstr_v("var(--cY)") + ";",
+    f"--cla: if(style(--csx: 1): var(--vz); else: {ndig('var(--cX)')});",
+    f"--clb: if(style(--csy: 1): var(--ve); else: {ndig('var(--cY)')});",
     "--ctn: calc(var(--cla) + var(--clb));", "--cnw: calc(round(down, (var(--ctn) + 10) / 8) * 8);",
     f"--cfull: clamp(0, var(--vk) + var(--cnw) - var(--vj) - {HS}, 1);",
     f"--ck: calc(var(--pst) - {CAT0});", f"--cbase: calc({HEAP0} + var(--vk) - var(--cnw));",
     # the characters from i = k - 2: of X (i < la), or of Y from i - la; a chunk of cc to the written line's end (uw), X's or Y's end
     # and a string's line's end (up); cnul: the NUL too
     "--ci: calc(var(--ck) - 2);", "--cfx: clamp(0, var(--cla) - var(--ci), 1);", "--cj: calc(var(--ci) - (1 - var(--cfx)) * var(--cla));",
-    f"--cvv: if(style(--cfx: 1): {xB}; else: {yC});", "--cvs: if(style(--cfx: 1): var(--csx); else: var(--csy));",
-    "--cvb: if(style(--cfx: 1): var(--cbx); else: var(--cby));", "--clv: if(style(--cfx: 1): var(--cla); else: var(--clb));",
+    "--cvv: if(style(--cfx: 1): var(--cX); else: var(--cY));", "--cvs: if(style(--cfx: 1): var(--csx); else: var(--csy));",
+    "--clv: if(style(--cfx: 1): var(--cla); else: var(--clb));",
     "--cin: calc(clamp(0, var(--ck) - 1, 1) * clamp(0, var(--ctn) - var(--ci), 1));",
     "--cc: max(0, min(var(--clv) - var(--cj), 4 - var(--uw), 4 - var(--cvs) * var(--up)));",
     "--cnul: calc(var(--cin) * " + eq('var(--ci) + var(--cc)', 'var(--ctn)') + " * clamp(0, 4 - var(--uw) - var(--cc), 1));"] + \
     [f"--cq{j}: clamp(0, {j} - var(--uw) + var(--up), 3);" for j in range(4)] + \
     trap(f"calc(clamp(0, {CAT0} - var(--pst), 1) + {eq('var(--pst)', CAT0)} * var(--cfull))", f"calc(clamp(0, {CAT0} - var(--pst), 1) * (var(--pst) - {CATT}))",
-         2, "var(--aA)", f"if(style(--ts: 0): {yC}; else: {xB})", f"calc((var(--A) - 256) * 8192 + {pc} + 2)") + [
+         2, f"mod({fp} + {R.TRAPDEF}, 32768)", f"if(style(--ts: 0): {yC}; else: {xB})", f"calc({R.TRAPDEF * 8192} + {pc} / 2)") + [
     "--cnull: calc((1 - var(--tr)) * " + eq('var(--ci)', 'var(--ctn)') + ");",
     "--cmap: calc((1 - var(--tr)) * " + eq('var(--ci)', 'var(--ctn) + 1') + ");",
     "--clast: calc((1 - var(--tr)) * " + eq('var(--ci)', 'var(--ctn) + 2') + ");",
@@ -291,39 +350,40 @@ CAT_PRE = OPND + [f"--aA: {oaddr('var(--A)')};",
     "--ckk: if(style(--ck: 1): 2; style(--cin: 1): calc(var(--cc) + var(--cnul)); else: 1);"]
 def cat_val(j):
     r = f"({j} - var(--uw))"; g = f"(var(--cj) + {r})"
-    ch = (f"calc(clamp(0, var(--cc) - {r}, 1) * if(style(--cvs: 1): {pick('p', f'cq{j}')}; style(--cvb: 1): {boolch('var(--cvv)', g)};"
-          f" else: {numch('var(--cvv)', g)}))")
+    ch = f"calc(clamp(0, var(--cc) - {r}, 1) * if(style(--cvs: 1): {pick('p', f'cq{j}')}; else: {numch('var(--cvv)', g)}))"
     hdr = ["calc(-2 - var(--cnw))", "var(--ctn)", "0", "0"][j]
     return (f"if(style(--tr: 1): var(--tval); style(--ck: 0): calc(var(--vk) + var(--cnw)); style(--ck: 1): {hdr}; style(--cin: 1): {ch};"
             f" style(--cnull: 1): 0; style(--cmap: 1): {mapset('var(--vr)', 'var(--cmb)')}; else: calc(var(--cbase) + {2 - STRTAG}))")
-CAT_NX = {'pc': f"if(style(--clast: 1): calc({pc} + 2); style(--tlast: 1): {by_op({'DADD': ENT['gccat'], 'DADDL': ENT['gccatl']}, ENT['gccatr'])}; else: {pc})",
+CAT_NX = {'pc': f"if(style(--clast: 1): calc({pc} + 2); style(--tlast: 1): {ENT['gccat']}; else: {pc})",
           'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': "calc(var(--steps) + var(--clast) + var(--tlast))",
           'pst': f"if(style(--clast: 1): 0; style(--tlast: 1): 0; style(--tr: 1): calc({CATT} + var(--ts) + 1);"
                  " else: calc(var(--pst) + if(style(--cin: 1): calc(var(--cc) + var(--cnul)); else: 1)))"}
 CAT_CLASS = dict(ops=[], pre=CAT_PRE,
                  reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"),
-                        ("z", f"mod({xB} + {STRTAG - 1}, 32768)", "var(--csx)"), ("e", f"mod({yC} + {STRTAG - 1}, 32768)", "var(--csy)"),
+                        ("z", f"mod(var(--cX) + {STRTAG - 1}, 32768)", "var(--csx)"), ("e", f"mod(var(--cY) + {STRTAG - 1}, 32768)", "var(--csy)"),
                         ("k", HP, "1"), ("r", "var(--cmw)", "var(--cmap)")],
                  lines=[("p", f"mod(var(--cvv) + {STRTAG} + var(--cj), 32768)", "calc(var(--cin) * var(--cvs) * (1 - var(--tr)))")],
                  pair={'k': 'j'}, write=("var(--caddr)", None, None, "1"), wline=("var(--ckk)", cat_val), nx=CAT_NX,
                  deps={'z': [('x', None)], 'e': [('y', None)], 'p': [('x', None), ('y', None), ('z', None)]})
 # GETX / SETX: X the array (B / A), Y the index (C / B); z its length and h its ptr (the words before and at its value's address,
 # read only for an array); e the element (GETX, inside the length) or C (SETX)
+_xgtrap = f"calc(1 - var(--xarr) * {smi_v('var(--Y)')})"     # GETX: no array and an integer index: the library
 ARR_PRE = OPND + OPNDA + [
     f"--X: {by_op({'GETX': kv('B', 'x')}, kv('A', 'x'))};", f"--Y: {by_op({'GETX': kv('C', 'y')}, kv('B', 'y'))};",
     f"--xarr: calc((1 - min(1, var(--pst))) * {isarr_v('var(--X)')});",
     "--xin: calc(var(--xarr) * clamp(0, var(--Y) + 1, 1) * clamp(0, var(--vz) - var(--Y), 1));",
-    f"--E: {by_op({'GETX': 'calc(var(--xin) * var(--ve))'}, kv('C', 'e'))};",
-    f"--xhand: calc({eq(pst, 0)} * {isobj_v('var(--X)')} * (1 - {isstr_v('var(--Y)')} * (1 - {own_v('var(--Y)')})));"] + \
-    trap(f"calc((1 - var(--xhand)) * {by_op({'GETX': 'calc(1 - var(--xarr))'}, 'calc(1 - var(--xin))')})", f"mod({pst}, {XBACK})", by_op({'GETX': 2}, 3),
+    f"--E: {by_op({'GETX': f'calc(var(--xin) * var(--ve) + (1 - var(--xin)) * {R.UNDEF})'}, kv('C', 'e'))};",
+    f"--xhand: calc({eq(pst, 0)} * {isobj_v('var(--X)')} * min(1, calc({smi_v('var(--Y)')} + {own_v('var(--Y)')})));"] + \
+    trap(f"calc((1 - var(--xhand)) * {by_op({'GETX': _xgtrap}, 'calc(1 - var(--xin))')})", f"mod({pst}, {XBACK})", by_op({'GETX': 2}, 3),
          by_op({'GETX': "var(--aA)"}, f"mod({fp} + {TRAPOFF}, 32768)"),
          by_op({'GETX': "if(style(--ts: 0): var(--Y); else: var(--X))"}, "if(style(--ts: 0): var(--E); style(--ts: 1): var(--Y); else: var(--X))"),
-         f"calc({by_op({'GETX': 'calc((var(--A) - 256) * 8192)'}, TRAPOFF * 8192)} + {pc} + 2)")
+         f"calc({by_op({'GETX': 'calc((var(--A) - 256) * 8192)'}, TRAPOFF * 8192)} + ({pc} + 2) / 2)")
 ARR_NX = {'pc': f"if(style(--xhand: 1): {pc}; style(--tr: 0): calc({pc} + 2); style(--tlast: 1): {by_op({'GETX': ENT['getx']}, ENT['setx'])}; else: {pc})",
           'fp': DYN_NX['fp'], 'steps': "calc(var(--steps) + 1 - var(--tr) + var(--tlast) - var(--xhand))",
           'pst': f"if(style(--xhand: 1): mod(var(--X) + {OBJTAG}, 32768); style(--tr: 0): 0; style(--tlast: 1): 0; else: calc(var(--ts) + 1))"}
 # GETP / SETP / NEW. A probe reads the pair at q (z: the key, h: the value): pst the pair's address, 0 the object's first. The
-# case oc: GETP 1 done (the value or 0), 2 the next pair; SETP 3 a trap's execution (pst 1 ... 3, or the first: a full chunk),
+# case oc: GETP 1 done (the value or 0), 2 the next pair, 3 a string's (the library's getps: its frame at A, no arguments);
+# SETP 3 a trap's execution (pst 1 ... 3, or the first: a full chunk),
 # 4 the new pair (pst: its address + 1; the terminator is written), 5 not an object, 6 the key's value, 7 the new pair's
 # terminator, 8 the next pair; NEW 9 the heap is full (the collector, NEW again), 10 one of its four writes (pst 0 the key word, 1
 # A, 2 the map's bit, 3 HP); 11 SETX's chunk is full (back to the arr class's trap: pst XBACK). GETX and SETX come here (cls_of,
@@ -334,27 +394,29 @@ OBJ_PRE = OPND + OPNDA + [
     f"--okey: {by_op({'GETX': s20(kv('C', 'y') + f' + {STRTAG}'), 'SETX': s20(kv('B', 'y') + f' + {STRTAG}')}, f'calc({DB} + var(--C))')};",
     f"--sst: calc({eq('var(--op)', OP['SETP'])} * min(1, var(--pst)) * clamp(0, {HEAP0} - var(--pst), 1));",
     f"--oq: {by_op({'NEW': HP}, f'calc(min(1, var(--pst)) * (var(--pst) - mod(var(--pst), 2)) + (1 - min(1, var(--pst))) * mod(var(--O) + {OBJTAG}, 32768))')};",
-    f"--ohit: {eq('var(--vz)', 'var(--okey)')};", f"--oend: {eq('var(--vz)', 0)};",
+    f"--ohit: {eq('var(--vz)', 'var(--okey)')};",
+    f"--oend: calc({eq('var(--vz)', 0)} + {by_op({'SETP': 1, 'SETX': 1}, 0)} * clamp(0, {-OBJTAG} - var(--vz), 1));",     # (SETP / SETX: a prototype's link ends the keys too)
     f"--onext: calc(clamp(0, -1 * var(--vz), 1) * mod(var(--vz) + {OBJTAG}, 32768) + (1 - clamp(0, -1 * var(--vz), 1)) * ({oq} + 2));",
-    "--oc: " + by_op({'GETP': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))", 'GETX': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))",
+    "--oc: " + by_op({'GETP': f"calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)) + 2 * {isstr_v('var(--O)')})", 'GETX': "calc(1 + var(--ob) * (1 - var(--ohit) - var(--oend)))",
                       'NEW': f"calc(10 - {eq('var(--pst)', 0)} * clamp(0, var(--vz) - var(--vh) - {HS - 8}, 1))"},
                      "if(style(--sst: 1): 3; style(--sodd: 1): 4; style(--ob: 0): 5; style(--ohit: 1): 6;"
                      f" style(--oend: 1): calc(3 + 4 * var(--oroom) + 8 * (1 - var(--oroom)) * {eq('var(--op)', OP['SETX'])}); else: 8)") + ";",
     f"--sodd: calc({opin('SETP', 'SETP')} * (1 - var(--sst)) * mod(var(--pst), 2) + {eq('var(--op)', OP['SETX'])} * mod(var(--pst), 2));",
     f"--oroom: clamp(0, 6 - mod({oq} - {HEAP0}, 8), 1);", f"--V: {by_op({'SETX': kv('C', 'e')}, kv('B', 'y'))};",
     f"--omw: {mapword(f'({HEAP0} + var(--vz))')};"] + \
-    trap(f"{eq('var(--oc)', 3)}", "calc(var(--sst) * var(--pst))", 3, f"mod({fp} + {TRAPOFF}, 32768)",
-         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))", f"calc({TRAPOFF * 8192} + {pc} + 2)") + [
+    trap(f"{eq('var(--oc)', 3)}", "calc(var(--sst) * var(--pst))", by_op({'GETP': 0}, 3), by_op({'GETP': "var(--aA)"}, f"mod({fp} + {TRAPOFF}, 32768)"),
+         "if(style(--ts: 0): var(--V); style(--ts: 1): var(--okey); else: var(--O))",
+         by_op({'GETP': f"calc((var(--A) - 256) * 8192 + ({pc} + 2) / 2)"}, f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)")) + [
     f"--oaddr: if(style(--oc: 1): var(--aA); style(--oc: 3): var(--taddr); style(--oc: 4): {oq}; style(--oc: 6): calc({oq} + 1);"
     f" style(--oc: 7): calc({oq} + 2); style(--oc: 9) or style(--oc: 11): var(--aA); style(--pst: 0): calc({HEAP0} + var(--vz)); style(--pst: 1): var(--aA);"
     f" style(--pst: 2): var(--omw); else: {HP});",
-    f"--oval: if(style(--oc: 1): calc(var(--ob) * var(--ohit) * var(--vh)); style(--oc: 3): var(--tval); style(--oc: 4): var(--okey);"
-    f" style(--oc: 6): var(--V); style(--oc: 7): 0; style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc}); style(--pst: 0): 0;"
+    f"--oval: if(style(--oc: 1): calc(var(--ob) * var(--ohit) * var(--vh) + (1 - var(--ob) * var(--ohit)) * {R.UNDEF}); style(--oc: 3): var(--tval); style(--oc: 4): var(--okey);"
+    f" style(--oc: 6): var(--V); style(--oc: 7): var(--vz); style(--oc: 9): calc((var(--A) - 256) * 8192 + {pc} / 2); style(--pst: 0): 0;"
     f" style(--pst: 1): calc(var(--vz) + {HEAP0 - OBJTAG}); style(--pst: 2): {mapset('var(--vr)', mapbitv(f'({HEAP0} + var(--vz))'))}; else: calc(var(--vz) + 8));",
     "--oen: if(style(--oc: 2) or style(--oc: 5) or style(--oc: 8) or style(--oc: 11): 0; else: 1);", f"--w2: {eq('var(--oc)', 4)};",
     f"--odone: calc({eq('var(--oc)', 1)} + {eq('var(--oc)', 4)} + {eq('var(--oc)', 5)} + {eq('var(--oc)', 6)} + {eq('var(--oc)', 10)} * {eq('var(--pst)', 3)});",
     f"--ojump: calc(var(--tlast) + {eq('var(--oc)', 9)});"]
-OBJ_NX = {'pc': f"if(style(--odone: 1): calc({pc} + 2); style(--ojump: 1): if(style(--oc: 9): {ENT['gcnew']}; else: {ENT['setp']}); else: {pc})",
+OBJ_NX = {'pc': f"if(style(--odone: 1): calc({pc} + 2); style(--ojump: 1): if(style(--oc: 9): {ENT['gcnew']}; else: {by_op({'GETP': ENT['getps']}, ENT['setp'])}); else: {pc})",
           'fp': f"if(style(--ojump: 1): if(style(--oc: 9): var(--aA); else: var(--tF)); else: {fp})",
           'steps': "calc(var(--steps) + var(--odone) + var(--ojump))",
           'pst': "if(style(--oc: 2) or style(--oc: 8): var(--onext); style(--oc: 7): calc(var(--oq) + 1); style(--oc: 3): if(style(--tlast: 1): 0;"
@@ -364,9 +426,16 @@ OBJ_NX = {'pc': f"if(style(--odone: 1): calc({pc} + 2); style(--ojump: 1): if(st
 _own = own_v(xB)
 KINDE = ("if(" + " ".join(f"style(--kk: {i}): {e};" for i, e in enumerate([
     f"calc({isstr_v(xB)} + 2 * {isarr_v(xB)} + 3 * {isobj_v(xB)})", isstr_v(xB), isarr_v(xB), isobj_v(xB), f"calc({isarr_v(xB)} + {isobj_v(xB)})",
-    f"calc({isstr_v(xB)} * (1 - {_own}))", ndig(xB), isref_v(xB)])) + f" else: calc({isstr_v(xB)} * clamp(0, {xB} + {STRTAG - HEAP0 + 1}, 1)))")
-# JZ / JNZ / NOT: 0 and the empty string are false (a string's length, the word before its address: read z, only for a string)
-FALSY = ["--tz: calc(var(--tstr) * " + eq("var(--vz)", 0) + f" + (1 - var(--tstr)) * {eq(xB, 0)});"]
+    f"calc({isstr_v(xB)} * (1 - {_own}))", ndig(xB), isref_v(xB), f"calc({isstr_v(xB)} * clamp(0, {xB} + {STRTAG - HEAP0 + 1}, 1))",
+    # typeof: its name, BSTRS[BS_TYPE + type code] (cc_ref.typecode)
+    f"calc({R.BSTRV(R.BS_TYPE)} + 12 * (4 * {isstr_v(xB)} + {isarr_v(xB)} + {isobj_v(xB)} + {eq(xB, R.NULL)} + 2 * ({eq(xB, R.TRUE)} + {eq(xB, R.FALSE)})"
+    f" + 5 * {isfun_v(xB)} + 3 * (1 - {isstr_v(xB)} - {isarr_v(xB)} - {isobj_v(xB)} - {eq(xB, R.NULL)} - {eq(xB, R.UNDEF)} - {eq(xB, R.TRUE)} - {eq(xB, R.FALSE)}"
+    f" - {isfun_v(xB)})))",
+    special_v(xB), smi_v(xB), isdbl_v(xB), isfun_v(xB)])) +
+    f" else: calc({smi_v(xB)} + {eq(xB, R.INF)} + {eq(xB, R.NINF)} + {eq(xB, R.NAN)} + {eq(xB, R.MZERO)} + {isdbl_v(xB)}))")     # (num)
+# JZ / JNZ / NOT: 0 and the empty string are false (a string's length, the word before its address: read z, only for a string);
+# in user code also false, null, undefined, NaN and -0 (the specials from FALSE on)
+FALSY = ["--tz: calc(var(--tstr) * " + eq("var(--vz)", 0) + f" + (1 - var(--tstr)) * ({eq(xB, 0)} + {user} * clamp(0, {xB} - {R.FALSE - 1}, 1)));"]
 # A class's rule evaluates all its declarations whether an instruction needs them or not, and a read costs a cache lookup,
 # so each class reads only what its instructions read: x (B), y (C), z (a third word), w (the written word's set)
 CLASSES = {
@@ -376,16 +445,24 @@ CLASSES = {
     'mov': dict(ops=['MOV', 'NEG', 'LOADK', 'GETFP', 'KIND'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};", "--kk: calc(var(--C) - 896);"],
                 reads=[("x", "var(--aB)", f"(1 - var(--kB)) * (1 - {eq('var(--op)', OP['LOADK'])} - {eq('var(--op)', OP['GETFP'])})")],
                 write=("var(--aA)", by_op({'MOV': xB, 'LOADK': "var(--vg)", 'GETFP': fp, 'KIND': KINDE}, s20(f"-1 * {xB}")), None, "1"), nx={'pc': f"calc({pc} + 2)"}),
-    'jump': dict(ops=['JMP', 'JNE', 'JLT', 'JGE', 'JLE', 'JGT', 'JEQ', 'HALT'], pre=OPND +
-                 ["--jc: " + by_op({'JMP': 1, **{f'J{o}': BINE[o] for o in ('LT', 'GT', 'LE', 'GE', 'EQ')}}, BINE['NE']) + ";"],
-                 reads=[("x", "var(--aB)", f"(1 - var(--kB)) * {opin('JLT', 'JNE')}"), ("y", "var(--aC)", f"(1 - var(--kC)) * {opin('JLT', 'JNE')}")],
+    # JLT ... JLNE in user code: two integers (and the identities of JEQ ... JLNE) here (CMP_FAST); else --jho hands off to the
+    # jtrap class (pst CATT), which calls the library's jcmp; the runtime library's jumps compare raw words
+    'jump': dict(ops=['JMP', 'JNE', 'JLT', 'JGE', 'JLE', 'JGT', 'JEQ', 'JLEQ', 'JLNE', 'JNLT', 'JNGT', 'JNLE', 'JNGE', 'HALT'], pre=OPND + CMP_PRE +
+                 [f"--juser: {user};", "--jcr: " + by_op({'JMP': 1, **{f'J{o}': BINE[o] for o in ('LT', 'GT', 'LE', 'GE', 'EQ')}}, BINE['NE']) + ";",
+                  f"--jok: {by_op({o: JFAST[o] for o in list(JFAST)[:-1]}, JFAST['JNGE'])};",
+                  f"--jcu: {by_op({o: JCOND[o] for o in list(JCOND)[:-1]}, JCOND['JNGE'])};",
+                  f"--jho: calc(var(--juser) * {opin('JLT', 'JNGE')} * (1 - var(--jok)));",
+                  "--jc: if(style(--juser: 1) and style(--jok: 1): var(--jcu); else: var(--jcr));"],
+                 reads=[("x", "var(--aB)", f"(1 - var(--kB)) * {opin('JLT', 'JNGE')}"), ("y", "var(--aC)", f"(1 - var(--kC)) * {opin('JLT', 'JNGE')}")],
                  write=None,
-                 nx={'pc': by_op({'HALT': pc, 'JMP': "var(--A)"}, f"calc(var(--jc) * var(--A) + (1 - var(--jc)) * ({pc} + 2))")}),
+                 nx={'pc': by_op({'HALT': pc, 'JMP': "calc(2 * var(--A))"}, f"if(style(--jho: 1): {pc}; else: calc(var(--jc) * 2 * var(--A) + (1 - var(--jc)) * ({pc} + 2)))"),
+                     'steps': "calc(var(--steps) + 1 - var(--jho))", 'pst': f"calc(var(--jho) * {CATT})"}),
     'test': dict(ops=['JZ', 'JNZ'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--tstr: {isstr_v(xB)};"] + FALSY +
                  [f"--jc: {by_op({'JZ': 'var(--tz)'}, 'calc(1 - var(--tz))')};"],
                  reads=[("x", "var(--aB)", "1 - var(--kB)"), ("z", f"mod({xB} - 1, 32768)", "var(--tstr)")], write=None,
-                 nx={'pc': f"calc(var(--jc) * var(--A) + (1 - var(--jc)) * ({pc} + 2))"}, deps={'z': [('x', None)]}),
-    # CALL A, off: the return word (off * 8192 + the return address) at fp + off, fp += off. RET B: B over the return word
+                 nx={'pc': f"calc(var(--jc) * 2 * var(--A) + (1 - var(--jc)) * ({pc} + 2))"}, deps={'z': [('x', None)]}),
+    # CALL A, off: the return word (off * 8192 + the return address / 2) at fp + off, fp += off, pc = 2 A (code targets and return
+    # addresses count instruction pairs). RET B: B over the return word
     # (the caller's slot for the value), fp -= off. NOT A, B (reads a string's length, z, as JZ does). TENTER A: CALL A with
     # off TRAPOFF and the return address pst + 2 (PRINT's trap, through pstub)
     'call': dict(ops=['CALL', 'RET', 'NOT', 'TENTER'], pre=OPND[0:1] + OPND[2:3] + OPND[4:5] + [f"--aA: {oaddr('var(--A)')};",
@@ -393,10 +470,11 @@ CLASSES = {
                  reads=[("x", "var(--aB)", f"(1 - {eq('var(--op)', OP['CALL'])} - {eq('var(--op)', OP['TENTER'])}) * (1 - var(--kB))"),
                         ("z", by_op({'NOT': f"mod({xB} - 1, 32768)"}, fp), f"calc({eq('var(--op)', OP['RET'])} + var(--tstr))")],
                  write=(by_op({'CALL': f"mod({fp} + var(--vg), 32768)", 'NOT': "var(--aA)", 'TENTER': f"mod({fp} + {TRAPOFF}, 32768)"}, fp),
-                        by_op({'CALL': f"calc(var(--vg) * 8192 + {pc} + 2)", 'NOT': "var(--tz)", 'TENTER': f"calc({TRAPOFF * 8192} + var(--pst) + 2)"}, xB), None, "1"),
-                 nx={'pc': by_op({'CALL': "var(--A)", 'RET': "mod(var(--vz), 8192)", 'TENTER': "var(--A)"}, f"calc({pc} + 2)"),
+                        by_op({'CALL': f"calc(var(--vg) * 8192 + ({pc} + 2) / 2)", 'NOT': f"calc(var(--tz) + {user} * ({R.FALSE} - 2 * var(--tz)))",
+                               'TENTER': f"calc({TRAPOFF * 8192} + (var(--pst) + 2) / 2)"}, xB), None, "1"),
+                 nx={'pc': by_op({'CALL': "calc(2 * var(--A))", 'RET': "calc(2 * mod(var(--vz), 8192))", 'TENTER': "calc(2 * var(--A))"}, f"calc({pc} + 2)"),
                      'fp': by_op({'CALL': f"calc({fp} + var(--vg))", 'RET': f"calc({fp} - round(down, var(--vz) / 8192))", 'TENTER': f"calc({fp} + {TRAPOFF})"}, fp),
-                     'pst': "0"},
+                     'pst': by_op({'RET': f"calc({WBACK} * {eq('round(down, var(--vz) / 8192)', TRAPDEF)})"}, "0")},
                  deps={'z': [('x', ['NOT'])]}),
     # LDI A, B, C: A = mem[B + C] (z); STI A, B, C: mem[A + B] = C (z: A's value). The runtime library's raw memory
     'mem': dict(ops=['LDI', 'STI'], pre=OPND + OPNDA + [f"--zA: {kv('A', 'z')};"],
@@ -404,8 +482,10 @@ CLASSES = {
                        ("z", by_op({'LDI': f"mod({xB} + {yC}, 32768)"}, "var(--aA)"), by_op({'LDI': 1}, "calc(1 - var(--kA))"))],
                 write=(by_op({'LDI': "var(--aA)"}, f"mod(var(--zA) + {xB}, 32768)"), by_op({'LDI': "var(--vz)"}, yC), None, "1"),
                 nx={'pc': f"calc({pc} + 2)"}, deps={'z': [('x', ['LDI']), ('y', ['LDI'])]}),
-    'dyn': dict(ops=DYNOPS, pre=DYN_PRE, reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)")],
-                write=("if(style(--tr: 1): var(--taddr); else: var(--aA))", f"if(style(--tr: 1): var(--tval); else: {by_op({o: DYNE[o] for o in DYNOPS[:-1]}, DYNE[DYNOPS[-1]])})", None,
+    'dyn': dict(ops=DYNC, pre=DYN_PRE, reads=[("x", "if(style(--dnl: 1): var(--aA); else: var(--aB))", "(1 - (1 - var(--dnl)) * var(--kB)) * (1 - var(--dwb))"),
+                                              ("y", "var(--aC)", "(1 - var(--kC)) * (1 - var(--dwb)) * (1 - var(--dnl))"),
+                                              ("z", f"mod({fp} + {TRAPDEF}, 32768)", "var(--dwb)")],
+                write=("if(style(--tr: 1): var(--taddr); else: var(--aA))", "if(style(--tr: 1): var(--tval); style(--dwb: 1): var(--vz); else: var(--dval))", None,
                        "calc(1 - var(--dcat))"),                 # (the hand-off to the cat class writes nothing)
                 nx=DYN_NX),
     'arr': dict(ops=['GETX', 'SETX'], pre=ARR_PRE,
@@ -428,6 +508,12 @@ CLASSES = {
                 write=("var(--oaddr)", "var(--oval)", None, "var(--oen)", "var(--V)"),
                 nx=OBJ_NX, deps={'z': [('x', ['GETP', 'SETP'])]}),
 }
+JTRAP_CLASS = dict(ops=[], pre=OPND + trap("1", f"calc(var(--pst) - {CATT})", 2, f"mod({fp} + {TRAPOFF}, 32768)",
+                                             f"if(style(--ts: 0): {yC}; else: {xB})", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)"),
+                   reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)")],
+                   write=("var(--taddr)", "var(--tval)", None, "1"),
+                   nx={'pc': f"if(style(--tlast: 1): {ENT['jcmp']}; else: {pc})", 'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})",
+                       'steps': "calc(var(--steps) + var(--tlast))", 'pst': "if(style(--tlast: 1): 0; else: calc(var(--pst) + 1))"})
 def first_miss(acc):
     """the block of the first missing access (dependency order) among [(name, mask)], -1 for none"""
     e = "-1"
@@ -466,24 +552,25 @@ def build_class(c, k):
     if c == 'net': d += [f"--ok: calc((1 - min(1, calc((1 - var(--kB)) * {miss('x')} + {miss('w')}))) * var(--nok));",      # (replaces the generic --ok: it waits)
                          f"--req: calc((1 - var(--ok) * var(--nfin)) * (1 - (1 - var(--kB)) * {miss('x')}) * (1 + mod({xB}, 524288)));"]
     cls_rules[c] = (k['ops'], d)
-for c, k in CLASSES.items(): build_class(c, k)
+for c, k in CLASSES.items():
+    if c != 'alu': build_class(c, k)          # (the alu class's opcodes come last: only the runtime library uses them)
 
 # 'out': PRINT B, PRINTK (the value in word1) and PUTC B, as gen_css.py's print service: up to 4 console cells per execution,
 # one per bank; a string chunk ends at its block (the block's line must be cached), at a NUL (the value is out) or a newline
 # (taken); until the value is out the instruction repeats (npc = pc) and --pst carries the position. Output needs the pass's
-# write set free. A = separator * 2 + boolean (rc_ref SEP) + 8 for a + chain's piece. PRINT of an array or an object (ptrap)
+# write set free. A = separator * 2 (rc_ref SEP) + 8 for a + chain's piece; a special prints its name (a built-in string). PRINT of an array or an object (ptrap)
 # prints nothing here: it jumps to pstub with its own address in pst (TENTER, then the library's ptrap)
 pv = "var(--pv)"
 isputc = eq("var(--op)", OP['PUTC'])
 pr = OPND + read("x", "var(--aB)") + [
     f"--mx: calc((1 - var(--kB)) * (1 - {eq('var(--op)', OP['PRINTK'])}) * {miss('x')});",
     f"--pv: {by_op({'PRINTK': 'var(--vg)'}, xB)};",
-    f"--prLN: {eq('round(down, mod(var(--A), 8) / 2)', 2)};", f"--prSP: {eq('round(down, mod(var(--A), 8) / 2)', 1)};", "--prB: mod(var(--A), 2);",
-    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)}));",
-    f"--pp: calc({pv} + {STRTAG});",
+    f"--prLN: {eq('round(down, mod(var(--A), 8) / 2)', 2)};", f"--prSP: {eq('round(down, mod(var(--A), 8) / 2)', 1)};",
+    f"--ptrap: calc({eq('var(--op)', OP['PRINT'])} * ({isarr_v(pv)} + {isobj_v(pv)} + {isdbl_v(pv)} + {isfun_v(pv)}));",
+    f"--pp: calc({pv} + {STRTAG} + {special_v(pv)} * ({R.BSTR + 1 - 12 * R.SPV0 - STRTAG} + 11 * {pv}"
+    f" + 12 * clamp(0, mod(var(--A), 16) - 7, 1) * {eq(pv, R.MZERO)}));",       # (a special: its name; a + chain's piece's -0: "0")
     f"--isStr: calc((1 - {isputc}) * clamp(0, var(--pp) - {STR_LO - 1}, 1) * clamp(0, {STRP_HI} - var(--pp), 1));",
-    f"--isBool: calc((1 - var(--isStr)) * var(--prB) * ({eq(pv, 0)} + {eq(pv, 1)}));",
-    "--isNum: calc((1 - var(--isStr)) * (1 - var(--isBool)));",
+    "--isNum: calc(1 - var(--isStr));",
     "--pq: calc(min(1, var(--pst)) * var(--pst) + (1 - min(1, var(--pst))) * var(--pp));",
     f"--pdone: calc(var(--isStr) * {eq('var(--pq)', STR_LO)});", "--pj0: mod(var(--pq), 4);"]
 pr += lookup("p", "var(--pq)")
@@ -492,16 +579,14 @@ pr.append(f"--hm: calc(1 - var(--mf) + 2 * (1 - {miss('x')}) + 16 * (1 - {miss('
 pr += [f"--mpp: calc(var(--isStr) * (1 - var(--pdone)) * {miss('p')});",
        f"--pa: max({pv}, -1 * {pv});", f"--pneg: clamp(0, -1 * {pv}, 1);",
        "--pL: calc(1 + " + " + ".join(f"clamp(0, var(--pa) - {10 ** dd - 1}, 1)" for dd in range(1, 6)) + ");",
-       f"--ptot: calc(var(--isNum) * (var(--pneg) + var(--pL)) + var(--isBool) * (5 - {pv}) + var(--prSP));",
+       "--ptot: calc(var(--isNum) * (var(--pneg) + var(--pL)) + var(--prSP));",
        "--pbase: calc((1 - var(--isStr)) * var(--pst));"]          # (a number's characters out so far)
 for i in range(4):
     g = f"var(--pg{i})"
     inum = f"clamp(0, var(--pneg) + var(--pL) - {g}, 1)"; ineg = f"clamp(0, var(--pneg) - {g}, 1)"
     digit = f"mod(round(down, var(--pa) / pow(10, var(--pneg) + var(--pL) - 1 - {g})), 10)"
-    T_, F_ = [ord(c) for c in 'true'], [ord(c) for c in 'false']
-    boolc = " + ".join(f"{eq(g, kk)} * ({pv} * {T_[kk] if kk < 4 else 0} + (1 - {pv}) * {F_[kk]})" for kk in range(5))
     pr += [f"--pg{i}: calc(var(--pbase) + {i});",
-           f"--pnb{i}: calc(var(--isNum) * ({ineg} * 45 + ({inum} - {ineg}) * (48 + {digit})) + var(--isBool) * ({boolc}) + (1 - var(--isStr)) * var(--prSP) * {eq(g, 'var(--ptot) - 1')} * 32);"]
+           f"--pnb{i}: calc(var(--isNum) * ({ineg} * 45 + ({inum} - {ineg}) * (48 + {digit})) + (1 - var(--isStr)) * var(--prSP) * {eq(g, 'var(--ptot) - 1')} * 32);"]
 for i in range(4):
     inb = f"clamp(0, 4 - var(--pj0) - {i}, 1)"
     pr += [f"--pb{i}: calc({inb} * (" + " + ".join(f"{eq(f'var(--pj0) + {i}', j)} * var(--pw{j})" for j in range(4)) + "));",
@@ -550,26 +635,45 @@ cls_rules['out'] = (['PRINT', 'PRINTK', 'PUTC'], pr)
 # ALLOC again), 1 the header's line, 2 a string's NUL past it, 3 the map's bit, 4 A. Each phase re-derives the block from HP
 AL_PRE = OPND + OPNDA + [
     "--ak: calc(var(--C) - 896);",
-    f"--anw: calc(8 * round(up, ({xB} + if(style(--ak: 0): 3; style(--ak: 1): 4; else: 0)) / 8));",
+    f"--anw: calc(8 * round(up, ({xB} + if(style(--ak: 0): 3; style(--ak: 1): 4; style(--ak: 4): 8; else: 0)) / 8));",
     f"--afull: calc({eq(pst, 0)} * clamp(0, var(--vk) + var(--anw) - var(--vj) - {HS}, 1));",
     f"--abase: calc({HEAP0} + var(--vk) - clamp(0, {pst}, 1) * var(--anw));",
     f"--amw: {mapword('var(--abase)')};", f"--amb: {mapbitv('var(--abase)')};", f"--amap: {mapset('var(--vr)', 'var(--amb)')};",
-    f"--ares: if(style(--ak: 0): calc(var(--abase) + {2 - STRTAG}); style(--ak: 1): calc(var(--abase) + {3 + ARRTAG}); else: var(--abase));",
+    f"--ares: if(style(--ak: 0): calc(var(--abase) + {2 - STRTAG}); style(--ak: 1): calc(var(--abase) + {3 + ARRTAG});"
+    f" style(--ak: 4): calc(var(--abase) + {4 - R.DBLTAG}); else: var(--abase));",
     f"--anext: if(style(--pst: 0): if(style(--ak: 2): 4; style(--ak: 3): 3; else: 1); style(--pst: 1): calc(3 - {eq('var(--ak)', 0)} * clamp(0, {xB} - 1, 1));"
     " style(--pst: 2): 3; else: 4);"] + \
     trap(f"calc(clamp(0, {pst} - {CATT - 1}, 1) + var(--afull))", f"calc(clamp(0, {pst} - {CATT - 1}, 1) * ({pst} - {CATT}))", 1, "var(--aA)",
-         "var(--anw)", f"calc((var(--A) - 256) * 8192 + {pc})") + [
+         "var(--anw)", f"calc((var(--A) - 256) * 8192 + {pc} / 2)") + [
     f"--adone: calc((1 - var(--tr)) * {eq(pst, 4)});",
     f"--aaddr: if(style(--tr: 1): var(--taddr); style(--pst: 0): {HP}; style(--pst: 1): var(--abase); style(--pst: 2): calc(var(--abase) + 2 + {xB});"
     " style(--pst: 3): var(--amw); else: var(--aA));",
     f"--akk: calc(1 + 3 * (1 - var(--tr)) * {eq(pst, 1)});"]
 def alloc_val(j):
-    hdr = [f"calc(-2 - var(--anw) - {eq('var(--ak)', 1)})", xB, "0", f"calc({eq('var(--ak)', 1)} * (var(--abase) + 4))"][j]
+    hdr = [f"calc(-2 - var(--anw) - {eq('var(--ak)', 1)} - 2 * {eq('var(--ak)', 4)})", xB, "0", f"calc({eq('var(--ak)', 1)} * (var(--abase) + 4))"][j]
     return (f"if(style(--tr: 1): var(--tval); style(--pst: 0): calc(var(--vk) + var(--anw)); style(--pst: 1): {hdr}; style(--pst: 2): 0;"
             " style(--pst: 3): var(--amap); else: var(--ares))")
 TRAP_NX = lambda routine, done: {'pc': f"if(style(--tlast: 1): {routine}; style(--{done}: 1): calc({pc} + 2); else: {pc})",
                                  'fp': f"if(style(--tlast: 1): var(--tF); else: {fp})", 'steps': f"calc(var(--steps) + var(--tlast) + var(--{done}))"}
 NEWCLASSES = {}
+# CALLV A, off: x the callee (fp + off), l its block's first line [hdr code meta env] when it is a function: one whose meta is A
+# (or A - 32: a this given to one that doesn't use it; cc_ref callv_end) is entered (the return word over x); an inner one's
+# (meta + 16) first takes an execution (pst 0 -> 2) to put its env (lw3) in its local 1, past the A % 32 parameters; anything
+# else traps to callv (frame at TRAPOFF, its argument x)
+# (gdl, gdc, gs (inner), gb (the env's execution): pooled names, the fdig class's)
+CV_PRE = [f"--gdl: {isfun_v('var(--vx)')};", f"--gs: calc(var(--gdl) * clamp(0, 64 - var(--lw2), 1) * clamp(0, mod(var(--lw2), 32) - 15, 1));",
+          f"--gdc: calc(var(--gdl) * ({eq('var(--lw2) - 16 * var(--gs)', 'var(--A)')} + {eq('var(--lw2) - 16 * var(--gs) + 32', 'var(--A)')})"
+          f" * ({eq(pst, 0)} + {eq(pst, 2)}));", f"--gb: calc(var(--gdc) * var(--gs) * {eq(pst, 0)});"] + \
+    trap("calc(1 - var(--gdc))", "var(--pst)", 1, f"mod({fp} + {TRAPOFF}, 32768)", "var(--vx)", f"calc({TRAPOFF * 8192} + ({pc} + 2) / 2)")
+NEWCLASSES['callv'] = dict(ops=['CALLV'], pre=CV_PRE,
+    reads=[("x", f"mod({fp} + var(--vg), 32768)", "1")], lines=[("l", f"mod(var(--vx) + {R.FUNTAG - 1}, 32768)", "var(--gdl)")],
+    write=("if(style(--tr: 1): var(--taddr); style(--gb: 1): mod(" + fp + " + var(--vg) + 2 + mod(var(--A), 32), 32768); else: mod(" + fp + " + var(--vg), 32768))",
+           f"if(style(--tr: 1): var(--tval); style(--gb: 1): var(--lw3); else: calc(var(--vg) * 8192 + ({pc} + 2) / 2))", None, "1"),
+    nx={'pc': f"if(style(--tr: 0) and style(--gb: 0): calc(2 * var(--lw1)); style(--tlast: 1): {ENT['callv']}; else: {pc})",
+        'fp': f"if(style(--tr: 0) and style(--gb: 0): calc({fp} + var(--vg)); style(--tlast: 1): var(--tF); else: {fp})",
+        'steps': "calc(var(--steps) + (1 - var(--tr)) * (1 - var(--gb)) + var(--tlast))",
+        'pst': "if(style(--tr: 0): calc(2 * var(--gb)); style(--tlast: 1): 0; else: calc(var(--pst) + 1))"},
+    deps={'l': [('x', None)]})
 NEWCLASSES['alloc'] = dict(ops=['ALLOC'], pre=AL_PRE,
     reads=[("x", "var(--aB)", "1 - var(--kB)"), ("k", HP, "1"), ("r", "var(--amw)", f"calc((1 - var(--tr)) * {eq(pst, 3)})")], pair={'k': 'j'},
     write=("var(--aaddr)", None, None, "1"), wline=("var(--akk)", alloc_val),
@@ -585,7 +689,7 @@ NEWCLASSES['apush'] = dict(ops=['APUSH'], pre=OPND + [
     reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", fp, eq(pst, 2))],
     lines=[("p", f"mod({xB} - 3, 32768)", "var(--uarr)")],
     write=("var(--uaddr)", "var(--uval)", None, "calc(1 - var(--ufall))"),
-    nx={'pc': f"if(style(--ufall: 1): calc({pc} + 2); style(--pst: 2): mod(var(--vz), 8192); else: {pc})",
+    nx={'pc': f"if(style(--ufall: 1): calc({pc} + 2); style(--pst: 2): calc(2 * mod(var(--vz), 8192)); else: {pc})",
         'fp': f"if(style(--pst: 2): calc({fp} - round(down, var(--vz) / 8192)); else: {fp})",
         'steps': f"calc(var(--steps) + var(--ufall) + {eq(pst, 2)})", 'pst': "if(style(--ufall: 1): 0; style(--pst: 0): 1; style(--pst: 1): 2; else: 0)"},
     deps={'p': [('x', None)]})
@@ -621,7 +725,10 @@ H_ = HS
 def isfref_v(w, flo):
     return (f"min(1, calc(clamp(0, {w} + {OBJTAG + 1} - {flo}, 1) * clamp(0, {flo} + {H_ - OBJTAG} - {w}, 1)"
             f" + clamp(0, {w} + {STRTAG - 1} - {flo}, 1) * clamp(0, {flo} + {H_ - STRTAG} - {w}, 1)"
-            f" + clamp(0, {w} - {ARRTAG + 2} - {flo}, 1) * clamp(0, {flo} + {H_ + ARRTAG} - {w}, 1)))")
+            f" + clamp(0, {w} - {ARRTAG + 2} - {flo}, 1) * clamp(0, {flo} + {H_ + ARRTAG} - {w}, 1)"
+            f" + clamp(0, {w} + {R.DBLTAG - 3} - {flo}, 1) * clamp(0, {flo} + {H_ - R.DBLTAG} - {w}, 1)"
+            f" + clamp(0, {w} + {R.FUNTAG} - {flo}, 1) * clamp(0, {flo} + {H_ - R.FUNTAG} - {w}, 1)"
+            f" + clamp(0, {w} + {R.ENVTAG} - {flo}, 1) * clamp(0, {flo} + {H_ - R.ENVTAG} - {w}, 1)))")
 isw = eq('var(--op)', OP['MWALK'])
 NEWCLASSES['mcmp'] = dict(ops=['MCMP', 'MFEQ', 'MFREF', 'MWALK'], pre=OPND + OPNDA + [f"--zA: {kv('A', 'z')};", f"--mo: {pst};",
     f"--mk: max(0, min(var(--zA) - var(--mo), 4 - var(--up), 4 - {eq('var(--op)', OP['MCMP'])} * var(--ul)));"] +
@@ -671,8 +778,157 @@ NET_PRE += ["--nmatch: calc(" + " * ".join(f"var(--nm{j})" for j in range(NP)) +
 NEWCLASSES['net'] = dict(ops=['NET'], pre=NET_PRE, reads=[("x", "var(--aB)", "1 - var(--kB)")],
                          write=(f"calc(var(--nfin) * var(--aA) + (1 - var(--nfin)) * ({R.RBUF0} + {pst}))", "var(--nval)", None, "1"),
                          nx={'pc': f"calc({pc} + 2 * var(--nfin))", 'steps': "calc(var(--steps) + var(--nfin))", 'pst': f"calc((1 - var(--nfin)) * ({pst} + 1))"})
+# The FPU (cc_ref FLOPS / FVOPS; the runtime library's only): calc() computes in IEEE doubles within one declaration, so the
+# operands' doubles and the result are written out inline in each declaration that needs them (a registered <integer> keeps 6
+# digits across var(): only the words and small integers cross). B and C: a scratch line (the constants FSCR ...: their line at
+# fpu_base), a boxed double (its number line: lines p and l), or the number itself (an integer, or the specials NaN, +-Infinity,
+# -0). FLOPS write the line at A (a scratch line, or A's value: z) from the result's flags, exponent and mantissa; FVOPS write A
+FB_ = R.LAYOUT['fpu_base']
+def fopnd(o, val, ln):
+    """operand o's (B / C) line flag, line address and kind/sign declarations: --f<ln>l (a line), --f<ln>a, --f<ln>k (0 finite from
+    the line, 1 zero, 2 infinite, 3 NaN, 4 the integer itself), --f<ln>s (the sign)"""
+    w = [f"var(--{ln}w{j})" for j in range(4)]
+    sc = f"calc(var(--k{o}) * clamp(0, var(--{o}) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--{o}), 1))"
+    return [f"--f{ln}c: {sc};", f"--f{ln}l: min(1, calc(var(--f{ln}c) + {isdbl_v(val)}));",
+            f"--f{ln}a: if(style(--f{ln}c: 1): calc({FB_} + 4 * (var(--{o}) - {896 + R.FSCR})); else: mod({val} + {R.DBLTAG}, 32768));",
+            f"--f{ln}k: if(style(--f{ln}l: 1): calc({eq(f'abs({w[0]})', 1)} + 2 * {eq(f'abs({w[0]})', 3000)} + 3 * {eq(w[0], 4000)});"
+            f" else: calc(4 - 3 * {eq(val, R.MZERO)} - 2 * ({eq(val, R.INF)} + {eq(val, R.NINF)}) - {eq(val, R.NAN)}));",
+            f"--f{ln}s: if(style(--f{ln}l: 1): sign({w[0]}); else: calc(1 - 2 * ({eq(val, R.MZERO)} + {eq(val, R.NINF)})));"]
+def fdouble(ln, val):
+    """the operand's double, inline (from its line's words, or the integer / special)"""
+    w = [f"var(--{ln}w{j})" for j in range(4)]
+    fin = f"calc(var(--f{ln}s) * ({w[1]} * pow(2, 36) + {w[2]} * pow(2, 18) + {w[3]}) * pow(2, abs({w[0]}) - 1152))"
+    return (f"if(style(--f{ln}k: 4): {val}; style(--f{ln}k: 0): {fin}; style(--f{ln}k: 1): calc(var(--f{ln}s) * 0);"
+            f" style(--f{ln}k: 2): calc(var(--f{ln}s) * infinity); else: NaN)")
+FX, FY = fdouble('p', xB), fdouble('l', yC)
+def _split(a): return f"calc((134217729 * ({a})) - ((134217729 * ({a})) - ({a})))"
+def _tplo(a, b):
+    ah, bh = _split(a), _split(b); al, bl = f"calc(({a}) - {ah})", f"calc(({b}) - {bh})"
+    return f"calc(((({ah}) * ({bh}) - ({a}) * ({b})) + ({ah}) * ({bl}) + ({al}) * ({bh})) + ({al}) * ({bl}))"
+_FCV = {'pi': 'pi', 'e': 'e', 'ln2': 'log(2)', 'ln10': 'log(10)', 'log2e': 'calc(log(e) / log(2))', 'log10e': 'calc(log(e) / log(10))',
+        'sqrt2': 'sqrt(2)', 'sqrt1_2': 'sqrt(0.5)'}
+FLR = {'FLD': f"calc({FX})", 'FADD': f"calc(({FX}) + ({FY}))", 'FSUB': f"calc(({FX}) - ({FY}))", 'FMUL': f"calc(({FX}) * ({FY}))",
+       'FDIV': f"calc(({FX}) / ({FY}))", 'FMOD': f"rem({FX}, {FY})", 'FPOW': f"pow({FX}, {FY})", 'FSQRT': f"sqrt({FX})",
+       'FFLOOR': f"round(down, {FX})", 'FCEIL': f"round(up, {FX})", 'FROUND': f"round(nearest, {FX})", 'FTRUNC': f"round(to-zero, {FX})",
+       'FABS': f"abs({FX})", 'FTPLO': _tplo(FX, FY),
+       'FSCALE': f"calc(({FX}) * pow(2, round(down, {yC} / 2)) * pow(2, {yC} - round(down, {yC} / 2)))",
+       'FP10': f"pow(10, {yC})", 'FCONST': "if(" + " ".join(f"style(--yC: {i}): {_FCV[n]};" for i, n in enumerate(R.FCONSTS)) + " else: 0)",
+       'FEXP': f"exp({FX})", 'FLOG': f"log({FX})", 'FSIN': f"sin({FX})", 'FCOS': f"cos({FX})", 'FTAN': f"tan({FX})"}
+assert list(FLR) == R.FLOPS
+FR = by_op({o: FLR[o] for o in R.FLOPS[:-1]}, FLR[R.FLOPS[-1]])
+def fenc_decls(R_, p):
+    """a double's number line from its value R_ (inline): --<p>f finite, --<p>i (not finite) infinite, --<p>z zero, --<p>s the sign,
+    --<p>e the exponent, --<p>m1 ... 3 the mantissa's words, --<p>w0 ... 3 the line"""
+    aR = f"abs({R_})"
+    d = [f"--{p}f: calc(({R_}) * 0 + 1);", f"--{p}i: calc(1 / ({R_}) * 0 + 1);",
+         f"--{p}z: calc(1 - min(1, {aR} * pow(2, 537) * pow(2, 537)));",
+         f"--{p}s: if(style(--{p}f: 1): sign(1 / ({R_})); else: sign({R_}));",
+         f"--{p}e0: round(down, log({aR}, 2));",
+         f"--{p}e: clamp(-1022, var(--{p}e0) + clamp(0, sign({aR} - pow(2, var(--{p}e0) + 1)) + 1, 1) - clamp(0, sign(pow(2, var(--{p}e0)) - {aR}), 1), 1023);",
+         f"--{p}k1: round(down, (52 - var(--{p}e)) / 2);"]
+    M = f"({aR} * pow(2, var(--{p}k1)) * pow(2, 52 - var(--{p}e) - var(--{p}k1)))"
+    d += [f"--{p}m1: round(down, {M} / pow(2, 36));", f"--{p}m2: mod(round(down, {M} / pow(2, 18)), pow(2, 18));", f"--{p}m3: mod({M}, pow(2, 18));",
+          f"--{p}w0: if(style(--{p}f: 1) and style(--{p}z: 1): var(--{p}s); style(--{p}f: 1): calc(var(--{p}s) * (var(--{p}e) + 1100));"
+          f" style(--{p}i: 1): calc(var(--{p}s) * 3000); else: 4000);"]
+    d += [f"--{p}w{j}: if(style(--{p}f: 1) and style(--{p}z: 0): var(--{p}m{j}); else: 0);" for j in (1, 2, 3)]
+    return d
+FPU_LINE = f"clamp(0, {OP['FNORM']} - var(--op), 1)"      # an FLOPS op (they precede FVOPS)
+# the value ops (cc_ref.fval_op)
+_fkx = "var(--fpk)"
+_fint = f"calc(1 - clamp(0, sign(abs(rem({FX}, 1))), 1))"
+_finr = f"calc(clamp(0, sign(({FX}) - {R.SMI_LO}) + 1, 1) * clamp(0, sign({R.SMI_HI} - ({FX})) + 1, 1))"
+FVAL = {'FNORM': (f"if(style(--fpk: 3): {R.NAN}; style(--fpk: 2): if(style(--fps: 1): {R.INF}; else: {R.NINF}); style(--fpk: 1): if(style(--fps: 1): 0; else: {R.MZERO});"
+                  f" style(--fpk: 4): {xB}; else: if(style(--fni: 1): round(to-zero, {FX}); else: {xB}))"),
+        'FINT': f"if(style(--fpk: 0) or style(--fpk: 4): round(to-zero, {FX}); else: 0)",
+        'FCMP': f"if(style(--fpk: 3) or style(--flk: 3): 2; else: sign(({FX}) - ({FY})))",
+        'FEXPO': "var(--fve)",
+        'FLOG10': (f"calc(round(down, log(abs({FX}), 10)) + clamp(0, sign(abs({FX}) - pow(10, round(down, log(abs({FX}), 10)) + 1)) + 1, 1)"
+                   f" - clamp(0, sign(pow(10, round(down, log(abs({FX}), 10))) - abs({FX})), 1))"),
+        'FDIGIT': f"calc((rem({FX}, pow(10, {yC} + 1)) - rem({FX}, pow(10, {yC}))) / pow(10, {yC}))"}
+assert list(FVAL) == R.FVOPS
+FPU_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') + fopnd('C', yC, 'l') +
+           [f"--fdl: {FPU_LINE};", f"--fac: calc(var(--kA) * clamp(0, var(--A) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--A), 1));",
+            f"--fda: if(style(--fac: 1): calc({FB_} + 4 * (var(--A) - {896 + R.FSCR})); else: mod(var(--zA) + {R.DBLTAG}, 32768));",
+            f"--fni: calc({_fint} * {_finr});"] +
+           fenc_decls(FR, 'fr') +
+           [f"--fve: var(--fxe);"] + fenc_decls(FX, 'fx')[4:6] +
+           [f"--fval: {by_op({o: FVAL[o] for o in R.FVOPS[:-1]}, FVAL[R.FVOPS[-1]])};"])
+# FCOK / FCDIG (numstr's search: cc_ref.fcand): B's number line (p: a scratch line or a boxed double), C the scale n; ok into A, or
+# the candidate's 5-digit limbs into A's line. The candidate c = c_hi + c_lo exactly: c_hi a double, c_lo small (registered)
+def _gt0(x): return f"clamp(0, sign({x}), 1)"
+def _ge0(x): return f"clamp(0, sign({x}) + 1, 1)"
+_pw = [f"var(--pw{j})" for j in range(4)]
+_M = f"calc({_pw[1]} * pow(2, 36) + {_pw[2]} * pow(2, 18) + {_pw[3]})"
+_F5 = f"pow(5, {yC})"
+_NH = f"calc(({_M}) * {_F5})"; _NL = _tplo(_M, _F5)
+_XH = f"calc(({_NH}) * pow(2, var(--gs0)))"; _XL = f"calc(({_NL}) * pow(2, var(--gs0)))"
+_FL = f"round(down, {_XH})"; _HF = f"calc(0.5 - (({_XH}) - ({_FL})))"
+_CHI = f"if(style(--gs: 1) or style(--gb: 1): {_XH}; else: calc({_FL} + var(--gu)))"
+_CLO = "if(style(--gs: 1): 0; style(--gb: 1): var(--gr); else: 0)"
+_D = f"calc((({_CHI}) * pow(2, 1 - var(--gs0)) - 2 * ({_NH})) + ({_CLO}) * pow(2, 1 - var(--gs0)) - 2 * ({_NL}))"
+_CLOX = f"if(style(--gs: 1): {_XL}; else: {_CLO})"
+def _limb(j): return f"calc((rem({_CHI}, pow(10, {5 * j + 5})) - rem({_CHI}, pow(10, {5 * j}))) / pow(10, {5 * j}))"
+FD_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') +
+          [f"--fac: calc(var(--kA) * clamp(0, var(--A) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--A), 1));",
+           f"--fda: if(style(--fac: 1): calc({FB_} + 4 * (var(--A) - {896 + R.FSCR})); else: mod(var(--zA) + {R.DBLTAG}, 32768));",
+           f"--fdl: {eq('var(--op)', OP['FCDIG'])};",
+           f"--gs0: calc(abs({_pw[0]}) - 1152 + {yC});", f"--gs: {_ge0('var(--gs0)')};", f"--gb: {_ge0(f'({_XH}) - pow(2, 52)')};",
+           f"--gu: calc({_gt0(f'({_XL}) - ({_HF})')} + {eq(f'sign(({_XL}) - ({_HF}))', 0)} * rem({_FL}, 2));",
+           f"--grf: round(down, {_XL});",
+           f"--gr: calc(var(--grf) + {_gt0(f'({_XL}) - var(--grf) - 0.5')} + {eq(f'sign(({_XL}) - var(--grf) - 0.5)', 0)} * abs(rem(var(--grf), 2)));",
+           f"--gdl: calc({eq(f'sign({_D})', -1)} * {eq(_pw[1], 65536)} * {eq(_pw[2], 0)} * {eq(_pw[3], 0)} * {_gt0(f'abs({_pw[0]}) - 78')});",
+           f"--gdc: sign(abs({_D}) - {_F5} / (1 + var(--gdl)));",
+           f"--gok: if(style(--gs: 1): 1; else: calc({eq('var(--gdc)', -1)} + {eq('var(--gdc)', 0)} * (1 - rem({_pw[3]}, 2))));",
+           f"--gl0x: calc(rem({_CHI}, 100000) + ({_CLOX}));", "--gc0: round(down, var(--gl0x) / 100000);", "--gl0: calc(var(--gl0x) - 100000 * var(--gc0));",
+           f"--gl1x: calc({_limb(1)} + var(--gc0));", "--gc1: round(down, var(--gl1x) / 100000);", "--gl1: calc(var(--gl1x) - 100000 * var(--gc1));",
+           f"--gl2x: calc({_limb(2)} + var(--gc1));", "--gc2: round(down, var(--gl2x) / 100000);", "--gl2: calc(var(--gl2x) - 100000 * var(--gc2));",
+           f"--gl3: calc({_limb(3)} + var(--gc2));"])
+NEWCLASSES['fdig'] = dict(ops=list(R.FDOPS), pre=FD_PRE,
+    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(var(--fdl) * (1 - var(--kA)))")],
+    lines=[("p", "var(--fpa)", "1")],
+    write=("if(style(--fdl: 1): var(--fda); else: var(--aA))", None, None, "1"),
+    wline=("calc(1 + 3 * var(--fdl))", lambda j: f"if(style(--fdl: 1): var(--gl{j}); else: var(--gok))"),
+    nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)]})
+FD_NAMES = ["gs0", "gs", "gb", "gu", "grf", "gr", "gdl", "gdc", "gok", "gl0x", "gc0", "gl0", "gl1x", "gc1", "gl1", "gl2x", "gc2", "gl2", "gl3"]
+NEWCLASSES['fpu'] = dict(ops=R.FLOPS + R.FVOPS, pre=FPU_PRE,
+    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(var(--fdl) * (1 - var(--kA)))")],
+    lines=[("p", "var(--fpa)", "var(--fpl)"), ("l", "var(--fla)", "var(--fll)")],
+    write=("if(style(--fdl: 1): var(--fda); else: var(--aA))", None, None, "1"),
+    wline=("calc(1 + 3 * var(--fdl))", lambda j: f"if(style(--fdl: 1): var(--frw{j}); else: var(--fval))"),
+    nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)], 'l': [('y', None)]})
+NEWCLASSES['fdig'] = NEWCLASSES.pop('fdig')       # (its opcodes follow the FPU's)
+# FAND ... FUSHR (DBIT's trap, dbit): B and C as 32-bit integers in 16-bit halves (gs0 gs: B's high and low, gb gu: C's; grf gr:
+# their & ; gdl gdc: & | ^'s), the result an exact double into A's line (the FPU's fr temps, fdouble's operands)
+def _u32(ln, val): return f"if(style(--f{ln}k: 2) or style(--f{ln}k: 3): 0; else: mod(round(to-zero, {fdouble(ln, val)}), 4294967296))"
+def _and16(a, b): return "calc(" + " + ".join(f"{2 ** i} * {_bit(a, i)} * {_bit(b, i)}" for i in range(16)) + ")"
+_g = {n: f"var(--{n})" for n in ("gs0", "gs", "gb", "gu", "grf", "gr", "gdl", "gdc")}
+_ua = f"calc({_g['gs0']} * 65536 + {_g['gs']})"; _bsh = f"pow(2, mod({_g['gu']}, 32))"
+_shl = f"mod(({_ua}) * {_bsh}, 4294967296)"
+FBR = by_op({'FSHL': f"calc({_shl} - 4294967296 * clamp(0, {_shl} - 2147483647, 1))",
+             'FSHR': f"round(down, ({_ua} - 4294967296 * clamp(0, {_g['gs0']} - 32767, 1)) / {_bsh})",
+             'FUSHR': f"round(down, ({_ua}) / {_bsh})"},
+            f"calc({_g['gdl']} * 65536 + {_g['gdc']} - 4294967296 * clamp(0, {_g['gdl']} - 32767, 1))")
+FB_PRE = (OPND + OPNDA + [f"--zA: {kv('A', 'z')};"] + fopnd('B', xB, 'p') + fopnd('C', yC, 'l') +
+          [f"--fac: calc(var(--kA) * clamp(0, var(--A) - {896 + R.FSCR - 1}, 1) * clamp(0, {896 + R.FSCR + R.NFLINES} - var(--A), 1));",
+           f"--fda: if(style(--fac: 1): calc({FB_} + 4 * (var(--A) - {896 + R.FSCR})); else: mod(var(--zA) + {R.DBLTAG}, 32768));",
+           f"--gs0: round(down, {_u32('p', xB)} / 65536);", f"--gs: calc({_u32('p', xB)} - 65536 * var(--gs0));",
+           f"--gb: round(down, {_u32('l', yC)} / 65536);", f"--gu: calc({_u32('l', yC)} - 65536 * var(--gb));",
+           f"--grf: {_and16(_g['gs0'], _g['gb'])};", f"--gr: {_and16(_g['gs'], _g['gu'])};",
+           f"--gdl: {by_op({'FAND': _g['grf'], 'FOR': f'calc({_g['gs0']} + {_g['gb']} - {_g['grf']})'}, f'calc({_g['gs0']} + {_g['gb']} - 2 * {_g['grf']})')};",
+           f"--gdc: {by_op({'FAND': _g['gr'], 'FOR': f'calc({_g['gs']} + {_g['gu']} - {_g['gr']})'}, f'calc({_g['gs']} + {_g['gu']} - 2 * {_g['gr']})')};"] +
+          fenc_decls(FBR, 'fr'))
+NEWCLASSES['fbit'] = dict(ops=list(R.FBOPS), pre=FB_PRE,
+    reads=[("x", "var(--aB)", "1 - var(--kB)"), ("y", "var(--aC)", "1 - var(--kC)"), ("z", "var(--aA)", "calc(1 - var(--kA))")],
+    lines=[("p", "var(--fpa)", "var(--fpl)"), ("l", "var(--fla)", "var(--fll)")],
+    write=("var(--fda)", None, None, "1"),
+    wline=("4", lambda j: f"var(--frw{j})"),
+    nx={'pc': f"calc({pc} + 2)"}, deps={'p': [('x', None)], 'l': [('y', None)]})
+FPU_NAMES = (["fpc", "fpl", "fpa", "fpk", "fps", "flc", "fll", "fla", "flk", "fls", "fdl", "fac", "fda", "fni", "fve", "fval"] +
+             [f"fr{x}" for x in ("f", "i", "z", "s", "e0", "e", "k1", "m1", "m2", "m3", "w0", "w1", "w2", "w3")] + ["fxe0", "fxe"])
 for c_, k_ in NEWCLASSES.items(): build_class(c_, k_)
+build_class('alu', CLASSES['alu'])
 build_class('cat', CAT_CLASS)                 # (no opcode of its own: a DADD's pst picks it, cls_of)
+build_class('jtrap', JTRAP_CLASS)             # (likewise: a slow jump's pst)
 CLS = {c: i + 1 for i, c in enumerate(cls_rules)}
 assert sorted(RC.OPN) == sorted(o for ops, _ in cls_rules.values() for o in ops), 'every instruction in one class'
 opcls = {o: CLS[c] for c, (ops, _) in cls_rules.items() for o in ops}
@@ -680,7 +936,8 @@ assert [opcls[o] for o in RC.OPN] == sorted(opcls[o] for o in RC.OPN), 'rc_ref.O
 # the class from the opcode's range (rc_ref.OPN is in class order); 0 for no instruction (--op 255: the fetch missed)
 bounds = [i for i in range(1, len(RC.OPN)) if opcls[RC.OPN[i]] != opcls[RC.OPN[i - 1]]]
 cls_of = (f"calc(clamp(0, {len(RC.OPN)} - var(--op), 1) * (1" + "".join(f" + clamp(0, var(--op) - {b - 1}, 1)" for b in bounds) +
-          f") + {CLS['cat'] - CLS['dyn']} * {opin('DADD', 'DADDR')} * clamp(0, var(--pst) - {CATT - 1}, 1)"
+          f") + {CLS['cat'] - CLS['dyn']} * {opin('DADD', 'DADD')} * clamp(0, var(--pst) - {CATT - 1}, 1)"
+          f" + {CLS['jtrap'] - CLS['jump']} * {opin('JLT', 'JNGE')} * clamp(0, var(--pst) - {CATT - 1}, 1)"
           f" + {CLS['obj'] - CLS['arr']} * {opin('GETX', 'SETX')} * clamp(0, var(--pst) - {CATT - 1}, 1))")
 
 # the ROM's instructions (fetch only), two-level on the pc: 32 instructions (64 words) per group. An if() costs ~70 ns per entry
@@ -696,15 +953,16 @@ def rom_of(x): return f"calc(clamp(0, {ROM} - {x}, 1) * (1 + round(down, {x} / {
 
 # ---------------- the page's CSS
 P = ["pc", "rpc", "rfp", "fp", "optr", "pst", "steps", "halt", "pend", "init", "k", "par", "tprev", "first", "fresh", "go", "chan", "nk", "npar",
-     "fon", "fb", "fs", "fv", "fk", "fT", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
+     "fon", "fb", "fs", "fv", "fk", "fT", "fabs", "fd", "fvb", "fk1", "pend0", "gs", "gv", "gk", "gT", "gabs", "gk1", "xon", "xb", "xbh", "xbl", "xbhot", "yb", "ybh", "ybl", "ybhot",
      "t", "stop", "cw", "op", "A", "B", "C", "cls", "rom", "rh", "rl", "vf", "vg", "mf", "ok", "mb", "npc", "nfp", "nsteps", "nstop", "nhalt",
      "kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv",
-     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "prB", "pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0",
+     "wval", "wz", "nT0", "nT1", "pout", "ncw", "noptr", "npst", "prLN", "prSP", "pp", "isStr", "isNum", "pq", "pdone", "pj0",
      "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pf", "pcut", "pn0", "pblk", "pfr0", "pfr1", "pfr2", "pfr3", "pe", "pvE", "pbE", "ptNul", "ptNL", "pn", "pfin", "pnl", "lat", "hm", "Lm", "isHALT", "ptrap",
      "wval2", "vh", "vj"]
 # the new classes' scratch (.x only)
-XNEW = ["kA", "aA", "zA", "dslow", "dcat", "csx", "csy", "cbx", "cby", "cla", "clb", "ctn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
-        "cvv", "cvs", "cvb", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
+XNEW = FPU_NAMES + FD_NAMES + ["kA", "aA", "zA", "dcat", "dwb", "dnl", "dr", "dok", "dval", "dix", "diy", "cqs", "cao", "cbs", "cdb", "juser", "jcr", "jok", "jcu", "jho",
+        "cX", "cY", "csx", "csy", "cla", "clb", "ctn", "cnw", "cfull", "ck", "cbase", "ci", "cfx", "cj",
+        "cvv", "cvs", "cbyte", "cin", "clast", "caddr", "cval", "X", "Y", "xarr", "xin", "E", "tr", "ts", "tlast", "tF", "taddr", "tval", "O", "ob", "okey", "sst", "sodd",
         "oroom", "oq", "ohit", "oend", "onext", "oc", "V", "oaddr", "oval", "oen", "w2", "odone", "ojump"]
 # the runtime's primitives' scratch (.x only), and write_line's
 XNEW += ("kk ak anw afull abase amw amb amap ares anext adone aaddr akk uarr uok ufall uaddr uval isn ifl icp mlo mdl mpa mpn mpl mn mk mdone"
@@ -725,9 +983,9 @@ props = [lbl.section('Registered properties', 'registers, the chain\'s state and
 LOCAL = {x + n for n in READS if n != "f" for x in LOOKUP} | {"uf", "qf", "hf", "Hf", "rh", "rl", "ib", "iblo", "ibhi", "iu", "ih"}
 LOCAL |= {"nws", "nfin", "nmatch", "ntime", "nok", "nsel", "nval"} | {f"{x}{j}" for j in range(NP) for x in ("nd", "nm")}
 LOCAL |= {"kB", "kC", "aB", "aC", "aA", "xB", "yC", "tstr", "tz", "jc", "mx", "pv", "ptrap"} | set(XNEW)
-LOCAL |= {"pp", "isStr", "isBool", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pe", "pvE", "pbE", "pf", "pcut", "pn0", "pblk",
+LOCAL |= {"pp", "isStr", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL", "ptot", "pbase", "pe", "pvE", "pbE", "pf", "pcut", "pn0", "pblk",
           "pfr0", "pfr1", "pfr2", "pfr3",
-          "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP", "prB"}
+          "ptNul", "ptNL", "pn", "pfin", "pnl", "prLN", "prSP"}
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
 props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; initial-value: --c0; }}' for i in range(2 * WB)]   # a port's leaf name
@@ -870,12 +1128,16 @@ if UI:
     # the picker's sample programs (samples/<file>.js): (file, label, icon); #ed (the page's program) comes first
     SAMPLES = [('fizzbuzz', 'FizzBuzz', '\U0001F41D'), ('primes', 'primes', '\U0001F9EE'), ('fib', 'Fibonacci', '\U0001F41A'),
                ('stars', 'stars', '\u2728'), ('hanoi', 'Hanoi', '\U0001F5FC'), ('sort', 'sort', '\U0001F4CA'), ('tree', 'tree', '\U0001F333'),
-               ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6')]
+               ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6'),
+               ('counter', 'closures', '\u23F2'), ('animals', 'prototypes', '\U0001F43E')]
     if os.environ.get('NOPICK') == '1': SAMPLES = []     # (measurement: the page without the picker)
     SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
     # (an editor's initial text starts at its line 0, so UIL lines of it are read)
     assert all(len(t.rstrip('\n').split('\n')) <= UIL and max(map(len, t.split('\n'))) <= UIP for t in SRC), 'a sample longer than the editor reads'
     EDS = 1 + len(SAMPLES)
+    # each editor's radio button right before it in .frame: '.pkr:checked + .ed' is the editor that shows, for one set of
+    # readback rules (ui_rb.css) and one display rule whatever the number of editors
+    PKR = lambda e: f'<input type="radio" name="pk" id="pk{e}" class="pkr"{" checked=\"checked\"" if e == 0 else ""}/>'
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
@@ -963,7 +1225,7 @@ if os.environ.get('BENCH'):
 MODEMS = "".join(f'<div class="nslot np{i}"><div class="nclip"><iframe class="modem" loading="lazy" src="/net/m0.html?part={i}&amp;n={NP}{"&amp;show" if NETSHOW else ""}#t"'
                  f' title="network modem {i}" aria-hidden="true"></iframe></div></div>' for i in range(NS))
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM)) | {R.LAYOUT['data_base'] - ROM}
-LIVE = set() if UI else STATIC_CELLS     # on the editor page the compile chain's overlays hold code, strings and staging
+LIVE = (set() if UI else STATIC_CELLS) | {a - ROM for a in R.GINIT}     # on the editor page the compile chain's overlays hold code, strings and staging; the globals start undefined
 mem_html = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE) for w in range(WB))
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
 con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
@@ -1008,7 +1270,10 @@ if not UI:
     </html>
     """
 else:
-    ui_props = uipage.props(WOFF) + [f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
+    ui_props = uipage.props(WOFF) + [
+        # (Edit: the globals back to undefined, as the CPU-only image starts them, cc_ref GINIT: hoisting, FCACHE's sentinel)
+        f'#run:not(:checked) ~ .mem :is({", ".join(f".c{a - ROM}" for a in sorted(R.GINIT))}) {{ width: {R.UNDEF + WOFF}px; }}',
+        f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
                                      '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }']
     notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back (a variable axis makes HarfBuzz "
              f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "
@@ -1040,7 +1305,6 @@ else:
 </head>
 <body>
 <input type="checkbox" id="run" class="runcb" aria-label="Run"/>
-{"".join(f'<input type="radio" name="pk" id="pk{e}" class="pkr"{' checked="checked"' if e == 0 else ''}/>' for e in range(EDS))}
 {mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
 <main id="app">
 <div class="width-reader"></div>{ui_rb.regs_html()}
@@ -1049,7 +1313,7 @@ else:
 <section class="pane">
 <div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span><span class="unread">A line break from Shift+Enter or a paste isn't read: use Enter.</span></div>
 <div class="picker" role="radiogroup" aria-label="Programs"><label for="pk0" data-icon="\u270E">yours</label>{"".join(f'<label for="pk{e + 1}" data-icon="{ic}">{_h.escape(lb)}</label>' for e, (_, lb, ic) in enumerate(SAMPLES))}</div>
-<div class="frame"><div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
+<div class="frame">{PKR(0)}<div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'{PKR(e + 1)}<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
 <p class="merged">A pasted code block shows and runs as one line. If it had several, undo (Ctrl+Z, or ⌘Z on a Mac) and paste it as plain text: Ctrl+Shift+V, or ⌥⇧⌘V on a Mac.</p>

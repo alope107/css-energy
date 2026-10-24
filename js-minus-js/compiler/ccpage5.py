@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import csslabel as lbl     # section and group comments in the output (../../shared/README.md#labels-in-generated-css)
 
 WOFF = 1 << 20
+BSTRW = sorted(R.BSTRW.items())        # the built-in strings' words (cc_ref BSTRS; RAM holds the zeros)
 OTH = {'A': 'B', 'B': 'A'}
 DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v')) for f in ('h1', 'h2', last)}   # read by var() one level down
 PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
@@ -330,7 +331,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # parser variants. A variant that changes nothing (a newline token where it means nothing) is folded into one
     # pass-through rule per token code, placed first so a mode-specific variant (later in the sheet) overrides it;
     # only when every reachable mode has a variant for that code (else a mode without one must stay 'bad').
-    allm = set(range(R.S_ERR))
+    allm = set(range(R.NMODES)) - {R.S_ERR}
     noop_tc = []
     for tc in sorted({c for r in progs for c in D.key_tcodes(r[0])}):
         ks = [r for r in progs if D.key_tcodes(r[0]) == [tc]]
@@ -339,16 +340,21 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for tc in noop_tc:
         css.append(f'@container style(--tcq: {tc}) {{ .tpA, .tpB {{ ' + ' '.join(f'--q-new-{n}: var(--x-{n});' for n in pst) + ' --q-ran: 1; } }')
     progs = [r for r in progs if not (D.key_tcodes(r[0])[0] in noop_tc and len(D.key_tcodes(r[0])) == 1 and r[2])]
-    # variants of one mode whose CSS is identical (a third of them: mostly modes that treat many punctuation tokens
-    # alike) share one rule whose condition lists all their token codes. Every rule costs time on every token level
-    # whether it applies or not (docs/BENCHMARKS.md §4c), so fewer rules is faster.
-    rules = {}                                         # (mode, declarations) -> token codes, in first-seen order
+    # variants whose CSS is identical (a third of them: mostly modes that treat many punctuation tokens alike; and the
+    # modes that only rename another, cc_ref.CMODES / S_ABODY, outside the tokens they handle) share one rule whose
+    # condition lists all their modes and token codes. Every rule costs time on every token level whether it applies or
+    # not (docs/BENCHMARKS.md §4c), so fewer rules is faster.
+    rules = {}                                         # declarations -> {mode: token codes}, in first-seen order
     for key, _, _, decl, names in progs:
         for n, inh in names: N.add(n, inh)
-        rules.setdefault((key[0], decl), []).extend(D.key_tcodes(key))
-    for (mode, body), tcs in rules.items():
-        tcond = f'style(--tcq: {tcs[0]})' if len(tcs) == 1 else '(' + ' or '.join(f'style(--tcq: {t})' for t in tcs) + ')'
-        css.append(f'@container style(--vh: {mode}) and {tcond} {{ .tpA, .tpB {{ {body} }} }}')
+        rules.setdefault(decl, {}).setdefault(key[0], []).extend(D.key_tcodes(key))
+    def anyof(name, vs): return f'style(--{name}: {vs[0]})' if len(vs) == 1 else '(' + ' or '.join(f'style(--{name}: {v})' for v in vs) + ')'
+    for body, bym in rules.items():
+        byt = {}                                       # token codes -> the modes with exactly those
+        for mode, tcs in bym.items(): byt.setdefault(tuple(tcs), []).append(mode)
+        conds = [f'{anyof("vh", ms)} and {anyof("tcq", tcs)}' for tcs, ms in byt.items()]
+        cond = conds[0] if len(conds) == 1 else ' or '.join(f'({c})' for c in conds)
+        css.append(f'@container {cond} {{ .tpA, .tpB {{ {body} }} }}')
     # code / data overlays (fixed, contained by #tcr)
     css.append(lbl.group('Code and data overlays', 'each emitted word is an element anchored as its RAM cell'))
     cb0 = code_base - R.LAYOUT['rom_size']          # RAM index of the first code word (--c<index> names RAM cells)
@@ -378,10 +384,10 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                f' else: var(--s-perr-{y}))')
         css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
-               f' width: calc((var(--dpf) - {data_base} + {WOFF}) * 1px); }}'
+               f' width: calc((var(--dpf) + {WOFF}) * 1px); }}'
                # the string untag constant at data_base (the program never writes it)
                f' .fin > .ovk {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c0; width: {R.STRTAG + WOFF}px; }}'
-               + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{data_cells + 1 + i}; width: {w + WOFF}px; }}' for i, w in enumerate(R.SEED))
+               + ''.join(f' .fin > .sd{i} {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{a - data_base}; width: {w + WOFF}px; }}' for i, (a, w) in enumerate(BSTRW))
                # the string area's end, for the runtime's key lookups
                + f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
                + ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
@@ -390,7 +396,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(R.SEED))) + '<b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

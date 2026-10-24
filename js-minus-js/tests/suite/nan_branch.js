@@ -1,0 +1,10 @@
+var n = 0 / 0;
+if (n < 1) console.log("lt"); else console.log("not lt");
+if (n >= 1) console.log("ge"); else console.log("not ge");
+console.log(n > 1 ? "gt" : "not gt", !(n <= 1));
+var i = 0;
+while (!(n === n) && i < 2) i++;
+console.log(i, n == n, n != n, n === n, n !== n);
+for (var k = n; k < 3; k++) console.log("never");
+do { i--; } while (i > n);
+console.log(i, 1 / 0 > 1000, -1 / 0 < 0);

@@ -34,3 +34,4 @@ ok = sum(1 for v in res.values() if v[0] == 'ok')
 for k, v in res.items():
     if v[0] != 'ok': print(f'{k:18} {v[0]:12} {v[1]}')
 print(f'{ok}/{len(res)} pass')
+sys.exit(int(ok != len(res)))           # (make test stops on an L1 failure)

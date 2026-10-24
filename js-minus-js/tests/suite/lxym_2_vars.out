@@ -1,0 +1,11 @@
+10
+100
+101
+100
+45 10 undefined
+4
+3 [ 'Hello', 45, true, 'Hello' ]
+32;false;js;12;56;90 [ false, 'js', 12 ]
+[ 'js', 12, 56, 90 ] [ 32, false, 'hi', 'wr', 'ld' ]
+4 myValue
+undefined { myKey: 'myValue', 'my other key': 4, myThirdKey: true }
