@@ -44,7 +44,8 @@ ROMF = PREF = True
 BLKS = (ref.ROMN + ref.LA['ram_size']) // 4; RB0 = ref.ROMN // 4
 DB = LA['data_base']
 def setof(b): return (b + b // 16 + b // 256) % NSET
-MIDM = int(os.environ.get('MIDM', 0)); MIDW = int(os.environ.get('MIDW', 1)); MIDPF = os.environ.get('MIDPF', '1') == '1'; MIDIC = os.environ.get('MIDIC', '1') == '1'     # (run_pass: exp/ram's mid-chain fills)
+MIDM = int(os.environ.get('MIDM', 0)); MIDW = int(os.environ.get('MIDW', 1)); MIDPF = os.environ.get('MIDPF', '1') == '1'; MIDIC = os.environ.get('MIDIC', '1') == '1'
+MIDS = sorted(int(x) for x in os.environ['MIDS'].split(',')) if os.environ.get('MIDS') else None     # explicit stage levels (gen_css STAGE)     # (run_pass: exp/ram's mid-chain fills)
 STR_LO, STR_HI = LA['data_base'] + SDATA, STRP_HI     # literals and heap strings
 ALU = {'ADD': lambda a, b: s20(a + b), 'SUB': lambda a, b: s20(a - b), 'MUL': lambda a, b: s20(a * b),
        'DIV': lambda a, b: 0 if b == 0 else int(a / b), 'MOD': lambda a, b: 0 if b == 0 else a - b * int(a / b),
@@ -426,7 +427,7 @@ class Sim:
             self.first = lvl == 0 or refirst; refirst = False
             try: cw = self.execute(cw); n += 1; lvl += 1
             except Stall as e:
-                stage = (lvl // MIDM + 1) * MIDM if MIDM else K
+                stage = next((x for x in MIDS if x > lvl), K) if MIDS else (lvl // MIDM + 1) * MIDM if MIDM else K
                 if e.miss is not None and stage < K and not (e.miss in self.wbs and not e.ic) and (MIDIC or not e.ic):
                     sv = setof(e.miss); victim_dirty = not e.ic and self.dirty[sv][self.fifo[sv]]
                     if len(self.wbs) + victim_dirty <= MIDW:
@@ -449,4 +450,4 @@ if __name__ == '__main__':
     lib = json.load(open(os.path.join(ref.ROOT, 'compiler', 'lib.json')))
     steps, out = R.compile_and_run(open(path).read(), lib)[1]
     got = ''.join(map(chr, sim.st['out']))
-    print(f"{os.path.basename(path)}: passes {sim.passes} {ends}, steps {sim.st['steps']} (cc_ref {steps}), output ok {got == out}" + (f", mid-chain fills {sim.mids}" if MIDM else ""))
+    print(f"{os.path.basename(path)}: passes {sim.passes} {ends}, steps {sim.st['steps']} (cc_ref {steps}), output ok {got == out}" + (f", mid-chain fills {sim.mids}" if MIDM or MIDS else ""))

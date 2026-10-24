@@ -60,12 +60,13 @@ CH = 'ABCDEFGHIJKL'[:2 * ISSUE]; sp0 = image['sp0']; CODE0 = image['codeBase']; 
 # at the chain's end, a fixed size container .memx around the RAM: exp/ram/README.md)
 RAMNI = os.environ.get('RAMNI') == '1'; RAMDEC = os.environ.get('RAMDEC') == '1'
 if RAMDEC: RAMNI = True
-# STAGE=s (exp/ram, csssim MIDM=s MIDW=2 MIDPF=0 MIDIC=0): a fill stage between levels s - 1 and s. A data miss above it is
-# filled there in the same pass: two fixed size containers as wide and tall as the missing block's four words (anchor-size()
-# of its leaves, the names picked by a style query on the block's high digit), then .fl's line update; the stalled
-# instruction re-executes at level s with its latches. The stage's dirty victim leaves through a second write set (CH2).
-STAGE = int(os.environ.get('STAGE', 0)); CH2 = 'MNOPQRST'[:2 * ISSUE] if STAGE else ''
-CHW = CH + CH2
+# STAGE=s[,s2...] (exp/ram; csssim MIDS=... MIDW=<stages + 1> MIDPF=0 MIDIC=0): a fill stage between levels s - 1 and s. A data
+# miss above it is filled there in the same pass: two fixed size containers as wide and tall as the missing block's four words
+# (anchor-size() of its leaves, the names picked by a style query on the block's high digit), then .fl's line update; the
+# stalled instruction re-executes at level s with its latches. Stage j's dirty victim leaves through write set j (CHS[j]).
+STAGES = [int(x) for x in os.environ.get('STAGE', '').split(',') if x and x != '0']
+CHS = ['MNOPQRST', 'UVWXYZab', 'cdefghij'][:len(STAGES)]; CHS = [c[:2 * ISSUE] for c in CHS]
+CHW = CH + ''.join(CHS)
 
 def eq(x, c): return f"calc(1 - min(1, max(({x}) - ({c}), ({c}) - ({x}))))"     # 1 iff x == c (integers)
 def s20(e): return f"calc(mod({e} + {1 << 19}, {M20}) - {1 << 19})"
@@ -121,9 +122,9 @@ def isel(key, val):
     return lo(0) if ISET == 8 else "if(" + " ".join(f"style(--{key}hi: {h}): {lo(h)};" for h in range(ISET // 8 - 1)) + f" else: {lo(ISET // 8 - 1)})"
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
-if STAGE:     # (a block the stage wrote back is stale for the next pass's fill too)
-    regs[-2:] = [("stale", 2, 0, f"calc(min(1, var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} + var(--sfd) * {eq('var(--pend) - 1', 'var(--sfvb)')}) * min(1, var(--pend)))"),
-                 ("pstale", 2, 0, f"calc(min(1, var(--fd) * {eq('var(--pend)', 'var(--fvb)')} + var(--sfd) * {eq('var(--pend)', 'var(--sfvb)')}) * min(1, var(--pend)))")]
+if STAGES:     # (a block a stage wrote back is stale for the next pass's fill too)
+    wbk = lambda x: "min(1, var(--fd) * " + eq(x, 'var(--fvb)') + "".join(f" + var(--sfd{j}) * {eq(x, f'var(--sfvb{j})')}" for j in range(len(STAGES))) + ")"
+    regs[-2:] = [("stale", 2, 0, f"calc({wbk('var(--pend) - 1')} * min(1, var(--pend)))"), ("pstale", 2, 0, f"calc({wbk('var(--pend)')} * min(1, var(--pend)))")]
 # NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the clock (--t, 600 a second)
 # when this request began: a new request takes the time (consecutive words always differ, by the sequence bit, even when
 # a read() loop's next NET stalls in the pass the last one completed). NWAIT ticks without an answer give -1 (no gateway:
@@ -1024,8 +1025,9 @@ P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
 P += [f"n{r[0]}" for r in WREGS]
 P += [x + n for n in READS for x in LOOKUP] + [f"v{n}" for n in READS if n not in ("w", "p", "l")] + [f"lw{j}" for j in range(4)]
-if STAGE: P += ["son", "sstale", "sxb", "sfs", "sfv", "sfk", "sfT", "sfabs", "sfd", "sfvb", "sfk1", "sxh", "sxl"] + [f"sw{j}" for j in range(4)] + \
-              [f"{x}{w}" for w in range(WB) for x in ("sfwd", "wA2", "wD2")]
+for j in range(len(STAGES)):
+    P += [f"{x}{j}" for x in ("son", "sstale", "sxb", "sfs", "sfv", "sfk", "sfT", "sfabs", "sfd", "sfvb", "sfk1", "sxh", "sxl")] + \
+         [f"sw{j}_{i}" for i in range(4)] + [f"{x}{j}_{w}" for w in range(WB) for x in ("sfwd", "sA", "sD")]
 P = list(dict.fromkeys(P))
 _unreg = {m for _, d in cls_rules.values() for x in d for m in re.findall(r'(?:^|;\s*)--([\w-]+):', x)} - set(P)
 assert not _unreg, f'declared by an instruction class but not registered: {sorted(_unreg)}'
@@ -1040,7 +1042,7 @@ LOCAL |= {"pp", "isStr", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
 props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; initial-value: --c0; }}' for i in range(2 * WB)]   # a port's leaf name
-if STAGE: props += [f'@property --sn{j} {{ syntax: "<custom-ident>"; inherits: true; initial-value: --rom; }}' for j in range(4)]   # the stage's leaf names
+props += [f'@property --sn{j}_{i} {{ syntax: "<custom-ident>"; inherits: true; initial-value: --rom; }}' for j in range(len(STAGES)) for i in range(4)]   # the stages' leaf names
 
 css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines'),
        "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
@@ -1124,7 +1126,7 @@ css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(-
            f" --rom: {rom_of('var(--pc)')}; --Lm: calc((1 - var(--go)) * var(--rLm));"
            + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) +
-           ("".join(f" --wA2{w}: 0; --wD2{w}: 0;" for w in range(WB)) + " --sfd: 0; --sfvb: 0;" if STAGE else "") + " }")
+           "".join(f" --sA{j}_{w}: 0; --sD{j}_{w}: 0;" for j in range(len(STAGES)) for w in range(WB)) + "".join(f" --sfd{j}: 0; --sfvb{j}: 0;" for j in range(len(STAGES))) + " }")
 if REPLP: css += [f"@container style(--xk1: {k + 1}) {{ .fl {{ --T{k}: calc(var(--fT) - 1); }} }}" for k in range(NL)]    # (written back: clean)
 css += [f"@container style(--fk1: {k + 1}) {{ .fl {{ --T{k}: calc(2 * var(--fb) + 2); --F{k // 2}: {1 - k % 2}; " +
         " ".join(f"--W{k}_{j}: var(--mv{j});" for j in range(4)) + " } }" for k in range(NL)]
@@ -1161,44 +1163,47 @@ css += [f"@container style(--pout: 1) and style(--dp{w}: 1) {{ .c {{ --cA{w}: va
 css += [f"@container style(--wz: {s + 1}) {{ .c {{ " + " ".join(f"--W{2 * s + i // 4}_{i % 4}: var(--n{i});" for i in range(8)) +
         f" --T{2 * s}: var(--nT0); --T{2 * s + 1}: var(--nT1); }} }}" for s in range(NSET)]
 
-if STAGE:
-    css.append(lbl.section(f'Fill stage (STAGE={STAGE})', 'a data miss above level STAGE filled in the same pass: .sa decides, .sr1 / .sr2 read the '
-                           'block\'s words as their sizes, .sf updates the line and resumes the chain with the stalled instruction\'s latches'))
-    css.append(".sa, .sf { display: contents; } .sa { --son: 0; --sfk1: 0; --sfd: 0; }")
-    sa = ["--sxb: max(0, var(--pend) - 1);", f"--sfs: {setof('var(--sxb)')};",
-          "--sfv: " + sel("sfs", NSET, lambda s_: f"var(--F{s_})") + ";", "--sfk: calc(2 * var(--sfs) + var(--sfv));",
-          "--sfT: " + sel("sfk", NL, lambda k: f"var(--T{k})") + ";",
-          "--sfabs: " + sel("sfs", NSET, lambda s_: f"calc(1 - {eq(f'round(down, var(--T{2 * s_}) / 2)', 'var(--sxb) + 1')} - {eq(f'round(down, var(--T{2 * s_ + 1}) / 2)', 'var(--sxb) + 1')})") + ";",
-          # (a block .fl wrote back this pass: its leaf still holds the old words until the channels apply, next pass)
-          f"--sstale: calc(var(--fd) * {eq('var(--sxb)', 'var(--fvb)')});",
-          "--son: calc(var(--go) * (1 - var(--halt)) * min(1, var(--pend)) * (1 - var(--sstale)) * var(--sfabs));",
-          "--sfd: calc(var(--son) * mod(var(--sfT), 2));", "--sfvb: calc(round(down, var(--sfT) / 2) - 1);",
-          "--sfk1: calc(var(--son) * (var(--sfk) + 1));", "--sxh: round(down, var(--sxb) / 64);", "--sxl: mod(var(--sxb), 64);"]
-    sa += [f"--sfwd{w}: " + sel("sfk", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
-    css.append("@container style(--stop: 1) and style(--pic: 0) { .sa { " + " ".join(sa) + " } }")
-    css.append(f".sr1, .sr2 {{ display: block; position: fixed; left: 0; top: 0; width: 1px; height: 1px; container-type: size; }}")
+for j, lvj in enumerate(STAGES):
+    css.append(lbl.section(f'Fill stage {j} (between levels {lvj - 1} and {lvj})', 'a data miss above it filled in the same pass: .sa decides, .sr1 / .sr2 '
+                           'read the block\'s words as their sizes, .sf updates the line and resumes the chain with the stalled instruction\'s latches'))
+    v_ = lambda n: f"var(--{n}{j})"
+    css.append(f".sa{j}, .sf{j} {{ display: contents; }} .sa{j} {{ --son{j}: 0; --sfk1{j}: 0; --sfd{j}: 0; }}")
+    sa = [f"--sxb{j}: max(0, var(--pend) - 1);", f"--sfs{j}: {setof(v_('sxb'))};",
+          f"--sfv{j}: " + sel(f"sfs{j}", NSET, lambda s_: f"var(--F{s_})") + ";", f"--sfk{j}: calc(2 * {v_('sfs')} + {v_('sfv')});",
+          f"--sfT{j}: " + sel(f"sfk{j}", NL, lambda k: f"var(--T{k})") + ";",
+          f"--sfabs{j}: " + sel(f"sfs{j}", NSET, lambda s_: f"calc(1 - {eq(f'round(down, var(--T{2 * s_}) / 2)', v_('sxb') + ' + 1')} - {eq(f'round(down, var(--T{2 * s_ + 1}) / 2)', v_('sxb') + ' + 1')})") + ";",
+          # (a block .fl or an earlier stage wrote back this pass: its leaf holds the old words until the channels apply, next pass)
+          f"--sstale{j}: min(1, calc(var(--fd) * {eq(v_('sxb'), 'var(--fvb)')}" + "".join(f" + var(--sfd{i}) * {eq(v_('sxb'), f'var(--sfvb{i})')}" for i in range(j)) + "));",
+          f"--son{j}: calc(var(--go) * (1 - var(--halt)) * min(1, var(--pend)) * (1 - {v_('sstale')}) * {v_('sfabs')});",
+          f"--sfd{j}: calc({v_('son')} * mod({v_('sfT')}, 2));", f"--sfvb{j}: calc(round(down, {v_('sfT')} / 2) - 1);",
+          f"--sfk1{j}: calc({v_('son')} * ({v_('sfk')} + 1));", f"--sxh{j}: round(down, {v_('sxb')} / 64);", f"--sxl{j}: mod({v_('sxb')}, 64);"]
+    sa += [f"--sfwd{j}_{w}: " + sel(f"sfk{j}", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
+    css.append(f"@container style(--stop: 1) and style(--pic: 0) {{ .sa{j} {{ " + " ".join(sa) + " } }")
+    css.append(f".sr1_{j}, .sr2_{j} {{ display: block; position: fixed; left: 0; top: 0; width: 1px; height: 1px; container-type: size; }}")
     for h in range(BLKS // 64):
-        nm = lambda j: "if(" + " ".join(f"style(--sxl: {i}): {leafname(4 * (64 * h + i) + j)};" for i in range(64)) + " else: --rom)"
-        css.append(f"@container style(--son: 1) and style(--sxh: {h}) {{ .sr1 {{ " + " ".join(f"--sn{j}: {nm(j)};" for j in range(4)) + " } }")
-    css.append(f"@container style(--son: 1) {{ .sr1 {{ width: anchor-size(var(--sn0) width, {WOFF}px); height: anchor-size(var(--sn1) width, {WOFF}px);"
+        nm = lambda i_: "if(" + " ".join(f"style(--sxl{j}: {i}): {leafname(4 * (64 * h + i) + i_)};" for i in range(64)) + " else: --rom)"
+        css.append(f"@container style(--son{j}: 1) and style(--sxh{j}: {h}) {{ .sr1_{j} {{ " + " ".join(f"--sn{j}_{i_}: {nm(i_)};" for i_ in range(4)) + " } }")
+    css.append(f"@container style(--son{j}: 1) {{ .sr1_{j} {{ width: anchor-size(var(--sn{j}_0) width, {WOFF}px); height: anchor-size(var(--sn{j}_1) width, {WOFF}px);"
                + "".join(f" --Lb{n}: mod(round(down, var(--Lm) / {b}), 2);" for n, b in LATCH.items()) + " } }")
-    css.append(f"@container style(--son: 1) {{ .sr2 {{ width: anchor-size(var(--sn2) width, {WOFF}px); height: anchor-size(var(--sn3) width, {WOFF}px);"
-               f" --sw0: calc(round(100cqw / 1px) - {WOFF}); --sw1: calc(round(100cqh / 1px) - {WOFF}); }} }}")
-    css.append(f"@container style(--son: 1) {{ .sf {{ --sw2: calc(round(100cqw / 1px) - {WOFF}); --sw3: calc(round(100cqh / 1px) - {WOFF});"
+    css.append(f"@container style(--son{j}: 1) {{ .sr2_{j} {{ width: anchor-size(var(--sn{j}_2) width, {WOFF}px); height: anchor-size(var(--sn{j}_3) width, {WOFF}px);"
+               f" --sw{j}_0: calc(round(100cqw / 1px) - {WOFF}); --sw{j}_1: calc(round(100cqh / 1px) - {WOFF}); }} }}")
+    css.append(f"@container style(--son{j}: 1) {{ .sf{j} {{ --sw{j}_2: calc(round(100cqw / 1px) - {WOFF}); --sw{j}_3: calc(round(100cqh / 1px) - {WOFF});"
                " --stop: 0; --pend: 0; --lat: 1; --Lm: 0;" + "".join(f" --rL{n}: var(--L{n});" for n in LATCH if n != "p") +
-               "".join(f" --rLp{j}: var(--Lp{j});" for j in range(4)) +
-               "".join(f" --wA2{w}: calc(var(--sfd) * (var(--sfvb) - {RB0 - 1})); --wD2{w}: var(--sfwd{w});" for w in range(WB)) + " } }")
-    css += [f"@container style(--sfk1: {k + 1}) {{ .sf {{ --T{k}: calc(2 * var(--sxb) + 2); --F{k // 2}: {1 - k % 2}; " +
-            " ".join(f"--W{k}_{j}: var(--sw{j});" for j in range(4)) + " } }" for k in range(NL)]
+               "".join(f" --rLp{i}: var(--Lp{i});" for i in range(4)) +
+               "".join(f" --sA{j}_{w}: calc({v_('sfd')} * ({v_('sfvb')} - {RB0 - 1})); --sD{j}_{w}: var(--sfwd{j}_{w});" for w in range(WB)) + " } }")
+    css += [f"@container style(--sfk1{j}: {k + 1}) {{ .sf{j} {{ --T{k}: calc(2 * {v_('sxb')} + 2); --F{k // 2}: {1 - k % 2}; " +
+            " ".join(f"--W{k}_{i}: var(--sw{j}_{i});" for i in range(4)) + " } }" for k in range(NL)]
 
 css.append(lbl.section('Export', 'the write set into the RAM channels; the registers\' subjects'))
 ex = []
 for w in range(WB):
     for i, c in enumerate(CHW):
-        # (the console: CH only; RAM: CH for .fl's write set, CH2 for the stage's, the same index of the pass's channel)
-        for p_, A_, D_ in ((("", f"wA{w}", f"wD{w}"), ("k", f"cA{w}", f"cD{w}")) if c in CH else (("", f"wA2{w}", f"wD2{w}"),)):
+        # (the console: CH only; RAM: CH for .fl's write set, CHS[j] for stage j's, the same index as the pass's channel)
+        sets_all = [(f"wA{w}", f"wD{w}")] + [(f"sA{j}_{w}", f"sD{j}_{w}") for j in range(len(STAGES))]
+        own = 0 if c in CH else 1 + next(j for j, cs in enumerate(CHS) if c in cs)
+        for p_, A_, D_ in ((("", f"wA{w}", f"wD{w}"), ("k", f"cA{w}", f"cD{w}")) if own == 0 else (("", *sets_all[own]),)):
             s_ = f"var(--go) * {eq('var(--chan)', i % len(CH))} * min(1, var(--{A_}))"
-            sets = [A_] + ([f"wA2{w}" if A_ == f"wA{w}" else f"wA{w}"] if STAGE and p_ == "" else [])     # a channel lets go of a cell either set now writes
+            sets = [A_] + ([a_ for a_, _ in sets_all if a_ != A_] if p_ == "" else [])     # a channel lets go of a cell any set now writes
             rel = "min(1, " + " + ".join(f"min(1, var(--{a_})) * {eq(f'var(--{a_})', f'var(--wa{p_}{w}{c})')}" for a_ in sets) + ")"
             ex += [f"--nwa{p_}{w}{c}: calc({s_} * var(--{A_}) + (1 - {s_}) * (1 - {rel}) * var(--wa{p_}{w}{c}));",
                    f"--nwd{p_}{w}{c}: calc({s_} * var(--{D_}) + (1 - {s_}) * var(--wd{p_}{w}{c}));"]
@@ -1349,7 +1354,7 @@ subj += "".join(f'<div class="rp rp{i}"><div class="reg" style="height: {M20}px"
 chain = f'<div class="ex"><div class="regs" aria-hidden="true">{"<i class=\"ab\"></i>" if RAMDEC else ""}{subj}</div></div>'     # (.ab first: past the registers' boxes, 2^21 px each, its offset saturates LayoutUnit and its height reads 0)
 for lv in range(K - 1, -1, -1):
     chain = f'<i class="f"><i class="x"><i class="c">{chain}</i></i></i>'
-    if STAGE and lv == STAGE: chain = f'<i class="sa"><i class="sr1"><i class="sr2"><i class="sf">{chain}</i></i></i></i>'
+    if lv in STAGES: j = STAGES.index(lv); chain = f'<i class="sa{j}"><i class="sr1_{j}"><i class="sr2_{j}"><i class="sf{j}">{chain}</i></i></i></i>'
 
 blurb = (f"<p>No font: style alone runs the bytecode, a register machine's three-address instructions. Each layout pass runs up "
          f"to {K} instructions as a chain of nested elements (fetch and decode, execute, commit) out of a 2-way, 32-line cache of RAM "
