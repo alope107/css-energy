@@ -19,6 +19,7 @@ steady to ±0.5% (10.79 s median, 8 runs); a CPU-only page's load → HALT to ±
 
 | What | Current | Section |
 |---|---|---|
+| Compile speed (2026-10-24): padding levels passed through, token levels waiting for their tokens, the scan stopping at the first blank column | the page's Run → compiled 0.71× (FizzBuzz ~2.0 s, was ~2.9 s), the chain alone 0.86×, a REPL entry 0.70× (interleaved, unleased) | §21 |
 | The hybrid: the runtime's primitives (branch `rom-css`) and a code cache on the register machine (2026-10-22) | 25 programs on CPU-only pages 1.74× faster than the register machine and 1.53× than the stack machine with the primitives (geometric means; total 334.5 s against 545.7 and 452.3); faster than both on 23, compute as fast as the register machine; suite steps −57%, passes −45% / −27% (model) | §15 |
 | Register machine against the stack machine (2026-10-21) | samples on CPU-only pages 1.07–2.75× faster (compute 1.9–2.8×, FizzBuzz output-bound 1.07×), 3.0× fewer suite steps; compile time median ×1.03; FizzBuzz on the page compiled as fast, HALT 3.1 s (main 3.4 s) | §14 |
 | FizzBuzz 1–15 on the page | 476 steps, 103 shapings; compiled 2.51–2.58 s after Run, HALT at 10.75–10.90 s (run ≈ 8.3 s). Before: 1,329 steps, 193 shapings, HALT 18.2–18.3 s | §5a |
@@ -786,7 +787,53 @@ editor's text (it reshapes every line every frame).
 at 12.2–12.7 s, the compile at 13.8–14.5 s, the output shows at 16.5–17.3 s (37 steps). So the scan is the cost now: 64
 columns a frame each, every frame reshaping every line, though the lines already run keep their latched characters.
 
-## 21. RAM: non-inherited trees, read paths, fill stages (2026-10-24, branch `ram-explore`)
+## 21. Compile speed (2026-10-24, branch `compile-speed`)
+
+Against `main` (`c3f6900`, built in its own worktree), headless Chromium 153, the mini PC, **interleaved and unleased**
+(`../shared/js/ab.js`, fresh browser per run; other sessions' browsers ran alongside, load 2–11).
+
+**Where a compile went** (FizzBuzz on `main`'s page, a trace from Run, unpinned): the scan 64 frames of ~25 ms (mostly
+layout) to ~1.9 s; then the compile chain in two style passes: the lexer's, 851 ms (810 of it style), and the parser's,
+434 ms (394). On the L3 page the same chain: pass 1, 8,913 elements, ~400 ms; pass 2, 3,785 elements, ~320 ms.
+
+| Change | What it does | Measured |
+|---|---|---|
+| Padding levels pass the lexer state through (`ccpage5` `CL_PAD`) | ~1,350 of FizzBuzz's 1,561 character levels: 15 copies instead of the space lexer's 63 declarations | L3 total (11 programs) 0.933 (IQR 0.906–0.939) |
+| … and token levels wait for their tokens (`--has: 0` → `display: none`) | the lexer's pass no longer runs ~110 token levels' base rules on zeros: pass 1 400 → 261 ms (5,195 elements) | L3 total 0.843 (0.828–0.845); page Run → compiled 0.919 (0.888–0.932) |
+| … and the scan stops at the first column blank in every row (`ui_rb.py` `EARLY`), columns past it read as spaces (`--rbe`) | FizzBuzz ~48 frames instead of 64 | see below |
+| … and the latch cells show no counter text | a scan frame 24.7 → 22.3 ms (layout 13.9 → 11.5) | (in the totals below) |
+
+**All of it against `main`**:
+
+| Measure | `main` | `compile-speed` | ratio (median, IQR) |
+|---|---|---|---|
+| The page, Run → compiled, FizzBuzz then `and_or_chain` typed after it (sum; `ui_seq.js`, 8 rounds) | 5,585 ms | 3,989 ms | 0.712 (0.694–0.718) |
+| L3, the compile chain alone, 11 programs (sum; `suite_css.js`, 6 rounds) | 15.5 s | 13.0 s | 0.857 (0.840–0.867) |
+| The REPL page, `tests/repl/basics.js`'s first entry, Enter → its output shown (`WAIT=1 repl_ui.js`, 4 rounds) | 3,178 ms | 2,213 ms | 0.701 (0.681–0.828) |
+
+Single runs on a quiet machine: FizzBuzz compiles ~2.0 s after Run against ~2.9 s (the scan ~1.5 s against ~1.9 s, the
+chain ~0.4 + 0.3 s against ~0.6 + 0.35 s). The pages grew 0.2 MB (each character level's three codes masked by `--rbe`).
+
+**Costs found on the way** (L3 traces and ablations, FizzBuzz unless named):
+
+- A character level costs ~170 µs even as pure padding: with its rules stripped to `display: contents` ~75 µs, and without
+  the line sources' animations ~10 µs. A synthetic chain of 1,561 nested `display: contents` levels styles in ~3 µs a level
+  (17 µs cold), with 4,000 registered properties, 16 parity calcs a level or 3,000 inherited properties set above it
+  (+15 µs a level, cold): the nesting costs nothing. Creating the 1,536 line-source animations is ~40 ms of the lexer's
+  pass (kept alive across runs: 255 → 215 ms); all on one element they make every paint 170–280 ms (ENGINE_NOTES 83).
+- A token level costs ~1.1 ms of plumbing (the variants' bodies stripped: pass 2 300 → 120 ms) and ~1.6 ms of its variant.
+  Of the plumbing: the table writes' 160 container rules ~50 ms of the pass (−16% without them), the overlay and
+  label-port children ~25 ms (−8%).
+- The real page's lexer pass costs about twice L3's for the same elements (542 against ~260 ms): unexplained; not the
+  inherited properties set above the chain, not the page's 36% more registered properties (4,628 against 3,392).
+- Selector matching is negligible (selector stats: ~1 ms a pass).
+- The scan: a frame restyles ~640 elements (the active group's cells, their registers, the probes) in 3–5 ms; its
+  layout is most of the frame. Two columns a frame (one sentinel up to 9,215 px wide) halved the frames but ran 2.4
+  passes a frame against 1.5 and each layout cost 18.7 against 13.1 ms: Run → compiled 0.874 against 0.798 for one
+  column, both against `main`, pinned to CPUs 12–15 (ENGINE_NOTES 84). A reset of every latch cell at the sweep's start
+  cost a 210 ms layout (ENGINE_NOTES 86).
+
+## 22. RAM: non-inherited trees, read paths, fill stages (2026-10-24, branch `ram-explore`)
 
 Flags in `gen_css.py`, default off; the catalog and probes are `exp/ram/README.md`. P-cores, unpinned, interleaved with
 `../shared/js/ab.js`, unleased; the stage runs had the machine quiet (load ~1, IQRs within ±3%). Ratios per round

@@ -45,7 +45,7 @@ def css(CH, wregs, n, WOFF, prefix='', group=None, chan=None, bound=False, ni=Fa
     then registered and their keyframes made: this tree only reads them); bound: a write past this tree's cells is none of
     its (a smaller tree over the first cells of another's channels). Returns (props, rules).
     ni: the trees' properties don't inherit; each node takes its parent's parity by explicit inherit, so a node whose
-    computed values didn't change stops the restyle at its children (ENGINE_NOTES 82). reads: {q: (enable, leaf index)},
+    computed values didn't change stops the restyle at its children (ENGINE_NOTES 87). reads: {q: (enable, leaf index)},
     expressions on #mem<prefix>: read paths down the same tree; the leaf at the index (if enabled) is named --r<q><prefix>
     (an unnamed leaf: html()'s named; a named leaf keeps its own name)."""
     R = radix(n); D = len(R); S = _strides(R); p = prefix; q = prefix if chan is None else chan; reads = reads or {}

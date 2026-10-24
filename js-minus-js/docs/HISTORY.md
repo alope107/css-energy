@@ -123,7 +123,21 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `z` and `e` were read at garbage addresses that hit, and `e` was kept. csssim reads in order and stops at the first
   miss, so it never did. A read is good now only if every read its address came from was, transitively
   (`tests/suite/latch_chain.js` fails without it).
-- **2026-10-24 — A fill stage in the chain; RAM trees not inherited** (`exp/ram/README.md`, BENCHMARKS 21). A catalog
+- **19, compile speed (2026-10-24, branch `compile-speed`).** A trace of FizzBuzz from Run: the scan 64 frames, then the
+  compile chain in two style passes, the lexer's (~810 ms on the page) and the parser's (~400 ms). Three cuts, each
+  measured on the page and on L3 (BENCHMARKS §21). Padding levels (the rest of each line to 64 columns, the empty lines:
+  ~1,350 of FizzBuzz's 1,561 character levels) take a pass-through rule instead of the space lexer. The token chain
+  waits for its tokens: in the lexer's pass its live levels had run their base rules on zeros (`--has: 0`). And the scan
+  starts at column 1 and stops at the first column blank in every row; the compile chain reads the columns past it as
+  spaces (an earlier, longer text's codes may be there). Resetting the cells at the sweep's start instead cost more than it
+  saved: a reset value equal to the hold's target left the holds running (ENGINE_NOTES 85), any other value changed every
+  shown cell, a 210 ms layout (86), and a container query on the cells restyled all of them every frame. Together, Run → compiled on the
+  page 0.71× (FizzBuzz and a typed program), the chain alone (L3) 0.86×, a REPL entry 0.70×. On the way: a character level costs ~170 µs even as pure padding, of which the lexer's rules are
+  ~100 and creating the line sources' 1,536 animations ~25 µs each (ENGINE_NOTES 83); the nesting itself costs nothing
+  (a synthetic chain of 1,561 levels styles in ~3 µs a level). A token level costs ~1.1 ms of plumbing (state copies,
+  the table writes' rules, the overlay slots) and ~1.6 ms of its variant. Two columns a frame worked (a sentinel up to
+  9,215 px wide, GPOS adjustments past an advance's 511 px) but each frame cost 1.7× the layout (ENGINE_NOTES 84).
+- **20, a fill stage in the chain; RAM trees not inherited (2026-10-24, branch `ram-explore`).** (`exp/ram/README.md`, BENCHMARKS §22.) A catalog
   of ~40 ways to build RAM, probed, led to two changes. In the first, a RAM whose cost doesn't grow with its size,
   only the non-inherited trees (`RAMNI`, now the default) were kept. They cut the RAM's restyles ~3× (arr_gc ~790 → ~260
   elements per layout) but saved no time. The rest of it (unnamed leaves read through paths, the miss address through
@@ -172,7 +186,7 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 32 | Readers with value, scroller, spacer and pad per size container | ~1,300 restyles inside layout per pass | one scroller, positioned subjects |
 | 33 | 3 or 4 issues per frame | wrong output | 2 issues |
 | 34 | Code / data cache partition (model) | suite shapings +5% | one ring |
-| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K (2026-10-24: likely an unmasked address; masked, with explicit `inherit`, only the paths restyle: `exp/ram`, ENGINE_NOTES 82) | sparse RAM groups |
+| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K (2026-10-24: likely an unmasked address; masked, with explicit `inherit`, only the paths restyle: `exp/ram`, ENGINE_NOTES 87) | sparse RAM groups |
 | 36 | 13-bit addresses, ROM 0 … 4095 for a 93-word lib | RAM capped at 4K words | 15-bit, 1K ROM |
 | 37 | Object instructions with 3-way selectors everywhere | 531 subtables per cycle; export dropped | gated rule groups, merged digits |
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
@@ -223,8 +237,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 83 | The REPL's line count from 24 `#app:has()` rules | `#app` restyles every frame of the scan: a program's compile +1% | `.pane:has()` into a register |
 | 84 | The REPL as a chip in the program page's picker, replaying the session on each Enter | programs compiled ~6% slower for the REPL's page parts; an entry cost the whole session's run (13 s at 19 lines) | a page of its own that keeps the machine's state (ARCHITECTURE §3.10) |
 | 85 | The REPL's output room opened by moving the lines with `position: relative` | the rows' names (their sentinels' view progress) moved with the lines: the probes read the wrong rows (ENGINE_NOTES 81) | `transform: translateY()` |
-| 86 | Read paths down the RAM trees, the miss address through layout, unnamed leaves (`RAMDEC`) | the size container around the RAM is resolved in layout, and the tree under it restyled there each pass: 0.95–1.29 on CPU-only pages (arr_gc layout 9.8 → 16.7 ms) | the named leaves and the read ports' mux |
-| 87 | Two or three fill stages (`STAGE=11,22`, `8,16,24`) | fewer passes, but each stage costs every pass: the GC programs 0.85–0.95 against one stage's 0.80–0.82, the compile 1.05× | one stage at level 16 |
+| 86 | Chain levels without parity copies, through `inherit()` (`--x: f(inherit(--x))`) | not in Chromium 153 (ENGINE_NOTES 82) | the copies |
+| 87 | The line sources' codes not inherited, copied into inherited `--mc<j>` by one child each | no faster (pass 1 280 against 257 ms): the levels' cost wasn't the animated inherited values | per-line sources |
+| 88 | One source at the chain's top for every line's codes (`--lc<k>_<j>`, 1,536 animations), kept alive across runs | the lexer's pass 255 → 215 ms, but every paint lifecycle 170–280 ms (ENGINE_NOTES 83) | a source per line |
+| 89 | `timeline-scope: all` on the chain's root, to shorten each animation's named-timeline walk (timing only) | no change (115 against 112 ms) | — |
+| 90 | Two columns a frame: one sentinel W = (a − 31) + 96 (b − 31) px (`mkfont2.py` pair mode, in `4783a53`) | half the frames, but 2.4 passes a frame against 1.5 and dearer layouts: Run → compiled 0.874× of main against 0.798× for one column (ENGINE_NOTES 84) | one column, stopping at the first blank column |
+| 91 | A reset frame for the latch cells (every cell to 0 or −1 at the sweep's start) | to the hold's target: no effect (ENGINE_NOTES 85); to 0: a 210 ms layout (86); as a container query on the cells: every cell restyled every frame, +30% | the chain reads columns past the scan's end as spaces (`--rbe`) |
+| 92 | Read paths down the RAM trees, the miss address through layout, unnamed leaves (`RAMDEC`) | the size container around the RAM is resolved in layout, and the tree under it restyled there each pass: 0.95–1.29 on CPU-only pages (arr_gc layout 9.8 → 16.7 ms) | the named leaves and the read ports' mux |
+| 93 | Two or three fill stages (`STAGE=11,22`, `8,16,24`) | fewer passes, but each stage costs every pass: the GC programs 0.85–0.95 against one stage's 0.80–0.82, the compile 1.05× | one stage at level 16 |
 
 ## Open leads (untried)
 
@@ -283,7 +303,15 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   layout → style → layout loops ([JS-in-CSS multicore](https://claude.ai/chat/91b25db5-fef0-4893-9055-42e5003ad7e5)).
   N16 S64 (needs fewer subtables per cycle).
 - **Per-program CPU fonts**: hot blocks compiled to GSUB, or superinstructions from traces.
-- **Compile time** (the sweep is ~1.2 s): several columns per frame; parallel lexing by prefix scan over the DFA.
+- **Compile time** (BENCHMARKS §21): the scan, one column a frame to the longest line, is now about half of a compile.
+  Each scan frame is ~23 ms, ~13 ms of it layout (24 probes re-laid out by anchor, each probe a size container whose 64
+  cells follow its height): a probe per group of cells, sized only while its group is read, would re-lay out 8 cells a
+  row instead of 64, if a fixed group can anchor to the editor's sentinels from inside the probe. Two columns a frame
+  need a cheaper wide sentinel (ENGINE_NOTES 84). Per-pass latches with a pass pump (`../survey/PRIMITIVES.md` P4)
+  remain untried. In the parser, the table writes' 160 container rules are ~16% of a token level and the overlay and
+  label-port children ~8% (L3 ablations); a level's variant is ~60%. The real page's lexer pass costs about twice L3's
+  for the same elements (542 against ~260 ms): unexplained (not the inherited properties set above the chain, not the
+  page's 36% more registered properties).
 - **Other compute surfaces** ([CSS JavaScript interpreters speedup](https://claude.ai/chat/427a6452-26e2-4ff6-8289-3177eab3cabc)):
   `@function` / nested-grid lookup chains (300–600 dependent lookups per update); avar2 (ENGINE_NOTES 33). css-physics
   measured both as compute (its `docs/HISTORY.md`): `@function` 2–3× slower than the same math inline (Chrome 141); each

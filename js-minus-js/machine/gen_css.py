@@ -55,7 +55,7 @@ WOFF = M20 = 1 << 20; A15 = 32768
 NSET, NWAY = 16, 2; NL = NSET * NWAY
 CH = 'ABCDEFGHIJKL'[:2 * ISSUE]; sp0 = image['sp0']; CODE0 = image['codeBase']; DB = R.LAYOUT['data_base']
 # RAMNI=1: the RAM trees' properties don't inherit (explicit inherit per node: the restyle stops one level off a write's
-# path, ENGINE_NOTES 82; the default, RAMNI=0 for the inherited trees). RAMDEC=1: the leaves past the named area are unnamed; each bank's tree has two read paths that
+# path, ENGINE_NOTES 87; the default, RAMNI=0 for the inherited trees). RAMDEC=1: the leaves past the named area are unnamed; each bank's tree has two read paths that
 # name the missing block's leaf --rx<bank> and the next one's --ry<bank>, the block arriving through layout (the box .ab
 # at the chain's end, a fixed size container .memx around the RAM: exp/ram/README.md)
 RAMNI = os.environ.get('RAMNI', '1') == '1'; RAMDEC = os.environ.get('RAMDEC') == '1'
@@ -64,7 +64,7 @@ if RAMDEC: RAMNI = True
 # miss above it is filled there in the same pass: two fixed size containers as wide and tall as the missing block's four words
 # (anchor-size() of its leaves, the names picked by a style query on the block's high digit), then .fl's line update; the
 # stalled instruction re-executes at level s with its latches. Stage j's dirty victim leaves through write set j (CHS[j]).
-# The default is one stage at level 16 (K/2; none for K < 4); STAGE=0 for none (BENCHMARKS 21).
+# The default is one stage at level 16 (K/2; none for K < 4); STAGE=0 for none (BENCHMARKS §22).
 STAGES = [int(x) for x in os.environ.get('STAGE', str(K // 2) if K >= 4 else '0').split(',') if x and x != '0']
 CHS = ['MNOPQRST', 'UVWXYZab', 'cdefghij'][:len(STAGES)]; CHS = [c[:2 * ISSUE] for c in CHS]
 CHW = CH + ''.join(CHS)
@@ -1235,7 +1235,7 @@ if UI:
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
-    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES + NETTL] + ui_tls + ['--rbrdT'] + (['--rbdnT', '--hdone', '--ccok'] + replui.timelines(UIL) if REPLP else [])) + "; }")
+    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES + NETTL] + ui_tls + ['--rbrdT'] + (['--rbenT'] if ui_rb.EARLY else []) + (['--rbdnT', '--hdone', '--ccok'] + replui.timelines(UIL) if REPLP else [])) + "; }")
 else: css.append(memtree.scope(WNAMES + NETTL))
 _sp, _sc = memtree.shared(); props += [lbl.group('RAM write channels')] + _sp; css += _sc
 for w in range(WB):
@@ -1422,7 +1422,7 @@ else:
                f'<span class="unread">A line break from Shift+Enter or a paste isn\'t read: use Enter.</span></div>')
         editors = f'<div class="frame">{PKR(0)}<div id="ed" class="ed ed0" {edattr} aria-labelledby="in-label">{ui_rb.editor_html(replui.DEMO)}<div><br/></div></div></div>'
         cons_box = f'<div class="rcons">{con_q}' + replui.html_cons(UIL, R.LAYOUT['repl_cols'], R.LAYOUT['repl_rows'], lambda k: OUT_BASE - ROM + k, WOFF) + '</div>'
-        app_regs = ui_rb.regs_html(repl=True) + replui.html_app() + ui_rb.rcnt_html(UIL)
+        app_regs = ui_rb.regs_html(repl=True) + replui.html_app() + ui_rb.rcnt_html(UIL) + ui_rb.rsum_html(UIL)
     else:
         title, lede = 'JavaScript in CSS', 'Type a program and press Run. No JavaScript runs on this page. Or try <a href="repl.xhtml">the REPL</a>.'
         bar = (f'<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span>'
@@ -1431,7 +1431,7 @@ else:
         editors = (f'<div class="frame">{PKR(0)}<div id="ed" class="ed ed0" {edattr} aria-labelledby="in-label">{ui_rb.editor_html(image.get("source", ""))}</div>'
                    + "".join(f'{PKR(e + 1)}<div class="ed ed{e + 1}" {edattr} aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC))) + '</div>')
         cons_box = f'<div class="cons">{con_html}<div class="con"></div>\n{console}</div>'
-        app_regs = ui_rb.regs_html()
+        app_regs = ui_rb.regs_html() + ui_rb.rsum_html(UIL)
     page_css = f"""{static}
 {uipage.static(COLS, ROWS, UIL, UIP, WOFF, EDS, repl=REPLP)}
 {chr(10).join(props)}
