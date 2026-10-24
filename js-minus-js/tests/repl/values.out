@@ -1,0 +1,14 @@
+[ 1, 'two', [ 3, 4 ], { k: 'v' } ]
+{}
+[]
+{ 'a b': 1, c: [] }
+undefined
+NaN
+7
+43
+'12!'
+'tab\there'
+'q"uote'
+[Number: 5]
+[ 'a', 'b', 'c' ]
+[ 3, 2, 1 ]

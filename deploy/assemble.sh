@@ -19,8 +19,9 @@ case "$project" in
     (cd "$root/css-physics" && python3 experiments/widgets/build.py "$out/widgets.html")
     ;;
   js-minus-js)
-    # dist/ is the released page and its stylesheets (make page && make l5-smoke, then make dist); serve it at /
+    # dist/ is the released pages and their stylesheets (make page && make l5-smoke, then make dist); serve the program's at /
     cp -R "$root/js-minus-js/dist/js_in_css.xhtml" "$root/js-minus-js/dist/js_in_css" "$out/"
+    cp -R "$root/js-minus-js/dist/repl.xhtml" "$root/js-minus-js/dist/repl" "$out/"     # the REPL's page, which the program page links to
     printf '/ /js_in_css.xhtml 302\n' > "$out/_redirects"
     ;;
   paint)

@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A view timeline on an inline subject uses its containing block's position</title>
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 16px; }
+  .case { display: flex; gap: 12px; align-items: start; margin: 8px 0; }
+  /* the scroller: 100px tall, at scrollTop 0 */
+  .sc { width: 200px; height: 100px; overflow: auto; outline: 1px solid gray; font: 16px/20px monospace; }
+  .sc > div { height: 300px; }
+  .rel { position: relative; top: 60px; }
+  /* The subject's top is ~60px down, so at scrollTop 0 the cover progress is (100 - 60) / (100 + h), about 0.33.
+     Its containing block's top is 0, which would give 100 / (100 + h), about 0.83.
+     The indicator is green only between 15% and 60%: red when the timeline uses the containing block's position
+     (or when view timelines aren't supported). */
+  @keyframes k {
+    0%, 15% { background: red; }
+    15.01%, 60% { background: green; }
+    60.01%, 100% { background: red; }
+  }
+  .ind { width: 300px; height: 30px; color: white; padding: 4px; box-sizing: border-box; background: red;
+         animation: k auto linear both; }
+  #a { timeline-scope: --a; } #a .s { view-timeline: --a; } #a .ind { animation-timeline: --a; }
+  #b { timeline-scope: --b; } #b .s { view-timeline: --b; } #b .ind { animation-timeline: --b; }
+  #c { timeline-scope: --c; } #c .s { view-timeline: --c; } #c .ind { animation-timeline: --c; }
+  #d { timeline-scope: --d; } #d .s { view-timeline: --d; } #d .ind { animation-timeline: --d; }
+</style>
+<p>Each box should be green: each subject (the "x") is ~60px down a 100px scroller. Red means the view timeline
+took the subject's containing block's top (0px) as the subject's position.</p>
+<div class="case" id="a">
+  <div class="sc"><div><span class="s rel">x</span></div></div>
+  <div class="ind">1. inline, position: relative; top: 60px</div>
+</div>
+<div class="case" id="b">
+  <div class="sc"><div>a<br>b<br>c<br><span class="s">x</span></div></div>
+  <div class="ind">2. inline on the 4th line (no positioning)</div>
+</div>
+<div class="case" id="c">
+  <div class="sc"><div><span class="rel">a<span class="s">x</span></span></div></div>
+  <div class="ind">3. inline inside a relatively positioned inline</div>
+</div>
+<div class="case" id="d">
+  <div class="sc"><div><span class="s rel" style="display: inline-block">x</span></div></div>
+  <div class="ind">4. control: inline-block, top: 60px</div>
+</div>
+<!--
+Observed (Linux, 2026-10-24): Chrome 153.0.8010.12 headless: boxes 1-3 red, box 4 green. Playwright's Firefox 157
+(layout.css.scroll-driven-animations.enabled): all green.
+Measured with a registered <number> animated 0 -> 1 on view(block), scrollTop 0, 300px scroller (cover progress
+expected (300 - top) / (300 + height), top and height from getBoundingClientRect):
+  inline on line 1                     Chrome 0.940  Firefox 0.933  expected 0.934 (top 2)
+  inline, relative top: 100px          Chrome 0.940  Firefox 0.619  expected 0.621 (top 102)
+  inline on the 6th line               Chrome 0.940  Firefox 0.556  expected 0.558 (top 122)
+  inline in a relative inline          Chrome 0.940  Firefox 0.619  expected 0.621 (top 102)
+  inline, parent padding-top: 100px    Chrome 0.940  Firefox 0.619  expected 0.621 (top 102)
+  block or inline-block, relative      Chrome 0.617  Firefox 0.617  expected 0.617 (top 100)
+Chrome's 0.940 is 300 / (300 + 19): top 0, the containing block's border-box origin, whatever the inline's place in
+it. Same on view(inline): a span after 21 characters (left 202px) or with left: 150px reports the progress of left 0.
+The size is right (19px). getBoundingClientRect and anchor(top) (the span as an anchor) agree with each other and
+with Firefox; only the view timeline is off. Transforms are ignored in every case, as specified.
+
+Spec: scroll-animations-1 §3.1 (https://drafts.csswg.org/scroll-animations-1/#view-timelines-ranges): "Transforms
+are ignored, but relative and absolute positioning are accounted for." §3 (view progress subject): the timeline
+covers the scroll positions in which "any part of the subject element's principal box intersects its nearest
+ancestor scrollport"; the CSSWG resolved (w3c/csswg-drafts#13818, 2026-06-03; crbug 519585581) that a fragmented
+subject uses the bounding box of its fragments, as IntersectionObserver does. Either way it is the inline's own
+boxes, not its containing block's origin.
+
+Likely cause (153 and main 22b3b159): ViewTimeline::SubjectPosition maps PointF() from the subject's layout object
+to the scroller (core/animation/view_timeline.cc:528 in 153, :574 on main). A LayoutBox's local origin is its border
+box, which includes relative offsets; a LayoutInline has no location of its own (LayoutInline doesn't override
+OffsetFromContainer), so its origin is its container's. SubjectSize already uses
+layout_inline->LocalBoundingBoxRectF() (:510 / :556), whose size is right; its origin (the inline's bounding box in
+the containing block, relative offsets included) is what SubjectPosition drops. Inline subjects became active in
+M121 (before that SubjectSize required a LayoutBox: crbug 40925514, "view() on inline elements regression?", 2023,
+still Assigned), with this mapping. WPT: view-timelines/inline-subject.html puts the span on its paragraph's first
+line with a coarse contain-range check, so it passes; view-timeline-relative-subject.html and
+-relative-ancestor.html use blocks. No WPT test has an inline subject away from its containing block's origin.
+-->

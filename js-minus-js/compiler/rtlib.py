@@ -12,14 +12,14 @@ DB, INIT, SP0 = L['data_base'], L['init'], L['sp0']
 CELL = U.CELL
 MAP, MAPN = R.MAP, R.MAPN                        # the collector's map of block starts (a bit per 8 heap words, 16 to a word)
 POWT = MAP + MAPN                                # its powers of two (the collector fills them in)
-assert H % 8 == 0 and U.HEAP0 % 8 == 0 and U.HEAP0 + 2 * H <= L['rom_size'] + L['ram_size'] - L['cols'] * L['rows']
+assert H % 8 == 0 and U.HEAP0 % 8 == 0 and U.HEAP0 + 2 * H <= R.LAYOUT['out_base']
 assert MAP >= L['rt_base'] + len(L['rt_cells']) and POWT + 16 <= SP0
 
 def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=R.SDATA, STR_LO=U.STR_LO, HEAP0=U.HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=R.STRTAG, OBJTAG=U.OBJTAG, ARRTAG=U.ARRTAG,
              INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, FUNTAG=R.FUNTAG, ENVTAG=R.ENVTAG, RSTUB=2, FTAB=R.FTAB, FCACHE=R.FCACHE, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT,
-             GCELL=R.GCELL, GLOBK=R.GLOBK, JMPOP=R.OP['JMP'], PKPROTO=R.PKPROTO, PKPT=R.PKPT, TCELL=R.TCELL, RCELL=R.RCELL, SPCELL=R.SPCELL, PKVAL=R.PKVAL, PKSTAT=R.PKSTAT, NSTAT=len(R.MATHK) + len(R.MATHV), NMATHK=len(R.MATHK))
+             GCELL=R.GCELL, GLOBK=R.GLOBK, JMPOP=R.OP['JMP'], PKPROTO=R.PKPROTO, PKPT=R.PKPT, TCELL=R.TCELL, RCELL=R.RCELL, SPCELL=R.SPCELL, ECELL=R.ECELL, PKVAL=R.PKVAL, PKSTAT=R.PKSTAT, NSTAT=len(R.MATHK) + len(R.MATHV), NMATHK=len(R.MATHK))
     k.update(CELL); k['NETPARTS'] = L['net_parts']; k['NBUF'] = 2 * L['net_parts']
     k.update({f'K_{n.upper()}': i for i, n in enumerate(R.KINDS)}); k.update({f'A_{n.upper()}': i for i, n in enumerate(R.ALLOCK)})
     k.update({n: v for n, v in zip(R.SPECIALS, range(R.SPV0, R.SPV0 + 8))}); k.update(SPV0=R.SPV0, TRAPDEF=R.TRAPDEF)

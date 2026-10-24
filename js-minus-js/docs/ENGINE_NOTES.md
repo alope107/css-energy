@@ -269,3 +269,25 @@ chats.
     selector. Tab: `KeyboardEventManager::DefaultTabEventHandler` moves focus unless the document is in design mode
     (script only); past the last element `FocusController` hands focus to the browser's UI, so the Tab key never
     reaches the editor's InsertTab command. *(measured 2026-10-24; Chromium 153 source; tests/editor_input.js)*
+79. **A change an animation makes doesn't start a transition; a container query's does.** A latch held by
+    `transition: --v 0s calc((1 - var(--g)) * 1000000s)` never held when `--v`'s change came from an inherited custom
+    property that an animation (a view timeline register) drives: `getAnimations()` listed no transition, and the value
+    followed at once. With the gate in a rule, `@container style(--g: 1) { .x { --v: …; transition-delay: 0s } }` over
+    `--v: -1` and a 1,000,000 s delay, the transition starts and holds the last value (the editor scan's latches work
+    this way, through `@container rbscan style(--rbscan: k)`). The REPL's display latches so (ARCHITECTURE §3.10).
+    *(observed 2026-10-24, Chromium 153)*
+80. **A positioned element outside a `contain: strict` subtree can anchor to an element inside it**: the console box
+    (`position: absolute`, containing block the initial one) takes `anchor(--rbed top)` / `anchor-size(--rbed width)` of
+    the editor inside `#app` (`contain: strict; will-change: transform`), and follows it. The other way round doesn't
+    serve: a reader's anchors must be inside its containing block (the console box holds its leaves and its readers).
+    *(observed 2026-10-24, Chromium 153)*
+81. **A view timeline's progress counts relative positioning, not transforms** (scroll-animations-1 §3.1: "Transforms
+    are ignored, but relative and absolute positioning are accounted for"): a `::before` with
+    `animation-timeline: view(block)` in a line div moved down 100px by `position: relative; top: 100px` reads the
+    progress of a box 100px lower (0.555 against its row's 0.870); moved by `transform: translateY(100px)` it keeps its
+    row's. So the REPL moves its lines down with a transform (ARCHITECTURE §3.10): with `position: relative` the rows'
+    names (ENGINE_NOTES 77) followed the lines, the probes read the wrong rows, and the session stopped compiling. The
+    sentinels are inline `::before`s, and Chrome takes an inline subject's position to be its containing block's origin
+    (the line div's), ignoring its own place and offsets, against the spec (bugs/chrome-view-timeline-inline-relative.html):
+    so a row's name is its line div's position, which `position: relative` on the div moves.
+    *(measured 2026-10-24, Chromium 153; machine/replui.py)*

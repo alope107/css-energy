@@ -21,8 +21,9 @@ Token chain (#tcr, nested inside the deepest character level; levels past the to
   - symbol/function tables: delayed writes; labels: in-flow anchors; code words: fixed overlays inside #tcr
     (contain: strict), anchor-name --c<RAM index>, two per instruction slot: word0 adds its label (a jump target, or the
     function's frame label for a temp in A), word1 the frame label times its multiplier (1024 for a temp in B, 1 in C).
-  - the last level shows .fin: the globals' count word, and two in-flow anchors the CPU page reads:
-    --ccdone (width 1 when compiled without error) and --ccinfo (width = done + 2*err + 1024*words).
+  - the last level shows .fin: the globals' count word, and three in-flow anchors the CPU page reads:
+    --ccdone (width 1 when compiled without error), --ccinfo (width = done + 2*err + 1024*words) and --ccstart (the REPL's:
+    where the run starts, the parser's rst; the input --rdone, on #ccw, is the lines its last run read).
 """
 import sys, json, re, os
 from dsl import css2 as tocss, isK, S
@@ -209,7 +210,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # (a pause driven by an animated flag does not work: Blink reads animation-play-state from the base style)
     css.append(lbl.group('Chain switch', 'the chain exists only once the editor scan is complete'))
     css.append('@property --ccgo { syntax: "<integer>"; inherits: true; initial-value: 0; } @keyframes kccgo { from { --ccgo: 4096; } to { --ccgo: -1; } }'
-               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; }'
+               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; --repl: 0; --x-repl: var(--repl); --rdone: 0; --x-rdone: var(--rdone); }'
                ' #cc { display: if(style(--ccgo: 1): block; else: none); contain: strict; position: relative; height: 0; }'
                ' .ls, .lvA, .lvB, .gs0, .gs1 { display: contents; }'
                )
@@ -252,7 +253,9 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                f' .tr > b {{ position: absolute; left: 0; width: 1px; height: 1px; display: block; }} .tr > .tp {{ position: static; height: {HT}px; }}'
                ' @container style(--l-o_tkany: 1) { .tr { display: block; } }')
     for f, src in TOKF:
-        css.append(f'.tr > .t{f} {{ top: calc(var(--l-o_{src}) * 1px); view-timeline-name: {mux_name("l-tix", TMAX, lambda t, f=f: f"--tk{t}{f}")}; }}')
+        line = ' + var(--l-o_rnl) * var(--trl)' if f == 'h' else ''     # (a REPL newline token's th1: the level's line, cc_dsl o_rnl)
+        css.append(f'.tr > .t{f} {{ top: calc((var(--l-o_{src}){line}) * 1px); view-timeline-name: {mux_name("l-tix", TMAX, lambda t, f=f: f"--tk{t}{f}")}; }}')
+    css.append(' '.join(f'.trl{k} {{ --trl: {k}; }}' for k in range(L + 1)))
     # string bytes: in-flow words
     css.append(lbl.group('String bytes: in-flow words'))
     N.add('l-o_sa-h', False)
@@ -279,7 +282,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         if nk is not None:
             ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{nk}_{j}" for j in range(P))}">')
         ch_html.append(f'<div class="lv{x} {kcls}" style="{"; ".join(st)}"><b class="ovs"></b>'
-                       f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
+                       f'<div class="tr trl{sl[1] + (sl[0] == "nl") if sl[0] != "nul" else L}"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
     root_st = ''
     fo = OTH['A' if (NC - 1) % 2 == 0 else 'B']      # suffix written by the deepest character level
     css.append(lbl.group('Lexer start state (#cc)'))
@@ -408,7 +411,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for y in 'AB':
         err = (f'if(style(--s-perr-{y}: 0): max(var(--s-bad-{y}) * 99, clamp(0, 2 * var(--p-cp-{y}) - {code_cells}, 1) * 62);'
                f' else: var(--s-perr-{y}))')
-        css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); }}')
+        css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); --rsf: var(--p-rst-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
                f' width: calc((var(--dpf) + {WOFF}) * 1px); }}'
                # the string untag constant at data_base (the program never writes it)
@@ -417,16 +420,18 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                # the string area's end, for the runtime's key lookups
                + f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
                + ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
-               ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }')
+               ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }'
+               # where the REPL's run starts (an instruction pair's index; 0: code_base), which its CPU reads (gen_css.py ccpc)
+               ' .fin > .ds { display: block; height: 0; anchor-name: --ccstart; width: calc(var(--rsf) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
-    for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
+    for n in ('e', 'done', 'n', 'dpf', 'sdf', 'rsf'): N.add(n, True)
     R_NAMES = {getattr(R, n): n for n in dir(R) if n.startswith('S_')}
     for f, what, ms in FAMILIES:
         css.append(lbl.section(f'Parser variants: {f}', f'{what} ({", ".join(R_NAMES[m] for m in ms)}): one rule per body, its condition the modes and token codes it serves'))
         css += vcss[f]
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b><b class="ds"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

@@ -79,6 +79,8 @@
 @property --jc { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --mx { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --pv { syntax: "<integer>"; inherits: false; initial-value: 0; }
+@property --pmk { syntax: "<integer>"; inherits: false; initial-value: 0; }
+@property --pmo { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --wval { syntax: "<integer>"; inherits: true; initial-value: 0; }
 @property --wz { syntax: "<integer>"; inherits: true; initial-value: 0; }
 @property --nT0 { syntax: "<integer>"; inherits: true; initial-value: 0; }
@@ -947,6 +949,7 @@
 @property --wv { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --wnow { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --live { syntax: "<integer>"; inherits: true; initial-value: 0; }
+@property --rclr { syntax: "<integer>"; inherits: true; initial-value: 0; }
 @property --mwa0A { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --mwa0B { syntax: "<integer>"; inherits: false; initial-value: 0; }
 @property --mwa0C { syntax: "<integer>"; inherits: false; initial-value: 0; }

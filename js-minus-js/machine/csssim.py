@@ -325,6 +325,9 @@ class Sim:
             if not cells and not done and not nl: raise Stall()          # (nothing fits this pass)
             out = (cells, nl)
             if not done: pc -= 2
+        elif op == 'PUTC' and a:                         # a REPL mark (cc_ref.NMARK): the output's position into mark a - 1
+            if (cw >> (a - 1) % 4) & 1: raise Stall()    # (its bank: R.OUTMAX is a multiple of 4)
+            out = ('mark', a - 1)
         elif op == 'PUTC':
             ch = val(b)
             if ch != 10 and not self.free(cw): raise Stall()
@@ -388,14 +391,27 @@ class Sim:
         else: raise SystemExit(f'op {op} not in csssim.py')
         # commit
         for (s, w, j), v in mem_w.items(): self.words[s][w][j] = v; self.dirty[s][w] = 1
-        if out:
-            cells, nl = out
+        if out and out[0] == 'mark': cw |= 1 << out[1] % 4; st['mem'][OUT_BASE + R.OUTMAX + out[1]] = st['optr'] + 1
+        elif out:
+            cells, nl = out; cols, size = st['cols'], st['cols'] * st['rows']
             for ch in cells:
                 cw |= 1 << (st['optr'] % 4)
-                st['mem'][OUT_BASE + st['optr']] = ch; st['out'].append(ch); st['optr'] = (st['optr'] + 1) % (COLS * ROWS)
-            if nl: st['optr'] = (st['optr'] // COLS + 1) * COLS % (COLS * ROWS); st['out'].append(10)
+                st['mem'][OUT_BASE + st['optr']] = ch; st['out'].append(ch); st['optr'] = (st['optr'] + 1) % size
+            if nl: st['optr'] = (st['optr'] // cols + 1) * cols % size; st['out'].append(10)
         st['pc'], st['fp'], st['pst'] = pc, fp, npst; st['steps'] += 1 if done else 0
         return cw
+    def flush_pass(self):
+        """the REPL's page, once halted (gen_css.py xk1): the last dirty line (k = 2 * set + way) written back through the fill's
+        write set, a pass each, so the next entry's run (a new CPU, its cache empty) finds RAM as this one left it -> whether
+        there was one"""
+        for k in range(2 * NSET - 1, -1, -1):
+            s, w = divmod(k, NWAY)
+            if self.dirty[s][w]:
+                vt = self.tag[s][w]
+                if vt >= RB0:
+                    for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
+                self.dirty[s][w] = 0; self.passes += 1; return True
+        return False
     def run_pass(self, K):
         """one pass: (instructions executed, why it ended)"""
         self.passes += 1; cw = 0; self.wb = None

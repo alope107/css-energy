@@ -1,0 +1,33 @@
+> 3 + 4
+7
+> "hello" + ' ' + "world"
+'hello world'
+> var s = "hi"
+undefined
+> s.toUpperCase()
+'HI'
+> s.length * 10
+20
+> let n = 2, m = 3
+undefined
+> const k = n * m
+undefined
+> k
+6
+> true && !false
+true
+> null
+null
+> typeof s
+'string'
+> 0.1 + 0.2
+0.30000000000000004
+> -0
+-0
+> 1 / 0
+Infinity
+> 10 / 3
+3.3333333333333335
+> "it's"
+"it's"
+>

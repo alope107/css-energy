@@ -1,8 +1,8 @@
 # JavaScript, compiled and run by a stylesheet
 
 `dist/js_in_css.xhtml` is one static XHTML page (its stylesheets in `dist/js_in_css/`), and no script runs on it. You
-type a JavaScript program into its editor (or pick one of twelve samples) and press Run. The program then goes
-through four stages:
+type a JavaScript program into its editor (or pick one of twelve samples) and press Run; `dist/repl.xhtml` is a REPL on
+the same machinery, run a line at a time ([REPL](#repl)). The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
@@ -31,6 +31,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 - On the page, FizzBuzz 1–15 compiles in about 2.6 s from Run (including the 1.2 s readback sweep) and halts about
   3.8 s after Run (before the language: 2.3 and 3.2 s; BENCHMARKS §17).
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
+- A REPL (2026-10-24, its own page): Enter runs the new entry on the memory the last one left and shows its output and
+  value under it, checked against Node's REPL ([REPL](#repl)).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - An X-ray page, which shows the work as it happens (the scan, lexing a line at a time, parsing a token at a time,
   each pass's instructions, registers, caches and RAM) at a speed you pick, is on branch `xray` (`26f9a4d`, off
@@ -138,7 +140,7 @@ machine too; a key built at run time is first matched by its characters. Details
 ### Limits
 
 - **Program size**: 24 lines of 64 columns, 400 tokens, 1,023 code words (511 instructions); 768 words of string data
-  (the length + 2 for every string literal and every `.name` in the program) and 231 globals (a double literal
+  (the length + 2 for every string literal and every `.name` in the program) and 230 globals (a double literal
   takes one too); 64 labels (an `if` takes 1 or 2, a loop up to 4, a function 3 or 4: functions use them fastest; a
   `switch` takes 2, plus 2 per `case` and 1 for a `default`), 32 variables in scope, 16 functions; 32 distinct strings
   and property names (one interning table; a method's name doesn't count when `(` follows it directly); blocks and
@@ -148,8 +150,8 @@ machine too; a key built at run time is first matched by its characters. Details
 - **Functions** nest two deep (a function inside a function, not a third level; error 41). A function declared at
   the top level and called by its name must be called with as many arguments as it has parameters (error 76); a
   function value can be called with any number.
-- **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has about 7,500 words, so recursion can go a few
-  hundred to a thousand calls deep (a call takes its frame: its `this`, the parameters, the locals and the
+- **Memory**: RAM is 16K words (`compiler/layout.json`); the stack has 6,144 words, so recursion can go a few
+  hundred calls deep (`deep_recursion`'s takes about 2,050 words) (a call takes its frame: its `this`, the parameters, the locals and the
   expression's temps). The heap holds 3,072 words of live data (an object of up to 3 keys or a double takes 8 words, a
   function 8, a string its length + 3 rounded up to 8, an array 4 words + 1 per element, rounded up to 8); more halts
   with `out of memory`.
@@ -186,7 +188,7 @@ machine too; a key built at run time is first matched by its characters. Details
   same name. A `for (let i ...)` loop has one `i`, not one per iteration: functions made in the loop all see its last
   value (`for (let i = 0; i < 3; i++) setTimeout(() => console.log(i))` prints 3 three times).
 - **`do … while`**: `if (a) do s; while (c); else …` is rejected (drop that `;`); `do s;; while (c)` is accepted.
-- **Console**: 9 columns × 16 rows. Long lines wrap, and output past 16 rows wraps to the top.
+- **Console**: 9 columns × 16 rows (the REPL's: 40 × 32). Long lines wrap, and output past the last row wraps to the top.
 - **Network**: one request at a time, GET only, no headers; a status above 511 reads as 511. A round trip carries 2 URL
   bytes or 8 body bytes. Without the gateway (`file:`, a static server) `fetch` returns `-1` after about 20 s.
 
@@ -205,7 +207,7 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 22 | expression too deep (8 operators, 10 values, 24 with pending arguments, 5 unary operators in a row, 127 array elements) | 50–53 | statement or `for` header ended in the wrong place |
 | 23 | too many functions (16) | 54–55 | unexpected `}` |
 | 24 | too many variables (32) | 56 | `break` / `continue` outside a loop |
-| 25 | too many globals (231) | 57 | `return` outside a function |
+| 25 | too many globals (230) | 57 | `return` outside a function |
 | 26 | too much string data | 60 | (the runtime library: an undefined function) |
 | 30, 38–39 | malformed `console.log`, or used as a value | 61 | a token emits too much code at once (7 instructions) |
 | 32–37 | malformed `if` / `while` / `for` / `function` / arrow header (36: a parameter that is a reserved word) | 62 | program too long (more than 1,023 words) |
@@ -220,6 +222,40 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.
+
+## REPL
+
+`repl.xhtml` (linked from the program page) is a session, as Node's REPL is one: type a line and press Enter, and what
+it printed and its value appear under it (`'HI'`, `[ 1, 2, 3 ]`, `undefined` for a declaration). Nothing presses Run:
+the page sees the editor's number of rows change.
+
+- **Each Enter runs the new entry.** The page reads every line again (all but the last, the prompt) and compiles them
+  as one program, but the run starts at the first entry after the lines the last run read, on the memory that run
+  left: variables, functions, the heap and the console are kept. So an entry costs the session's readback and compile,
+  but only its own run.
+- **Starting over.** Delete lines (or everything) and press Enter: a session with fewer lines than the last run read
+  runs from its start, on cleared memory. So does one whose Enter came while a run was still going (that run may have
+  written part of an entry's effects).
+- **Entries.** A line that starts a top-level statement ends the entry before it; a line that leaves a block, a call or
+  an expression open goes on in the next (its prompt is `...`), as in Node's REPL. A line that starts with `(`, `[`,
+  `+` or `-` starts a statement (in a program it would continue the one before), and an `if` ends at its line (`else`
+  goes on the same line, as in Node's REPL).
+- **Values.** An entry's value is its last expression statement's (an assignment's value, `x++`'s old one, `++x`'s
+  new one), printed as Node's REPL prints it: strings quoted, arrays and objects as `console.log` prints them. Anything
+  else (a declaration, `console.log`, a loop, an `if`) leaves `undefined`; Node gives a loop or an `if` its body's
+  last value.
+- **The transcript stays until a run ends.** An entry that doesn't compile keeps the last transcript and shows the
+  error above the editor; fix it and press Enter.
+- **Limits**: 23 lines (the editor's 24, less the prompt); 32 rows of 40 characters of output for the whole session (a
+  longer line wraps; past 32 rows the output wraps to the top and the transcript breaks). Editing a line that has
+  already run doesn't run it again: the next Enter compiles the edited text but runs only what comes after, so an edit
+  that declares or names things differently can give wrong values (delete lines to start over). A run-time
+  error (`Uncaught ReferenceError`) ends that run; the next entry runs on the memory as the error left it, as in Node's
+  REPL. A function declared in a later entry can be called from an earlier one's function (both are compiled each
+  time), where Node's REPL throws until it is declared.
+- How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.10. Its tests: `tests/repl/` (sessions; Node's REPL,
+  `tests/repl_expect.js`, writes their output and their transcript as the page shows it) through L1, L2 and C1, each
+  replayed whole and typed a line at a time, and `make l5-repl` on the page.
 
 ## Network
 
