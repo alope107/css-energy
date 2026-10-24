@@ -1,0 +1,10 @@
+f start 4
+after f
+f got 4
+k 21
+i 0
+i 1
+f z 40
+h 3
+i 2
+f -> 41

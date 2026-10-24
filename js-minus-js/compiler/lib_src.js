@@ -64,7 +64,7 @@ function gc(need) {
   poke(__G_FLO__, from); poke(__G_FREE__, to);
   while (i < 16) { poke(__POWT__ + i, x); x = x * 2; i++; }
   __mfill(__MAP__ + (to - __HEAP0__) / 128, 0, __MAPH__);
-  fwdrange(__DB__ + 1, __DB__ + peek(__INIT__ - 1), 0);
+  fwdrange(__DB__ + 1, __DB__ + peek(__INIT__ - 1), 0); poke(__MQ__, fwd(peek(__MQ__)));      // (the microtask queue: promises)
   p = __fp(); e = p - peek(p) / 8192;
   while (p > __SP0__) { fwdrange(e + 1, p, 1); p = e; e = p - peek(p) / 8192; }
   p = to;
@@ -260,11 +260,15 @@ function arith(op, a, b) {
   return fbox();
 }
 // DBIT's trap: the bitwise operator in its instruction's A (A's 1024s: 0 & 1 | 2 ^ 3 << 4 >> 5 >>>; the return word holds the
-// instruction's address / 2) of two values as numbers, in the FPU (32-bit integers, as JavaScript computes)
+// instruction's address / 2) of two values as numbers, in the FPU (32-bit integers, as JavaScript computes); 6 is await, 7 RETC
 function dbit(a, b) {
-  var k = peek(2 * (peek(__fp()) % 8192)) % 8192 / 1024;
-  if (k == 7) { retc(a, b, __fp() - __TRAPDEF__); poke(__fp(), __TRAPDEF__ * 8192 + __RSTUB__ / 2); return 0; }    // (rstub returns)
-  a = tonum(a); b = tonum(b);
+  var k = peek(2 * (peek(__fp()) % 8192)) % 8192;      // (its A)
+  if (k >= 7168) {                                      // (RETC; A + 16: an async function's return, aret. rstub returns)
+    if (k % 32 >= 16) { aret(a, b, __fp() - __TRAPDEF__); } else { retc(a, b, __fp() - __TRAPDEF__); }
+    poke(__fp(), __TRAPDEF__ * 8192 + __RSTUB__ / 2); return 0;
+  }
+  if (k >= 6144) { return await1(a, b, __fp() - __TRAPDEF__); }      // (await x)
+  k = k / 1024; a = tonum(a); b = tonum(b);
   if (k == 0) { __fl(__FL_FAND__, __F0__, a, b); }
   else if (k == 1) { __fl(__FL_FOR__, __F0__, a, b); }
   else if (k == 2) { __fl(__FL_FXOR__, __F0__, a, b); }
@@ -395,16 +399,17 @@ function retc(v, e, fp) {
 // 63 for f.apply(t, a) (a's elements become the arguments). Without a this the callee's is the global object; a bound function
 // (meta 64 + its arguments, bind) puts its this and argument in and calls its target
 function callv(f) {
-  var r = peek(__fp()) % 8192; var n = peek(2 * r - 2) % 8192; var off = peek(2 * r - 1); var fc = __fp() - __TRAPOFF__ + off; var np = 0;
-  var m = 0; var a = 0; var i = 0;
+  var r = peek(__fp()) % 8192; var n = 2; var off = __C2OFF__; var fc = 0; var np = 0; var m = 0; var a = 0; var i = 0;
+  if (r >= __ROMPAIRS__) { n = peek(2 * r - 2) % 8192; off = peek(2 * r - 1); }     // (the library's one CALLV is call2's: ROM can't be read)
+  fc = __fp() - __TRAPOFF__ + off;
   if (n == 63) { a = peek(fc + 2); n = 32; if (__kind(a, __K_ARR__)) { n = 32 + peek(a - 1); __mcpy(fc + 2, peek(a), peek(a - 1)); } }
   if (__kind(f, __K_FUN__) == 0) { m_uncaught(); m_typeerr(); m_notfn(); putc(10); halt(); }
   m = peek(f + 1);
-  if (m >= 128) { poke(fc, native(peek(f + 2), n % 32, fc + 2)); return 0; }     // (a native: its value is the call's)
+  if (m >= 128) { poke(fc, native(f, n % 32, fc + 2)); return 0; }     // (a native: its value is the call's)
   while (m >= 64) {
     if (m % 2) { i = n % 32; while (i > 0) { i = i - 1; poke(fc + 3 + i, peek(fc + 2 + i)); } poke(fc + 2, peek(f + 6)); n = n + 1; }
     poke(fc + 1, peek(f + 5)); n = n % 32 + 32; f = peek(f + 2); m = peek(f + 1);
-    if (m >= 128) { poke(fc, native(peek(f + 2), n % 32, fc + 2)); return 0; }
+    if (m >= 128) { poke(fc, native(f, n % 32, fc + 2)); return 0; }
   }
   np = m % 16;
   poke(fc, off * 8192 + r);
@@ -447,6 +452,154 @@ function nexttimer() {
   f = p[b + 1]; p[0] = p[b];
   if (p[b + 2]) { p[b] = p[b] + p[b + 2]; } else { p[b + 1] = 0; }
   return f;
+}
+// ---------------- promises (cc_ref: new Promise, Promise.resolve / reject, then / catch; an async function's await and return).
+// A promise is an object chunk of three hidden pairs [PKPS state][PKPV value][PKPR reactions]: state 0 pending, 1 fulfilled,
+// 2 rejected, 3 resolved to another promise, whose outcome it waits for. Its reactions: an array of triples (on fulfilled, on
+// rejected, the promise the handler's value resolves; an await's continuation is both handlers, with 0). Jobs wait in the
+// microtask queue, the array in rt cell MQ (a root: gc): [head, the resumed frame's fp, its promise, the running handler's
+// promise, then a job (h, v, q, s) per four elements]. The program's end runs them, all before each timer (cc_ref.task_loop)
+function mq() {
+  var q = peek(__MQ__);
+  if (__kind(q, __K_ARR__) == 0) { q = newarr(16, 4); __mfill(peek(q), 0, 4); poke(peek(q), 4); poke(__MQ__, q); }
+  return q;
+}
+function enq(h, v, q, s) {
+  var m = peek(__MQ__); var n = 0; var p = 0;
+  if (__kind(m, __K_ARR__) == 0) { m = mq(); }
+  n = peek(m - 1);
+  if (n + 4 > peek(m - 2)) { grow(m, n + 4); }
+  p = peek(m); p[n] = h; p[n + 1] = v; p[n + 2] = q; p[n + 3] = s; poke(m - 1, n + 4);
+  return 0;
+}
+function mkprom() {
+  var o = __alloc(8, __A_CHUNK__);
+  poke(o, __PKPS__); poke(o + 1, 0); poke(o + 2, __PKPV__); poke(o + 3, __UNDEF__); poke(o + 4, __PKPR__); poke(o + 5, 0); poke(o + 6, 0);
+  return o - __OBJTAG__;
+}
+function isprom(x) { if (__kind(x, __K_OBJ__)) { return peek(x) == __PKPS__; } return 0; }
+// p settles (s: 1 fulfilled, 2 rejected) with v: a job per reaction
+function settle(p, s, v) {
+  var r = peek(p + 5); var i = 0;
+  poke(p + 1, s); poke(p + 3, v); poke(p + 5, 0);
+  if (r) { while (i < peek(r - 1)) { enq(peek(peek(r) + i + s - 1), v, peek(peek(r) + i + 2), s); i = i + 3; } }
+  return 0;
+}
+// a reaction to p (f, r: its handlers or 0; q: the promise they resolve): a job now if p has settled
+function react(p, f, r, q) {
+  var s = peek(p + 1); var a = peek(p + 5);
+  if (s == 1) { return enq(f, peek(p + 3), q, 1); }
+  if (s == 2) { return enq(r, peek(p + 3), q, 2); }
+  if (a == 0) { a = newarr(6, 0); poke(p + 5, a); }
+  push(a, f); push(a, r); push(a, q);
+  return 0;
+}
+// p resolved with x: a promise x it follows (a job of its own first, as JavaScript's NewPromiseResolveThenableJob)
+function resolve1(p, x) {
+  if (isprom(x)) { poke(p + 1, 3); return enq(x, 0, p, 3); }
+  return settle(p, 1, x);
+}
+// the resolve / reject functions new Promise hands its executor (pfn's natives)
+function presolve(p, x) { if (peek(p + 1) == 0) { resolve1(p, x); } return __UNDEF__; }
+function preject(p, x) { if (peek(p + 1) == 0) { settle(p, 2, x); } return __UNDEF__; }
+// new Promise(ex) (cc_ref NEWM: on a dummy receiver): ex(resolve, reject) runs at once
+function newprom(d, ex) {
+  var p = mkprom(); var r = __UNDEF__; var j = __UNDEF__; var np = 2;
+  if (__kind(ex, __K_FUN__)) { if (peek(ex + 1) < 64) { np = peek(ex + 1) % 16; } }      // (one it doesn't take isn't made)
+  if (np > 0) { r = pfn(129, p); }
+  if (np > 1) { j = pfn(130, p); }
+  call2(ex, r, j);
+  return p;
+}
+// promise p's resolve (m 129) or reject (130) function: a native whose env word is p (native)
+function pfn(m, p) {
+  var g = __alloc(8, __A_RAW__);
+  poke(g, 0 - 13); poke(g + 1, 0); poke(g + 2, m); poke(g + 3, p); __mfill(g + 4, 0, 4); mark(g);
+  return g + 1 - __FUNTAG__;
+}
+// f(a, b) from the library: its only CALLV (rtlib.py checks: A 2, the callee at F4), which callv decodes without reading it
+function call2(f, a, b) { return f(a, b); }
+// p.then(f, r), p.then(f), p.catch(r): a new promise, which the handler's value resolves (without one, p's outcome passes on)
+function then2(p, f, r) {
+  var q = 0;
+  if (isprom(p) == 0) { m_uncaught(); m_typeerr(); m_notfn(); putc(10); halt(); }
+  if (__kind(f, __K_FUN__) == 0) { f = 0; }
+  if (__kind(r, __K_FUN__) == 0) { r = 0; }
+  q = mkprom(); react(p, f, r, q);
+  return q;
+}
+function then1(p, f) { return then2(p, f, 0); }
+function catch1(p, r) { return then2(p, 0, r); }
+// Promise.resolve(x) (x itself if it is a promise), Promise.reject(x): on a dummy receiver (cc_ref MATHM)
+function presolvev(d, x) { var p = 0; if (isprom(x)) { return x; } p = mkprom(); settle(p, 1, x); return p; }
+function presolve0(d) { return presolvev(d, __UNDEF__); }
+function prejectv(d, x) { var p = mkprom(); settle(p, 2, x); return p; }
+// await x (DBIT T, x, local 1, k 6: dbit) in the function whose frame is at fp, e its local 1. Its continuation k is a closed env
+// cell [hdr][base][n][its promise][the frame words kept][the DBIT's pair][its own env cell, closed now, or 0][the frame's
+// words fp + 1 ... up to the DBIT's A, a temp: every live word is below it] (the collector scans them as values). The
+// function's promise (a resumed one's: the one it has) goes to its caller: rstub's RET F1 (retc puts it there)
+function await1(x, e, fp) {
+  var r = peek(fp + __TRAPDEF__) % 8192; var n = peek(2 * r) % 1024 - 257; var k = peek(__MQ__); var p = 0; var w = rnd8(n + 7);
+  if (__kind(k, __K_ARR__) == 0) { k = mq(); }
+  k = peek(k);
+  if (k[1] == fp) { p = k[2]; k[1] = 0; } else { p = mkprom(); }
+  k = __alloc(w, __A_RAW__);
+  poke(k, 0 - 6 - w); poke(k + 1, k + 2); poke(k + 2, n + 4); mark(k); k = k + 1 - __ENVTAG__;
+  poke(k + 2, p); poke(k + 3, n); poke(k + 4, r); poke(k + 5, 0);
+  __mcpy(k + 6, fp + 1, n);
+  w = e + __ENVTAG__;
+  if ((w >= __HEAP0__) * (w < __HEAP_HI__)) {             // (its own env cell, open on this frame: closed, as retc does)
+    if (peek(e) == fp) { __mcpy(e + 2, fp + 1, peek(e + 1)); poke(e, w + 1); poke(k + 5, e); }
+  }
+  poke(fp + 1, p);
+  if (isprom(x)) { react(x, k, k, 0); } else { enq(k, x, 0, 1); }
+  poke(fp + __TRAPDEF__, __TRAPDEF__ * 8192 + __RSTUB__ / 2);
+  return 0;
+}
+// an async function's return (DBIT k 7 with A + 16: cc_ref.ret): its promise (a resumed one's own, else a new one) resolved
+// with v, for its caller
+function aret(v, e, fp) {
+  var p = peek(__MQ__);
+  if (__kind(p, __K_ARR__) == 0) { p = mq(); }
+  p = peek(p);
+  if (p[1] == fp) { p[1] = 0; p = p[2]; } else { p = mkprom(); }
+  resolve1(p, v);
+  return retc(p, e, fp);
+}
+// continuation k (await1) resumes with v: its frame back at the loop's F2 (b: the loop's fp; nexttask's frame is at F63, so F2
+// is its fp - TRAPDEF), its own env cell open on it again with what its closures left there, returning to the loop's CALL
+// nexttask; nexttask returns v into the DBIT (pst WBACK moves it into the DBIT's A)
+function resume(k, v, b) {
+  var f = b + 2; var e = peek(k + 5);
+  __mcpy(f + 1, k + 6, peek(k + 3));
+  if (e) { __mcpy(f + 1, e + 2, peek(e + 1)); poke(e, f); }
+  poke(f, 2 * 8192 + peek(b + 63) % 8192 - 1);
+  e = peek(peek(__MQ__)); e[1] = f; e[2] = peek(k + 2);
+  poke(b + 63, __TRAPDEF__ * 8192 + peek(k + 4));
+  return v;
+}
+// the program's end when it uses promises (cc_ref.task_loop: L: CALL nexttask at F63; JZ F63 -> end; CALLV 1, F1; JMP L). The
+// last handler's value (F1) resolves its then's promise; then the next job: a handler goes to the loop (F1, its argument in
+// F3), a continuation is entered (resume; rejected: its promise is), a promise resolved to another follows it, no handler
+// passes the outcome on; with none left, the next timer (0: none, the end)
+function nexttask() {
+  var b = __fp() - 63; var h = 0; var v = 0; var q = 0; var s = 0; var i = 0; var p = mq();     // (p: raw, until an allocation)
+  p = peek(p); q = p[3]; p[1] = 0; p[2] = 0;
+  if (q) { p[3] = 0; resolve1(q, peek(b + 1)); }
+  p = peek(peek(__MQ__));
+  while (p[0] < peek(peek(__MQ__) - 1)) {
+    i = p[0]; h = p[i]; v = p[i + 1]; q = p[i + 2]; s = p[i + 3]; p[0] = i + 4;
+    if (i + 4 == peek(peek(__MQ__) - 1)) { p[0] = 4; poke(peek(__MQ__) - 1, 4); }
+    if (s == 3) { react(h, 0, 0, q); }
+    else if (__kind(h, __K_FUN__)) { p[3] = q; poke(b + 1, h); poke(b + 3, v); return 1; }
+    else if (h == 0) { settle(q, s, v); }
+    else if (s == 1) { return resume(h, v, b); }      // (else h is a continuation: await1's)
+    else { settle(peek(h + 2), 2, v); }
+    p = peek(peek(__MQ__));
+  }
+  h = nexttimer();
+  if (h) { poke(b + 1, h); poke(b + 3, __UNDEF__); }
+  return h;
 }
 // ---------------- Math. Math.f(x) through the FPU (cc_ref MATHM: after Math., a method on a dummy receiver d); min / max of up
 // to 4 arguments, and as values natives (meta 128; callv computes them: their id in the env word); Math.PI ...: FCONST's;
@@ -499,8 +652,15 @@ function mathfn(k) {
   mark(g);
   return g + 1 - __FUNTAG__;
 }
-// a native's value for n arguments at p (callv)
-function native(id, n, p) {
+// native f's value for n arguments at p (callv): its id in its env word; meta 129 / 130, a promise's resolve / reject (pfn),
+// the promise there
+function native(f, n, p) {
+  var id = peek(f + 2);
+  if (peek(f + 1) > 128) {
+    if (n < 1) { poke(p, __UNDEF__); }
+    if (peek(f + 1) == 129) { return presolve(id, peek(p)); }
+    return preject(id, peek(p));
+  }
   if (id == 0) { return mm(p, n, 0 - 1); }
   if (id == 1) { return mm(p, n, 1); }
   return ocreate(0, peek(p));
@@ -1334,6 +1494,7 @@ function ins(v, d) {
 function insobj(v, d) {
   var c = v + __OBJTAG__; var k = 0; var pass = 0; var first = 1; var go = 1;
   if (peek(c) == __PKVAL__) { return inswrap(peek(c + 1)); }
+  if (peek(c) == __PKPS__) { return insprom(c, d); }
   if ((peek(c) == 0) + (peek(c) < 0 - __OBJTAG__)) { putc(123); putc(125); return 0; }
   if (d > 2) { putc(91); putc(79); putc(98); putc(106); putc(101); putc(99); putc(116); putc(93); return 0; }
   putc(123); putc(32);
@@ -1355,6 +1516,15 @@ function insobj(v, d) {
     }
     pass++;
   }
+  putc(32); putc(125);
+  return 0;
+}
+// a promise (its chunk c): Promise { <pending> }, Promise { 1 }, Promise { <rejected> 1 }
+function insprom(c, d) {
+  var s = peek(c + 1);
+  m_promise();
+  if (s == 2) { m_rejected(); }
+  if ((s == 0) + (s == 3)) { m_pending(); } else { insel(peek(c + 3), d + 1); }
   putc(32); putc(125);
   return 0;
 }

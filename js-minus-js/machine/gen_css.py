@@ -1161,7 +1161,8 @@ if UI:
     SAMPLES = [('fizzbuzz', 'FizzBuzz', '\U0001F41D'), ('primes', 'primes', '\U0001F9EE'), ('fib', 'Fibonacci', '\U0001F41A'),
                ('stars', 'stars', '\u2728'), ('hanoi', 'Hanoi', '\U0001F5FC'), ('sort', 'sort', '\U0001F4CA'), ('tree', 'tree', '\U0001F333'),
                ('caesar', 'Caesar', '\U0001F510'), ('collatz', 'Collatz', '\U0001F300'), ('bank', 'bank', '\U0001F3E6'),
-               ('counter', 'closures', '\u23F2'), ('animals', 'prototypes', '\U0001F43E')]
+               ('counter', 'closures', '\u23F2'), ('animals', 'prototypes', '\U0001F43E'),
+               ('async', 'async', '\u23F3')]
     if os.environ.get('NOPICK') == '1': SAMPLES = []     # (measurement: the page without the picker)
     SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
     if REPLP: SAMPLES = SRC = []     # (the REPL's page: one editor, the REPL's)

@@ -86,7 +86,7 @@ net/       server.js (web server + network gateway: the modem's documents and pr
    codes; new state in `parse_state_names()` / `LEX_STATE` and `ref_state()` in `tests/cmp_dsl.py`) until `make l2`
    reports `ALL OK`. Teach the program generator (`tests/fuzz/progen.py`) the feature, within what the language
    guarantees, and run `python3 tests/fuzz/fuzz.py gen -n 2000`, `fmt` and `mut -n 2000`.
-3. Note `tools/vsz.py` before and after (now 492 variants, 152,295 temps). Every temp (a declaration: its text size
+3. Note `tools/vsz.py` before and after (now 516 variants, 158,489 temps). Every temp (a declaration: its text size
    counts too, BENCHMARKS §14), every rule (applied or not) and every label port costs on each of 400 token levels.
 4. `make fuzz` and `make l3` (`make fuzz-l3` too if the lexer or the page changed), then `make page && make l5-smoke`,
    then `make dist`.
@@ -194,6 +194,10 @@ net/       server.js (web server + network gateway: the modem's documents and pr
   (csssim `flush_pass`). A REPL test is a session Node's REPL can run (no timers, no uncaught errors; `make expect`
   writes its `.out` and `.tr`). `WAIT=1 node tests/repl_ui.js build/repl.xhtml tests/repl/x.js` types it as a user
   would, waiting for each entry's run.
+- Promises and async functions (ARCHITECTURE §3.11) are the library's: `await` is DBIT k 6, an async function's return
+  RETC with A + 16, and a program that uses them ends with the task loop (`nexttask`'s frame at F63, a resumed frame at
+  F2 = its fp − TRAPDEF). The library's only call of a value is `call2`'s CALLV, which `callv` can't read (ROM is
+  fetch-only) and so assumes. The ROM has 18 words left (12,270 of 12,288); `ALLM` is full (63 entries).
 - The console's RAM is `console_words` (1,536): its trees decode in radix 4 only if each bank's leaves are a small number
   times a power of 4 (384 = 6 × 4³). A size like 1,312 made a radix-82 level that every console write restyles: +17.6%
   on FizzBuzz (BENCHMARKS §20). The grid's size is the CPU's `--ocols` / `--osize` on the editor page.

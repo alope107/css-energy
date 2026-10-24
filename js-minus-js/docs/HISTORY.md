@@ -123,6 +123,16 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   `z` and `e` were read at garbage addresses that hit, and `e` was kept. csssim reads in order and stops at the first
   miss, so it never did. A read is good now only if every read its address came from was, transitively
   (`tests/suite/latch_chain.js` fails without it).
+- **19, promises and async functions (2026-10-24, branch `async`, from `main` at `c3f6900`).** `new Promise`, `then` /
+  `catch`, `Promise.resolve` / `reject`, `async` functions and arrows, `await` (ARCHITECTURE §3.11, README). Promises are
+  the library's, in ROM; their jobs run in a loop at the program's end, before each timer. `await` is one instruction
+  (DBIT with the spare operator code 6), which traps: the library copies the frame into the heap and returns the
+  function's promise to its caller; the loop later copies the frame back onto the stack and returns into the same
+  instruction, whose trap return moves the value into its A, as any dynamic operator's does. So the compiler needed no
+  transformation of async functions: a token for `async`, a unary operator for `await`, a different RET. The Node
+  oracle needed one: timers there ran before any promise job (`vm.runInNewContext`, timers drained synchronously), so
+  `tests/jsctx.js` runs a program in a context with a microtask queue of its own (`microtaskMode: 'afterEvaluate'`),
+  each timer's callback an evaluation in it.
 
 ## Dead ends and superseded approaches
 
@@ -213,6 +223,10 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 83 | The REPL's line count from 24 `#app:has()` rules | `#app` restyles every frame of the scan: a program's compile +1% | `.pane:has()` into a register |
 | 84 | The REPL as a chip in the program page's picker, replaying the session on each Enter | programs compiled ~6% slower for the REPL's page parts; an entry cost the whole session's run (13 s at 19 lines) | a page of its own that keeps the machine's state (ARCHITECTURE §3.10) |
 | 85 | The REPL's output room opened by moving the lines with `position: relative` | the rows' names (their sentinels' view progress) moved with the lines: the probes read the wrong rows (ENGINE_NOTES 81) | `transform: translateY()` |
+| 86 | `await` in a console.log argument after the first as an error (81) | console.log prints each argument as it is computed, so the first one printed before the wait: but `console.log("got", await p)` is the common case | in an async function the arguments before the last are set aside in temps and all print at `)` (`M_PDEF`): first below `M_PRINT` with the pieces joined at each `,` (+174 temps in every `,` variant), then on top of it, where `+` makes no pieces (+57) |
+| 87 | `new Promise`'s executor called from the library by CALLV, through `callv` when its parameters differ | `callv` decodes the CALLV from the code at its return address, and ROM can't be read (a peek of ROM is 0): it ran the executor in a wrong frame | the library's one CALLV in `call2`, whose slot `callv` assumes for a caller in ROM (`rtlib.py` checks) |
+| 88 | `Math.floor (x)` (a blank before the `(`) as a check in S_OPER for a Math. method not called | S_OPER's variants for tokens that are always an error there (an operand after an operand) made error 48 or 69 by `pm`: no longer pure errors, 26 more variants, ~2,800 temps | a mode of its own, `S_MATHM`, after such a name: one variant |
+| 89 | A promise's resolve and reject as `mathfn` natives wrapped by `bind` | five heap blocks per `new Promise`, and every call through `callv`'s bound loop | natives of their own (meta 129 / 130, the promise in the env word), none for a parameter the executor doesn't take: steps −20% |
 
 ## Open leads (untried)
 
@@ -292,3 +306,10 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 - **Network, more**: POST, request headers and response headers (more words); a gateway on the deployed site (a Worker
   with state per page); a two-click path with no gateway at all, through a form GET to a `data:` document (ENGINE_NOTES
   57: it can read CORS-enabled JSON as CSS and report through responsive iframes).
+- **Promises, more**: `finally`, `Promise.all` / `race` / `allSettled` need method-table entries, and `ALLM` is full
+  (63: its index is `M_METH`'s value mod 64, and `pm` = 4 + it below `PMFN`); widening those encodings makes room.
+  The ROM has 18 words left (12,270 of 12,288): growing it to 13,312 shifts RAM by 1,024 words (the caches' sets stay)
+  and adds a 13th ROM tier. An ALLOC kind for env cells (header and map bit by the instruction) would take `mark` off
+  every await's continuation and every closure's env (the async sample: `mark` 6% of its passes). The REPL runs an
+  entry's jobs after it, but its oracle can't check that (Node's REPL inspects the value before the jobs run; a vm
+  context with its own microtask queue runs them first).

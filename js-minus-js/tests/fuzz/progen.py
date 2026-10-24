@@ -326,7 +326,7 @@ class Gen:
         return out
     def stmt1(self, braceless=False):
         r = self.r; self.budget -= 1
-        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this', 'proto', 'alog']
+        opts = ['decl', 'decl', 'asg', 'asg', 'log', 'log', 'log', 'if', 'if', 'loop', 'inc', 'aset', 'pset', 'switch', 'callst', 'blk', 'putc', 'alloc', 'push', 'net', 'this', 'proto', 'alog', 'async']
         if self.loops: opts += ['break', 'cont']
         if self.cur is not None: opts += ['ret']
         if len(self.scopes) > 6 or self.budget < 0: opts = ['log', 'asg', 'inc']
@@ -371,6 +371,34 @@ class Gen:
         for _ in range(r.randint(1, 2)):
             out.append(r.choice([f'{n}({i()})', f'console.log({n}({i()}))', f'console.log(typeof {n}({i()}))',
                                  f'setTimeout(() => console.log({i()}), {r.randint(0, 3) * 10})', f'setTimeout(() => {n}({i()}))']) + self.semi())
+        return out
+    def s_async(self):
+        """an async function awaiting a number, a resolved promise, a new Promise (resolved now or by a timer) or another async
+        function's result; then / catch chains, a rejection always caught (its own statements, as s_alog: the top level, where
+        a promise's executor may hold an arrow). Their output interleaves with the program's (the oracle's microtask queue:
+        tests/jsctx.js run); console.log in an async function has at most 4 arguments (README Limits)"""
+        r = self.r
+        if self.inswitch or self.cur is not None: return None
+        n, m = self.fresh(), self.fresh()
+        if None in (n, m) or n == m: return None
+        kw = 'var' if len(self.scopes) == 1 else 'let'
+        self.scopes[-1][n] = Var(n, 'fobj'); self.scopes[-1][m] = Var(m, 'fobj')
+        i = lambda: str(r.randint(-9, 99))
+        aw = lambda own=True: r.choice([i(), f'Promise.resolve({i()})', f'new Promise(r_ => r_({i()}))', *([f'{m}({i()})'] if own else []),
+                                        f'new Promise(r_ => setTimeout(r_.bind(null, {i()}), {r.randint(0, 3) * 10}))'])
+        out = [r.choice([f'{kw} {m} = async x_ => x_ * 2 + {i()}', f'{kw} {m} = async function (x_) {{ await {aw(False)}; return x_ - 1; }}',
+                         f'{kw} {m} = async (x_) => {{ console.log("{m}", x_); return x_; }}']) + self.semi()]
+        out.append('\n'.join([f'{kw} {n} = async (a_) => {{', '  const b_ = await a_;',     # (names no other statement makes)
+                               r.choice([f'  console.log("{n}", b_, await {aw()});', f'  console.log(b_ + await {aw()});',
+                                         f'  if (b_ > {i()}) console.log("{n}", await {aw()});', f'  for (let j_ = 0; j_ < 2; j_++) console.log(await j_, b_);']),
+                               f'  return b_ * 3;', '}' + self.semi()]))
+        for _ in range(r.randint(1, 3)):
+            out.append(r.choice([f'{n}({aw()}).then(v_ => console.log(v_))', f'{n}({aw()}); console.log("{n}s")',
+                                 f'Promise.resolve({i()}).then(v_ => v_ + 1).then(v_ => console.log("p", v_))',
+                                 f'Promise.reject({i()}).catch(e_ => console.log("e", e_))',
+                                 f'{m}({i()}).then(v_ => {n}(v_)).then(v_ => console.log(v_))',
+                                 f'new Promise((y_, z_) => z_({i()})).then(v_ => console.log(v_), e_ => console.log("r", e_))',
+                                 f'setTimeout(() => {n}({aw()}), {r.randint(0, 3) * 10})']) + self.semi())
         return out
     def s_proto(self):
         """a constructor with a method on its prototype, an object made by Object.create and given another prototype, read through

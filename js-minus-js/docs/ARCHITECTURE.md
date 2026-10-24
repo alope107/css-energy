@@ -52,7 +52,7 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 14335 | count of global words (the collector's roots) | compiler `.fin` |
 | 14336 … | `bstr`: the built-in strings (the specials' names, `typeof`'s), 12 words apart | compiler `.fin` |
 | 14591 | `strend`: the string area's end | compiler `.fin` |
-| 14592 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 14640 (`map_base`) and its powers of two; the FPU's 14 scratch number lines at 14720 (`fpu_base`) and its digit buffer | instructions, ROM routines |
+| 14592 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`), MQ (the microtask queue, a root: §3.11); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 14640 (`map_base`) and its powers of two; the FPU's 14 scratch number lines at 14720 (`fpu_base`) and its digit buffer | instructions, ROM routines |
 | 14848 … 20991 | stack (`sp0`, 6,144 words) | program |
 | 20992 … 27135 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ALLOC, the cat class, ROM routines, the collector |
 | 27136 … 28671 | console (`console_words`, 1,536): the grid, `cols × rows` = 9 × 16 from its start (the REPL's `repl_cols × repl_rows` = 40 × 32), then the REPL's 32 marks from +1,280 (§3.10) | output instructions; marks: PUTC with A > 0 |
@@ -90,7 +90,7 @@ lists them in class order (the CSS CPU's class is a range of opcodes).
 | test | JZ JNZ | to A if B is false / true: 0 and the empty string are false (a string's length word is read) |
 | call | CALL RET NOT TENTER | CALL A, off: the return word (off × 8192 + the return address / 2: targets count instruction pairs) at fp + off, fp += off. RET B: B over the return word (the caller's slot for the value), fp −= off (its A: 32 if the function uses this, for `mkfn`; a label may turn it into DBIT k7, RETC). TENTER A: CALL A with off = TRAPOFF and the return address pst + 2 (PRINT's trap) |
 | mem | LDI STI | A = mem[B + C]; mem[A + B] = C (raw memory: the runtime library's `peek`, `poke`, `p[i]`) |
-| dyn | DADD … DMOD, DLT … DLNE, DBIT, DNEG, NUMLIT | two integers whose result is an integer here (DBIT: `& | ^ << >> >>>` by its A's 1024s); `+` with a string goes on to the cat class; anything else (doubles, specials, strings compared) the library, whose value the instruction moves into A (pst WBACK). NUMLIT A: A's cached value, or (undefined, or word1 ≥ 16) the library's `numlit` makes it: a double literal, a function's value, a closure, the global object |
+| dyn | DADD … DMOD, DLT … DLNE, DBIT, DNEG, NUMLIT | two integers whose result is an integer here (DBIT: `& | ^ << >> >>>` by its A's 1024s; 6, `await`, and 7, RETC, always trap); `+` with a string goes on to the cat class; anything else (doubles, specials, strings compared) the library, whose value the instruction moves into A (pst WBACK). NUMLIT A: A's cached value, or (undefined, or word1 ≥ 16) the library's `numlit` makes it: a double literal, a function's value, a closure, the global object |
 | arr | GETX SETX | A = B[C], A[B] = C: an array inside its length here; an object whose key is a number or the program's own string goes to the obj class's probe (pst: its first pair); anything else the library (an array grows, a string's character, a key built at run time) |
 | obj | GETP SETP NEW | A = B.key, A.key = B (C: the key's string-area offset), probing one pair per execution and following chunk links and the prototype's link; SETP stops at the prototype's link and adds a pair in place, carrying the link on (a full chunk: the library); GETP of a string: the library's `getps` (String.prototype); NEW: a chunk |
 | callv | CALLV | A = arguments + 32 if a this is given (63: apply): calls the value in slot fp + off when it is a function whose meta (parameters + 32 if it uses this) is A or A − 32, as CALL; anything else (padding, a closure's environment, this for a plain call, natives, bound functions) the library's `callv`, which enters the function through its own return word |
@@ -214,6 +214,16 @@ only on top, for a branch to fuse). So `x = a + b * c` is `MUL T1, b, c` then `A
   else; `new Number(` / `String(` / `Object(` are library calls on a dummy receiver (wrappers).
 - Timers: `setTimeout` / `setInterval` are library calls (a queue in `TCELL`); a program that sets one ends with
   `L: CALL nexttimer -> T(0); JZ T(0), end; CALLV 0, T(0); JMP L` before HALT (absolute targets: no labels).
+- Promises (§3.11): `new Promise(`, `Promise.` and `async` set `nfdef`'s `PROMS` (and `TIMERS`): such a program ends
+  with `L: CALL nexttask at F63; JZ F63, end; CALLV 1, F1; JMP L` (the jobs, then the timers). `new Promise(ex)` is a
+  library call on a dummy receiver (`NEWM`), `Promise.resolve` / `reject` are `S_MATHDOT`'s (`MATHM`), `then` / `catch`
+  methods. `async` (a token, `T_ASYNC`) pushes the marker `M_ASYNC`, which the next function's head takes
+  (`asyncf`): its control entry's d has `ASYNC` (32). `await` (`T_AWAIT`) is a unary operator, `AWAIT`, in such a
+  function only (error 79); its pop is `DBIT T(i) + 6·1024, x, local 1`, which never writes an assignment's target.
+  An async function's RETs are `DBIT 7·1024 + 16 (+ 32 if it uses this), v, local 1`: RETC with A + 16, no label.
+  Inside one, `console.log`'s first argument pushes `M_PDEF` on `M_PRINT`: each argument but the last goes to its temp
+  at its `,` and `)` prints them all (at most `PDEFN` = 3 set aside: with the last one's `PIECES`, `EMAX`); with
+  `M_PRINT` not on top, a `+` in them is an addition, not pieces.
 - Methods: `x.name(` copies the receiver above its slot as the first argument; the `)` emits `CALL` of the ROM routine
   for that name and argument count (`ALLM`). `parseInt(` `Number(` `String(` pass an unused receiver. A method's name not
   followed by `(` is a property (it was interned then).
@@ -341,14 +351,18 @@ routines). It is a static table in the page (in tiers of 1,024 words), so a chan
 
 - The dialect: functions, locals, `while` / `for` / `if`, no short-circuit `&&` / `||` or `break`, `peek` / `poke` /
   `p[i]` on raw memory, `putc`, `prn` (PRINT), `halt`, `__fp()` (this frame's fp), and the primitives' intrinsics
-  (`cc_ref.INTR`, below). No globals or string literals (they would land in the program's data area). A routine's frame
+  (`cc_ref.INTR`, below). A local's value can be called (CALLV), but only `call2` does (`newprom`'s executor):
+  `callv` decodes a CALLV from its code, and ROM can't be read, so it takes a caller in ROM to be `call2`'s CALLV 2 at
+  F4, which `rtlib.py` checks. No globals or string literals (they would land in the program's data area). A routine's frame
   holds tagged values, which the collector updates; a raw address must not be kept across an allocation.
 - `lib_src.js`: the collector and its stubs (`gcnew`, `galloc`, `gccat`), strings (`newstr`, `tostr`, `cat`, `scmp`), the
   dynamic operators' routines (`arith` and the FPU, `dcmp`, `leqr`, `jcmp`, `dbit`), numbers (`numstr`: the shortest
   digits, `numscan`, `numlit`), arrays (`newarr`, `grow`, `push`, `pop`, `join`), `getx` / `setx` / `pset`, `mkarrN`,
   the methods, printing (`pval`, `ptrap`, `ins`), run-time string keys (`okey`), functions (`mkfn`, `mkclo`, `newenv`,
   `retc`, `callv`, `bind1` …, natives), prototypes (`mknew`, `getdp` / `setdp`, `getpt` / `setpt`, `ocreate`,
-  `hasown`, `getps`, wrappers), the global object (`glob`), timers (`addtimer`, `nexttimer`, `cleartimer`), `Math`
+  `hasown`, `getps`, wrappers), the global object (`glob`), timers (`addtimer`, `nexttimer`, `cleartimer`), promises
+  and async functions (`mkprom`, `settle`, `react`, `resolve1`, `newprom`, `then2`, `await1`, `aret`, `resume`,
+  `nexttask`: §3.11), `Math`
   (`mabs` …, `mm`, `mrandom`), `refstub` (address 0: a function never declared, a ReferenceError) and `rstub`
   (address 2, RET: where `retc` returns).
 
@@ -549,6 +563,46 @@ left.
   transform: the rows' names come from their sentinels' view progress, which a transform doesn't move and
   `position: relative` on the line does (ENGINE_NOTES 81). Row r shows above line `L(r) = #{L < n : t_L ≤ r}`, at
   y = 12 + 24 (r + L(r)); a prompt is `>` where an entry starts (a mark, and line 0) and `...` where one goes on.
+
+### 3.11 Promises and async functions (`lib_src.js`, 2026-10-24)
+
+**Promises.** A promise is an object chunk of three hidden pairs, `[PKPS state][PKPS-1 value][PKPS-2 reactions]` (state 0
+pending, 1 fulfilled, 2 rejected, 3 resolved to another promise; `typeof` says `object`, `insprom` prints it). Its
+reactions are an array of triples (on fulfilled, on rejected, the promise the handler's value resolves). Settling
+(`settle`) queues a job per reaction; a reaction to a settled promise is a job at once (`react`). Resolving with a
+promise (`resolve1`) is a job of its own first, which then reacts to that promise with no handlers, so its outcome
+passes on: two jobs later, as JavaScript's `NewPromiseResolveThenableJob` makes it. `new Promise(ex)` calls ex with two
+bound natives (3 resolve, 4 reject: `native`), which do nothing once the promise is resolved.
+
+**The jobs.** The microtask queue is an array in rt cell MQ, which the collector forwards as a root: `[head, the resumed
+frame's fp, its promise, the running handler's promise, then a job (h, v, q, s) per four elements]`. A program that
+uses promises ends with the task loop (§2), whose `nexttask` (frame at F63) first resolves the last handler's promise
+with its value (F1, where the loop's CALLV left it), then takes jobs in order: a handler goes back to the loop in F1
+with its argument in F3 (CALLV 1); a job with no handler passes the outcome on; a continuation is entered (below). With
+no job left it takes the next timer (`nexttimer`), with its jobs to follow, as a browser runs them.
+
+**await.** `await x` is `DBIT T(i), x, local 1` with k 6, which always traps (TRAPDEF: the routine's frame at fp + 61).
+`await1` reads the DBIT back from code: its pair (the return word) and its A, the temp: every live word of the frame is
+below it (temps are a stack, and the arguments of a call under way and a console.log's set-aside ones are in temps
+below). It copies those words into a continuation, a closed env cell (`[hdr][base][n][promise][words][pair][env][frame
+words]`, so the collector scans it), closes the function's own env cell if it is open on this frame (as `retc` does, so
+that closures read and write its copy while it waits), puts the continuation in the awaited promise's reactions (or a
+job, for a value that isn't a promise), and returns the function's promise to its caller through `rstub`. Its promise
+is a new one, or (the frame is the one `nexttask` resumed: MQ's fp) the one it already had.
+
+**Resuming.** `resume` copies the frame back at the loop's F2, which is `nexttask`'s fp − TRAPDEF: the env cell's words
+over it, and the cell open on it again; the frame's return word goes to the loop's `CALL nexttask`. It records F2 and
+the promise in MQ, then `nexttask` returns into the DBIT with the value: a return from a frame at TRAPDEF leaves pst
+WBACK, so the DBIT moves the value into its A, as after any dynamic operator's trap. A rejected promise rejects the
+function's promise instead (there is no `try`). An async function's return is RETC with A + 16: `aret` resolves its
+promise (a resumed frame's, or a new one) with the value and returns the promise to its caller (`retc`, then `rstub`).
+
+A suspended function costs its frame's live words plus 7, rounded up to 8, in the heap until it resumes. The task
+loop's CALLV 1 calls a timer's callback with one argument, undefined (the timer-only loop's CALLV 0 calls it with none),
+so a callback without parameters goes through `callv`. `console.log` in an async function evaluates its arguments
+before printing them, as JavaScript does: elsewhere each prints as soon as it is computed (README Limits).
+
+---
 
 ## 4. Editor readback (`readback/ui_rb.py`)
 

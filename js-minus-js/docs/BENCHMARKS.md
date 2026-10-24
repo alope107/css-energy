@@ -785,3 +785,40 @@ editor's text (it reshapes every line every frame).
 15.5 s at 19 (the replay: 3.2, 9.8, 20, 36, 57.5). The 19th entry, two runs: the scan restarts 1.35 s after Enter, ends
 at 12.2–12.7 s, the compile at 13.8–14.5 s, the output shows at 16.5–17.3 s (37 steps). So the scan is the cost now: 64
 columns a frame each, every frame reshaping every line, though the lines already run keep their latched characters.
+
+## 21. Promises and async functions (2026-10-24, branch `async`)
+
+Branch `async` (HISTORY 19): promises in the library, `await` as one trapping instruction, a task loop at the program's
+end. Against main (`c3f6900`), each built in its own worktree; headless Chromium 153, the mini PC, **interleaved and
+unleased** (`../shared/js/ab.js`, fresh browser per run, not pinned), with other sessions' work beside it (load 3–9).
+
+**What it costs a program without promises** (FizzBuzz on the editor page, `EXP1=build/ui_exp/fizzbuzz.grid node
+machine/ui_seq.js`):
+
+| Build | Run → compiled | Run → HALT |
+|---|---|---|
+| main against main (8 rounds) | 1.005 (0.980–1.012) | |
+| First build (S_OPER's error variants no longer pure: 26 more; the 13th sample), 6 rounds | 1.029 (1.008–1.036) | |
+| … those fixed (`S_MATHM`), `console.log`'s set-aside arguments below `M_PRINT` | 1.028 (1.010–1.031) | 1.010 (1.001–1.015) |
+| **Final** (`M_PDEF` on `M_PRINT`, no error path in its push), 8 rounds | **1.011 (0.991–1.022)**, ~2.95 s | **0.989 (0.941–1.037)**, ~4.3 s |
+
+The compile chain: 465 → 488 variants, 235 → 244 rules, CSS 18.3 → 19.1 MB (`ccpage5`'s count); `tools/vsz.py` 492 →
+516 variants, 154,511 → 158,489 temps (+2.6%). The new tokens' variants in most modes (`async` / `await` after a name,
+in S_VARAFTER, …) are the same CSS as `this` / `new`'s there, so they share rules. What remains is `console.log`'s
+argument set-aside in every `,` (+57 temps) and `)` (+41) variant of S_OPER / S_NAMEE / S_NAMES, and the expression
+statement's shared variant (+161, only where a statement starts with punctuation). The 13th sample editor (`async`)
+measured nothing apart from it (with it 1.012, without it 1.017, in one noisy run).
+
+**Model** (`csssim.py`, the 181 programs both run): passes 22,897 → 22,928 (+0.14%, geometric mean 1.0002), steps
+174,463 → 175,169 (+0.4%); every program within ±2%. The steps are `callv`'s test for a caller in ROM and RETC's for an
+async function's return: `closure_gc` 7,314 → 7,370 steps.
+
+**What promises cost** (model passes; K = 32): the `async` sample 399 passes, 3,224 steps (est. 3.8 s; `tree` 238,
+`counter` 139); `promise_then` 411, `async_await` 472, `promise_order` 726, `async_rec` 1,379. Per operation (`cc_ref`
+steps, a loop of 11 less a loop of 1, over 10; an arrow closure made in the loop alone is 91): `await null` in an async
+function 261 (296 before `await1` closed the env cell itself and `nexttask` stopped testing for one: `await1` 76,
+`nexttask` 63, `resume` 35, a job 26, `mark` 17, the trap's decoding 17); `new Promise(r => r(i))` 319; `p.then(v => v)`
+and its job 281. Almost every pass ends on a miss (928 of 979 in the first sample): each promise, continuation and job
+touches new heap lines. A first sample (two counters sleeping on `new Promise` timers) took 1,132 passes; the library's
+queue helpers inlined and the resolve / reject functions as natives of their own took it to 979, steps −20% (HISTORY
+89); the sample now in the picker awaits `null` instead.

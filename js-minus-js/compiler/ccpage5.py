@@ -46,7 +46,7 @@ FAMILIES = [
      [R.S_FNAME, R.S_FPAREN, R.S_FPARAM, R.S_FPSEP, R.S_APAR1, R.S_AARROW0, R.S_AARROW, R.S_ABODY]),
     ('names', 'the token after a name, at a statement\'s start (an assignment, a call) or in an expression', [R.S_NAMES, R.S_NAMEE, R.S_NAMEEC]),
     ('operands', 'where an operand is expected: values, property names, object literals, window. / Math., new F(',
-     [R.S_OPND, R.S_DOT, R.S_OKEY, R.S_OCOLON, R.S_WDOT, R.S_MATHDOT, R.S_NEW, R.S_NEWN]),
+     [R.S_OPND, R.S_DOT, R.S_OKEY, R.S_OCOLON, R.S_WDOT, R.S_MATHDOT, R.S_MATHM, R.S_NEW, R.S_NEWN]),
     ('operators', 'after an operand: operators, closing brackets, the end of an expression', [R.S_OPER, R.S_OPERC]),
     ('console', 'console.log( up to its first argument', [R.S_CONDOT, R.S_CONLOG, R.S_CONLP, R.S_CONFIRST]),
 ]

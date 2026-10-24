@@ -9,8 +9,8 @@ const uncaught = e => e.name === 'ReferenceError' ? 'Uncaught ReferenceError\n' 
   : `Uncaught TypeError: ${e.message.endsWith('is not a function') ? 'not a function' : e.message}\n`;
 for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) {
   let out = '';
-  const ctx = require('./jsctx.js')(t => { out += t; }), drain = ctx.drain; delete ctx.drain;
-  try { vm.runInNewContext(fs.readFileSync(path.join(dir, f), 'utf8'), ctx, { timeout: 2000 }); drain(); }
+  const jsctx = require('./jsctx.js'), ctx = jsctx(t => { out += t; });
+  try { jsctx.run(ctx, fs.readFileSync(path.join(dir, f), 'utf8'), 2000); }
   catch (e) { out += uncaught(e); }
   const o = path.join(dir, f.replace(/\.js$/, '.out'));
   if (!fs.existsSync(o) || fs.readFileSync(o, 'utf8') !== out) fs.writeFileSync(o, out);

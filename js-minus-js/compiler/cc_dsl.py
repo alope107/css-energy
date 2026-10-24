@@ -51,7 +51,7 @@ def initial_parse(data_base):
 # punctuation codes the parser distinguishes (single chars and the lexer's two-char codes); others share a variant.
 # '?' and ':' are not among them: every variant costs some time on every token level, whether it applies or not, and
 # only S_OPER (and the modes that fall into it) accepts them, so they share the 'other punctuation' variant there
-PUNCT = sorted(({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL, R.T_ARROW, R.T_THIS, R.T_NEW, R.T_PROTO, R.T_PTYPE} | set(R.BIN) | set(R.COMPOUND)) - set(R.BITTOK))     # (cc_ref.BITTOK)
+PUNCT = sorted(({41, 59, 93, 40, 44, 61, 123, 91, 45, 8, 7, 46, 125, 33, R.T_NL, R.T_ARROW, R.T_THIS, R.T_NEW, R.T_PROTO, R.T_PTYPE, R.T_ASYNC, R.T_AWAIT} | set(R.BIN) | set(R.COMPOUND)) - set(R.BITTOK))     # (cc_ref.BITTOK)
 import os
 SPEC_LEVEL = os.environ.get('SPECK', 'mtv')     # m: mode only; mt: + token kind; mtv: + punctuation value
 # at a statement's start ( [ ! - (cc_ref.XSTART) begin an expression statement: there they share the 'other punctuation'
@@ -146,6 +146,25 @@ class Prog(Base):
         self.set('nloc', mul(not_(top), mod(s1, 64))); self.set('npar', mul(not_(top), mod(fdiv(s1, 64), 16)))
         self.set('fsym', mul(not_(top), mod(fdiv(s2, 512), 32))); self.set('fmark', mul(not_(top), fdiv(s2, 16384))); self.set('cfn', mul(not_(top), mod(s3, 16)))
         self.set('flab', mul(not_(top), mod(fdiv(s3, 16), 64))); self.set('fcsp', mul(not_(top), fdiv(s3, 1024)))
+    def isasync(self):
+        """cc_ref.isasync: the current function's entry (fcsp - 1) has d + ASYNC"""
+        fi = self.m(sub(self.v('fcsp'), 1), 'asfi')
+        B = add(*[mul(eq(fi, k), self.v(f'csB{k}')) for k in range(CD)])
+        return self.m(and_(gt(self.v('curf'), 0), mod(fdiv(B, R.ASYNC), 2)), 'asy')
+    def asyncf(self):
+        """cc_ref.asyncf: M_ASYNC on top is taken -> ASYNC (else 0)"""
+        tc, _ = self.top_op(); a = self.m(eq(tc, R.M_ASYNC), 'asf')
+        with self.when(a): self.set('osp', self.v('osp') - 1)
+        return self.m(mul(a, R.ASYNC), 'asfv')
+    def promflag(self):
+        """cc_ref.promflag"""
+        with self.when(lt(self.v('nfdef'), R.PROMS)): self.set('nfdef', add(mod(self.v('nfdef'), R.TIMERS), R.PROMS + R.TIMERS))
+    def ret(self, b, a, cl, asy, lab=None, islp=K(0)):
+        """cc_ref.ret: RET b (A: a), local 1 and the close label if cl (a top-level function's); an async function's (asy): RETC
+        with A + 16, no label (the library's aret). islp: close_block's slot, shared with a loop's JMP to lab"""
+        op = ite(islp, OP['JMP'], ite(asy, OP['DBIT'], OP['RET']))
+        self.emit(op, (add(a, mul(asy, 7 * 1024 + 16)), 0), b=b, c=(mul(or_(cl, asy), add(258, self.v('npar'))), 0),
+                  label=ite(islp, -1 if lab is None else lab, ite(and_(cl, not_(asy)), self.v('clab'), -1)))
     def captured(self, j, k):
         """cc_ref.captured (k: symbol j's kind)"""
         return self.m(and_(eq(k, 2), eq(self.v('curf'), 2), or_(and_(ge(j, R.NIMP), lt(j, self.v('fsym'))), ge(j, sub(NS, self.v('fmark'))))), 'capt')
@@ -234,11 +253,11 @@ class Prog(Base):
         w = self.m(mul(gt(osp, self.v('obase')), add(*[mul(eq(osp, k + 1), self.v(f'op{k}')) for k in range(OD)])), 'topw')
         return self.m(fdiv(w, 8192), 'topc'), self.m(mod(w, 8192), 'topv')
     def prec(self, code):
-        assert ((R.ADD, R.MUL, R.LT, R.EQ, R.LNE, R.BAND, R.BOR, R.BXOR, R.SHL, R.USHR, R.AND, R.OR, R.NOT, R.BNOT) ==
-                (8, 10, 13, 17, 20, 21, 22, 23, 24, 26, 27, 28, 29, 32))
+        assert ((R.ADD, R.MUL, R.LT, R.EQ, R.LNE, R.BAND, R.BOR, R.BXOR, R.SHL, R.USHR, R.AND, R.OR, R.NOT, R.BNOT, R.AWAIT) ==
+                (8, 10, 13, 17, 20, 21, 22, 23, 24, 26, 27, 28, 29, 32, 33))
         return self.m(add(mul(inrange(code, 10, 12), 11), mul(inrange(code, 8, 9), 10), mul(inrange(code, 24, 26), 9), mul(inrange(code, 13, 16), 8),
                           mul(inrange(code, 17, 20), 7), mul(eq(code, 21), 6), mul(eq(code, 23), 5), mul(eq(code, 22), 4),
-                          mul(eq(code, 27), 3), mul(eq(code, 28), 2), mul(inrange(code, 29, 32), 12),
+                          mul(eq(code, 27), 3), mul(eq(code, 28), 2), mul(inrange(code, 29, 33), 12),
                           mul(eq(code, R.M_CADD), 10), eq(code, R.M_TELSE)), 'prec')
     def tmerge(self, a, b): return self.m(ite(or_(eq(a, 1), eq(b, 1)), 1, mul(eq(a, b), b)), 'tmg')     # cc_ref.tmerge
     def lookup(self, h1, h2):
@@ -581,7 +600,8 @@ class Prog(Base):
                 ptop = self.v('ptop'); dR, tR, tL = self.m(mod(ptop, 4096), 'pdR'), self.m(mod(fdiv(ptop, 4096), 4), 'ptR'), self.otype(iL)
                 oR, oL, TR, TL = self.opnd(iR, dR), self.opnd(iL), self.tmp(iR), self.tmp(iL)
                 isAO = self.m(or_(eq(code, R.AND), eq(code, R.OR)), 'pao'); isTE = self.m(eq(code, R.M_TELSE), 'pte')
-                isUN = self.m(inrange(code, R.NOT, R.BNOT), 'pun'); isCA = self.m(eq(code, R.M_CADD), 'pca')
+                isUN = self.m(inrange(code, R.NOT, R.AWAIT), 'pun'); isCA = self.m(eq(code, R.M_CADD), 'pca')
+                isaw = self.m(eq(code, R.AWAIT), 'paw')       # (await x: DBIT k 6 into its temp, never the target; cc_ref)
                 hasstr = self.m(or_(eq(val, 2), eq(tR, 2)), 'pstr')
                 popped = self.m(or_(popped, go), 'ppd')
                 ok = K(1)
@@ -591,7 +611,7 @@ class Prog(Base):
                 iscmp = self.m(inrange(code, R.LT, R.LNE), 'picmp')
                 pnot = self.m(and_(eq(code, R.NOT), last, br), 'pnot')
                 pcmp = self.m(and_(isBIN, last, br, iscmp), 'pcmp')               # (a branch takes it: the jump traps for non-integers)
-                isd = self.m(and_(last, dvalid), 'pisd')
+                isd = self.m(and_(last, dvalid, not_(isaw)), 'pisd')
                 # the one instruction: && / || MOV T(iL), right; M_TELSE MOV T(iR), right (if not there); ! / - (dest or T(iR));
                 # binary (dest or T(iL)) left op right
                 with self.when(and_(ok, or_(isAO, and_(isTE, ne(dR, TMP)), and_(isUN, not_(pnot)), and_(isBIN, not_(pcmp))))):
@@ -599,10 +619,11 @@ class Prog(Base):
                     op = ite(or_(isAO, isTE), OP['MOV'], ite(isUN, ite(eq(code, R.NOT), OP['NOT'], ite(eq(code, R.NEG), OP['DNEG'],
                                                                     ite(eq(code, R.TYPEOF), OP['KIND'], OP['DBIT']))), dopc))
                     dst = add(ite(isAO, TL[0], ite(or_(isTE, and_(isUN, not_(isd))), TR[0], ite(isd, dfield, TL[0]))),
-                              mul(1024, add(mul(isBIN, bs), mul(eq(code, R.BNOT), R.BXOR - R.BAND))))     # (DBIT's operator; ~x: x ^ -1)
+                              mul(1024, add(mul(isBIN, bs), mul(eq(code, R.BNOT), R.BXOR - R.BAND), mul(isaw, 6))))     # (DBIT's operator; ~x: x ^ -1)
                     dstt = mul(not_(and_(isd, not_(isAO), not_(isTE))), gt(self.v('curf'), 0))     # (a temp's frame flag: 0 / 1)
                     un = or_(isAO, isTE, isUN)
-                    cU = ite(eq(code, R.NEG), R.K(0), ite(eq(code, R.TYPEOF), R.K(R.KINDS.index('typeof')), ite(eq(code, R.BNOT), R.K(-1), 0)))     # (DNEG: #0; KIND: typeof's test)
+                    cU = ite(eq(code, R.NEG), R.K(0), ite(eq(code, R.TYPEOF), R.K(R.KINDS.index('typeof')), ite(eq(code, R.BNOT), R.K(-1),
+                                                                                                                  ite(isaw, add(258, self.v('npar')), 0))))     # (DNEG: #0; KIND: typeof's test; await: local 1)
                     self.emit(op, (self.m(dst, 'pdst'), self.m(dstt, 'pdstt')), (ite(un, oR[0], oL[0]), ite(un, oR[1], oL[1])),
                               (ite(isBIN, oR[0], cU), mul(isBIN, oR[1])))
                 here = self.here()
@@ -616,7 +637,7 @@ class Prog(Base):
                 self.setif('nd', two, iR)
                 ae = add(mul(16384, self.v('tb')), mul(4096, ite(or_(isAO, isTE), self.tmerge(fdiv(val, 64), tR),
                                                     ite(or_(pnot, pcmp, and_(isUN, eq(code, R.NOT)), iscmp), 1,
-                                                        ite(isUN, ite(eq(code, R.TYPEOF), 2, 3), ite(isBIN, self.btype(binc, tL, tR), 3))))),
+                                                        ite(isUN, ite(eq(code, R.TYPEOF), 2, mul(not_(isaw), 3)), ite(isBIN, self.btype(binc, tL, tR), 3))))),
                          ite(pnot, add(CND + 4 * R.CNDOPS.index(R.NOT), mul(oR[1], 2)),
                              ite(pcmp, add(CND - 4 * R.LT, mul(code, 4), mul(oL[1], 2), oR[1]),
                              ite(and_(isd, or_(isUN, isBIN)), dfield, TMP))))
@@ -1052,7 +1073,9 @@ class Prog(Base):
                 k, o, b, cst = self.symkind_addr(j)
                 with self.when(p78n): self.incdec(pn1, pn2, tv, 2, (j, k, o, b, cst))     # x++ in an expression
                 ismath = self.m(and_(eq(pn1, KW['Math'][0]), eq(pn2, KW['Math'][1])), 'ismath')
-                sdot = self.m(and_(not_(p78n), lt(j, 0), or_(ismath, *[and_(eq(pn1, KW[w][0]), eq(pn2, KW[w][1])) for w in ('String', 'Object')]), P(46)), 'sdot')
+                isprm = self.m(and_(eq(pn1, KW['Promise'][0]), eq(pn2, KW['Promise'][1])), 'isprm')
+                sdot = self.m(and_(not_(p78n), lt(j, 0), or_(ismath, isprm, *[and_(eq(pn1, KW[w][0]), eq(pn2, KW[w][1])) for w in ('String', 'Object')]), P(46)), 'sdot')
+                with self.when(and_(sdot, isprm)): self.promflag()     # (Promise.resolve(x))
                 isstrn = self.m(and_(eq(pn1, KW['String'][0]), eq(pn2, KW['String'][1])), 'isstrn')
                 with self.when(sdot): self.push_od(R.K(0), 0); self.set('mode', ite(isstrn, R.S_DOT, R.S_MATHDOT)); self.done()     # String.fromCharCode
                 tyo = self.m(eq(self.top_op()[0], R.TYPEOF), 'ntyo')       # typeof x, x undeclared: "undefined"
@@ -1129,10 +1152,12 @@ class Prog(Base):
                 with self.when(and_(eq(self.v('csp'), 0), eres)): self.fail(4)
                 with self.when(and_(eq(self.v('csp'), 0), not_(eres))):
                     self.setif('rst', and_(ne(I('rdone'), 0), eq(self.v('rst'), 0)), self.here())     # (cc_ref: no entry after the lines run)
-                    with self.when(ge(self.v('nfdef'), R.TIMERS)):    # cc_ref.timer_loop
-                        t = self.tmp(K(0)); l = self.here()
-                        self.emit(OP['CALL'], (self.ent.get('nexttimer', 0) // 2, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JZ'], (add(l, 4), 0), b=t)
-                        self.emit(OP['CALLV'], (0, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JMP'], (l, 0))
+                    with self.when(ge(self.v('nfdef'), R.TIMERS)):    # cc_ref.timer_loop, or (promises) task_loop
+                        t = self.tmp(K(0)); l = self.here(); pr = self.m(ge(self.v('nfdef'), R.PROMS), 'eopr'); npr = not_(pr)
+                        self.emit(OP['CALL'], (ite(pr, self.ent.get('nexttask', 0) // 2, self.ent.get('nexttimer', 0) // 2), 0),
+                                  w1=(ite(pr, R.TASKOFF, sub(t[0], 256)), mul(npr, t[1])))
+                        self.emit(OP['JZ'], (add(l, 4), 0), b=(ite(pr, 256 + R.TASKOFF, t[0]), mul(npr, t[1])))
+                        self.emit(OP['CALLV'], (pr, 0), w1=(ite(pr, 1, sub(t[0], 256)), mul(npr, t[1]))); self.emit(OP['JMP'], (l, 0))
                     with self.when(I('repl')): self.emit(OP['PUTC'], (1 + R.MARKEND, 0), (R.K(0), 0))     # (cc_ref: the output's end)
                     self.emit(OP['HALT']); self.done()
             with self.when(P(123)): self.push_cs(R.C_BLOCK); self.done()
@@ -1141,7 +1166,9 @@ class Prog(Base):
             fstep = self.m(and_(P(41), eq(t0, R.C_FORSTEP)), 'fstep')
             with self.when(fstep): self.set('f_simple', 1)
             with self.when(or_(P(7), P(8))): self.set('pn1', tv); self.set('pn2', 0); self.set('mode', R.S_PREINC); self.done()
-            other = self.m(and_(not_(isEOF), not_(P(123)), not_(P(125)), not_(P(59)), not_(fstep), not_(P(7)), not_(P(8))), 'oth')
+            asys = P(R.T_ASYNC)
+            with self.when(and_(asys, not_(fstep))): self.promflag(); self.push_op(R.M_ASYNC); self.done()     # (async function f: cc_ref)
+            other = self.m(and_(not_(isEOF), not_(P(123)), not_(P(125)), not_(P(59)), not_(fstep), not_(asys), not_(P(7)), not_(P(8))), 'oth')
             exs = self.m(and_(other, or_(isNUM, isSTR, *[P(c) for c in R.XSTART])), 'exs')     # an expression statement (cc_ref)
             with self.when(and_(exs, fallin)): self.fail(8)
             with self.when(and_(exs, not_(fallin))): self.push_cs(R.C_EXPR); self.set('mode', R.S_OPND)      # (into S_OPND)
@@ -1190,8 +1217,8 @@ class Prog(Base):
                     bad = self.m(ge(self.v('curf'), 2), 'fbad')
                     with self.when(bad): self.fail(41)
                     with self.when(not_(bad)):
-                        lo = self.newlab(); self.emit(OP['JMP'], label=lo); self.set('mode', R.S_FNAME)
-                        self.push_cs(ite(gt(self.v('curf'), 0), R.C_FUNCN, R.C_FUNCB), lo); self.done()
+                        a = self.asyncf(); lo = self.newlab(); self.emit(OP['JMP'], label=lo); self.set('mode', R.S_FNAME)
+                        self.push_cs(ite(gt(self.v('curf'), 0), R.C_FUNCN, R.C_FUNCB), lo, 0, 0, a); self.done()
                 with self.when(not_(or_(*[KWc(k) for k in kws]))):
                     self.set('pn1', th1); self.set('pn2', th2); self.set('mode', R.S_NAMES); self.done()
         # ---- S_PREINC
@@ -1270,7 +1297,7 @@ class Prog(Base):
                 with self.when(eq(self.v('err'), 0)):
                     self.fn_enter(ite(isb, fi, kn))
                     r = self.m(self.v('cp'), 'fbr')            # (its body: cc_ref, c / d of its entry)
-                    with self.when(isb): self.set_topB(lambda B: add(sub(B, mod(B, 4096)), mul(mod(r, 64), 64), mul(fdiv(r, 64), 4)))
+                    with self.when(isb): self.set_topB(lambda B: add(sub(B, mod(B, 4096)), mul(mod(r, 64), 64), mul(fdiv(r, 64), 4), mod(B, 64)))
                     self.set('mode', R.S_FPAREN); self.done()
         with block(R.S_FPAREN):
             with self.when(not_(P(40))): self.fail(35)
@@ -1300,13 +1327,21 @@ class Prog(Base):
             mk_ = self.m(add(*[mul(and_(eq(th1, KW[c][0]), eq(th2, KW[c][1])), k + 1) for c, k in R.MATHK.items()]), 'mmk')
             tpar = self.m(ge(tv, 262144), 'mtp')
             meth = self.m(and_(isID, ne(mi_, 0), tpar), 'mmeth')
+            mpend = self.m(and_(isID, ne(mi_, 0), not_(tpar), eq(mv_, 0)), 'mpend')     # (its '(' after a blank: S_MATHM)
+            with self.when(mpend): self.set('pm', add(mi_, 3)); self.set('mode', R.S_MATHM); self.done()
             with self.when(meth): self.set('pn1', 0); self.set('pn2', 0); self.set('pm', add(mi_, 3)); self.set('mode', R.S_OPER); self.done()
             val = self.m(and_(isID, not_(meth), or_(ne(mk_, 0), and_(ne(mi_, 0), ne(mv_, 0)))), 'mval')
-            with self.when(and_(not_(meth), not_(val))): self.fail(69)
+            with self.when(and_(not_(meth), not_(val), not_(mpend))): self.fail(69)
             with self.when(val):                               # (dummy[a hidden key], pending as x[k]: cc_ref)
                 isk = self.m(ne(mk_, 0), 'misk')
                 self.push_od(KBIG, 0, sub(R.PKSTAT, ite(isk, sub(mk_, 1), add(sub(mv_, 1), len(R.MATHK)))))
                 self.set('pm', 2); self.set('mode', R.S_OPER); self.done()
+        with block(R.S_MATHM):                             # Math.floor ( (cc_ref): the call, as S_OPER's
+            with self.when(not_(P(40))): self.fail(69)
+            with self.when(P(40)):
+                i = self.m(self.v('nd') - 1, 'mmi')
+                self.put(self.tmp(i + 1), i); self.set_od(i, TMP, 0); self.set('tb', self.v('tb') + 1)
+                self.push_op(R.M_METH, sub(self.v('pm'), 4)); self.set('pm', 0); self.set('mode', R.S_OPND); self.done()
         with block(R.S_NEW):                               # new F(...): F's name (cc_ref)
             nbad = self.m(or_(not_(isID), self.isres(th1, th2)), 'nbad')
             with self.when(nbad): self.fail(3)
@@ -1314,7 +1349,8 @@ class Prog(Base):
         with block(R.S_NEWN):
             with self.when(not_(P(40))): self.fail(35)
             nw = self.m(add(*[mul(and_(eq(self.v('pn1'), h[0]), eq(self.v('pn2'), h[1])), ix + 1) for h, ix in R.NEW_INDEX.items()]), 'nwi')
-            with self.when(and_(P(40), ne(nw, 0))):            # new Number( ...: a wrapper (cc_ref)
+            with self.when(and_(P(40), ne(nw, 0))):            # new Number( ...: a wrapper (cc_ref; new Promise)
+                with self.when(eq(nw, R.NEW_INDEX[KW['Promise']] + 1)): self.promflag()
                 self.push_od(TMP, 0); self.set('tb', self.v('tb') + 1); self.push_op(R.M_METH, sub(nw, 1)); self.set('mode', R.S_OPND); self.done()
             with self.when(and_(P(40), eq(nw, 0))): self.new_call(self.v('pn1'), self.v('pn2'))
         for am in (R.S_AARROW0, R.S_AARROW):              # () => / (a, b) =>
@@ -1337,7 +1373,13 @@ class Prog(Base):
             with self.when(and_(P(41), ne(cfv, 2))):
                 self.set('osp', self.v('osp') - 1); self.emit(OP['PUTC'], b=(R.K(10), 0)); self.print_end()
             with self.when(not_(P(41))):
-                self.set_top_op(R.M_PRINT, 0); self.set('mode', R.S_OPND)
+                self.set_top_op(R.M_PRINT, 0)
+                osp_ = self.m(self.v('osp'), 'osp')
+                with self.when(and_(self.isasync(), lt(osp_, OD))):      # (an async function's console.log: cc_ref; no error path)
+                    for k in range(OD):
+                        with self.when(eq(osp_, k)): self.set(f'op{k}', R.M_PDEF * 8192)
+                    self.set('osp', osp_ + 1)
+                self.set('mode', R.S_OPND)
         # ---- objects (cc_ref)
         with block(R.S_DOT):
             dpt = self.m(or_(P(R.T_PROTO), P(R.T_PTYPE)), 'dpt')     # o.__proto__ / f.prototype: x[a hidden key] (cc_ref)
@@ -1413,11 +1455,16 @@ class Prog(Base):
             with self.when(KWc('function')):                   # a function expression (cc_ref): its value; a key gives it its name
                 with self.when(ge(self.v('curf'), 2)): self.fail(41)
                 with self.when(lt(self.v('curf'), 2)):
-                    tc_, tv_ = self.top_op()
+                    a = self.asyncf(); tc_, tv_ = self.top_op()
                     self.push_op(R.M_FN, mul(eq(tc_, R.M_OKEY), tv_)); lo = self.newlab(); self.emit(OP['JMP'], label=lo)
-                    self.push_cs(R.C_FUNCE, lo); self.set('mode', R.S_FNAME); self.done()
+                    self.push_cs(R.C_FUNCE, lo, 0, 0, a); self.set('mode', R.S_FNAME); self.done()
             tyo = KWc('typeof')
             with self.when(tyo): self.push_op(R.TYPEOF); self.done()
+            with self.when(P(R.T_ASYNC)): self.promflag(); self.push_op(R.M_ASYNC); self.done()     # (cc_ref)
+            with self.when(P(R.T_AWAIT)):                      # await x: a unary operator, in an async function only (cc_ref)
+                aok = self.isasync()
+                with self.when(not_(aok)): self.fail(79)
+                with self.when(aok): self.snapshot(lambda d: lt(d, 256)); self.push_op(R.AWAIT); self.done()
             with self.when(P(R.T_THIS)): self.this_val()
             with self.when(P(R.T_NEW)): self.set('mode', R.S_NEW); self.done()
             with self.when(P(123)):                            # an object literal: NEW, then each pair as o.key = v
@@ -1577,6 +1624,9 @@ class Prog(Base):
             with self.when(and_(live(), P(44))):
                 vasg = self.m(and_(eq(osp0, ob0), eq(self.top()[0], R.C_ASSIGN), ne(self.top()[3], 0)), 'vasg')
                 with self.when(eq(tc, R.M_PRINT)): self.print_call(32); self.set_top_op(R.M_PRINT, 2); self.set('mode', R.S_CONFIRST); self.done()
+                with self.when(eq(tc, R.M_PDEF)):              # (an async function's console.log: the argument set aside, cc_ref)
+                    with self.when(ge(tvv, R.PDEFN)): self.fail(30)
+                    with self.when(lt(tvv, R.PDEFN)): self.arg_end(); self.set_top_op(R.M_PDEF, tvv + 1); self.set('mode', R.S_OPND); self.done()
                 with self.when(eq(tc, R.M_OKEY)): self.okey_end(tvv, 0)
                 with self.when(eq(tc, R.M_ARR)):              # cc_ref.arr_elem
                     with self.when(ge(tvv, 8)): self.arr_store(tvv)
@@ -1586,7 +1636,7 @@ class Prog(Base):
                     self.set_top_op(R.M_ARR, tvv + 1); self.set('mode', R.S_OPND); self.done()
                 with self.when(anyeq(tc, (R.M_CALL, R.M_METH, R.M_CALLV))): self.arg_end(); self.set_top_op(tc, tvv + 64)       # count the arguments
                 with self.when(anyeq(tc, (R.M_CALL, R.M_METH, R.M_PUTC, R.M_CALLV))): self.set('mode', R.S_OPND); self.done()
-                known = anyeq(tc, (R.M_PRINT, R.M_OKEY, R.M_ARR, R.M_CALL, R.M_METH, R.M_PUTC, R.M_CALLV))
+                known = anyeq(tc, (R.M_PRINT, R.M_PDEF, R.M_OKEY, R.M_ARR, R.M_CALL, R.M_METH, R.M_PUTC, R.M_CALLV))
                 with self.when(and_(not_(known), vasg)): self.set('f_expr', 1)
                 with self.when(not_(or_(known, vasg))): self.fail(44)
             with self.when(and_(live(), P(41))):
@@ -1597,8 +1647,13 @@ class Prog(Base):
                 with self.when(eq(tc, R.M_PUTC)):
                     self.set('osp', osp0 - 1); o = self.src(self.v('nd') - 1); self.emit(OP['PUTC'], b=o)
                     self.set('nd', self.v('nd') - 1); self.push_od(R.K(0), 0); self.done()
-                with self.when(eq(tc, R.M_PRINT)): self.print_call(10); self.set('osp', osp0 - 1); self.print_end()
-                other = self.m(not_(anyeq(tc, (R.M_PAREN, R.M_CALL, R.M_METH, R.M_PUTC, R.M_PRINT, R.M_CALLV))), 'o41')
+                pdf = self.m(eq(tc, R.M_PDEF), 'pdf')         # (an async function's console.log: the arguments set aside first, cc_ref)
+                for j in range(R.PDEFN):
+                    with self.when(and_(pdf, lt(j, tvv))): self.emit(OP['PRINT'], (2 * R.SEP[32], 0), self.tmp(add(self.v('nd') - 1, j, mul(tvv, -1))))
+                with self.when(pdf): self.set('osp', osp0 - 1)
+                with self.when(or_(eq(tc, R.M_PRINT), pdf)):
+                    self.print_call(10); self.set('osp', self.v('osp') - 1); self.setif('tb', pdf, sub(self.v('tb'), tvv)); self.print_end()
+                other = self.m(not_(anyeq(tc, (R.M_PAREN, R.M_CALL, R.M_METH, R.M_PUTC, R.M_PRINT, R.M_PDEF, R.M_CALLV))), 'o41')
                 with self.when(and_(other, gt(osp0, ob0))): self.fail(46)
                 with self.when(and_(other, eq(osp0, ob0))): self.set('f_expr', 1)
             with self.when(and_(live(), eq(binop, 0), semi)):
@@ -1686,7 +1741,7 @@ class Prog(Base):
                 self.fnw.append((self.x.g, cfn, add(*[mul(eq(cfn, n_), I(f'fh1_{n_}')) for n_ in range(NF)]),
                                  add(*[mul(eq(cfn, n_), I(f'fh2_{n_}')) for n_ in range(NF)]), add(mod(fl, 64), mul(rty, 64), mul(fdiv(fl, 256), 256))))
             o = self.src(i); d1 = self.m(eq(self.v('curf'), 1), 'rd1')       # (a top-level function's: its close label, local 1)
-            self.emit(OP['RET'], b=o, c=(mul(d1, add(258, self.v('npar'))), 0), label=ite(d1, self.v('clab'), -1)); self.set('nd', i); self.set('f_compl', 1); self.done()
+            self.ret(o, 0, d1, self.isasync()); self.set('nd', i); self.set('f_compl', 1); self.done()
         with self.when(not_(or_(c1, c2, c3, c4, c6, c7, c8, c9, c10, c11))): self.fail(50)
 
     def end_simple_stmt(self, P):
@@ -1751,10 +1806,9 @@ class Prog(Base):
             # the code (one instruction slot for both): loop JMP top; function RET #0 (and its frame label := its count of locals)
             cd1 = self.m(and_(isfn, eq(self.v('curf'), 1)), 'ccd1')     # (a top-level function's RET: its close label, local 1)
             uth = self.m(and_(isfn, mod(fdiv(t[4], 2), 2)), 'cuth')     # (it uses this: RET's A 32, the library's mkfn)
-            with self.when(or_(islp, isfn)): self.emit(ite(islp, OP['JMP'], OP['RET']), (mul(uth, 32), 0), b=(ite(islp, 512, R.K(R.UNDEF)), 0),
-                                                       c=(mul(cd1, add(258, self.v('npar'))), 0), label=ite(islp, t[1], ite(cd1, self.v('clab'), -1)))
+            with self.when(or_(islp, isfn)): self.ret((ite(islp, 512, R.K(R.UNDEF)), 0), mul(uth, 32), cd1, and_(isfn, self.isasync()), t[1], islp)
             isb = self.m(eq(k, R.C_FUNCB), 'cisb')         # a declaration's calls' entry (cc_ref): its body, or a thunk that makes this the global
-            body = self.m(add(self.cb // 2, t[3], mul(fdiv(t[4], 4), 64)), 'cbody')     # object (sharing the switch's label port)
+            body = self.m(add(self.cb // 2, t[3], mul(fdiv(mod(t[4], R.ASYNC), 4), 64)), 'cbody')     # object (sharing the switch's label port)
             thk = self.here()
             with self.when(and_(isb, uth)):
                 self.emit(OP['NUMLIT'], (R.GCELL, 0), w1=R.GLOBK); self.emit(OP['MOV'], (257, 0), (R.GCELL, 0)); self.emit(OP['JMP'], (body, 0))
@@ -1789,19 +1843,21 @@ class Prog(Base):
             if not fresh: self.fnw.append((self.x.g, cfn, self.fn_sel(cfn, 'fh1_'), self.fn_sel(cfn, 'fh2_'), add(mod(fl, 256), mul(add(npar, 1), 256))))
             self.set('nloc', 1)                                # (local 1: an env cell; an inner function's meta + 16: cc_ref)
             self.datum(add(cfn, R.FTAB), add(self.here(), mul(add(npar, mul(eq(self.v('curf'), 2), 16)), 8192)))
-            t = self.top(); self.set('mode', ite(and_(eq(t[0], R.C_FUNCE), ne(t[4], 0)), R.S_AARROW, R.S_LBRACE)); self.done()
+            t = self.top(); self.set('mode', ite(and_(eq(t[0], R.C_FUNCE), mod(t[4], 2)), R.S_AARROW, R.S_LBRACE)); self.done()
 
     def arrow_start(self, h1, h2, argc=0):
         """cc_ref.arrow_start (h1 None: no parameter). argc: as fnnew's"""
-        curf = self.m(self.v('curf'), 'asc'); tc_, tv_ = self.top_op()
+        curf = self.m(self.v('curf'), 'asc')
         with self.when(ge(curf, 2)): self.fail(41)
         ares = self.m(and_(lt(curf, 2), self.isres(h1, h2)), 'ares') if h1 is not None else K(0)
         with self.when(ares): self.fail(36)
+        with self.when(and_(lt(curf, 2), not_(ares))): asy = self.asyncf()
+        tc_, tv_ = self.top_op()
         opd = self.m(and_(lt(curf, 2), not_(ares), gt(tc_, 0), lt(tc_, 100)), 'aopd')     # (an operator's operand: 1 + x => x)
         with self.when(opd): self.fail(48)
         with self.when(and_(lt(curf, 2), not_(ares), not_(opd))):
             nm = self.m(mul(eq(tc_, R.M_OKEY), tv_), 'anm')
-            self.push_op(R.M_FN, nm); lo = self.newlab(); self.emit(OP['JMP'], label=lo); self.push_cs(R.C_FUNCE, lo, 0, 0, 1)
+            self.push_op(R.M_FN, nm); lo = self.newlab(); self.emit(OP['JMP'], label=lo); self.push_cs(R.C_FUNCE, lo, 0, 0, add(1, asy))
             self.emit(OP['MOV'], w1=mul(ne(nm, 0), add(nm, self.db - R.STRTAG))); ka = self.fnnew(argc); self.fn_enter(ka)
             if h1 is not None:
                 with self.when(eq(self.v('err'), 0)):
@@ -1815,7 +1871,7 @@ class Prog(Base):
         """cc_ref.arrow_close: the body's RET; the function's end (close_block's)"""
         self.pop_cs(); i = self.m(self.v('nd') - 1, 'aci'); o = self.src(i)
         cd1 = self.m(eq(self.v('curf'), 1), 'acd1')     # (a top-level function's RET: its close label, local 1)
-        self.emit(OP['RET'], b=o, c=(mul(cd1, add(258, self.v('npar'))), 0), label=ite(cd1, self.v('clab'), -1)); self.set('nd', i)
+        self.ret(o, 0, cd1, self.isasync()); self.set('nd', i)
         t = self.pop_cs(); self.set('nlet', t[5]); self.deflab(t[1], self.here())     # (its frame label: 1, arrow_body)
         fkn = self.m(self.v('cfn'), 'acfk'); self.fn_exit()
         self.set('osp', self.v('osp') - 1); j = self.m(self.v('nd'), 'acj'); self.push_od(TMP, 0)

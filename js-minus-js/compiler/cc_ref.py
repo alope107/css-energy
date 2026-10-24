@@ -164,7 +164,7 @@ def dyn_fast(op, x, y, k=0):
     return r if issmi(r) else None
 # operator codes on the parser's operator stack (and their precedences: prec)
 (NOP, PUSHI, LOADG, STOREG, LOADL, STOREL, LOADI, STOREI, ADD, SUB, MUL, DIV, MOD, LT, GT, LE, GE, EQ, NE, LEQ, LNE,
- BAND, BOR, BXOR, SHL, SHR, USHR, AND, OR, NOT, NEG, TYPEOF, BNOT) = range(33)
+ BAND, BOR, BXOR, SHL, SHR, USHR, AND, OR, NOT, NEG, TYPEOF, BNOT, AWAIT) = range(34)
 # (ADD ... LNE in the order of their dynamic instructions, DADD ... DLNE: the opcode is the code + a constant; BAND ... USHR right
 # after them are DBIT, whose A's 1024s are the code - BAND)
 BITOPS = (BAND, BOR, BXOR, SHL, SHR, USHR)
@@ -232,6 +232,8 @@ PKPROTO, PKPT = SPV0 - 1, SPV0 - 2
 # Math.PI ... (MATHK), Math.min / max, Object.create as values (MATHV): x[PKSTAT - i] on the dummy receiver (getx: the constant or
 # the native; setx ignores them: Object.create = f is no error)
 PKSTAT = SPV0 - 3
+# a promise's chunk: three hidden pairs, PKPS (its state), PKPS - 1 (its value), PKPS - 2 (its reactions) (lib_src.js mkprom)
+PKPS = SPV0 - 16
 HP, GCLIM, GCSP, KEYCELL, RETCELL = range(LAYOUT['rt_base'], LAYOUT['rt_base'] + 5)
 RBUF0 = LAYOUT['rt_base'] + LAYOUT['rt_cells'].index('RBUF0')        # NET's answers, unpacked into bytes (net/device.py)
 def netw(ans):
@@ -495,7 +497,7 @@ METHODS = [('push', {1: 'push'}, 3), ('pop', {0: 'pop'}, 0), ('shift', {0: 'shif
            ('startsWith', {1: 'startswith'}, 1), ('endsWith', {1: 'endswith'}, 1), ('repeat', {1: 'repeat'}, 2),
            ('fromCharCode', {1: 'fromcc'}, 2), ('lastIndexOf', {1: 'lastindexof'}, 3), ('fill', {1: 'fill'}, 0),
            ('toString', {0: 'tostring0'}, 2), ('splice', {k: f'splice{k}' for k in range(9)}, 0), ('bind', {1: 'bind1', 2: 'bind2', 3: 'bind3'}, 0),
-           ('hasOwnProperty', {1: 'hasown'}, 1)]
+           ('hasOwnProperty', {1: 'hasown'}, 1), ('then', {1: 'then1', 2: 'then2'}, 0), ('catch', {1: 'catch1'}, 0)]
 # functions called like methods on a dummy receiver (0): parseInt(s), Number(x), String(x), parseFloat(s); their names are reserved
 GLOBALS = [('parseInt', {1: 'parseint'}, 3), ('Number', {1: 'number'}, 3), ('String', {1: 'tostring'}, 2), ('parseFloat', {1: 'parsefloat'}, 3),
            ('fetch', {1: 'fetch'}, 3), ('read', {0: 'read'}, 3),       # the network (net/device.py)
@@ -506,17 +508,19 @@ MATHM = [('abs', {1: 'mabs'}, 3), ('floor', {1: 'mfloor'}, 3), ('ceil', {1: 'mce
          ('trunc', {1: 'mtrunc'}, 3), ('sign', {1: 'msign'}, 3), ('sqrt', {1: 'msqrt'}, 3), ('exp', {1: 'mexp'}, 3), ('log', {1: 'mlog'}, 3),
          ('sin', {1: 'msin'}, 3), ('cos', {1: 'mcos'}, 3), ('tan', {1: 'mtan'}, 3), ('pow', {2: 'mpow'}, 3),
          ('min', {k: f'min{k}' for k in range(5)}, 3), ('max', {k: f'max{k}' for k in range(5)}, 3), ('random', {0: 'mrandom'}, 3),
-         ('create', {1: 'ocreate'}, 0)]                  # (Object.create: Object. is a dummy receiver as Math. is)
+         ('create', {1: 'ocreate'}, 0),                  # (Object.create: Object. is a dummy receiver as Math. is)
+         ('resolve', {0: 'presolve0', 1: 'presolvev'}, 0), ('reject', {1: 'prejectv'}, 0)]     # (Promise.resolve / reject: so is Promise.)
 MATHK = {'PI': 0, 'E': 1, 'LN2': 2, 'LN10': 3, 'LOG2E': 4, 'LOG10E': 5, 'SQRT2': 6, 'SQRT1_2': 7}      # (cc_ref.FCONSTS)
 MATHV = ('min', 'max', 'create')                        # as values: the library's natives (mathfn)
 # new Number(x) / new String(x) / new Object(): wrapper objects (the library's wrapnum ...: an object whose first key, PKVAL, holds
 # the primitive, which ToPrimitive (prim) takes)
-NEWM = [('Number', {0: 'wrapnum0', 1: 'wrapnum'}, 0), ('String', {0: 'wrapstr0', 1: 'wrapstr'}, 0), ('Object', {0: 'wrapobj0', 1: 'wrapobj'}, 0)]
+NEWM = [('Number', {0: 'wrapnum0', 1: 'wrapnum'}, 0), ('String', {0: 'wrapstr0', 1: 'wrapstr'}, 0), ('Object', {0: 'wrapobj0', 1: 'wrapobj'}, 0),
+        ('Promise', {1: 'newprom'}, 0)]             # (new Promise(ex): the library calls ex)
 ALLM = METHODS + GLOBALS + MATHM + NEWM
 assert len(ALLM) < 64
 KW = {k: h1h2(k) for k in ['var', 'let', 'const', 'if', 'else', 'while', 'for', 'return', 'function', 'putc', 'console', 'log',
                            'true', 'false', 'break', 'continue', 'do', 'null', 'switch', 'case', 'default', 'length', 'String',
-                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply', '__proto__', 'prototype', 'Object', 'Math'] + list(MATHK)
+                           'undefined', 'NaN', 'Infinity', 'typeof', 'window', 'globalThis', 'of', 'in', 'this', 'new', 'call', 'apply', '__proto__', 'prototype', 'Object', 'Math', 'async', 'await'] + list(MATHK)
                           + [m[0] for m in ALLM] + INTR}
 METHOD_INDEX = {KW[m[0]]: i for i, m in enumerate(METHODS)}
 # f.call( / f.apply( (pm PMFN + 0 / 1): f is called with this = the first argument (apply: the second's elements as arguments)
@@ -540,6 +544,10 @@ FCACHE = IMPC + NIMP
 # the timers' queue (setTimeout / setInterval): global TCELL, past the functions' caches; nfdef + TIMERS once the program sets one,
 # so that its end runs them (cc_ref timer_loop)
 TCELL, TIMERS = FCACHE + 16, 64
+# a program that uses promises (async, new Promise, Promise.): nfdef + PROMS (and TIMERS), so that its end runs the jobs and the
+# timers (cc_ref task_loop); its async functions' entries have d + ASYNC
+PROMS, ASYNC = 128, 32
+TASKOFF = 63                            # (task_loop's CALL nexttask: its frame at F63, the resumed frame at F2: lib_src.js resume)
 RCELL = TCELL + 1                       # Math.random's state
 SPCELL = RCELL + 1                      # String.prototype (an object made the first time)
 ECELL = SPCELL + 1                      # the REPL's entry value (Compiler repl): what the entry's last expression statement left
@@ -557,9 +565,10 @@ RESERVED = tuple(KW[w] for w in ('var', 'let', 'const', 'if', 'else', 'while', '
 # punctuation that can start an expression statement (not a statement): ( [ ! - ~; at a statement's start the CSS compiler's
 T_THIS, T_NEW = 25, 26                  # this, new: the lexer makes them punctuation (variants of their own: no cost to other names)
 T_PROTO, T_PTYPE = 27, 28               # __proto__, prototype (after '.': x[a hidden key], so GETX / SETX trap to the library)
-PKW = {KW['this']: T_THIS, KW['new']: T_NEW, KW['__proto__']: T_PROTO, KW['prototype']: T_PTYPE}
+T_ASYNC, T_AWAIT = 29, 30              # async, await
+PKW = {KW['this']: T_THIS, KW['new']: T_NEW, KW['__proto__']: T_PROTO, KW['prototype']: T_PTYPE, KW['async']: T_ASYNC, KW['await']: T_AWAIT}
 # variants don't tell them apart (cc_dsl.variant_key: STMTM)
-XSTART = (40, 91, 33, 45, 126, T_THIS, T_NEW)
+XSTART = (40, 91, 33, 45, 126, T_THIS, T_NEW, T_AWAIT)
 
 # punctuation codes: single chars by ASCII; two-char ops: === 1, !== 2, <= 3, >= 4, && 5, || 6, ++ 7, -- 8,
 # += 9, -= 10, *= 11, /= 12, %= 13 (== and != as === and !== with tflag); NL 14: a newline after a token that can end a
@@ -591,7 +600,8 @@ BITTOK = (38, 124, 94, 126, 15, 16, 17, 18, 19, 20, 21, 22, 23)
 ESC = {110: 10, 116: 9, 114: 13}
 def prec(code):
     return {MUL: 11, DIV: 11, MOD: 11, ADD: 10, M_CADD: 10, SUB: 10, SHL: 9, SHR: 9, USHR: 9, LT: 8, GT: 8, LE: 8, GE: 8,
-            EQ: 7, NE: 7, LEQ: 7, LNE: 7, BAND: 6, BXOR: 5, BOR: 4, AND: 3, OR: 2, M_TELSE: 1, NOT: 12, NEG: 12, TYPEOF: 12, BNOT: 12}.get(code, 0)
+            EQ: 7, NE: 7, LEQ: 7, LNE: 7, BAND: 6, BXOR: 5, BOR: 4, AND: 3, OR: 2, M_TELSE: 1, NOT: 12, NEG: 12, TYPEOF: 12, BNOT: 12,
+            AWAIT: 12}.get(code, 0)
 
 # popops pops at most popcap(minprec) operators: between markers the binary operators' precedences increase upwards (one per
 # class from minprec to 11, M_TELSE at 1), and unary ones (12) stack only on top: UNARYRUN of them at most (more: error 22). The CSS
@@ -616,6 +626,13 @@ M_CALLV = 113
 # M_FN: a function expression's barrier (its value: the name it takes from an object literal's key, or 0); a function body's
 # expressions use the operator and operand stacks above obase / dbase
 M_FN = 114
+# M_ASYNC: 'async' before a function or an arrow's head (cc_ref.asyncf takes it: the function's entry's d + ASYNC)
+M_ASYNC = 115
+# M_PDEF: on M_PRINT in an async function's console.log, from its first argument (value: the arguments set aside): each one but
+# the last goes to its temp at its ',', and ')' prints them all, so that one after an await prints after it too (a + is an
+# addition there: no pieces, M_PRINT isn't on top)
+M_PDEF = 116
+PDEFN = 3                               # (with PIECES of the last, EMAX PRINTs at its ')')
 # the runtime library's intrinsics (rom mode): M_INTR's value = the intrinsic (INTR) + 32 * its slot on the operand stack (d0)
 M_INTR = 112
 # control stack kinds. Bodies: IFB / ELSEB / LOOPB and DOB (a = continue target, b = break target; DOB c = the loop
@@ -650,7 +667,8 @@ C_IFB1, C_ELSEB1, C_DOB1, C_LOOPB1 = C_IFB + BRACELESS, C_ELSEB + BRACELESS, C_D
 S_APAR1, S_AARROW0, S_AARROW, S_ABODY, S_OPERC, S_NAMEEC = range(29, 35)
 S_NEW, S_NEWN = 35, 36                    # new F( : after new, after its name
 S_MATHDOT = 37                            # after Math.
-NMODES = 38
+S_MATHM = 38                              # after Math. name when a blank comes before its '(' (pm: the method, as S_OPER's)
+NMODES = 39
 CMODES = {S_OPERC: S_OPER, S_NAMEEC: S_NAMEE}
 ACLOSE = (41, 44, 59, 125, T_NL)          # the tokens that can end an expression body (not ']' or ':': [x => x] and c ? x => 1 : 2
                                           # need parentheses; four rules fewer, ccpage5)
@@ -740,9 +758,21 @@ class Compiler:
         """a top-level function's RETs carry its close label (RET + it is RETC once the function makes a closure: fn_enter)"""
         return self.clab if self.curf == 1 and not self.rom else None
     def ret(self, b, a=0):
-        """RET b; a top-level function's: RET b, local 1 with its close label (cc_ref RETC)"""
+        """RET b; a top-level function's: RET b, local 1 with its close label (cc_ref RETC); an async function's: RETC with A + 16
+        (the library's aret: its promise resolved, for its caller)"""
         lab = self.closelab()
+        if self.isasync(): self.emit('DBIT', (7 * 1024 + 16 + a, 0), b=b, c=(L(self.npar + 1 + self.th()), 0)); return
         self.emit('RET', (a, 0), b=b, c=(L(self.npar + 1 + self.th()), 0) if lab is not None else (0, 0), label=lab)
+    def isasync(self):
+        """the current function is async (its entry's d, which a pop leaves in place)"""
+        return self.curf > 0 and bool(self.cs[self.fcsp - 1][4] & ASYNC)
+    def asyncf(self):
+        """a function's head: ASYNC if 'async' came before it (M_ASYNC on top: taken)"""
+        if self.top_op()[0] != M_ASYNC: return 0
+        self.osp -= 1; return ASYNC
+    def promflag(self):
+        """the program uses promises: its end runs the jobs (task_loop)"""
+        if self.nfdef < PROMS: self.nfdef = self.nfdef % TIMERS + PROMS + TIMERS
     # Closures: a function inside a function (curf 2) reads and writes its outer function's variables through that invocation's
     # env cell (the library's: its base word holds the frame's address while it runs, the cell's own copy of the frame after it
     # returned: RETC). Every function's local 1 holds an env cell: a top-level function's own (once it makes a closure), an inner
@@ -947,6 +977,9 @@ class Compiler:
                 self.set_od(i, TMP, tmerge(val // self.LM, self.otype(i + 1))); self.deflab(val % self.LM, self.here())
             elif code == M_TELSE:                       # c ? a : b: a went to T(i); b joins it
                 i = self.nd - 1; t = tmerge(val // self.LM, self.otype(i)); self.to_temp(i); self.set_od(i, TMP, t); self.deflab(val % self.LM, self.here())
+            elif code == AWAIT:                         # await x: DBIT k 6 into its temp, local 1 (the library's await1)
+                i = self.nd - 1; b = self.src(i); o = self.tmp(i)
+                self.emit('DBIT', (o[0] + 6 * 1024, o[1]), b, (L(self.npar + 1 + self.th()), 0)); self.set_od(i, TMP, 0)
             elif code == NOT and last and mode == 'br':
                 i = self.nd - 1; self.pend(i, NOT, self.src(i), (0, 0))
             elif code in (NOT, NEG, TYPEOF, BNOT):      # (user code's -x: DNEG; typeof x: KIND's test 'typeof'; ~x: x ^ -1)
@@ -1231,6 +1264,14 @@ class Compiler:
         self.emit('CALL', (self.ent.get('nexttimer', 0) // 2, 0), w1=(t[0] - 256, t[1])); self.emit('JZ', (l + 4, 0), b=t)
         self.emit('CALLV', (0, 0), w1=(t[0] - 256, t[1])); self.emit('JMP', (l, 0))
 
+    def task_loop(self):
+        """the program's end when it uses promises: L: CALL nexttask at F63 (the next job's function into F1, its argument into
+        F3; 0: none left, the end); JZ F63 -> end; CALLV 1, F1; JMP L. The library's nexttask runs the jobs, then the timers,
+        and enters an await's continuation itself"""
+        l = self.here()
+        self.emit('CALL', (self.ent.get('nexttask', 0) // 2, 0), w1=(TASKOFF, 0)); self.emit('JZ', (l + 4, 0), b=(256 + TASKOFF, 0))
+        self.emit('CALLV', (1, 0), w1=(1, 0)); self.emit('JMP', (l, 0))
+
     def this_val(self):
         """this: a function's own (frame slot 1; its entry's d |= 2: uthis); an arrow's is its outer function's (through the env,
         that function's entry d |= 2); at the top level, and in an arrow there, the global object"""
@@ -1451,7 +1492,7 @@ class Compiler:
                 elif h in GLOBAL_INDEX:                                  # parseInt(s), ...: a method on a dummy receiver
                     self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, GLOBAL_INDEX[h])    # (the receiver: unused)
                     if h in (KW['setTimeout'], KW['setInterval']) and self.nfdef < TIMERS: self.nfdef += TIMERS
-                elif not self.rom and self.lookup(h) >= 0:   # a variable's value: CALLV (the callee in its slot)
+                elif self.lookup(h) >= 0:                    # a variable's value: CALLV (the callee in its slot; the library's newprom)
                     j = self.lookup(h); self.snapshot(lambda q: q < 256)
                     if self.captured(j): self.cread(j)
                     else: self.push_od(self.var(j), 0); self.to_temp(self.nd - 1)
@@ -1464,7 +1505,8 @@ class Compiler:
             if isP(7) or isP(8): return self.incdec(h, v, 2)
             if h in WGLOB and isP(46): self.pn = (0, 0); self.mode = S_WDOT; return     # window.x: x
             j = self.lookup(h)
-            if j < 0 and h in (KW['String'], KW['Object'], KW['Math']) and isP(46):     # String.fromCharCode(...), Object.create(p), Math.f(x):
+            if j < 0 and h in (KW['String'], KW['Object'], KW['Math'], KW['Promise']) and isP(46):     # String.fromCharCode(...), Object.create(p), Math.f(x):
+                if h == KW['Promise']: self.promflag()       # (Promise.resolve(x))
                 self.push_od(K(0), 0); self.mode = S_DOT if h == KW['String'] else S_MATHDOT; return     # a method on a dummy receiver
             tyo = self.top_op()[0] == TYPEOF
             k = self.fnlook(h) if j < 0 and not self.rom else -1
@@ -1516,13 +1558,15 @@ class Compiler:
                                      or any(self.sym[k][2] == 3 for k in range(self.nimp))     # read, never assigned or declared
                                      or any((self.fn[k][0], self.fn[k][1]) in RESERVED for k in range(self.nfn))): return self.fail(4)
                 if self.rdone and not self.rst: self.rst = self.here()     # (no entry after the lines run: the end's code)
-                if self.nfdef >= TIMERS and not self.rom: self.timer_loop()
+                if self.nfdef >= PROMS and not self.rom: self.task_loop()
+                elif self.nfdef >= TIMERS and not self.rom: self.timer_loop()
                 if self.repl: self.emit('PUTC', (1 + MARKEND, 0), (K(0), 0))     # (the output's end)
                 self.emit('HALT'); return
             if isP(123): self.push_cs(C_BLOCK); return
             if isP(125): return self.close_block()
             if isP(59): return self.end_simple_stmt(kind, v)
             if isP(41) and self.top_cs()[0] == C_FORSTEP: return self.end_simple_stmt(kind, v)
+            if isP(T_ASYNC): self.promflag(); self.push_op(M_ASYNC); return     # (async function f: its declaration)
             if isP(7) or isP(8): self.pn = (v, 0); self.mode = S_PREINC; return
             if kind in ('NUM', 'STR') or (kind == 'P' and v in XSTART) or (kind == 'ID' and (v in LITK or isK_('typeof'))):
                 if fallin: return self.fail(8)
@@ -1558,8 +1602,8 @@ class Compiler:
             if isK_('break') or isK_('continue'): self.pn = (int(isK_('break')), 0); self.mode = S_BRK; return
             if isK_('function'):                             # a declaration (inside a function: a local variable's value)
                 if self.curf >= 2 or (self.rom and self.csp): return self.fail(41)
-                lo = self.newlab(); self.emit('JMP', label=lo); self.mode = S_FNAME
-                self.push_cs(C_FUNCN if self.curf else C_FUNCB, lo); return
+                a = self.asyncf(); lo = self.newlab(); self.emit('JMP', label=lo); self.mode = S_FNAME
+                self.push_cs(C_FUNCN if self.curf else C_FUNCB, lo, 0, 0, a); return
             self.pn = v; self.mode = S_NAMES; return
         if m == S_PREINC:
             if kind != 'ID': return self.fail(10)
@@ -1631,7 +1675,7 @@ class Compiler:
                 if fk == C_FUNCB:
                     r = self.here() - self.cb // 2; t = self.cs[self.csp - 1]
                     if self.rom: t[3] = r
-                    else: t[3], t[4] = r % 64, 4 * (r // 64)
+                    else: t[3], t[4] = r % 64, 4 * (r // 64) + (t[4] & ASYNC)
                 self.mode = S_FPAREN; return
         if m == S_FPAREN:
             if not isP(40): return self.fail(35)
@@ -1652,17 +1696,23 @@ class Compiler:
         if m == S_MATHDOT:                                     # Math. name: a method (the call: S_OPER, M_METH), a constant, min / max's value
             if kind != 'ID' or not (v in MATH_INDEX or v in [KW[c] for c in MATHK]): return self.fail(69)
             if v in MATH_INDEX and self.tparen: self.pn = (0, 0); self.pm = 4 + MATH_INDEX[v]; self.mode = S_OPER; return
+            if v in MATH_INDEX and ALLM[MATH_INDEX[v]][0] not in MATHV:      # (its '(' after a blank: S_MATHM)
+                self.pm = 4 + MATH_INDEX[v]; self.mode = S_MATHM; return
             if v in MATH_INDEX:                                # (a value: dummy[a hidden key], pending as x[k])
-                if ALLM[MATH_INDEX[v]][0] not in MATHV: return self.fail(69)
                 k = len(MATHK) + MATHV.index(ALLM[MATH_INDEX[v]][0])
             else: k = MATHK[next(c for c in MATHK if KW[c] == v)]
             self.push_od(KBIG, 0, PKSTAT - k); self.pm = 2; self.mode = S_OPER; return
+        if m == S_MATHM:                                       # Math.floor (: the call, as S_OPER's for o.name (
+            if not isP(40): return self.fail(69)
+            i = self.nd - 1; self.put(self.tmp(i + 1), i); self.set_od(i, TMP, 0); self.tb += 1
+            self.push_op(M_METH, self.pm - 4); self.pm = 0; self.mode = S_OPND; return
         if m == S_NEW:                                         # new F(...): F's name
             if kind != 'ID' or v in RESERVED: return self.fail(3)
             self.pn = v; self.mode = S_NEWN; return
         if m == S_NEWN:                                        # new F( : F's value, a new object (its prototype F's) as its this
             if not isP(40): return self.fail(35)
-            if self.pn in NEW_INDEX:                           # new Number( ...: a method on a dummy receiver (a wrapper)
+            if self.pn in NEW_INDEX:                           # new Number( ...: a method on a dummy receiver (a wrapper; new Promise)
+                if self.pn == KW['Promise']: self.promflag()
                 self.push_od(TMP, 0); self.tb += 1; self.push_op(M_METH, NEW_INDEX[self.pn]); self.mode = S_OPND; return
             return self.new_call(self.pn)
         if m in (S_AARROW0, S_AARROW):                         # () => / (a, b) =>
@@ -1682,6 +1732,7 @@ class Compiler:
                 if self.opv[self.osp - 1] == 2: return self.fail(30)
                 self.osp -= 1; self.emit('PUTC', b=(K(10), 0)); return self.print_end()
             self.opv[self.osp - 1] = 0
+            if self.isasync() and self.osp < OD: self.push_op(M_PDEF)     # (no room: it prints as it goes; no error of its own)
             m = self.mode = S_OPND
         if m == S_DOT:                                         # o . name
             if isP(T_PROTO) or isP(T_PTYPE):                   # o.__proto__ / f.prototype: x[a hidden key]
@@ -1724,13 +1775,17 @@ class Compiler:
                 self.push_od(KBIG, 2, e - STRTAG); self.mode = S_OPER; return
             if kind == 'ID' and v in LITK: self.push_od(*LITK[v]); self.mode = S_OPER; return
             if isK_('typeof'): self.push_op(TYPEOF); return
+            if isP(T_ASYNC): self.promflag(); self.push_op(M_ASYNC); return     # (an async function expression or arrow follows)
+            if isP(T_AWAIT):                                   # await x: a unary operator, in an async function only
+                if not self.isasync(): return self.fail(79)
+                self.snapshot(lambda q: q < 256); self.push_op(AWAIT); return
             if isP(T_THIS) and not self.rom: return self.this_val()
             if isP(T_NEW) and not self.rom: self.mode = S_NEW; return
             if isK_('function') and not self.rom:             # a function expression: its value (its name from a key it is the value of)
                 if self.curf >= 2: return self.fail(41)
-                t, tv = self.top_op()
+                a = self.asyncf(); t, tv = self.top_op()
                 self.push_op(M_FN, tv if t == M_OKEY else 0); lo = self.newlab(); self.emit('JMP', label=lo)
-                self.push_cs(C_FUNCE, lo); self.mode = S_FNAME; return
+                self.push_cs(C_FUNCE, lo, 0, 0, a); self.mode = S_FNAME; return
             if isP(123):                                       # an object literal: NEW, then each pair as o.key = v
                 i = self.nd; self.push_od(TMP, 0)
                 if self.err: return
@@ -1857,6 +1912,9 @@ class Compiler:
                 t, tv = self.top_op()
                 if isP(44):
                     if t == M_PRINT: self.print_call(32); self.opv[self.osp - 1] = 2; self.mode = S_CONFIRST; return
+                    if t == M_PDEF:                            # (an async function's console.log: at most PDEFN set aside)
+                        if tv >= PDEFN: return self.fail(30)
+                        self.arg_end(); self.opv[self.osp - 1] += 1; self.mode = S_OPND; return
                     if t == M_OKEY: return self.okey_end(tv, 0)
                     if t == M_ARR: return self.arr_elem(tv)
                     if t == M_CALL: self.arg_end(); self.opv[self.osp - 1] += 4 * self.FM
@@ -1871,6 +1929,9 @@ class Compiler:
                 if t == M_METH: self.osp -= 1; return self.meth_end(tv, 1)
                 if t == M_PUTC:
                     self.osp -= 1; self.emit('PUTC', b=self.src(self.nd - 1)); self.nd -= 1; self.push_od(K(0), 0); return
+                if t == M_PDEF:                                # (an async function's console.log: the arguments set aside first)
+                    for j in range(tv): self.emit('PRINT', (2 * SEP[32], 0), self.tmp(self.nd - 1 + j - tv))
+                    self.osp -= 1; self.print_call(10); self.osp -= 1; self.tb -= tv; return self.print_end()
                 if t == M_PRINT: self.print_call(10); self.osp -= 1; return self.print_end()
                 if self.osp > self.obase: return self.fail(46)
                 return self.end_expr_stmt(kind, v)
@@ -1982,7 +2043,7 @@ class Compiler:
         if k in FUNCS:                                     # (still inside: the RET's frame label)
             self.ret((K(0 if self.rom else UNDEF), 0), 32 * (t[4] // 2 % 2))     # (A 32: it uses this; the library's mkfn)
             if k == C_FUNCB:                               # its calls' entry: the body, or (it uses this) this := the global object; JMP body
-                body = self.cb // 2 + t[3] + 64 * (t[4] // 4); e = body
+                body = self.cb // 2 + t[3] + 64 * (t[4] % ASYNC // 4); e = body
                 if t[4] & 2:
                     e = self.here(); self.emit('NUMLIT', (GCELL, 0), w1=GLOBK); self.emit('MOV', (L(1), 0), (GCELL, 0)); self.emit('JMP', (body, 0))
                 self.deflab(self.fn[self.cfn][2], e)
@@ -2009,10 +2070,10 @@ class Compiler:
         cc_dsl's fnnew does: before fn_enter, which can run out of labels)"""
         if self.curf >= 2: return self.fail(41)
         if h in RESERVED: return self.fail(36)            # ((break, x) =>: the first name came as a pending name)
-        t, tv = self.top_op()
+        a = self.asyncf(); t, tv = self.top_op()
         if 0 < t < 100: return self.fail(48)              # (an operator's operand: 1 + x => x)
         nm = tv if t == M_OKEY else 0
-        self.push_op(M_FN, nm); lo = self.newlab(); self.emit('JMP', label=lo); self.push_cs(C_FUNCE, lo, 0, 0, 1)
+        self.push_op(M_FN, nm); lo = self.newlab(); self.emit('JMP', label=lo); self.push_cs(C_FUNCE, lo, 0, 0, 1 + a)
         self.emit('MOV', w1=self.db + nm - STRTAG if nm else 0); k = self.fnnew()
         if argc and not self.err: self.fn[k][4] = argc
         self.fn_enter(k)
@@ -2035,7 +2096,7 @@ class Compiler:
     def end_params(self):
         f = self.fn[self.cfn]                                # the calls so far must pass npar arguments (call_end)
         if f[4] and f[4] != self.npar + 1: return self.fail(76)
-        f[4] = self.npar + 1; t = self.top_cs(); self.mode = S_AARROW if t[0] == C_FUNCE and t[4] else S_LBRACE
+        f[4] = self.npar + 1; t = self.top_cs(); self.mode = S_AARROW if t[0] == C_FUNCE and t[4] & 1 else S_LBRACE
         if not self.rom:                                     # (its value's: FTAB, + 16 parameters: a closure, its env in local 1)
             self.nloc = 1; self.datum(FTAB + self.cfn, self.here() + 8192 * (self.npar + 16 * (self.curf == 2)))
 

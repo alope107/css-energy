@@ -19,7 +19,7 @@ def consts():
     """lib_src.js's __NAME__ constants"""
     k = dict(DB=DB, SDATA=R.SDATA, STR_LO=U.STR_LO, HEAP0=U.HEAP0, H=H, HEAP_HI=U.HEAP_HI, STRTAG=R.STRTAG, OBJTAG=U.OBJTAG, ARRTAG=U.ARRTAG,
              INIT=INIT, SP0=SP0, TRAPOFF=R.TRAPOFF, FUNTAG=R.FUNTAG, ENVTAG=R.ENVTAG, RSTUB=2, FTAB=R.FTAB, FCACHE=R.FCACHE, STREND=L['strend'], TRUEV=R.TRUEV, FALSEV=R.FALSEV, STRP0=R.STRP0, MAP=MAP, MAPH=MAPN // 2, POWT=POWT,
-             GCELL=R.GCELL, GLOBK=R.GLOBK, JMPOP=R.OP['JMP'], PKPROTO=R.PKPROTO, PKPT=R.PKPT, TCELL=R.TCELL, RCELL=R.RCELL, SPCELL=R.SPCELL, ECELL=R.ECELL, PKVAL=R.PKVAL, PKSTAT=R.PKSTAT, NSTAT=len(R.MATHK) + len(R.MATHV), NMATHK=len(R.MATHK))
+             GCELL=R.GCELL, GLOBK=R.GLOBK, JMPOP=R.OP['JMP'], PKPROTO=R.PKPROTO, PKPT=R.PKPT, TCELL=R.TCELL, RCELL=R.RCELL, SPCELL=R.SPCELL, ECELL=R.ECELL, PKVAL=R.PKVAL, PKSTAT=R.PKSTAT, PKPS=R.PKPS, PKPV=R.PKPS - 1, PKPR=R.PKPS - 2, C2OFF=C2OFF, ROMPAIRS=L['rom_size'] // 2, NSTAT=len(R.MATHK) + len(R.MATHV), NMATHK=len(R.MATHK))
     k.update(CELL); k['NETPARTS'] = L['net_parts']; k['NBUF'] = 2 * L['net_parts']
     k.update({f'K_{n.upper()}': i for i, n in enumerate(R.KINDS)}); k.update({f'A_{n.upper()}': i for i, n in enumerate(R.ALLOCK)})
     k.update({n: v for n, v in zip(R.SPECIALS, range(R.SPV0, R.SPV0 + 8))}); k.update(SPV0=R.SPV0, TRAPDEF=R.TRAPDEF)
@@ -32,9 +32,11 @@ def consts():
     k.update(DIGS=R.DIGS, CLO=R.DIGS + 20, NEND=R.DIGS + 21, DBLTAG=R.DBLTAG, SMI_LO=R.SMI_LO, SMI_HI=R.SMI_HI)
     return k
 
+C2OFF = 4                                        # call2's CALLV slot (the library's only CALLV: callv can't read ROM)
 # the runtime's messages (it has no string literals): m_<name>() prints one, a putc per character
 MSGS = {'uncaught': 'Uncaught ', 'referr': 'ReferenceError', 'typeerr': 'TypeError: ', 'notfn': 'not a function',
-        'fnname': '[Function: ', 'fnanon': '[Function (anonymous)]'}
+        'fnname': '[Function: ', 'fnanon': '[Function (anonymous)]', 'promise': 'Promise { ', 'pending': '<pending>',
+        'rejected': '<rejected> '}
 # and fixed texts it writes into strings: w_<name>(p) writes one at p
 WSTRS = {'fnhead': 'function ', 'fntail': '() { [native code] }'}
 def msgs():
@@ -53,6 +55,9 @@ def build(out):
         h = R.h1h2(n); f = next(f for f in c.fn[:c.nfn] if (f[0], f[1]) == h)
         entries[n] = 2 * c.lab[f[2]]                  # (code labels are instruction pairs: the address / 2)
     rom = [words.get(a, 0) for a in range(max(words) + 1)]
+    cv = [a for a in range(0, len(rom), 2) if rom[a] // 8192 == R.OP['CALLV']]
+    assert cv == [a for a in cv if entries['call2'] <= a < entries['call2'] + 8] and len(cv) == 1 and rom[cv[0]] % 8192 == 2 and rom[cv[0] + 1] == C2OFF, \
+        f'the library calls a value only in call2, as CALLV 2 at F{C2OFF} (callv assumes it): {cv}'
     assert len(rom) % 2 == 0
     rom[0:2] = [R.OP['JMP'] * 8192 + entries['refstub'] // 2, 0]     # address 0 (undefined labels: cc_ref.NIMP): to refstub
     assert entries['rstub'] == 2, 'rstub (RET F1) must be the first routine: retc returns through it'

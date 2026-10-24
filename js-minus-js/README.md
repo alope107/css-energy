@@ -1,7 +1,7 @@
 # JavaScript, compiled and run by a stylesheet
 
 `dist/js_in_css.xhtml` is one static XHTML page (its stylesheets in `dist/js_in_css/`), and no script runs on it. You
-type a JavaScript program into its editor (or pick one of twelve samples) and press Run; `dist/repl.xhtml` is a REPL on
+type a JavaScript program into its editor (or pick one of thirteen samples) and press Run; `dist/repl.xhtml` is a REPL on
 the same machinery, run a line at a time ([REPL](#repl)). The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
@@ -17,13 +17,14 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 
 **Status (2026-10-24).**
 
-- Every test level passes: 180 programs checked against Node's output and 49 the compiler must reject, the twelve
+- Every test level passes: 191 programs checked against Node's output and 52 the compiler must reject, the thirteen
   samples through the compiler in Chrome and on the page, plus differential tests that check thousands of generated,
   reformatted and mutated programs against Node (`make fuzz`). The CPU's checks: C1 (its model, every program) and C2
   (a CPU-only page per program; `make c2-all` every program, the collector's tests included).
 - The language covers everything in the [learnxinyminutes JavaScript tutorial](https://learnxinyminutes.com/javascript/)
   ([The language](#the-language)): JavaScript's numbers as doubles, `true` / `null` / `undefined` as values, functions
-  as values, closures, arrows, `this`, prototypes and `new`, timers, `Math`.
+  as values, closures, arrows, `this`, prototypes and `new`, timers, `Math`; and since 2026-10-24 promises and
+  `async` / `await` ([How await works](#how-await-works)).
 - The machine is a register machine since 2026-10-21, with the runtime's work on memory as machine instructions and a
   code cache since 2026-10-22 (BENCHMARKS §15). The language above costs it time (BENCHMARKS §17): against the machine
   before it, CPU-only pages run 1.20× longer (geometric mean of 16 programs) and programs compile 1.18× longer (median
@@ -60,7 +61,7 @@ the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timeli
 
 Everything in the [learnxinyminutes JavaScript tutorial](https://learnxinyminutes.com/javascript/) compiles and prints
 what Node prints: `tests/suite/lxym_1_basics` … `lxym_4_functions` are its first four sections as written, `this_call`,
-`proto_chain`, `builtin_protos` and `arrows` the rest, beside 171 other programs. In detail:
+`proto_chain`, `builtin_protos` and `arrows` the rest, beside 181 other programs. In detail:
 
 - **Values**: numbers (JavaScript's doubles), strings, `true` / `false`, `null`, `undefined`, `NaN`, `Infinity`,
   arrays, objects and functions. `typeof` names them; `false`, `null`, `undefined`, `NaN`, `0`, `-0` and `""` are
@@ -100,6 +101,13 @@ what Node prints: `tests/suite/lxym_1_basics` … `lxym_4_functions` are its fir
 - **Timers**: `setTimeout(f, ms)`, `setInterval(f, ms)`, `clearTimeout`, `clearInterval`. The callbacks run once the
   program is done, by due time and then in the order they were set, as a browser runs them (no time passes: the
   machine runs them at once). `alert(x)` prints `x` (the page has no dialogs).
+- **Promises and async functions**: `new Promise((resolve, reject) => ...)`, `p.then(f)`, `p.then(f, g)`, `p.catch(g)`,
+  `Promise.resolve(x)`, `Promise.reject(x)`; `async function f() {}` and async function expressions and arrows
+  (`async x => ...`, `async (a, b) => { ... }`), with `await` in them. Their jobs run as Node runs them: once the
+  program is done and after each timer's callback, all of them before the next timer, in Node's order (a promise
+  resolved with another promise follows it a job later, as `NewPromiseResolveThenableJob` makes it). An async
+  function's variables live while it waits: closures made in it read and write them, and its other calls run.
+  Promises print as Node prints them (`Promise { 1 }`, `Promise { <pending> }`, `Promise { <rejected> 'x' }`).
 - **Errors at run time**: calling something that isn't a function stops with `Uncaught TypeError: not a function`,
   reading a name that was never declared or assigned with `Uncaught ReferenceError`.
 - **Output**: `console.log(a, b, ...)` and `putc(code)`; arrays and objects print as Node prints them on one line.
@@ -127,6 +135,14 @@ what Node prints: `tests/suite/lxym_1_basics` … `lxym_4_functions` are its fir
   a function that uses it, a bound function, `apply`) goes through ROM.
 - Each `console.log` argument is one PRINT instruction, which writes up to 4 console cells per execution; a `+`
   chain with a string in it isn't built: its pieces are printed in turn.
+
+### How await works
+
+`await x` is one instruction. It traps into the runtime library, which copies the function's frame (every live word is
+below the await's temp) into a heap block and returns the function's promise to its caller, as `return` would. When
+`x` settles, the program's end loop (it runs the jobs, then the timers) copies the frame back onto the stack and
+returns into the same instruction, which takes the value; a rejection rejects the function's promise instead. An async
+function's `return` resolves its promise. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.11.
 
 ### How objects work
 
@@ -173,6 +189,14 @@ machine too; a key built at run time is first matched by its characters. Details
   wrap it in parentheses. A newline inside an expression body ends it when the statement around it could end there.
 - **Timers** run after the program in due order, but no time passes (`setTimeout(f, 5000)` doesn't wait), and a
   program with a `setInterval` it never clears runs forever.
+- **Promises**: `await` only inside an async function (not at the top level: error 79). In an async function
+  `console.log` takes at most 4 arguments (error 30): there it prints them all at its `)`, so that those after an
+  await print after it, where elsewhere each prints as soon as it is computed. A run-time error inside an async
+  function, a handler or an executor stops the program, where JavaScript rejects a promise; an unhandled rejection is
+  silent (Node reports it). `then` and `catch` are a promise's only methods (`x.then(f)` on anything else is a
+  TypeError), and an object with a `then` method isn't adopted as a promise. No `finally`, `Promise.all`, `race`,
+  `any` or `allSettled`, and no top-level await (in the REPL either). In the REPL an entry's jobs run after it, but
+  that isn't checked against Node's REPL.
 - **Not supported**: array methods that take a function (`map`, `forEach`, `filter`, `reduce`, `sort`, ...), template
   literals, classes, `try` / `catch` / `throw`, `in`, `instanceof`, `delete`, default and rest parameters, spread,
   destructuring, `arguments`, getters and setters, `**`, `??` and `?.`, `JSON`, `Object.keys`, `Array.isArray`,
@@ -180,7 +204,8 @@ machine too; a key built at run time is first matched by its characters. Details
   numbers, and of arrays other than `length` and the methods.
 - **Strings**: ASCII only; a string's characters can't be assigned. A method is only called (`s.toUpperCase` without
   `()` reads a property, which a string looks up in `String.prototype`). `parseInt`, `Number`, `String`, `Math`,
-  `Object`, `fetch`, `read`, `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` and `alert` are reserved names.
+  `Object`, `Promise`, `fetch`, `read`, `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` and `alert` are
+  reserved names, and `async` and `await` reserved words.
 - **Scoping**: a `var` after a `let` / `const` of the same name in the same scope isn't an error, use before
   declaration in an inner block (`let x = x + 1`) isn't caught, and a `var` read before its declaration inside a
   function is an error (4) rather than `undefined`. A function's parameter shadows a `let` of an enclosing block, but
@@ -188,6 +213,8 @@ machine too; a key built at run time is first matched by its characters. Details
   same name. A `for (let i ...)` loop has one `i`, not one per iteration: functions made in the loop all see its last
   value (`for (let i = 0; i < 3; i++) setTimeout(() => console.log(i))` prints 3 three times).
 - **`do … while`**: `if (a) do s; while (c); else …` is rejected (drop that `;`); `do s;; while (c)` is accepted.
+- **A body without braces** can't start with `(`, `[`, `!`, `-`, `~`, `this`, `new` or `await` (error 8): `if (x)
+  await f();` needs `{ }`.
 - **Console**: 9 columns × 16 rows (the REPL's: 40 × 32). Long lines wrap, and output past the last row wraps to the top.
 - **Network**: one request at a time, GET only, no headers; a status above 511 reads as 511. A round trip carries 2 URL
   bytes or 8 body bytes. Without the gateway (`file:`, a static server) `fetch` returns `-1` after about 20 s.
@@ -209,16 +236,16 @@ The status line shows a message for the common errors and `syntax error (n)` for
 | 24 | too many variables (32) | 56 | `break` / `continue` outside a loop |
 | 25 | too many globals (230) | 57 | `return` outside a function |
 | 26 | too much string data | 60 | (the runtime library: an undefined function) |
-| 30, 38–39 | malformed `console.log`, or used as a value | 61 | a token emits too much code at once (7 instructions) |
+| 30, 38–39 | malformed `console.log`, or used as a value (30: more than 4 arguments in an async function) | 61 | a token emits too much code at once (7 instructions) |
 | 32–37 | malformed `if` / `while` / `for` / `function` / arrow header (36: a parameter that is a reserved word) | 62 | program too long (more than 1,023 words) |
 | 40 | missing `}` at end of input | 77 | a method called with a number of arguments it doesn't take (`apply`: two) |
 | 64 | assignment to a `const` | 65 | `const` without `=` |
 | 66 | `while` expected after a `do` body | 67 | `:` without `?` (or a label inside a `for` header) |
-| 68 | too many strings and property names (32) | 69 | property name expected after `.` (or not one of `Math`'s) |
+| 68 | too many strings and property names (32) | 69 | property name expected after `.` (or not one of `Math`'s, or one of its methods not called) |
 | 70 | a property assignment must be a statement | 71 | object literal: key expected |
 | 72 | `:` expected after an object key or `default` | 73 | `case` / `default` outside a `switch` |
 | 74 | a `switch` body must start with `case` / `default` | 75 | a second `default` |
-| 76 | a call by name passes a different number of arguments than another call or the definition | | |
+| 76 | a call by name passes a different number of arguments than another call or the definition | 79 | `await` outside an async function |
 | 99 | page only: no parser variant accepts this token here | | |
 
 The page reports 99 where the reference compiler gives a more specific syntax-error code.

@@ -1,0 +1,9 @@
+Promise { 42 }
+Promise { <rejected> 'no' }
+Promise { <pending> }
+Promise { 'str' } object
+[ Promise { 42 }, { p: Promise { 42 } } ]
+Promise { 7 }
+Promise { <pending> }
+Promise { [ 1, 'x' ] }
+Promise { 42 }
