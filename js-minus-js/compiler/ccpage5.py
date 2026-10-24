@@ -235,7 +235,9 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                f' .tr > b {{ position: absolute; left: 0; width: 1px; height: 1px; display: block; }} .tr > .tp {{ position: static; height: {HT}px; }}'
                ' @container style(--l-o_tkany: 1) { .tr { display: block; } }')
     for f, src in TOKF:
-        css.append(f'.tr > .t{f} {{ top: calc(var(--l-o_{src}) * 1px); view-timeline-name: {mux_name("l-tix", TMAX, lambda t, f=f: f"--tk{t}{f}")}; }}')
+        line = ' + var(--l-o_rnl) * var(--trl)' if f == 'h' else ''     # (a REPL newline token's th1: the level's line, cc_dsl o_rnl)
+        css.append(f'.tr > .t{f} {{ top: calc((var(--l-o_{src}){line}) * 1px); view-timeline-name: {mux_name("l-tix", TMAX, lambda t, f=f: f"--tk{t}{f}")}; }}')
+    css.append(' '.join(f'.trl{k} {{ --trl: {k}; }}' for k in range(L + 1)))
     # string bytes: in-flow words
     css.append(lbl.group('String bytes: in-flow words'))
     N.add('l-o_sa-h', False)
@@ -254,8 +256,6 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         st = []
         if sl[0] == 'col': st.append(f'--c: var(--lc{sl[2]})')
         else: st.append(f'--c: {10 if sl[0] == "nl" else 0}')
-        # the line a level reads (the lexer's lnum: a T_NL's line), inherited down the chain from a line's first level and its newline's
-        if sl[0] == 'nl' or (sl[0] == 'col' and sl[2] == 0): st.append(f'--lnum: {sl[1]}')
         if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]})')
         else: st.append(f'--cn: {10 if nxt[0] == "nl" else 0}; --ncl: {CL_NL if nxt[0] == "nl" else CL_NUL}')
         # a line's source opens just before the previous line's newline level, whose --cn must be this line's first
@@ -264,7 +264,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         if nk is not None:
             ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{nk}_{j}" for j in range(P))}">')
         ch_html.append(f'<div class="lv{x} {kcls}" style="{"; ".join(st)}"><b class="ovs"></b>'
-                       f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
+                       f'<div class="tr trl{sl[1] + (sl[0] == "nl") if sl[0] != "nul" else L}"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
     root_st = ''
     fo = OTH['A' if (NC - 1) % 2 == 0 else 'B']      # suffix written by the deepest character level
     css.append(lbl.group('Lexer start state (#cc)'))

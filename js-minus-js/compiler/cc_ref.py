@@ -677,7 +677,7 @@ class Compiler:
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0; self.tflag = 0
-        self.line = 0; self.tline = 0           # the line being read; a T_NL's: the line its next token is on (the page: each level's)
+        self.line = 0; self.tline = 0           # the line being read; REPL: a T_NL's, the line its next token is on (its th1 on the page)
         self.dp = 1                         # globals (parser): global k is data_base + k (data_base itself holds STRTAG)
         self.sdp = data_base + SDATA + 1 + NF     # string literals and property names (lexer): STRP0; data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at
@@ -1359,7 +1359,7 @@ class Compiler:
                 self.kpos = 2 if (tok == ('P', 46) and not self.lcon) or (tok == ('ID', KW['function']) and not self.rom) else int(tok in (('P', 123), ('P', 44)))
                 self.lcon = int(tok == ('ID', KW['console']))
             self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 125, 7, 8))) + int(tok == ('ID', KW['return']))
-            if tok == ('P', T_NL): self.tline = self.line + (c == 10)
+            if tok == ('P', T_NL): self.tline = (self.line + (c == 10)) * self.repl     # (0 outside the REPL)
             cp0 = self.cp; self.token(*tok)
             if self.cp - cp0 > EMAX:                     # (instructions; the page's EMAX slots don't hold the rest)
                 self.fail(61)

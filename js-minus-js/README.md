@@ -28,6 +28,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
 - On the page, FizzBuzz 1–15 compiles in about 2.3 s from Run (including the 1.2 s readback sweep) and halts about
   3.2 s after Run.
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
+- A REPL (2026-10-24): Enter runs the session and shows each entry's output and value under it, checked against
+  Node's REPL ([REPL](#repl)). An entry replays the whole session: ~4 s at 8 lines, ~13 s at 19.
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start

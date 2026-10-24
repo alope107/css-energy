@@ -6,8 +6,8 @@
   again: the machine keeps no state between entries, and a session's replay prints what it printed before.
 - The console's grid is the REPL's (repl_cols x repl_rows), and the program marks where each entry's output starts (PUTC
   marks: mark k for the entry that starts on line k, MARKEND at the end, which the library's halts write too).
-- The console box (.cons) lies over the editor: its readers must share a containing block with the console's leaves, so
-  the REPL's readers live in it (.rdisp). They latch: they take RAM's values only once the run has ended (--rg: --ccgo and
+- The REPL's console box (.rcons: the whole console's RAM trees, gen_css.py KN, and the display) lies over the editor: its
+  readers must share a containing block with the leaves they read. A program's page leaves it display: none. They latch: they take RAM's values only once the run has ended (--rg: --ccgo and
   the end mark), so Enter doesn't blank the transcript, and a session that doesn't compile keeps the last one.
 - The latched marks and line count are registers (view timelines scoped on body), animated onto the display and onto the
   editor's frame: each line's ::before opens room for the output above it, and the readers put each row there.
@@ -34,17 +34,14 @@ def css(R, L, cells, WOFF, RCOLS, RROWS, NMARK, MARKEND, OUTMAX, ginit, UNDEF):
     out = [lbl.section('REPL', 'machine/replui.py: Enter replays the session; the console lies over the editor and shows each entry\'s output under it')]
     out.append(lbl.group('Properties and register keyframes'))
     out += [f'@property --{n} {{ syntax: "<integer>"; inherits: true; initial-value: 0; }}'
-            for n in regs + ['rg', 'rcl', 'rml', 'rnl', 'rqrE'] + [f'rqr{k}' for k in range(L)] + [f'rqt{k}' for k in range(L)]]
+            for n in regs + ['rg', 'rcl', 'rml', 'rnl', 'rqrE'] + [f'rqt{k}' for k in range(L)]]
     out += ['@property --rcd { syntax: "<integer>"; inherits: false; initial-value: -1; }']
     out += [nreg(f'mk{k}', 2048) for k in M] + [nreg('rn', 32), nreg('rg', 2), nreg('rcl', 4096)]
     # ---- running it: the CPU on, the REPL's grid, RAM cleared while the scan runs (--ccgo 0)
     out.append(lbl.group('Running', 'the CPU on while the REPL shows; RAM, globals and console cleared while the scan runs (Edit\'s rules are for the programs)'))
     out.append(f'{pk} ~ #clkw {{ --run: 1; --ocols: {RCOLS}; --osize: {RCOLS * RROWS}; }}')
-    out.append(f'{pk} ~ #memw {{ animation: kccgo auto linear both; animation-timeline: --rbrdT; }}')
-    keep = f'style(--hit: 1): calc((var(--wv) + {WOFF}) * 1px); else: fit-content'
-    out.append(f'{pk} ~ #memw .cell, {pk} ~ #clkw .cons .cell {{ content-visibility: if(style(--hit: 1) or style(--ccgo: 0): visible; else: hidden);'
-               f' width: if(style(--ccgo: 0): {WOFF}px; {keep}); }}')
-    out.append(f'{pk} ~ #memw :is({", ".join(f".c{a}" for a in ginit)}) {{ width: if(style(--ccgo: 0): {UNDEF + WOFF}px; {keep}); }}')
+    # (the cells' own rule clears them while --rclr is 1, memtree.py: a rule of its own here was one more each cell tests)
+    out.append(f'{pk} ~ #memw {{ animation: kccgo auto linear both; animation-timeline: --rbrdT; --rclr: calc(1 - var(--ccgo)); }}')
     # ---- the page around it
     out.append(lbl.group('Page', 'no Run button; the editor\'s frame grows with the output; the prompts\' gutter'))
     out.append(f'{pk} ~ #app {{ height: {(L + RROWS) * LH + 640}px; }}')
@@ -54,12 +51,14 @@ def css(R, L, cells, WOFF, RCOLS, RROWS, NMARK, MARKEND, OUTMAX, ginit, UNDEF):
     out.append(f'{pk} ~ .cst {{ position: absolute; left: calc(anchor(--rbed right) - 240px); top: calc(anchor(--rbed top) - 98px); }}'
                f' {pk} ~ .cst .cstv {{ width: 240px; text-align: right; }} {pk} ~ .cst .cstv::before {{ color: if(style(--cse: 0): var(--muted); else: #b00); }}')
     out.append(f'#app .ed{R} {{ padding-left: {PADL + GUT}px; background: none; }}')
-    out.append(f'{pk} ~ #clkw .cons {{ position: absolute; left: anchor(--rbed left); top: anchor(--rbed top); width: anchor-size(--rbed width);'
-               f' height: anchor-size(--rbed height); pointer-events: none; }}')
-    out.append(f'{pk} ~ #clkw .cons :is(.con, .oc) {{ display: none; }} #pk{R}:not(:checked) ~ #clkw .rdisp {{ display: none; }}')
+    # (a fixed size: anchor-size() of the editor changed every frame of the scan, whose font axis moves the lines' sentinels,
+    # and laid the box and its readers out again each time)
+    out.append(f'{pk} ~ #clkw .rcons {{ --rclr: calc(1 - var(--ccgo)); display: block; position: absolute; left: anchor(--rbed left); top: anchor(--rbed top);'
+               f' width: {PADL + GUT + RCOLS * CW + 8}px; height: {(L + RROWS) * LH + 2 * PADT}px; pointer-events: none; }}')
+    out.append(f'{pk} ~ #clkw .cons {{ display: none; }}   /* the program\'s console (the REPL\'s grid is in .rcons) */')
     # ---- the display's values: latched marks -> rows; the frame (::before) and the display (.rdisp) compute them alike
-    rows = [f'--rqr{k}: round(up, max(0, var(--mk{k}) - 1) / {RCOLS});' for k in range(L)] + [f'--rqrE: round(up, max(0, var(--mkE) - 1) / {RCOLS});']
-    rows += [f'--rqt{k}: max({", ".join(f"var(--rqr{j})" for j in range(k + 1))});' for k in range(L)]
+    rows = [f'--rqt{k}: max({"var(--rqt%d), " % (k - 1) if k else ""}round(up, max(0, var(--mk{k}) - 1) / {RCOLS}));' for k in range(L)]
+    rows += [f'--rqrE: round(up, max(0, var(--mkE) - 1) / {RCOLS});']
     anim = lambda names: (f'animation-name: {", ".join(f"k{n}" for n in names)}; animation-timeline: {", ".join(f"--{n}T" for n in names)};'
                           ' animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both;')
     out.append(lbl.group('Output room', 'each line\'s ::before opens the rows shown above it (the latched marks: n lines, t_L rows before line L)'))
@@ -79,7 +78,7 @@ def css(R, L, cells, WOFF, RCOLS, RROWS, NMARK, MARKEND, OUTMAX, ginit, UNDEF):
                f'--rqpg{k}: max(clamp(0, var(--mk{k}), 1), 1 - clamp(0, var(--rn) - {k}, 1));', f'--rqps{k}: clamp(0, var(--rcl) - {k} + 1, 1);']
     out.append(f'.rdisp {{ display: contents; {anim(regs + ["rg", "rcl"])} ' + ' '.join(rows + ry + pm) + ' }')
     out += [f'@property --{n}{i} {{ syntax: "<{"length" if n in ("rqy", "rqpy") else "integer"}>"; inherits: true; initial-value: 0{"px" if n in ("rqy", "rqpy") else ""}; }}'
-            for n, rng in (('rqy', range(RROWS)), ('rqv', range(RROWS)), ('rqpy', range(1, L)), ('rqpg', range(1, L)), ('rqps', range(1, L))) for i in rng]
+            for n, rng in (('rqv', range(RROWS)), ('rqpg', range(1, L)), ('rqps', range(1, L))) for i in rng]
     # the gate: the run ended (the end mark is set) and the compile chain is on; the latches take RAM's values only then
     out.append(f'.rgate {{ width: anchor-size(--c{mcell("E")} width, {WOFF}px); }}'
                f' .rgate .sub {{ top: calc(var(--ccgo) * min(1, max(0, round(100cqi / 1px) - {WOFF})) * 1px); }}')
@@ -102,7 +101,7 @@ def css(R, L, cells, WOFF, RCOLS, RROWS, NMARK, MARKEND, OUTMAX, ginit, UNDEF):
     return out
 
 def html_cons(L, RCOLS, RROWS, MARKEND, cells, OUTMAX, WOFF):
-    """the REPL's display, inside .cons: the gate, the marks' and the line count's latches (registers), the rows' readers, the prompts"""
+    """the REPL's display, inside .rcons: the gate, the marks' and the line count's latches (registers), the rows' readers, the prompts"""
     reg = lambda n, H: f'<div class="reg" style="height: {H}px"><div class="sub" style="view-timeline-name: --{n}T"></div></div>'
     h = ['<div class="rdisp">', f'<div class="rp rgate">{reg("rg", 2)}</div>']
     h += [f'<div class="rp rmk rmk{k}"><div class="rml">{reg(f"mk{k}", 2048)}</div></div>' for k in list(range(L)) + ['E']]

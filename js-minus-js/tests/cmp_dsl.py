@@ -52,7 +52,7 @@ def check(text, repl=0):
     src = [ord(ch) for ch in text] + [0, 0]
     ref = R.Compiler(DB, CB, lib, repl=repl); line = 0
     ls = D.initial_lex(DB); ps = D.initial_parse(DB); tab = {n: 0 for n in D.table_names()}; lab = {}; code = {}; data = {}
-    prev = dict(o_tkany=0); pw = None
+    prev = dict(o_tkany=0); pw = None; pline = 0
     for i in range(len(src)):
         c, cn = src[i], (src[i + 1] if i + 1 < len(src) else 0)
         if pw:                                   # delayed table writes from the previous level
@@ -66,6 +66,7 @@ def check(text, repl=0):
             if pg is not None:
                 env = {('S', n): v for n, v in ps.items()}
                 for k in ('tk', 'tv', 'th1', 'th2'): env[('I', k)] = prev['o_' + k]
+                env[('I', 'th1')] += prev['o_rnl'] * pline        # (the page: .trl<k> adds the level's line)
                 env[('I', 'repl')] = repl
                 for n, v in tab.items(): env[('I', n)] = v
                 ps, e = pg.run(env); e = collections.defaultdict(int, e); work += pg.ntemps; steps += 1
@@ -79,7 +80,7 @@ def check(text, repl=0):
                     if e[('T', f'o_lv{k}')]: lab[e[('T', f'o_lj{k}')]] = e[('T', f'o_lx{k}')]
                 pw = collections.defaultdict(int, {n: e[('T', n)] for n in pg.out})
         env = {('S', n): v for n, v in ls.items()}; env[('I', 'c')] = c; env[('I', 'cn')] = cn; env[('I', 'ptk')] = prev['o_tkany']
-        env[('I', 'repl')] = repl; env[('I', 'lnum')] = line; line += c == 10       # (the page: each line's level)
+        env[('I', 'repl')] = repl; pline = line + (c == 10); line += c == 10     # (the level's line: its next token's)
         lx_ = lex_for(c); ls, e = lx_.run(env)
         prev = {n: e[('T', n)] for n in lx_.out}
         if prev['o_sv']: data[prev['o_sa'] + DB] = prev['o_sw']

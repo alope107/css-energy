@@ -101,6 +101,13 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   grid for the REPL and the marks, and the display latches what the last finished run showed. Keeping the machine's
   state instead (RAM kept, only the new entry compiled to run) would need the data cache flushed at HALT (it is
   write-back), code that doesn't move when lines are added, and a resume address: not tried.
+  A CSS CPU bug surfaced on the way. The echo's cell moved every global a word, and the bank sample printed `wd ??`:
+  `ops[i]` read a word of the wrong array. On the page an instruction makes all its reads at once and keeps (latches)
+  the ones that hit for its re-execution, a read only if the reads its address came from hit too; but GETX's element
+  `e` (address from `z`, the array's header, whose address is from `x`) checked `z`'s miss, not `x`'s. With `x` missing,
+  `z` and `e` were read at garbage addresses that hit, and `e` was kept. csssim reads in order and stops at the first
+  miss, so it never did. A read is good now only if every read its address came from was, transitively
+  (`tests/suite/latch_chain.js` fails without it).
 
 ## Dead ends and superseded approaches
 
@@ -187,6 +194,8 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 79 | A 40 × 32 console for every program | FizzBuzz +24% on the page: the console box lays out every reader on each write | the grid's size a property: 9 × 16 for a program, 40 × 32 for the REPL |
 | 80 | The console's RAM as 1,312 words (the REPL's grid and its marks) | its trees decoded in radix 82 × 4: every console write restyled 82 group nodes per bank, FizzBuzz's CPU-only page +17.6% | 1,536 words, radix 6 × 4 × 4 × 4 |
 | 81 | The REPL's latches gated by an animated property in the transition's delay | no transition ever started (ENGINE_NOTES 65): Enter blanked the transcript | the gate as a container style query |
+| 82 | A newline token's line as a property of each line's compile levels (`--lnum`, inline or on the line source) | the levels of different lines no longer shared Chrome's matched properties cache: FizzBuzz compiled 29% slower | the line added where the token is written (`.trl<k>`), only on the REPL |
+| 83 | The REPL's line count from 24 `#app:has()` rules | `#app` restyles every frame of the scan: a program's compile +1% | `.pane:has()` into a register |
 
 ## Open leads (untried)
 

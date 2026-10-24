@@ -461,7 +461,10 @@ class Prog(Base):
         with self.when(L(3)):
             eb = self.m(ite(ceq(110), 10, ite(ceq(116), 9, ite(ceq(114), 13, c))), 'esc')
             self.datum(self.v('sdp'), eb); adv(); self.set('lx', 1); shash(eb)
-        repl = I('repl'); nline = self.m(add(I('lnum'), ceq(10)), 'nline')     # (a T_NL's th1: cc_ref.tline)
+        # a T_NL's th1, on the REPL the line its next token is on (cc_ref.tline), is added where the token is written (ccpage5
+        # .trl<k>: the level's line, o_rnl the flag): no per-line value on the chain's levels, which kept them from sharing
+        # Chrome's matched properties cache (FizzBuzz compiled 29% slower)
+        repl = I('repl'); nline = 0
         def newline():                                  # cc_ref.newline: after return a T_NL now, else pending (the REPL: always)
             with self.when(eq(ltk, 2)): tok(4, R.T_NL, nline)
             with self.when(or_(eq(ltk, 1), and_(eq(ltk, 0), repl))): self.set('pnl', 1)
@@ -1859,13 +1862,14 @@ class LexProg(Prog):
     def __init__(self, data_base, c=None, cset=None):
         if cset is not None and len(cset) == 1: c = next(iter(cset)); cset = None
         self.spec_c = c; self.cset = cset; self.db = data_base
-        X = self.x = Ctx(LEX_STATE, ['c', 'cn', 'ptk', 'repl', 'lnum'])
+        X = self.x = Ctx(LEX_STATE, ['c', 'cn', 'ptk', 'repl'])
         X.cur.update(tk=K(0), tv=K(0), th1=K(0), th2=K(0))
         self.data = []; self.out = []
         self.lexer()
         tk, tv = self.m(self.v('tk'), 'ptk_'), self.m(self.v('tv'), 'ptv_')
         # cc_ref.char's token tail: an object literal's key is committed at its ':'; console.log's log is no property name
         nl = self.m(and_(eq(tk, 4), eq(tv, R.T_NL)), 'isnl')
+        self.named('o_rnl', and_(nl, I('repl')))       # (a REPL T_NL: its th1 gets the level's line, ccpage5 .trl<k>)
         icm = self.m(self.v('icm'), 'icm')
         with self.when(and_(eq(tk, 4), eq(tv, 58), ne(icm, 0))): self.set('sdp', add(self.v('sdp'), icm))
         with self.when(and_(ne(tk, 0), ne(tk, 2), not_(nl))): self.set('icm', 0)

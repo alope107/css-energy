@@ -593,3 +593,37 @@ round ran 25% faster than the next on this machine), and in all 8 of 4 more roun
 (`net_fetch` 3.4–4.8 s against 3.8–5.4 s, `net_long` 9.1–12.4 s against 10.3–13.7 s; ratios 0.87–0.94): a median
 0.89, ~11% less time.
 
+
+## 18. The REPL (2026-10-24, branch `repl`)
+
+All pinned to the E-cores (`taskset -c 8-15`: ~1.9× slower than the P-cores but steady; the machine had 5–20 other
+agents' load), interleaved with `../shared/js/ab.js`, ratios per round against `lxym` (`a6a745c`). A against A: IQR
+0.985–1.015.
+
+**What it costs a program** (FizzBuzz; the REPL chip not picked):
+
+| Change | CPU-only page, Run → HALT | Real page, Run → compiled |
+|---|---|---|
+| The console 40 × 32 for every program (first try, P-cores, loaded) | | Run → HALT 1.24 (1.08–1.28) |
+| The console's RAM as 1,312 words: trees in radix 82 × 4 | 1.176 (1.159–1.180) | |
+| 1,536 words, radix 6 × 4 × 4 × 4, groups of 16 | 1.028–1.033 | |
+| … the out class's `--pmk` / `--pmo` not inherited | 1.021–1.030 | |
+| … the program's grid in trees of its own (144 cells), the REPL's in trees nothing shows | 1.001 (runMs) without the hidden trees, 1.017 (1.001–1.026) with them | |
+| The CPU's latch fix (`tests/suite/latch_chain.js`) | 1.027 against 1.028: none | |
+| The compiler's REPL mode, the line as `--lnum` on each line's levels | | L3 page: FizzBuzz 1,346 → 1,735 ms (+29%), others +2–7% |
+| … a newline counter in the lexer's state | | L3: +4% |
+| … the line where the token is written (`.trl<k>` on each level's `.tr`) | | L3: +2.2%, −1.0% (two rounds) |
+| All of it (`NOREPL=1`: the page without the REPL's own parts) | | 1.005–1.008 |
+| The page with the REPL | | 1.056–1.061 (FizzBuzz ~4.88 → 5.16 s); Run → HALT 1.046 |
+
+A per-line value on the compile chain's levels (inherited, registered or not) makes the levels of different lines
+differ, and Chrome stops sharing their style (the matched properties cache): FizzBuzz, with many short lines, paid most.
+The REPL's own page parts (its CSS section ~2%, the rest in pieces of 0.2–1%: the `:has()` count that was on `#app`,
+~200 registered properties, timeline names, an editor's probe rules) cost a program ~5% of its compile; a page without
+them (`NOREPL=1`) costs 0.5%.
+
+**What an entry costs** (P-cores, unpinned, load ~5): Enter → the output shown, the whole session read, compiled and run
+again. 8 lines (284 steps): the scan done 2.2 s, compiled 2.5 s, shown 3.9 s. 19 lines (`tests/repl/statements.js`, 1,544
+steps): 3.9, 4.7, 12.9 s. Pinned to the E-cores, line by line through that session: 3.2 s for the first, 9.8 s at 5,
+20 s at 10, 36 s at 15, 57.5 s at 19. The run grows with the session (each Enter replays it all) and the scan with the
+editor's text (it reshapes every line every frame).

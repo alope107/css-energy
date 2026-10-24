@@ -46,7 +46,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, REPL=None):
                           for n in REGS) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
                                                            for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz')) + \
               '\n@property --rbcnt { syntax: "<integer>"; inherits: true; initial-value: 0; }'
-    regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS)
+    regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS + ['cnt'])
     ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
     g = [lbl.group('Probe font, scan clock and latches', 'the readback font, the scan\'s driver state and the per-row latches')]
     g.append(f"""
@@ -71,10 +71,10 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, REPL=None):
    lets the compiler see the text. The latches keep their values. */
 #app {{
   container-name: rbscan;
-  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT, --rbnlT;
-  animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both, rbknl auto linear both;
-  animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT, --rbnlT;
-  animation-range: normal, cover, normal, normal, normal, normal;
+  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT, --rbnlT, --rbcntT;
+  animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both, rbknl auto linear both, rbkcnt auto linear both;
+  animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT, --rbnlT, --rbcntT;
+  animation-range: normal, cover, normal, normal, normal, normal, normal;
   --rbng: clamp(1, round(up, (10000 * var(--rbp) / (1 - var(--rbp)) - 30) / {GSW}, 1), {NG});
   --rbR: {P};   /* fixed: the editor's width includes the trailing sentinel, whose width is the code being read, so a
                     width-derived range flickers between frames and the scan would skip columns */
@@ -162,8 +162,14 @@ def repl_run(R, L):
     """the REPL's editor (index R) scans while it shows, again from its start whenever its line count (--rbcnt) differs from
     the one the sweep started with (the nl register)"""
     if R is None: return ''
+    # (the count goes through a register after .pane, read from .pane:has(): on #app, which every frame restyles, 24 :has()
+    # rules cost a program's compile 1%)
     return '\n'.join([f'#pk{R}:checked ~ #app {{ --rbrun: calc(1 - min(1, abs(var(--rbcnt) - var(--rbnl)))); }}'] +
-                     [f'#pk{R}:checked ~ #app:has(> .pane > .frame > .ed{R} > div:nth-of-type({k})) {{ --rbcnt: {k}; }}' for k in range(1, L + 1)]) + '\n'
+                     [f'#pk{R}:checked ~ #app > .pane:has(> .frame > .ed{R} > div:nth-of-type({k})) ~ .rcnt {{ --rbin: {k}; }}' for k in range(1, L + 1)]) + '\n'
+
+def rcnt_html():
+    """the REPL editor's line count as a register (repl_run), inside #app after .pane"""
+    return '<div class="rbreg rcnt"><div class="rbsp"></div><div class="rbsub" style="view-timeline-name: --rbcntT"></div><div class="rbpad"></div></div>'
 
 def regs_html():
     """the scan registers (inside #app). --rbrdT is read outside #app (by the compiler's wrapper), so it is scoped on body."""

@@ -17,7 +17,7 @@ const nbsp = s => s.replace(/ +/g, (m, i) => i === 0 || i + m.length === s.lengt
     return { rg: +d.getPropertyValue('--rg'), rn: +d.getPropertyValue('--rn'), end: +d.getPropertyValue('--mkE') }; });
   // the transcript as it shows: [top, text] for each prompted line and each output row, sorted by top
   const read = () => p.evaluate(ed => {
-    const items = [], divs = [...document.querySelector(ed).children].filter(d => d.tagName === 'DIV');
+    const items = [], divs = [...document.querySelector(ed).children].filter(d => d.localName === 'div');
     for (let k = 1; k <= divs.length; k++) {
       const pm = document.querySelector('.rpm' + k);
       if (!pm || getComputedStyle(pm).display === 'none') continue;
@@ -46,7 +46,7 @@ const nbsp = s => s.replace(/ +/g, (m, i) => i === 0 || i + m.length === s.lengt
   for (const f of files) {
     const lines = fs.readFileSync(f, 'utf8').replace(/\n$/, '').split('\n');
     const want = fs.readFileSync(f.replace(/\.js$/, '.tr'), 'utf8').replace(/\n$/, '');
-    await p.evaluate(ed => { const e = document.querySelector(ed); e.innerHTML = '<div><br></div>'; }, ed);
+    await p.evaluate(ed => { const e = document.querySelector(ed); e.innerHTML = '<div><br/></div>'; }, ed);
     await p.waitForTimeout(300);
     const first = await p.$(`${ed} > div`); const bb = await first.boundingBox(); await p.mouse.click(bb.x + 20, bb.y + bb.height - 8);
     const t0 = Date.now(); let ms = 0;
