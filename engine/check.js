@@ -91,6 +91,21 @@ const PROBES = [
     judge: r => ({ control: r.visible === 40, holds: r.hidden === 33, note: JSON.stringify(r) }),
   },
   {
+    // rows of 50px in a 300px scroller; a row's ::after (10px tall, at the row's top) has view progress (300 - top) / 310:
+    // 0.968, 0.806, 0.645, 0.484, named --r0 .. --r3 between the midpoints. Row 1 is nested in a wrapper.
+    id: 'anchor-view-name', kind: 'fact', wait: 400,
+    claim: 'a discrete anchor-name animation on a view timeline names each ::after by the row it shows in, nested or not, and anchor-size() reads the animated name',
+    docs: 'js-minus-js ENGINE_NOTES.md 77 (the editor scan names its rows)',
+    page: () => html('.sc{height:300px;overflow:hidden}.r{height:50px}.r::after{content:"";display:inline-block;vertical-align:top;height:10px;width:var(--w);' +
+      'animation:nm auto linear;animation-timeline:view()}@keyframes nm{0%,40%{anchor-name:none}40.1%,56.4%{anchor-name:--r3}56.6%,72.5%{anchor-name:--r2}' +
+      '72.7%,88.6%{anchor-name:--r1}88.8%,100%{anchor-name:--r0}}.st{width:7px;height:2px;anchor-name:--st}.p{position:absolute;height:1px}',
+      '<div class=sc><div class=r style="--w:10px"></div><div><div class=r style="--w:20px"></div></div><div class=r style="--w:30px"></div><div class=r style="--w:40px"></div></div>' +
+      '<div class=st></div>' + [0, 1, 2, 3].map(k => `<div class=p id=p${k} style="width:anchor-size(--r${k} width, 1px)"></div>`).join('') +
+      '<div class=p id=ps style="width:anchor-size(--st width, 1px)"></div>'),
+    read: () => ({ rows: [0, 1, 2, 3].map(k => document.getElementById('p' + k).getBoundingClientRect().width), stat: document.getElementById('ps').getBoundingClientRect().width }),
+    judge: r => ({ control: r.stat === 7, holds: r.rows.join() === '10,20,30,40', note: `rows read ${r.rows.join(', ')} (10, 20, 30, 40 if each is named by its row); a static anchor ${r.stat}` }),
+  },
+  {
     id: 'html-nesting-512', kind: 'fact',
     claim: 'the HTML parser stops nesting at 512 elements; XHTML nests as deep as the markup',
     docs: 'js-minus-js ENGINE_NOTES.md 19, CLAUDE.md (pages must be XHTML)',

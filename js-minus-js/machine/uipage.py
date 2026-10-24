@@ -4,8 +4,9 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
 import csslabel as lbl
 
-def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, REPL=None):
-    """the editor page's hand-written CSS (EDS: the editors, #ed and the samples the picker shows; REPL: the REPL's index)"""
+def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, repl=False):
+    """the editor page's hand-written CSS (EDS: the editors, #ed and the samples the picker shows; repl: the REPL's page, which
+    has no Run: the compile status always shows)"""
     TOPS = ROWS * 20 + 48
     return f"""
   {lbl.section('Editor page', 'hand-written: the layout, the Run button and the compile status line')}
@@ -21,9 +22,9 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, REPL=None):
   .label {{ font: 600 .72rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }}
   .scanpos {{ font: .8rem ui-monospace, monospace; color: var(--muted); }}
   .frame {{ background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }}
-  .frame:focus-within {{ border-color: var(--accent); }}
+  .frame:has(> .ed:focus) {{ border-color: var(--accent); }}   /* (not a picker radio's focus: they sit in .frame) */
   .ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
-  {lbl.group('Sample picker', 'radio buttons beside #run (#pk0, #pk1, ...) pick the editor that shows; each keeps its own edits')}
+  {lbl.group('Sample picker', 'radio buttons (#pk0, #pk1, ...), each right before its editor in .frame, pick the editor that shows; each keeps its own edits')}
   .pkr {{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }}
   .picker {{ display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 .7rem; }}
   .picker label {{ cursor: pointer; user-select: none; font: 500 .8rem/1 system-ui, sans-serif; padding: .38rem .72rem; border-radius: 999px;
@@ -31,11 +32,11 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, REPL=None):
   .picker label::before {{ content: attr(data-icon); margin-right: .35em; }}
   .picker label:hover {{ border-color: var(--accent); color: var(--ink); }}
   .ed {{ display: none; }}
-  {" ".join(f"#pk{e}:checked ~ #app .ed{e}," for e in range(EDS))[:-1]} {{ display: block; }}
-  {" ".join(f"#pk{e}:checked ~ #app label[for=pk{e}]," for e in range(EDS))[:-1]} {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
-  {" ".join(f"#pk{e}:focus-visible ~ #app label[for=pk{e}]," for e in range(EDS))[:-1]} {{ outline: 2px solid var(--ink); outline-offset: 2px; }}
+  .pkr:checked + .ed {{ display: block; }}
+  {" ".join(f".pane:has(> .frame > #pk{e}:checked) > .picker > label[for=pk{e}]," for e in range(EDS))[:-1]} {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
+  {" ".join(f".pane:has(> .frame > #pk{e}:focus-visible) > .picker > label[for=pk{e}]," for e in range(EDS))[:-1]} {{ outline: 2px solid var(--ink); outline-offset: 2px; }}
   #run:checked ~ #app .picker {{ opacity: .45; pointer-events: none; }}   /* the scan reads the editor that shows: no switching while it runs */
-  #run:checked ~ .pkr {{ visibility: hidden; }}
+  #run:checked ~ #app .pkr {{ visibility: hidden; }}
   {lbl.group('Run / Edit button')}
   .runbtn {{ position: relative; display: inline-block; cursor: pointer; font: 600 .9rem/1 system-ui, sans-serif; color: #fff; background: var(--accent);
     border-radius: 6px; padding: .55rem 1rem; user-select: none; }}
@@ -44,8 +45,8 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, REPL=None):
   .runbtn span::before {{ content: "\\25B6  Run"; }}
   #run:checked ~ #app .runbtn {{ background: #5b6875; }}
   #run:checked ~ #app .runbtn span::before {{ content: "\\270E  Edit"; }}
-  .limit, .nested {{ display: none; margin: 0; font-size: .85rem; color: var(--muted); }}
-  .nested {{ color: #b00; }}
+  .limit, .merged {{ display: none; margin: 0; font-size: .85rem; color: var(--muted); }}
+  .merged {{ color: #b00; }}
   .notes {{ color: var(--muted); font-size: .9rem; display: grid; gap: .5rem; }}
   .notes p {{ margin: 0; }}
   .notes code {{ font: .82rem ui-monospace, monospace; color: var(--ink); }}
@@ -61,7 +62,7 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, REPL=None):
     --csi: round(100cqi / 1px); --csd: mod(var(--csi), 2); --cse: mod(round(down, var(--csi) / 2), 512); --csn: round(down, var(--csi) / 1024);
     counter-set: csn var(--csn) cse var(--cse); }}
   .cstv::before {{ content: "edit the program, then Run"; color: var(--muted); }}
-  #run:checked ~ .cst .cstv::before{f', #pk{REPL}:checked ~ .cst .cstv::before' if REPL is not None else ''} {{ color: var(--ink);
+  {'.cst .cstv::before' if repl else '#run:checked ~ .cst .cstv::before'} {{ color: var(--ink);
     content: if(style(--csd: 0): "compiling\\2026"; style(--cse: 0): "compiled: " counter(csn) " words";
       style(--cse: 4): "error: undefined variable"; style(--cse: 5): "error: undefined variable"; style(--cse: 6): "error: undefined variable";
       style(--cse: 7): "error: undefined variable"; style(--cse: 20): "error: too many labels"; style(--cse: 21): "error: blocks nested too deeply";

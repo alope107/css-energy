@@ -26,7 +26,7 @@ LEX_STATE = ['lx', 'q', 'lt', 'tkc', 'acc', 'h1', 'h2', 'p2', 'sstart', 'sdp', '
 
 def parse_state_names():
     s = ['dp', 'mode', 'pn1', 'pn2', 'osp', 'csp', 'nsym', 'nlet', 'nfn', 'nlab', 'cp', 'curf', 'cfn', 'nfdef', 'nloc', 'npar', 'fsym', 'pendLa',
-         'err', 'nint', 'pm', 'nd', 'pk', 'tb', 'nimp', 'obase', 'dbase', 'fcsp', 'flab', 'sv0', 'sv1', 'sv2', 'sv3', 'fmark', 'clab', 'ca', 'rpend']
+         'err', 'nint', 'pm', 'nd', 'pk', 'tb', 'nimp', 'obase', 'dbase', 'fcsp', 'flab', 'sv0', 'sv1', 'sv2', 'sv3', 'fmark', 'clab', 'ca', 'rpend', 'rst']
     s += [f'op{k}' for k in range(OD)]
     s += [f'csA{k}' for k in range(CD)] + [f'csB{k}' for k in range(CD)]
     s += [f'od{k}' for k in range(ODN)]
@@ -95,7 +95,7 @@ class Prog(Base):
         self.db, self.cb = data_base, code_base
         self.ent = (lib or {}).get('entries', {})   # ROM routines (cc_ref)
         self.spec_mode, self.spec_tk, self.spec_tv = mode, tk, tv
-        X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2', 'repl'])
+        X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2', 'repl', 'rdone'])
         X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), f_imp=K(0))
         X.cur.update({f'sc{c}{f}': K(0) for c in 'AOT' for f in ('', 'l', 'x')}); X.cur['ptop'] = K(0); X.cur['psp'] = K(0)
         if mode is not None: X.cur['mode'] = K(mode); X.cur['err'] = K(0)
@@ -927,6 +927,7 @@ class Prog(Base):
             with self.when(and_(top, eq(self.v('mode'), R.S_STMT))):
                 with self.when(ne(self.v('rpend'), 0)):
                     t = self.tmp(K(0)); self.emit(OP['CALL'], (self.ent.get('echo', 0) // 2, 0), w1=(sub(t[0], 256), t[1]))
+                self.setif('rst', and_(ne(I('rdone'), 0), eq(self.v('rst'), 0), ge(I('th1'), I('rdone'))), self.here())     # (the run starts here)
                 self.emit(OP['PUTC'], (add(1, mn(I('th1'), R.MARKEND - 1)), 0), (R.K(0), 0)); self.set('rpend', 0)
     def echo_val(self, o):
         """cc_ref.echo_val: the REPL keeps a top-level expression statement's value (operand o) for the entry's echo"""
@@ -1127,6 +1128,7 @@ class Prog(Base):
                                   *[and_(lt(k, nf_), self.isres(I(f'fh1_{k}'), I(f'fh2_{k}'))) for k in range(NF)]), 'eres')
                 with self.when(and_(eq(self.v('csp'), 0), eres)): self.fail(4)
                 with self.when(and_(eq(self.v('csp'), 0), not_(eres))):
+                    self.setif('rst', and_(ne(I('rdone'), 0), eq(self.v('rst'), 0)), self.here())     # (cc_ref: no entry after the lines run)
                     with self.when(ge(self.v('nfdef'), R.TIMERS)):    # cc_ref.timer_loop
                         t = self.tmp(K(0)); l = self.here()
                         self.emit(OP['CALL'], (self.ent.get('nexttimer', 0) // 2, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JZ'], (add(l, 4), 0), b=t)

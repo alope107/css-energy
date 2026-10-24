@@ -170,6 +170,31 @@ gets neither. A scroll does follow the finger, and the scroller that scrolls say
   lighting by `color-mix` from the rotation columns (3× cheaper than inherited registered props in every face).
 - Shadows are blurred floor discs sized and faded by height.
 
+### Art styles (`src/art3d.py`)
+
+The "style" radios restyle the same scene: original (the look above), cel, pencil, baroque, Mondrian, paper.
+`ART=<name>` picks one at build time (for timing a style).
+
+- **Scoping.** The radios are `#app`'s first children (their labels are in the controls row). A style's static rules
+  (page colours and fonts, arena, tray, discs, rings, scenery) are scoped to `#app:has(> #a-NAME:checked)`; original
+  has none. The `>` matters: a `:has()` without it searches `#app`'s whole subtree (the engine, 5,040 pointer cells)
+  once per style pass for each style, as soon as anything restyled in that pass tries one of its rules (+11–18% per
+  pass at 16 bodies; HISTORY.md). Rules on what moving bodies restyle every frame (`.bx`, the faces and their
+  `::before`, `.sp`, `.sh`, `.bw`) are inside `@container art-NAME { … }`, a name the style's static rule puts on
+  `.cam`: for a style not picked, each costs one failed lookup. The original page costs what it did without the
+  styles (BENCHMARKS.md "Art styles").
+- **Shading.** Each style lights faces with its own tone function of gen3d.py's per-face term `lam` (bands for cel,
+  paper, Mondrian; hatch density for pencil; gilt that catches the light for baroque) and builds the face's
+  background from it, in one `.bx` rule and one rule per face index. Baroque's face ornament is a `::before` masked
+  by a static image and filled with the face's gilt colour, so only the colour is substituted every frame.
+- **Scenery.** `.cam` starts with `.deco` (five empty elements, hidden): paper shows them as a ground sheet and, on
+  each side of the tray, cut-out hills, farther hills and clouds (the elements and their `::before`, `::after`)
+  facing inward and culled when they face away, so the scenery turns with the camera. It comes first because Firefox
+  draws 3D planes in document order.
+- **Effects** are an SVG filter on `.view` (pencil's wobble), drop shadows, static `.arena::before`/`::after` layers
+  (paper grain, baroque's drapes and vignette) and `.stage::after` (baroque's frame, a `border-image`). The
+  compositor re-runs a filter on every frame in which something under it moves (BENCHMARKS.md).
+
 ## 4. Pages and builds
 
 | Command | Output |

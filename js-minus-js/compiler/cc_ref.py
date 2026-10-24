@@ -663,11 +663,12 @@ def tmerge(a, b):
     return 1 if 1 in (a, b) else a if a == b else 0
 
 class Compiler:
-    def __init__(self, data_base, code_base, lib=None, rom=False, repl=False):
+    def __init__(self, data_base, code_base, lib=None, rom=False, repl=False, rdone=0):
         """lib: the runtime library's entry addresses (lib.json). rom: compile the runtime library itself (rtlib.py): raw memory
         (peek, poke, p[i]), the intrinsics (INTR), no globals, and tables large enough for it. repl: the page's REPL (README REPL):
-        each line that starts a top-level statement ends the entry before it, which prints its value and marks the output"""
-        self.db, self.cb, self.rom, self.repl = data_base, code_base, rom, int(repl)
+        each line that starts a top-level statement ends the entry before it, which prints its value and marks the output.
+        rdone: the REPL's lines a run already ran (the machine kept its state): the run starts at the first entry after them (rst)"""
+        self.db, self.cb, self.rom, self.repl, self.rdone = data_base, code_base, rom, int(repl), rdone
         self.NF, self.NL = (NF, NL) if not rom else (256, 8192)
         self.LM, self.FM = self.NL, max(16, self.NF)         # a label + LM * a flag or type; a function + FM * its type
         self.CODESZ = CODESZ if not rom else LAYOUT['rom_size']
@@ -702,6 +703,7 @@ class Compiler:
         if not rom: self.nsym = NIMP; self.dp = ECELL + 1
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
         self.rpend = 0                      # REPL: a token since the last entry's end (its value is printed at the next)
+        self.rst = 0                        # REPL with rdone: where the run starts (an instruction pair's index; 0: code_base)
         self.code = {}; self.data = {}
 
     # ---------------- helpers
@@ -1386,6 +1388,7 @@ class Compiler:
         output's position marked for that line (PUTC with A = 1 + the mark: the page lays the output out under each entry)"""
         if self.rpend:
             t = self.tmp(0); self.emit('CALL', (self.ent.get('echo', 0) // 2, 0), w1=(t[0] - 256, t[1]))
+        if self.rdone and not self.rst and line >= self.rdone: self.rst = self.here()     # (its mark is the run's: the cursor now)
         self.emit('PUTC', (1 + min(line, MARKEND - 1), 0), (K(0), 0)); self.rpend = 0
     def echo_val(self, o):
         """REPL: a top-level expression statement's value (operand o) is the entry's"""
@@ -1512,6 +1515,7 @@ class Compiler:
                 if not self.rom and (any((self.sym[j][0], self.sym[j][1]) in RESERVED for j in range(self.nsym) if j >= NIMP or j < self.nimp)
                                      or any(self.sym[k][2] == 3 for k in range(self.nimp))     # read, never assigned or declared
                                      or any((self.fn[k][0], self.fn[k][1]) in RESERVED for k in range(self.nfn))): return self.fail(4)
+                if self.rdone and not self.rst: self.rst = self.here()     # (no entry after the lines run: the end's code)
                 if self.nfdef >= TIMERS and not self.rom: self.timer_loop()
                 if self.repl: self.emit('PUTC', (1 + MARKEND, 0), (K(0), 0))     # (the output's end)
                 self.emit('HALT'); return
@@ -2062,10 +2066,12 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator
-def run(rom, mem_init, sp0, out_base=None, cols=None, rows=None, max_steps=10 ** 6, strict=False, trace=None, ent=None, net=None, marks=None):
+def run(rom, mem_init, sp0, out_base=None, cols=None, rows=None, max_steps=10 ** 6, strict=False, trace=None, ent=None, net=None, marks=None,
+        pc0=None, optr0=0, final=None):
     """the register machine from code_base (fp = sp0) on a RAM image; returns (steps, output). ent: the runtime library's entries
     (the traps' routines). strict: fp is back at sp0 at HALT. net: the NET instruction's gateway (default: net/device.py's,
-    which serves tests/net/). marks: a list that gets the REPL's marks at HALT"""
+    which serves tests/net/). marks: a list that gets the REPL's marks at HALT. pc0, optr0: where the run starts and the
+    console's cursor (the REPL's runs after the first); final: a dict that gets the memory at HALT ('mem', a list)"""
     if net is None: net = Device()
     if out_base is None: out_base = LAYOUT['out_base']
     cols, rows = cols or LAYOUT['cols'], rows or LAYOUT['rows']
@@ -2073,7 +2079,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=None, rows=None, max_steps=10 **
     romw = [w or 0 for w in rom]       # instructions only: a data read below RAM gives 0 (the page has no ROM leaves)
     for a, v in mem_init.items(): mem[a] = v
     db, ROMN = LAYOUT['data_base'], LAYOUT['rom_size']
-    pc, fp, optr, steps, out, pst = LAYOUT['code_base'], sp0, 0, 0, [], 0
+    pc, fp, optr, steps, out, pst = pc0 or LAYOUT['code_base'], sp0, optr0, 0, [], 0
     def addr(o): return (db + o if o < 256 else fp + o - 256) & AMASK
     def rd(a): a &= AMASK; return mem[a] if a >= ROMN else 0
     def val(o): return kval(o) if o >= 768 else rd(addr(o))
@@ -2152,6 +2158,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=None, rows=None, max_steps=10 **
         elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
             if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
             if marks is not None: marks[:] = mem[out_base + OUTMAX:out_base + OUTMAX + NMARK]
+            if final is not None: final['mem'] = mem
             return steps, ''.join(chr(ch % 0x10000) for ch in out)     # (putc's code mod 2^16, as String.fromCharCode)
         elif op[0] == 'J':
             x, y = val(b), val(c); ng = op[1] == 'N' and op != 'JNE'

@@ -21,8 +21,9 @@ Token chain (#tcr, nested inside the deepest character level; levels past the to
   - symbol/function tables: delayed writes; labels: in-flow anchors; code words: fixed overlays inside #tcr
     (contain: strict), anchor-name --c<RAM index>, two per instruction slot: word0 adds its label (a jump target, or the
     function's frame label for a temp in A), word1 the frame label times its multiplier (1024 for a temp in B, 1 in C).
-  - the last level shows .fin: the globals' count word, and two in-flow anchors the CPU page reads:
-    --ccdone (width 1 when compiled without error) and --ccinfo (width = done + 2*err + 1024*words).
+  - the last level shows .fin: the globals' count word, and three in-flow anchors the CPU page reads:
+    --ccdone (width 1 when compiled without error), --ccinfo (width = done + 2*err + 1024*words) and --ccstart (the REPL's:
+    where the run starts, the parser's rst; the input --rdone, on #ccw, is the lines its last run read).
 """
 import sys, json, re, os
 from dsl import css2 as tocss, isK, S
@@ -192,7 +193,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # (a pause driven by an animated flag does not work: Blink reads animation-play-state from the base style)
     css.append(lbl.group('Chain switch', 'the chain exists only once the editor scan is complete'))
     css.append('@property --ccgo { syntax: "<integer>"; inherits: true; initial-value: 0; } @keyframes kccgo { from { --ccgo: 4096; } to { --ccgo: -1; } }'
-               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; --repl: 0; --x-repl: var(--repl); }'
+               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; --repl: 0; --x-repl: var(--repl); --rdone: 0; --x-rdone: var(--rdone); }'
                ' #cc { display: if(style(--ccgo: 1): block; else: none); contain: strict; position: relative; height: 0; }'
                ' .ls, .lvA, .lvB, .gs0, .gs1 { display: contents; }'
                )
@@ -384,7 +385,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for y in 'AB':
         err = (f'if(style(--s-perr-{y}: 0): max(var(--s-bad-{y}) * 99, clamp(0, 2 * var(--p-cp-{y}) - {code_cells}, 1) * 62);'
                f' else: var(--s-perr-{y}))')
-        css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); }}')
+        css.append(f'.tl{y} > .fin {{ --e: {err}; --done: calc(1 - var(--s-nr-{y})); --n: calc(2 * var(--p-cp-{y})); --dpf: var(--p-dp-{y}); --rsf: var(--p-rst-{y}); }}')
     css.append(f'.fin > .ovn {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{initw - 1 - data_base};'
                f' width: calc((var(--dpf) + {WOFF}) * 1px); }}'
                # the string untag constant at data_base (the program never writes it)
@@ -393,12 +394,14 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                # the string area's end, for the runtime's key lookups
                + f' .fin > .ovt {{ position: fixed; top: 0; left: 0; height: 1px; visibility: hidden; anchor-name: --c{R.LAYOUT["strend"] - data_base}; width: calc((var(--sdf) + {WOFF}) * 1px); }}'
                + ' .fin > .dn { display: block; height: 0; anchor-name: --ccdone; width: calc(var(--done) * (1 - min(1, var(--e))) * 1px); }'
-               ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }')
+               ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }'
+               # where the REPL's run starts (an instruction pair's index; 0: code_base), which its CPU reads (gen_css.py ccpc)
+               ' .fin > .ds { display: block; height: 0; anchor-name: --ccstart; width: calc(var(--rsf) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
-    for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
+    for n in ('e', 'done', 'n', 'dpf', 'sdf', 'rsf'): N.add(n, True)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
-              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b></div>')
+              + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b><b class="ds"></b></div>')
     tl_html = []
     for t in range(TMAX + 1):
         y = 'A' if t % 2 == 0 else 'B'

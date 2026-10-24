@@ -21,6 +21,7 @@ case "$project" in
   js-minus-js)
     # dist/ is the released page (make page && make l5-smoke, then make dist); serve it at /
     cp "$root/js-minus-js/dist/js_in_css.xhtml" "$out/"
+    cp "$root/js-minus-js/dist/repl.xhtml" "$out/"       # the REPL's page, which the program page links to
     printf '/ /js_in_css.xhtml 302\n' > "$out/_redirects"
     ;;
   paint)

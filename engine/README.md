@@ -27,6 +27,7 @@ fact, so a change in Chrome flips a reading.
 | `if-style` | `if(style(--k: v): a; else: b)` selects by a custom property | js-minus-js `display: if(…)`, read ports |
 | `anchor-last` | with a shared anchor name, `anchor-size()` reads the last element in tree order | js-minus-js compiler overlays (ENGINE_NOTES 21) |
 | `anchor-hidden` | an element in a `display: none` subtree is no anchor: `anchor-size()` reads the fallback | js-minus-js sparse RAM (ENGINE_NOTES 42) |
+| `anchor-view-name` | a discrete `anchor-name` animation on a view timeline names each `::after` by the row it shows in, nested or not, and `anchor-size()` reads the animated name | js-minus-js editor scan: its rows' names (ENGINE_NOTES 77) |
 | `html-nesting-512` | the HTML parser stops nesting at 512; XHTML nests as deep as the markup | js-minus-js pages are XHTML (ENGINE_NOTES 19) |
 | `font-resets-fvs` | the `font` shorthand resets `font-variation-settings` declared before it | both |
 | `play-state-base` | `animation-play-state` computed from an element's own animated property doesn't pause it (read from the base style) | js-minus-js (ENGINE_NOTES 9) |

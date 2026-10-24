@@ -400,6 +400,18 @@ class Sim:
             if nl: st['optr'] = (st['optr'] // cols + 1) * cols % size; st['out'].append(10)
         st['pc'], st['fp'], st['pst'] = pc, fp, npst; st['steps'] += 1 if done else 0
         return cw
+    def flush_pass(self):
+        """the REPL's page, once halted (gen_css.py xk1): the last dirty line (k = 2 * set + way) written back through the fill's
+        write set, a pass each, so the next entry's run (a new CPU, its cache empty) finds RAM as this one left it -> whether
+        there was one"""
+        for k in range(2 * NSET - 1, -1, -1):
+            s, w = divmod(k, NWAY)
+            if self.dirty[s][w]:
+                vt = self.tag[s][w]
+                if vt >= RB0:
+                    for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
+                self.dirty[s][w] = 0; self.passes += 1; return True
+        return False
     def run_pass(self, K):
         """one pass: (instructions executed, why it ended)"""
         self.passes += 1; cw = 0; self.wb = None

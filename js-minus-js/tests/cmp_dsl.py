@@ -18,7 +18,7 @@ def ref_state(c):
               sdp=c.sdp, pnl=c.pnl, inul=c.inul, icm=c.icm, kpos=c.kpos, lcon=c.lcon, nint=c.nint, pm=c.pm,
               osp=c.osp, csp=c.csp, nsym=c.nsym, nlet=c.nlet, nfn=c.nfn, nlab=c.nlab, cp=c.cp, curf=c.curf, cfn=c.cfn, nfdef=c.nfdef, nloc=c.nloc, npar=c.npar, fsym=c.fsym,
               pendLa=c.pendLa, err=c.err, nd=c.nd, tb=c.tb, nimp=c.nimp, obase=c.obase, dbase=c.dbase, fcsp=c.fcsp, flab=c.flab,
-              sv0=c.sv0, sv1=c.sv1, sv2=c.sv2, sv3=c.sv3, fmark=c.fmark, clab=c.clab, ca=c.ca, rpend=c.rpend)
+              sv0=c.sv0, sv1=c.sv1, sv2=c.sv2, sv3=c.sv3, fmark=c.fmark, clab=c.clab, ca=c.ca, rpend=c.rpend, rst=c.rst)
     for k in range(R.ODN): st[f'od{k}'] = c.od[k] if k < c.nd else None
     st['pk'] = c.pk if c.nd and c.desc(c.nd - 1) >= R.KBIG and c.desc(c.nd - 1) != R.TMP else None     # (a big constant or comparison on top)
     for k in range(R.OD): st[f'op{k}'] = c.ops[k] * 8192 + c.opv[k] if k < c.osp else None
@@ -46,11 +46,12 @@ else:
     def lex_for(c): return lexp
 if __name__ == '__main__' and not SPEC: print(f'lexer: {lexp.ntemps} temps; parser: {prog_for(0, 0, 0).ntemps} temps')
 work = 0; steps = 0
-def check(text, repl=0):
-    """run the DSL level by level on one source text against cc_ref -> (ok, detail). repl: as the page's REPL"""
+def check(text, repl=0, rdone=0):
+    """run the DSL level by level on one source text against cc_ref -> (ok, detail). repl: as the page's REPL (rdone: the lines
+    its last run read)"""
     global work, steps
     src = [ord(ch) for ch in text] + [0, 0]
-    ref = R.Compiler(DB, CB, lib, repl=repl); line = 0
+    ref = R.Compiler(DB, CB, lib, repl=repl, rdone=rdone); line = 0
     ls = D.initial_lex(DB); ps = D.initial_parse(DB); tab = {n: 0 for n in D.table_names()}; lab = {}; code = {}; data = {}
     prev = dict(o_tkany=0); pw = None; pline = 0
     for i in range(len(src)):
@@ -67,7 +68,7 @@ def check(text, repl=0):
                 env = {('S', n): v for n, v in ps.items()}
                 for k in ('tk', 'tv', 'th1', 'th2'): env[('I', k)] = prev['o_' + k]
                 env[('I', 'th1')] += prev['o_rnl'] * pline        # (the page: .trl<k> adds the level's line)
-                env[('I', 'repl')] = repl
+                env[('I', 'repl')] = repl; env[('I', 'rdone')] = rdone
                 for n, v in tab.items(): env[('I', n)] = v
                 ps, e = pg.run(env); e = collections.defaultdict(int, e); work += pg.ntemps; steps += 1
                 for s in range(R.EMAX):
@@ -99,7 +100,12 @@ def check(text, repl=0):
 if __name__ == '__main__':                       # (tests/fuzz/fuzz.py imports check())
     from par import pmap                         # one program per worker process; the counts come back with it
     def one(f):
-        w, s, v = work, steps, set(variants); ok, msg = check(open(f).read().rstrip('\n') + '\n', int(os.path.basename(os.path.dirname(os.path.abspath(f))) == 'repl'))
+        w, s, v = work, steps, set(variants); text = open(f).read().rstrip('\n') + '\n'
+        repl = int(os.path.basename(os.path.dirname(os.path.abspath(f))) == 'repl')
+        # (a REPL session also as a later run compiles it: the lines before the middle, or all of them, already run)
+        for rdone in ((0, text.count('\n') // 2, text.count('\n')) if repl else (0,)):
+            ok, msg = check(text, repl, rdone)
+            if not ok: msg += f' (rdone {rdone})'; break
         return ok, msg, work - w, steps - s, set(variants) - v
     tw = ts = 0; used = set()
     for f, (ok, msg, w, s, v) in zip(sys.argv[1:], pmap(one, sys.argv[1:])):

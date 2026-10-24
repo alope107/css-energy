@@ -34,7 +34,7 @@ CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
         expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-repl l5-net net-demo c1 c2 c2-all fuzz fuzz-quick fuzz-l3 clean
 
 help:
-	@echo "make page           build/js_in_css.xhtml (lib -> image -> page: editor, compile chain, CSS CPU; ~7 s)"
+	@echo "make page           build/js_in_css.xhtml and build/repl.xhtml (lib -> image -> pages: editor, compile chain, CSS CPU; ~15 s)"
 	@echo "make test           fast levels, no browser: Node oracle, L1 reference, quick fuzz, L2 DSL, C1 CPU model (~5 s)"
 	@echo "make fuzz           differential tests against Node on thousands of programs, L1 + L2 + C1 (~30 s)"
 	@echo "make test-browser   L3: the generated CSS compiler in Chrome vs the reference (~40 s)"
@@ -60,12 +60,16 @@ $(B)/ccimg.json: $(CC)/lib.json $(CC)/cc_ref.py $(CC)/mkimage.py tests/fizz.js
 	@mkdir -p $(B)
 	$(PY) $(CC)/mkimage.py tests/fizz.js $@
 
-page: $(B)/js_in_css.xhtml
-$(B)/js_in_css.xhtml: $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/replui.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
+page: $(B)/js_in_css.xhtml $(B)/repl.xhtml
+PAGEDEPS := $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
+$(B)/js_in_css.xhtml: $(PAGEDEPS)
 	UI=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
+$(B)/repl.xhtml: $(PAGEDEPS) machine/replui.py           # the REPL's page (machine/replui.py)
+	UI=1 REPL=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
 
 dist: page
 	cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
+	cp $(B)/repl.xhtml dist/repl.xhtml
 
 # ---- tests (see docs/ARCHITECTURE.md#5-tests)
 expect:                                   # Node is the oracle: writes tests/suite/*.out, and Node's REPL tests/repl/*.out
@@ -156,8 +160,8 @@ $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(
 
 l5-repl: $(B)/l5-repl.$(UICONF).log       # the REPL on the page: each session typed, its transcript vs Node's REPL's
 	$(call report,$<,3)
-$(B)/l5-repl.$(UICONF).log: tests/repl_ui.js $(wildcard tests/repl/*.tr) $(UI)
-	$(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/repl_ui.js $(B)/js_in_css.xhtml tests/repl/*.js
+$(B)/l5-repl.$(UICONF).log: tests/repl_ui.js $(wildcard tests/repl/*.tr) $(B)/repl.xhtml $(HARNESS) $(SUITE) $(RERUN_IF)
+	$(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/repl_ui.js $(B)/repl.xhtml tests/repl/*.js
 
 test: expect l1 fuzz-quick l2 c1
 test-browser: l3

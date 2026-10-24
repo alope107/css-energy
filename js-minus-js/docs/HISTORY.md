@@ -93,14 +93,29 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   them, always at the same LDI, with nothing pending and the same block in both ways of its set. The data fill had no
   check that its block was absent (the prefetch has one); a pending miss seen again after its fill, as when a register
   lands a frame late under load, filled the other way too. With the check, 30 of 30 such runs halt.
+  Against main, measured last (BENCHMARKS §17): CPU-only pages 1.20× slower (geometric mean of 16 programs: more passes
+  where frames grew or strings compare, and each pass costs more, the instruction classes carrying doubles, specials
+  and calls), compiles 1.18× slower (median of 186 programs: 21% more temps per token). Three cuts on the way: a
+  `console.log` chain past its pieces keeps the rest on its last piece when that is a string (`hanoi` had become three
+  heap strings per line: 63 → 35 passes, main 33); the runtime takes its common cases first (two numbers or two
+  strings skip `prim`, a name skips `canint`: steps −6.6%); and the picker's radio buttons moved next to their editors,
+  so one set of readback rules serves all thirteen (`.pkr:checked + .ed`; per editor they had cost ~10% of a compile).
+  Two tests from the start, `fn_in_block` and `nested_function`, became programs: the branch compiles them.
 - **18, the REPL (2026-10-24, branch `repl`, from `lxym`).** A chip that turns the editor into a Node-style session:
   Enter runs it, and each entry's output and value show under it (ARCHITECTURE §3.10, README REPL). No script presses
   Run, so the page sees the editor's line count change (`:has`) and restarts the scan; CSS keeps no machine state
   between runs, so each Enter replays the whole session. The compiler got a REPL mode (entries end where a top-level
   statement starts a line: an echo of the entry's value, and a mark of where the output stands), the console a larger
-  grid for the REPL and the marks, and the display latches what the last finished run showed. Keeping the machine's
-  state instead (RAM kept, only the new entry compiled to run) would need the data cache flushed at HALT (it is
-  write-back), code that doesn't move when lines are added, and a resume address: not tried.
+  grid for the REPL and the marks, and the display latches what the last finished run showed. Then (the same day) a
+  page of its own, which keeps the machine's state: Enter still reads and compiles the whole session, but the run
+  starts at the first entry after the lines the last run read (the compiler's `rdone`, its start `--ccstart`), on the
+  RAM that run left. That took three things the replay didn't need: the CPU writes its cache back once halted (a line
+  a pass; a new run's CPU starts with an empty cache), the console's cursor starts at the last end mark, and the
+  compiler is one pass, so lines already run compile to the same addresses. A session with fewer lines, or whose Enter
+  came while a run was going (part of an entry's writes may be in RAM), runs from its start on cleared RAM. Two traps
+  on the way: lxym's editor names rows by where their sentinels show, and moving the lines down for the output with
+  `position: relative` moved the names too (ENGINE_NOTES 81: a transform doesn't); and in the frame Enter drops the
+  compiler, the scan's 'run from line 0' flag still held the last sweep's value, which cleared a kept console.
   A CSS CPU bug surfaced on the way. The echo's cell moved every global a word, and the bank sample printed `wd ??`:
   `ops[i]` read a word of the wrong array. On the page an instruction makes all its reads at once and keeps (latches)
   the ones that hit for its re-execution, a read only if the reads its address came from hit too; but GETX's element
@@ -193,12 +208,24 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 78 | Inner functions' calls through the library's `callv` every time | closure_gc +5% passes, func_expr +15% after `this` added cases to `callv` | open lead: a CALLV fast path for them |
 | 79 | A 40 × 32 console for every program | FizzBuzz +24% on the page: the console box lays out every reader on each write | the grid's size a property: 9 × 16 for a program, 40 × 32 for the REPL |
 | 80 | The console's RAM as 1,312 words (the REPL's grid and its marks) | its trees decoded in radix 82 × 4: every console write restyled 82 group nodes per bank, FizzBuzz's CPU-only page +17.6% | 1,536 words, radix 6 × 4 × 4 × 4 |
-| 81 | The REPL's latches gated by an animated property in the transition's delay | no transition ever started (ENGINE_NOTES 65): Enter blanked the transcript | the gate as a container style query |
+| 81 | The REPL's latches gated by an animated property in the transition's delay | no transition ever started (ENGINE_NOTES 79): Enter blanked the transcript | the gate as a container style query |
 | 82 | A newline token's line as a property of each line's compile levels (`--lnum`, inline or on the line source) | the levels of different lines no longer shared Chrome's matched properties cache: FizzBuzz compiled 29% slower | the line added where the token is written (`.trl<k>`), only on the REPL |
 | 83 | The REPL's line count from 24 `#app:has()` rules | `#app` restyles every frame of the scan: a program's compile +1% | `.pane:has()` into a register |
+| 84 | The REPL as a chip in the program page's picker, replaying the session on each Enter | programs compiled ~6% slower for the REPL's page parts; an entry cost the whole session's run (13 s at 19 lines) | a page of its own that keeps the machine's state (ARCHITECTURE §3.10) |
+| 85 | The REPL's output room opened by moving the lines with `position: relative` | the rows' names (their sentinels' view progress) moved with the lines: the probes read the wrong rows (ENGINE_NOTES 81) | `transform: translateY()` |
 
 ## Open leads (untried)
 
+- **Two strings' equality in the machine.** `==`, `===` and `switch` on two strings always trap (`jcmp` or `deq`, then
+  `leqr` / `deqr`: ~37 steps, `primes` +30% passes against main). Same address is equal and different lengths unequal:
+  a stage after the dyn class that reads both length words (as the cat class does) would decide most of them.
+- **Compile time against main** (+18%, BENCHMARKS §17): `popops` chooses a dynamic operator in each of its ten
+  iterations (`dop`, `bty`, `picmp`: ~80 temps an operator token), and `(` after an operand carries value and method
+  calls in every variant. Choosing the operator once at push time, or variants for the common binary operators (a
+  smaller `popcap`), would cut the temps; §14 found new variants cost more than their temps, so measure both.
+- **A pass of the CPU** costs ~15% more than main's (`collatz`: the same passes in the model, 1.155× on the page): 63
+  more registered properties and 53% more `if()`. Which classes' declarations every pass pays for is
+  unmeasured.
 - **Per-iteration `let`.** `for (let i ...)` has one `i`: closures made in the loop see its last value (README
   Limits). An env cell is per frame, and a top-level function's variables are globals, so a binding per iteration
   needs a block's own env chained to the frame's; the one-pass compiler doesn't know at the loop's head whether the

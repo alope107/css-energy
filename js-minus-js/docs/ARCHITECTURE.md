@@ -27,7 +27,8 @@ until 2026-10-19 the CPU was a GSUB font, §3.8.)
 
 Run and Edit are one checkbox (`#run`, first in `body`), read through sibling selectors (`#run:checked ~ …`). Edit
 clears the CPU's registers and zeroes RAM, but for the globals, which it sets to `undefined` (cc_ref `GINIT`, as the
-CPU-only images start them: hoisting and the function cache's sentinel). The picker's radio buttons (`#pk<i>`) follow it.
+CPU-only images start them: hoisting and the function cache's sentinel). The picker's radio buttons (`#pk<i>`) sit in
+`.frame`, each right before its editor.
 
 ---
 
@@ -328,8 +329,8 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 - `UI=1` adds the editors, the readback scan, the compile chain and Run / Edit (`uipage.py`). Gating:
   `--go = compiled (ccok) × run × …`; nothing runs until `--ccgo`. Edit sets `--run` to 0, zeroing every register and
   RAM leaf; the compile chain's overlays hold code and strings, and read ports read them as RAM.
-- The picker: eleven editors (`#ed`, the page's own program, then `samples/*.js`), one shown (`#pk<i>:checked ~ #app
-  .ed<i>`); each keeps its edits. It is disabled while running (the scan reads the editor that shows).
+- The picker: thirteen editors (`#ed`, the page's own program, then `samples/*.js`), one shown (`.pkr:checked + .ed`:
+  each radio button is right before its editor); each keeps its edits. It is disabled while running (the scan reads the editor that shows).
 
 ### 3.5 Runtime library
 
@@ -494,44 +495,60 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 
 ### 3.10 The REPL (`machine/replui.py`, 2026-10-24)
 
-The REPL is one more editor on the page, run by Enter. It keeps no machine state between entries: each Enter replays the
-whole session, which the machine's determinism makes print what it printed before.
+The REPL is a page of its own (`repl.xhtml`, `gen_css.py` with `UI=1 REPL=1`): one editor, run by Enter. Each Enter
+compiles the whole session again, but runs only the entries after the lines the last run read, on the memory that run
+left.
 
-- **Enter.** `#app:has(> .pane > .frame > .ed<R> > div:nth-of-type(k))` gives the editor's line count (`--rbcnt`); a scan
-  register (`nl`) takes the count each sweep starts with, and while they differ the sweep counter is held at 0
-  (`ui_rb.repl_run`). So a new line restarts the scan, which drops `--rbrd` and `--ccgo`: the compile chain and the CPU
-  go away (its registers restart), and RAM, the globals (to `undefined`) and the console are cleared while the scan
-  runs, by an `if()` on the inherited `--ccgo` (`#memw`, a wrapper around the RAM trees, runs `kccgo` for it) where Edit
-  uses `#run:not(:checked)` selectors. The editor stays editable; its last line, the prompt, isn't read (its probe is
-  hidden, so it reads as spaces).
-- **The compiler's REPL mode** (`cc_ref.Compiler(repl=True)`, the DSL's input `repl`, `--repl` on `#ccw`). The lexer
-  leaves every newline pending, not only one after a token that can end a statement, and a line that starts with
-  `(` `[` `+` `-` starts a statement (`CONTR`); each `T_NL` carries the line its next token is on (`th1`: on the page each
-  level's `--lnum`). A `T_NL` that leaves the parser at a top-level statement start (no control entry, no function) ends
-  the entry before that line (`entry_end`): `CALL echo` if any token came since the last end (`rpend`), then `PUTC` with
-  A = 1 + the line, a mark. An `if` waiting for `else` there ends. Top-level expression statements, assignments and
-  `++` / `--` statements copy their value into `ECELL` (`echo_val`); the library's `echo` prints it as Node's REPL does
-  (`insel`: strings quoted) and resets it to `undefined`. The program's end writes the end mark (`MARKEND`) after the
-  timers; so does every library halt (`halt()` is `PUTC` end mark, `HALT`), so a run-time error ends a run too.
+- **Enter.** The editor's row count is a register (`--rbcnt`: a box as wide as the rows with a sentinel are many, each
+  sentinel 16px tall and an absent row's anchor-size 0, read through 100cqi); a scan register (`nl`) takes the count each
+  sweep starts with, and while they differ the sweep counter is held at 0 (`ui_rb.repl_run`). So a new line restarts the
+  scan, which drops `--rbrd` and `--ccgo`: the compile chain and the CPU go away (its registers restart). The editor stays
+  editable; its last row, the prompt, isn't read (probe k reads only if row k + 1 is there).
+- **What the run skips.** A sweep's start also takes `dn` = 1 + the lines the compiler may skip (0 from the moment the
+  sweep stops: in the frame `--ccgo` dropped `dn` still held the last sweep's value, and a clear for it blanked a kept
+  console). They are the line count the last finished run read (the display's latched `--rn`), or none if the editor now
+  has fewer lines, or if the scan started while a run was going (`--rbz`, a latch from the CPU's start, `ccok`, to its
+  end, `hdone`: that run may have written part of an entry, through evictions). Then the latched count is forced to 0 too
+  (`--rres`), so a session that doesn't compile after it starts over as well.
+- **The compiler's REPL mode** (`cc_ref.Compiler(repl=True, rdone=…)`, the DSL's inputs `repl` and `rdone`, `--repl` and
+  `--rdone` on `#ccw`). The lexer leaves every newline pending, not only one after a token that can end a statement, and a
+  line that starts with `(` `[` `+` `-` starts a statement (`CONTR`); each `T_NL` carries the line its next token is on
+  (`th1`: on the page each newline level's `.trl<k>`). A `T_NL` that leaves the parser at a top-level statement start (no
+  control entry, no function) ends the entry before that line (`entry_end`): `CALL echo` if any token came since the last
+  end (`rpend`), then `PUTC` with A = 1 + the line, a mark. An `if` waiting for `else` there ends. The first such end
+  before a line ≥ `rdone` (between the echo and the mark; else the program's end) is where the run starts: the parser's
+  `rst` (an instruction pair's index), which `.fin` publishes as `--ccstart` and the CPU reads (`ccpc`) for its first
+  pass (`init` stays 0 until the compiler is done). The compiler is one pass, so the lines already run compile to the same
+  code, strings and globals each time, and what RAM holds still means what it meant. Top-level expression statements,
+  assignments and `++` / `--` statements copy their value into `ECELL` (`echo_val`); the library's `echo` prints it as
+  Node's REPL does (`insel`: strings quoted) and resets it to `undefined`. The program's end writes the end mark
+  (`MARKEND`) after the timers; so does every library halt (`halt()` is `PUTC` end mark, `HALT`), so a run-time error
+  ends a run too.
+- **Memory kept.** RAM is cleared (the globals to `undefined`, `--rclr`, memtree.py) only while the scan of a run from line
+  0 runs. The data cache is write-back, and a new run's CPU starts with an empty one: so once halted, the REPL page's CPU
+  writes its dirty lines back, the last one each pass through the fill's write set (`xk1`; csssim `flush_pass`), and
+  `hdone` (halted, no dirty line at the chain's end) says when it is done. The console's cursor starts at the latched end
+  mark − 1 (`--optr0`; 0 for a run from line 0).
 - **Marks.** `PUTC A, #0` with A > 0 writes the output position + 1 (optr + 1) into console cell `1280 + A − 1`, in the
   console's write set, and leaves optr; the out class's `--pmk` / `--pmo` pick that cell and its bank (csssim: `('mark', k)`).
-  Marks go through the console's channels because the page reads RAM leaves, and a write through the data cache stays
-  in the cache (write-back, no flush at HALT). The console is 1,536 words, its banks 384 leaves (radix 6 × 4 × 4 × 4, groups
-  of 16): with 1,312 the trees were radix 82 × 4, and every console write restyled 82 group nodes per bank, which made
-  FizzBuzz's CPU-only page 17.6% slower (BENCHMARKS §18). A program's page renders only its grid's groups. The grid's size
-  is a property, `--ocols` × `--osize`, which the out class reads: 9 × 16 for a program, 40 × 32 for the REPL.
+  Marks go through the console's channels because the page reads RAM leaves, and the console isn't cached. The console is
+  1,536 words, its banks 384 leaves (radix 6 × 4 × 4 × 4, groups of 16): with 1,312 the trees were radix 82 × 4, and every
+  console write restyled 82 group nodes per bank, which made FizzBuzz's CPU-only page 17.6% slower (BENCHMARKS §19). The
+  program page renders only its grid's trees. The grid's size is a property, `--ocols` × `--osize`, which the out class
+  reads: 9 × 16 for a program, 40 × 32 for the REPL.
 - **The display.** Readers must share a containing block with the leaves they read, so the REPL's are in the console box,
-  which the REPL moves over the editor (`position: absolute`, anchored to the editor's `--rbed`). They latch: a reader's
-  value is −1 while the gate is shut, and a 1,000,000 s transition keeps showing the last one; the gate is a container
-  query, `style(--rg: 1) and style(--ccgo: 1)` (a change an animation makes doesn't start a transition: ENGINE_NOTES
-  65), where `--rg` is a register of `--ccgo` × (the end mark is set). It shuts with `--ccgo`, in the frame RAM is cleared,
-  and opens a frame after the run's end: so Enter doesn't blank the transcript, and a session that doesn't compile keeps
-  the last one. The latched marks and the line count the run read (`nl`, which changes a frame after `--ccgo` drops) are
-  registers (view timelines scoped on body), animated onto the display (`.rdisp`) and onto the editor's frame.
-  From them: `t_L`, the rows before line L's entry (a running maximum over the marks' rows: a line without a mark goes on
-  an entry), and the end's rows. Line L's `::before` is as tall as the rows between lines L − 1 and L; row r shows
-  above line `L(r) = #{L < n : t_L ≤ r}`, at y = 12 + 24 (r + L(r)); a prompt is `>` where an entry starts (a mark)
-  and `...` where one goes on.
+  which lies over the editor (`position: absolute`, anchored to the editor's `--rbed`). They latch: a reader's value is
+  −1 while the gate is shut, and a 1,000,000 s transition keeps showing the last one; the gate is a container query,
+  `style(--rg: 1) and style(--ccgo: 1)` (a change an animation makes doesn't start a transition: ENGINE_NOTES 79), where
+  `--rg` is a register of `--ccgo` × `hdone` (the end mark can't say a run ended: the last run's stays in RAM). It shuts
+  with `--ccgo` and opens a frame after the write-back: so Enter doesn't blank the transcript, and a session that doesn't
+  compile keeps the last one. The latched marks and the line count the run read (`--rcl`, from `nl` less the prompt) are
+  registers (view timelines scoped on body), animated onto the display (`.rdisp`) and onto the editor's frame. From them:
+  `t_L`, the rows before line L's entry (a running maximum over the marks' rows: a line without a mark goes on an entry),
+  and the end's rows. Line L (the editor's L-th div; line 0 is its own text) moves down by the rows above it with a
+  transform: the rows' names come from their sentinels' view progress, which a transform doesn't move and
+  `position: relative` on the line does (ENGINE_NOTES 81). Row r shows above line `L(r) = #{L < n : t_L ≤ r}`, at
+  y = 12 + 24 (r + L(r)); a prompt is `>` where an entry starts (a mark, and line 0) and `...` where one goes on.
 
 ## 4. Editor readback (`readback/ui_rb.py`)
 
@@ -542,12 +559,21 @@ whole session, which the machine's determinism makes print what it printed befor
 - The scan is frame-locked (one column per frame at any frame rate) over a fixed 64 columns.
 - It runs only after Run: while editing, `SCAN` is 0 and the registers are frozen (`--rbfrz`). After Run the editors
   are read-only, one sweep raises `--rbrd`, and `--ccgo` (from the `--rbrdT` timeline) shows the compile chain.
-- Lines: line 0 is text directly in the editor, line `k` its `k`-th `div`, each with a sentinel. Nested divs show
-  inline, `<br>` is hidden, `white-space: nowrap` with `&nbsp;`, and no CSS rule may match the line divs (ENGINE_NOTES
-  44–49). Hidden editors are `display: none`, so the anchors are the shown one's; the per-line checks (`:has`) are
-  per editor, under its radio button, on the editors' section with child combinators (on `#app` each searched its
-  ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan reads what the editor shows; `tests/picker.js`
-  the picker. An editor's initial text starts at its line 1, so a sample has at most 23 lines.
+- Rows: line 0 is text directly in the editor, where an editor's initial text starts, and every block that holds no
+  block is a row, nested or not: Chrome nests lines (Enter in line 0, pastes into an empty line) and formatted pastes
+  bring wrappers (VS Code's `<div style>` around a `<div>` per line). A wrapper whose first element is a `<br>` has a
+  row of its own before its lines (Enter at the end of line 0). Each row starts with a `::before` sentinel, named for
+  the row it shows in, `--rbs<k>`, by a discrete `anchor-name` animation on a view timeline (ENGINE_NOTES 77); probe
+  `k` reads `--rbs<k>`, and the probe of an absent row is 0px wide and has no cells. `<br>` shows, so an empty line
+  keeps a caret position (ENGINE_NOTES 78); a `<br>` inside a line (Shift+Enter, a paste) starts a row with no
+  sentinel, and `.unread` (as tall as any gap between named rows) says so. `white-space: nowrap` with `&nbsp;`; pasted
+  elements take the editor's style (`!important`, ENGINE_NOTES 75), so a `<pre>`'s newlines collapse and the page says
+  the block shows as one line (`.merged`). No CSS rule may match the line divs (ENGINE_NOTES 44–49). Hidden editors
+  are `display: none`, so the anchors are the shown one's; the per-editor checks (`:has`: the line limit, a `<pre>`)
+  look at the editor after the checked radio button, one set for every editor, on the editors' section with child
+  combinators (on `#app` each searched its ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan
+  reads what the editor shows; `tests/picker.js` the picker. A sample has at most 24 lines. Tab moves focus out of the
+  editor: without script the page can't keep it (ENGINE_NOTES 78).
 
 ---
 
@@ -564,8 +590,8 @@ whole session, which the machine's determinism makes print what it printed befor
 | L5 | `make l5` / `l5-smoke` | the real page: type, Run, read the console | Node output on the 9 × 16 grid |
 | L5 net | `make l5-net` | the `net_*` programs on the real page, served over HTTP with the gateway (`net/server.js`) | Node output, with `net/shim.js`'s fetch / read |
 
-- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 139 programs, `tests/suite_err/` 49;
-  `samples/` the picker's ten; `tests/programs/` the demos t1–t4.
+- `make test` = oracle, L1, quick fuzz, L2, C1. `tests/suite/` has 180 programs, `tests/suite_err/` 49;
+  `samples/` the picker's twelve; `tests/programs/` the demos t1–t4.
 - **Collector tests** (`str_keys_gc`, `obj_gc`, `gc_rawblock`, `arr_gc`) fill the 3,072-word heap, which is most of
   their time: a collection needs a full half, and each new 4-word line a program writes costs a cache-miss pass. They
   fill with empty objects where the filler doesn't matter (an 8-word chunk, one line written), collect at most twice

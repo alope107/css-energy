@@ -1,8 +1,8 @@
 # JavaScript, compiled and run by a stylesheet
 
 `dist/js_in_css.xhtml` is one static XHTML page, and no script runs on it. You type a JavaScript program into its
-editor (or pick one of twelve samples) and press Run, or type into its REPL a line at a time ([REPL](#repl)). The
-program then goes through four stages:
+editor (or pick one of twelve samples) and press Run; `dist/repl.xhtml` is a REPL on the same machinery, run a line at a
+time ([REPL](#repl)). The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
@@ -15,21 +15,24 @@ program then goes through four stages:
 
 It works in Chrome only, and has been tested only on headless Chromium 153.
 
-**Status (2026-10-22).**
+**Status (2026-10-24).**
 
-- Every test level passes: 135 programs checked against Node's output and 47 the compiler must reject, the ten
+- Every test level passes: 180 programs checked against Node's output and 49 the compiler must reject, the twelve
   samples through the compiler in Chrome and on the page, plus differential tests that check thousands of generated,
   reformatted and mutated programs against Node (`make fuzz`). The CPU's checks: C1 (its model, every program) and C2
-  (a CPU-only page per program, under 1,500 steps); all the programs as CPU-only pages, objects included.
+  (a CPU-only page per program; `make c2-all` every program, the collector's tests included).
+- The language covers everything in the [learnxinyminutes JavaScript tutorial](https://learnxinyminutes.com/javascript/)
+  ([The language](#the-language)): JavaScript's numbers as doubles, `true` / `null` / `undefined` as values, functions
+  as values, closures, arrows, `this`, prototypes and `new`, timers, `Math`.
 - The machine is a register machine since 2026-10-21, with the runtime's work on memory as machine instructions and a
-  code cache since 2026-10-22. On 25 programs on CPU-only pages it is 1.74× faster than the register machine before it
-  and 1.53× than the stack machine with those instructions (geometric means; strings, arrays and objects up to 7.6×,
-  compute as fast; BENCHMARKS §15), with compile time unchanged.
-- On the page, FizzBuzz 1–15 compiles in about 2.3 s from Run (including the 1.2 s readback sweep) and halts about
-  3.2 s after Run.
+  code cache since 2026-10-22 (BENCHMARKS §15). The language above costs it time (BENCHMARKS §17): against the machine
+  before it, CPU-only pages run 1.20× longer (geometric mean of 16 programs) and programs compile 1.18× longer (median
+  of 186).
+- On the page, FizzBuzz 1–15 compiles in about 2.8 s from Run (including the 1.2 s readback sweep) and halts about
+  3.8 s after Run (main: 2.4 and 3.3 s; BENCHMARKS §17).
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
-- A REPL (2026-10-24): Enter runs the session and shows each entry's output and value under it, checked against
-  Node's REPL ([REPL](#repl)). An entry replays the whole session: ~4 s at 8 lines, ~13 s at 19.
+- A REPL (2026-10-24, its own page): Enter runs the new entry on the memory the last one left and shows its output and
+  value under it, checked against Node's REPL ([REPL](#repl)).
 - Numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md). How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -218,14 +221,17 @@ The page reports 99 where the reference compiler gives a more specific syntax-er
 
 ## REPL
 
-The REPL chip turns the editor into a session, as Node's REPL is one: type a line and press Enter, and what it printed
-and its value appear under it (`'HI'`, `[ 1, 2, 3 ]`, `undefined` for a declaration). Nothing presses Run: the page
-sees the editor's number of lines change.
+`repl.xhtml` (linked from the program page) is a session, as Node's REPL is one: type a line and press Enter, and what
+it printed and its value appear under it (`'HI'`, `[ 1, 2, 3 ]`, `undefined` for a declaration). Nothing presses Run:
+the page sees the editor's number of rows change.
 
-- **Each Enter replays the session.** CSS keeps no state from one run to the next, so the page reads every line again
-  (all but the last, the prompt), compiles them as one program and runs it from the start; the machine is
-  deterministic, so earlier entries print what they printed before. An entry costs the session's whole readback,
-  compile and run ([docs/BENCHMARKS.md](docs/BENCHMARKS.md) §18).
+- **Each Enter runs the new entry.** The page reads every line again (all but the last, the prompt) and compiles them
+  as one program, but the run starts at the first entry after the lines the last run read, on the memory that run
+  left: variables, functions, the heap and the console are kept. So an entry costs the session's readback and compile,
+  but only its own run.
+- **Starting over.** Delete lines (or everything) and press Enter: a session with fewer lines than the last run read
+  runs from its start, on cleared memory. So does one whose Enter came while a run was still going (that run may have
+  written part of an entry's effects).
 - **Entries.** A line that starts a top-level statement ends the entry before it; a line that leaves a block, a call or
   an expression open goes on in the next (its prompt is `...`), as in Node's REPL. A line that starts with `(`, `[`,
   `+` or `-` starts a statement (in a program it would continue the one before), and an `if` ends at its line (`else`
@@ -235,15 +241,17 @@ sees the editor's number of lines change.
   else (a declaration, `console.log`, a loop, an `if`) leaves `undefined`; Node gives a loop or an `if` its body's
   last value.
 - **The transcript stays until a run ends.** An entry that doesn't compile keeps the last transcript and shows the
-  error above the editor; fix it and press Enter. Edit any line, then press Enter on the prompt to replay the session.
-- **Limits**: 22 lines (the editor's 24, less its empty first line and the prompt); 32 rows of 40 characters of output
-  for the whole session (a longer line wraps; past 32 rows the output wraps to the top and the transcript breaks). A
-  run-time error (`Uncaught ReferenceError`) ends the run there, so the entries after it show nothing until it's fixed;
-  Node's REPL goes on. Timers run after the last entry, not after the one that set them. Declarations are hoisted
-  across entries (a function declared in a later entry can be called from an earlier one, where Node's REPL throws).
+  error above the editor; fix it and press Enter.
+- **Limits**: 23 lines (the editor's 24, less the prompt); 32 rows of 40 characters of output for the whole session (a
+  longer line wraps; past 32 rows the output wraps to the top and the transcript breaks). Editing a line that has
+  already run doesn't run it again: the next Enter compiles the edited text but runs only what comes after, so an edit
+  that declares or names things differently can give wrong values (delete lines to start over). A run-time
+  error (`Uncaught ReferenceError`) ends that run; the next entry runs on the memory as the error left it, as in Node's
+  REPL. A function declared in a later entry can be called from an earlier one's function (both are compiled each
+  time), where Node's REPL throws until it is declared.
 - How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.10. Its tests: `tests/repl/` (sessions; Node's REPL,
-  `tests/repl_expect.js`, writes their output and their transcript as the page shows it) through L1, L2 and C1, and
-  `make l5-repl` on the page.
+  `tests/repl_expect.js`, writes their output and their transcript as the page shows it) through L1, L2 and C1, each
+  replayed whole and typed a line at a time, and `make l5-repl` on the page.
 
 ## Network
 

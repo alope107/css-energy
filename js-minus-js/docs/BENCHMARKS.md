@@ -594,7 +594,128 @@ round ran 25% faster than the next on this machine), and in all 8 of 4 more roun
 0.89, ~11% less time.
 
 
-## 18. The REPL (2026-10-24, branch `repl`)
+## 17. The learnxinyminutes language (2026-10-24, branch `lxym`)
+
+Branch `lxym` (HISTORY 17): JavaScript's values (doubles in an FPU of `calc()`, `true` / `false` / `null` /
+`undefined` / `NaN` as values), functions as values, closures, arrows, `this`, prototypes, `new`, timers, `Math`,
+wrappers. Against main (`0f31b87`), each built in its own worktree; headless Chromium 153, the mini PC. The editor
+page's FizzBuzz timings ran in a bench lease; everything after them **interleaved and unleased** (the queue was switched
+off on 2026-10-24), with other sessions' work beside it.
+
+**Model** (`cc_ref` steps, `csssim.py` passes, K = 32; the 150 suite programs and samples both run, at `a6a745c`):
+
+| | main | lxym |
+|---|---|---|
+| steps | 110,746 | 121,269 (+9.5%) |
+| passes | 13,739 | 15,513 (+12.9%) |
+
+- Per program the geometric mean is 1.087: 75 within ±2%, 11 faster, 64 slower.
+- Three programs do more because their numbers are now JavaScript's: `big` 9 → 99 passes and `cmp_far` 24 → 135
+  (numbers past 20 bits, which main wrapped, are doubles), `num_dot` 17 → 57. A double's literal is parsed once at run
+  time (~160 steps for `3.14`), and printing a double takes ~260. Without the three: +11.2%.
+- `deep_recursion` 560 → 963: a frame is `[ret][this][params][env][temps]`, two words more than main's, and its frames
+  miss the cache. The env slot only where a closure is made would give 760 (HISTORY, leads).
+- The collector's tests (`arr_gc` +353, `obj_gc` +161, `str_keys_gc` +125, `gc_rawblock` +92) miss more: the ROM grew
+  2,048 words, which moved every RAM address and so the cache sets the stack, the globals and the heap share. Without
+  them and `deep_recursion`: +6.6%.
+- `==` and `switch` on two strings trap to `jcmp` (it reads the jump's operator and target from the instruction, then
+  `leqr` / `deqr`): `primes` 284 → 369 passes (17 comparisons at ~37 steps against main's `deq` at ~11), `bank` 76 → 92,
+  `str_cmp` 74 → 114.
+- Within the branch: CALLV entering closures itself, 171 programs 44,809 → 43,645 passes (closures −17.8%); a
+  `console.log` chain past its pieces keeping the rest on a string piece, `hanoi` 63 → 35 (main 33: the head had
+  become three heap strings per line); the runtime's common cases first (two numbers or two strings skip `prim`, a
+  name as a key skips `canint`, one range test for the hidden keys), steps −6.6% and passes −1.9% over all programs
+  (`num_loop` 1,075 → 849 passes, `str_keys` 8,231 → 6,481 steps, a loop over doubles 1,452 → 588 steps).
+
+**CPU-only pages**, load → HALT (`machine/halttime.js`, POLL=30; run = first step → HALT), five interleaved rounds,
+medians (ms) and the median per-round ratio, at `a6a745c`:
+
+| Program | main | lxym | steps | ratio |
+|---|---|---|---|---|
+| `fizzbuzz` | 875 | 969 | 324 / 324 | 1.104 |
+| `hanoi` | 772 | 894 | 273 / 273 | 1.143 |
+| `bank` | 2,505 | 3,620 | 381 / 574 | 1.449 |
+| `collatz` | 3,683 | 4,206 | 3,673 / 3,673 | 1.155 |
+| `caesar` | 7,230 | 7,126 | 959 / 938 | 0.969 |
+| `stars` | 1,898 | 2,031 | 566 / 566 | 1.069 |
+| `sort` | 3,227 | 3,820 | 1,220 / 1,361 | 1.187 |
+| `primes` | 11,464 | 16,436 | 2,121 / 2,776 | 1.431 |
+| `tree` | 9,739 | 10,602 | 1,573 / 1,637 | 1.086 |
+| `deep_recursion` | 27,227 | 48,176 | 2,007 / 2,007 | 1.771 |
+| `str_cmp` | 2,993 | 4,298 | 668 / 849 | 1.464 |
+| `str_build` | 3,158 | 3,605 | 135 / 123 | 1.138 |
+| `obj_count` | 1,261 | 1,434 | 389 / 417 | 1.137 |
+| `obj_grow` | 2,471 | 2,192 | 701 / 769 | 0.967 |
+| `arr_methods` | 9,905 | 11,331 | 3,007 / 3,657 | 1.143 |
+| `str_methods` | 6,888 | 8,146 | 1,816 / 2,172 | 1.187 |
+
+- Geometric mean 1.197. Beyond the model's passes, each pass costs more: `collatz` has the same steps and passes in
+  the model and runs 1.155×. The CPU page has 1,200 registered properties (main 1,137), 168 instruction classes (157)
+  and 6,331 `if()` (4,148): doubles, the specials, bitwise operators and calls live in the classes every pass
+  evaluates.
+
+**The editor page, FizzBuzz 1–15** (`machine/ui_seq.js`, `../shared/js/ab.js`, six rounds, in a lease, at `a6a745c`):
+
+| | main | lxym | ratio (IQR) |
+|---|---|---|---|
+| compiled (from Run) | 2,448 ms | 2,979 ms | 1.214 (1.159–1.301) |
+| HALT (from Run) | 3,277 ms | 3,946 ms | 1.204 (1.200–1.205) |
+
+- The run after compiling: 829 → 967 ms (148 steps both).
+- The sample picker: twelve samples cost +9.9% of a compile (the page without a picker against with, ten rounds;
+  0.909, IQR 0.904–0.928), the two new ones +6.5% (ten rounds, 1.019–1.081). Each editor had 25 `:has()` rules for
+  the readback's per-line checks under its radio button; with each radio right before its editor in `.frame`, one set
+  serves them all (`.pkr:checked + .ed`): 0.935 (0.918–0.939) of the compile, twelve rounds (`0908314`). So FizzBuzz
+  compiles in ~2.8 s against main's 2.4 (+14%).
+- The final page (`0908314`) against main, eight interleaved rounds each, unleased on a busy machine (runs up to 10 s):
+  compiled 1.147 (IQR 1.105–1.348), HALT 1.151 (1.096–1.207).
+
+**Compile time** (`tests/suite_css.js`, the L3 page, the 186 programs both compile, one browser, main / lxym / lxym /
+main): median per-program ratio 1.178 (IQR 1.115–1.252), total 119.0 → 146.2 s. The parser evaluates 454 temps per
+token on FizzBuzz against main's 374 (+21%, L2's count): the variants its tokens hit grew, an operator after a name or an
+operand by 250–590 temps (`popops`' ten iterations each choose a dynamic operator now, `(` after an operand calls values
+and methods, arrows and `this` add operand-stack snapshots).
+
+**Costs.** The editor page 24.9 MB (main 17.4), 4,569 registered properties (3,828); the ROM 10,798 words (4,462); the
+compiler 152,295 temps in 492 variants, 24 label ports (79,100, 338, 22).
+
+## 18. Pasting into the editor (2026-10-23, branch `editor-paste`)
+
+Pasting over many lines froze the page (ENGINE_NOTES 76). The probes' contents now lay out only from Run on. Paste
+times, `main`'s page against this one, interleaved (`shared/js/ab.js`) in a bench lease:
+
+| Paste | `main` | `display: none` probes while editing | `content-visibility: hidden` (kept) |
+|---|---|---|---|
+| 200 plain lines over 200 | 2,451 ms | 660 ms | — |
+| 200 formatted lines over 200 (VS Code's HTML) | 3,251–3,509 ms | 675–730 ms | 1,212 ms |
+| 2 formatted lines over FizzBuzz | 80 ms | 40 ms | — |
+| Compile, FizzBuzz (`compiledMs`, ratio to `main`, median and IQR) | 1.00 | 1.02–1.04 (IQR up to 1.07; A-vs-A 1.018, 0.96–1.06) | 0.96 (0.92–1.07) |
+
+`display: none` was faster to paste into but built ~6,000 probe boxes at Run, a few percent of the compile; the
+content-visibility version keeps them and showed no compile cost above the noise.
+
+**Rows named by where they show (ENGINE_NOTES 77).** The sentinels' names now come from a view-timeline animation, so
+the positional selectors and the `:has()` rules per line are gone, and lines nested by Chrome or by a paste read as
+they show. Against the content-visibility page above, interleaved in a bench lease (FizzBuzz; pastes as above):
+
+| | before | rows named by position |
+|---|---|---|
+| 200 formatted lines over 200 | 1,125 ms | 211 ms (0.19×) |
+| 200 plain lines over 200 | 1,174 ms | 222 ms (0.19×) |
+| 8 formatted lines into FizzBuzz | 81 ms | 33 ms (0.38×) |
+| Compile, FizzBuzz (`compiledMs` ratio, median and IQR; A-vs-A 0.997, 0.985–1.016) | 1.00 | 0.945 (0.924–0.974) |
+
+The first version left every probe's 64 cells laid out, absent rows' too, and the compile took 1.37× as long (IQR
+1.35–1.38): the old `:has()` rules had hidden the probes of absent lines. A probe's width now comes from its
+sentinel's height (constant through the scan), and `@container (width: 0px)` drops its cells. Pausing the rows'
+animations at Run, or dropping their `:has()` leaf filter, changed nothing (1.41×, 1.41×).
+
+**Leading sentinels, shown `<br>`s, the unread-rows note (2026-10-24, branch `editor-quirks`).** Against `main`,
+interleaved, unleased (other agents' runs alongside): compile of FizzBuzz 0.981 (IQR 0.923–1.062; A-vs-A 0.995), 200
+formatted lines over 200 1.000 (0.926–1.067): no cost above the noise.
+
+
+## 19. The REPL (2026-10-24, branch `repl`)
 
 All pinned to the E-cores (`taskset -c 8-15`: ~1.9× slower than the P-cores but steady; the machine had 5–20 other
 agents' load), interleaved with `../shared/js/ab.js`, ratios per round against `lxym` (`a6a745c`). A against A: IQR
@@ -615,12 +736,14 @@ agents' load), interleaved with `../shared/js/ab.js`, ratios per round against `
 | … the line where the token is written (`.trl<k>` on each level's `.tr`) | | L3: +2.2%, −1.0% (two rounds) |
 | All of it (`NOREPL=1`: the page without the REPL's own parts) | | 1.005–1.008 |
 | The page with the REPL | | 1.056–1.061 (FizzBuzz ~4.88 → 5.16 s); Run → HALT 1.046 |
+| **The REPL on a page of its own** (the program page without its parts; the compiler's `rst`, `rdone`; against `8306b38`) | | **1.013 (1.003–1.023)**, 10 rounds (A against A: 1.001, 0.970–1.018); FizzBuzz ~4.7 s |
 
 A per-line value on the compile chain's levels (inherited, registered or not) makes the levels of different lines
 differ, and Chrome stops sharing their style (the matched properties cache): FizzBuzz, with many short lines, paid most.
 The REPL's own page parts (its CSS section ~2%, the rest in pieces of 0.2–1%: the `:has()` count that was on `#app`,
 ~200 registered properties, timeline names, an editor's probe rules) cost a program ~5% of its compile; a page without
-them (`NOREPL=1`) costs 0.5%.
+them (`NOREPL=1`) costs 0.5%. So the REPL moved to a page of its own (`repl.xhtml`): what is left on the program page is
+the compiler's REPL mode, 2,216 more temps (154,511 against lxym's 152,295, +1.5%), ~1% of a compile.
 
 **What an entry costs** (P-cores, unpinned, load ~5): Enter → the output shown, the whole session read, compiled and run
 again. 8 lines (284 steps): the scan done 2.2 s, compiled 2.5 s, shown 3.9 s. 19 lines (`tests/repl/statements.js`, 1,544
