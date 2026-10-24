@@ -1,6 +1,6 @@
 # Architecture
 
-`make page` builds one XHTML file that runs no script. The user types JavaScript (or picks a sample) and presses Run;
+`make page` builds one XHTML file and its stylesheets, and no script runs. The user types JavaScript (or picks a sample) and presses Run;
 CSS reads the text back, CSS compiles it to register code, and CSS executes it: a chain of instructions per layout
 pass. Output goes to a 9 × 16 console. (Until 2026-10-21 the machine was a stack machine, last at commit `212175a`;
 until 2026-10-19 the CPU was a GSUB font, §3.8.)
@@ -486,8 +486,17 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 
 ```
 make page   # compiler/lib.json (if lib_src.js or cc_ref.py changed) -> build/ccimg.json -> build/js_in_css.xhtml
-make dist   # copy it to dist/
+make dist   # copy it and its stylesheets (build/js_in_css/) to dist/
 ```
+
+- The page's CSS is in 15 stylesheets in `build/js_in_css/`, which the page links in cascade order (`gen_css.py`
+  `SHEETS`). Each one is a run of consecutive `===` sections: `page`, `machine-properties`, `cpu`, `memory`, `console`,
+  `scan`, `compiler-properties`, `lexer`, `parser`, then one `parser-<family>` per family of parser modes
+  (`ccpage5.FAMILIES`: statements, declarations, names, operands, operators, console). Cloudflare serves at most
+  25 MiB per file, and the build fails past 20 MiB. The parser variants grow with the language, so give a new mode a
+  family (the build fails until it has one), and split a family that outgrows the limit. The variants sit in their
+  families' sections, not in the order they were built; that is safe because each (mode, token code) has one rule
+  (asserted). The tokens that change nothing come before all of them, in `parser`.
 
 - Reproducible (the Makefile pins `PYTHONHASHSEED` and `SOURCE_DATE_EPOCH`). The image (`mkimage.py tests/fizz.js`)
   supplies the ROM and the editor's initial program; `samples/*.js` the picker's.
