@@ -44,6 +44,7 @@ ROMF = PREF = True
 BLKS = (ref.ROMN + ref.LA['ram_size']) // 4; RB0 = ref.ROMN // 4
 DB = LA['data_base']
 def setof(b): return (b + b // 16 + b // 256) % NSET
+MIDM = int(os.environ.get('MIDM', 0)); MIDW = int(os.environ.get('MIDW', 1)); MIDPF = os.environ.get('MIDPF', '1') == '1'; MIDIC = os.environ.get('MIDIC', '1') == '1'     # (run_pass: exp/ram's mid-chain fills)
 STR_LO, STR_HI = LA['data_base'] + SDATA, STRP_HI     # literals and heap strings
 ALU = {'ADD': lambda a, b: s20(a + b), 'SUB': lambda a, b: s20(a - b), 'MUL': lambda a, b: s20(a * b),
        'DIV': lambda a, b: 0 if b == 0 else int(a / b), 'MOD': lambda a, b: 0 if b == 0 else a - b * int(a / b),
@@ -64,7 +65,7 @@ class Sim:
         self.st.setdefault('pst', 0)
         self.tag = [[None] * NWAY for _ in range(NSET)]; self.dirty = [[0] * NWAY for _ in range(NSET)]
         self.words = [[[0] * 4 for _ in range(NWAY)] for _ in range(NSET)]; self.fifo = [0] * NSET
-        self.pending = None; self.passes = 0; self.wbacks = 0; self.stale = self.pstale = False; self.wb = None
+        self.pending = None; self.passes = 0; self.wbacks = 0; self.mids = 0; self.stale = self.pstale = False; self.wb = None
         self.latch = {}; self.reads = {}; self.first = False
         self.itag = [[None] * IWAY for _ in range(ISET)]; self.iwords = [[[0] * 4 for _ in range(IWAY)] for _ in range(ISET)]
         self.ififo = [0] * ISET; self.pic = False
@@ -100,7 +101,7 @@ class Sim:
             vt = self.tag[s][w]
             if vt >= RB0:
                 for j in range(4): self.st['mem'][4 * vt + j] = self.words[s][w][j]
-            self.wbacks += 1; self.wb = vt
+            self.wbacks += 1; self.wb = vt; self.wbs.add(vt)
         self.tag[s][w] = b; self.dirty[s][w] = 0; self.fifo[s] ^= 1
         self.words[s][w] = [self.st['mem'].get(4 * b + j, 0) if b >= RB0 else 0 for j in range(4)]     # (ROM as data: 0)
         nb = b + 1; s = setof(nb); w = self.fifo[s]
@@ -397,20 +398,30 @@ class Sim:
         st['pc'], st['fp'], st['pst'] = pc, fp, npst; st['steps'] += 1 if done else 0
         return cw
     def run_pass(self, K):
-        """one pass: (instructions executed, why it ended)"""
-        self.passes += 1; cw = 0; self.wb = None
+        """one pass: (instructions executed, why it ended). MIDM > 0 (exp/ram): a fill stage every MIDM levels services a miss
+        inside the pass, the stalled instruction re-executing at the stage with its latched reads. A pass writes back at most
+        MIDW lines (a write set each: a stage whose victim is dirty past them ends the pass), and a block the pass wrote back
+        waits for the next pass, as on the page. MIDPF=0: a stage fills the missing block only (no prefetch); MIDIC=0: data misses only"""
+        self.passes += 1; cw = 0; self.wb = None; self.wbs = set()
         if self.pending is not None and not self.stale: self.fill(self.pending, cw)
         self.pending = None
-        n = 0; why = 'halt'
-        while n < K and not self.st['halt']:
-            self.first = n == 0
-            try: cw = self.execute(cw); n += 1
+        n = 0; why = 'halt'; lvl = 0; refirst = False
+        while lvl < K and not self.st['halt']:
+            self.first = lvl == 0 or refirst; refirst = False
+            try: cw = self.execute(cw); n += 1; lvl += 1
             except Stall as e:
+                stage = (lvl // MIDM + 1) * MIDM if MIDM else K
+                if e.miss is not None and stage < K and not (e.miss in self.wbs and not e.ic) and (MIDIC or not e.ic):
+                    sv = setof(e.miss); victim_dirty = not e.ic and self.dirty[sv][self.fifo[sv]]
+                    if len(self.wbs) + victim_dirty <= MIDW:
+                        self.latch = dict(self.reads); self.pic = e.ic; self.pstale = e.miss + 1 in self.wbs
+                        if not MIDPF: self.pstale = True     # (no prefetch at a stage: fill() skips it as for a stale next block)
+                        self.fill(e.miss, cw); self.mids += 1; lvl = stage; refirst = True; continue
                 self.pending = e.miss; self.pic = e.ic; why = 'miss' if e.miss is not None else 'write'; self.latch = dict(self.reads); break
         else: why = 'halt' if self.st['halt'] else 'K'; self.latch = {}
         self.first = False
-        self.stale = self.pending is not None and self.pending == self.wb and not self.pic
-        self.pstale = self.pending is not None and self.pending + 1 == self.wb and not self.pic
+        self.stale = self.pending is not None and self.pending in self.wbs and not self.pic
+        self.pstale = self.pending is not None and self.pending + 1 in self.wbs and not self.pic
         return n, why
 
 if __name__ == '__main__':
@@ -422,4 +433,4 @@ if __name__ == '__main__':
     lib = json.load(open(os.path.join(ref.ROOT, 'compiler', 'lib.json')))
     steps, out = R.compile_and_run(open(path).read(), lib)[1]
     got = ''.join(map(chr, sim.st['out']))
-    print(f"{os.path.basename(path)}: passes {sim.passes} {ends}, steps {sim.st['steps']} (cc_ref {steps}), output ok {got == out}")
+    print(f"{os.path.basename(path)}: passes {sim.passes} {ends}, steps {sim.st['steps']} (cc_ref {steps}), output ok {got == out}" + (f", mid-chain fills {sim.mids}" if MIDM else ""))
