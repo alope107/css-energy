@@ -1135,6 +1135,9 @@ if UI:
     # (an editor's initial text starts at its line 1, so UIL - 1 lines of it are read)
     assert all(len(t.rstrip('\n').split('\n')) <= UIL - 1 and max(map(len, t.split('\n'))) <= UIP for t in SRC), 'a sample longer than the editor reads'
     EDS = 1 + len(SAMPLES)
+    # each editor's radio button right before it in .frame: '.pkr:checked + .ed' is the editor that shows, for one set of
+    # readback rules (ui_rb.css) and one display rule whatever the number of editors
+    PKR = lambda e: f'<input type="radio" name="pk" id="pk{e}" class="pkr"{" checked=\"checked\"" if e == 0 else ""}/>'
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
@@ -1302,7 +1305,6 @@ else:
 </head>
 <body>
 <input type="checkbox" id="run" class="runcb" aria-label="Run"/>
-{"".join(f'<input type="radio" name="pk" id="pk{e}" class="pkr"{' checked="checked"' if e == 0 else ''}/>' for e in range(EDS))}
 {mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
 <main id="app">
 <div class="width-reader"></div>{ui_rb.regs_html()}
@@ -1311,7 +1313,7 @@ else:
 <section class="pane">
 <div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span></div>
 <div class="picker" role="radiogroup" aria-label="Programs"><label for="pk0" data-icon="\u270E">yours</label>{"".join(f'<label for="pk{e + 1}" data-icon="{ic}">{_h.escape(lb)}</label>' for e, (_, lb, ic) in enumerate(SAMPLES))}</div>
-<div class="frame"><div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
+<div class="frame">{PKR(0)}<div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'{PKR(e + 1)}<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
 <p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>

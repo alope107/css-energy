@@ -21,9 +21,9 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
   .label {{ font: 600 .72rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }}
   .scanpos {{ font: .8rem ui-monospace, monospace; color: var(--muted); }}
   .frame {{ background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: auto; }}
-  .frame:focus-within {{ border-color: var(--accent); }}
+  .frame:has(> .ed:focus) {{ border-color: var(--accent); }}   /* (not a picker radio's focus: they sit in .frame) */
   .ed {{ background: linear-gradient(to right, transparent {14 + UIP * 10}px, var(--rule) 0, var(--rule) {15 + UIP * 10}px, transparent 0); }}
-  {lbl.group('Sample picker', 'radio buttons beside #run (#pk0, #pk1, ...) pick the editor that shows; each keeps its own edits')}
+  {lbl.group('Sample picker', 'radio buttons (#pk0, #pk1, ...), each right before its editor in .frame, pick the editor that shows; each keeps its own edits')}
   .pkr {{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; margin: 0; }}
   .picker {{ display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 .7rem; }}
   .picker label {{ cursor: pointer; user-select: none; font: 500 .8rem/1 system-ui, sans-serif; padding: .38rem .72rem; border-radius: 999px;
@@ -31,11 +31,11 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
   .picker label::before {{ content: attr(data-icon); margin-right: .35em; }}
   .picker label:hover {{ border-color: var(--accent); color: var(--ink); }}
   .ed {{ display: none; }}
-  {" ".join(f"#pk{e}:checked ~ #app .ed{e}," for e in range(EDS))[:-1]} {{ display: block; }}
-  {" ".join(f"#pk{e}:checked ~ #app label[for=pk{e}]," for e in range(EDS))[:-1]} {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
-  {" ".join(f"#pk{e}:focus-visible ~ #app label[for=pk{e}]," for e in range(EDS))[:-1]} {{ outline: 2px solid var(--ink); outline-offset: 2px; }}
+  .pkr:checked + .ed {{ display: block; }}
+  {" ".join(f".pane:has(> .frame > #pk{e}:checked) > .picker > label[for=pk{e}]," for e in range(EDS))[:-1]} {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
+  {" ".join(f".pane:has(> .frame > #pk{e}:focus-visible) > .picker > label[for=pk{e}]," for e in range(EDS))[:-1]} {{ outline: 2px solid var(--ink); outline-offset: 2px; }}
   #run:checked ~ #app .picker {{ opacity: .45; pointer-events: none; }}   /* the scan reads the editor that shows: no switching while it runs */
-  #run:checked ~ .pkr {{ visibility: hidden; }}
+  #run:checked ~ #app .pkr {{ visibility: hidden; }}
   {lbl.group('Run / Edit button')}
   .runbtn {{ position: relative; display: inline-block; cursor: pointer; font: 600 .9rem/1 system-ui, sans-serif; color: #fff; background: var(--accent);
     border-radius: 6px; padding: .55rem 1rem; user-select: none; }}
