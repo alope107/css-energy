@@ -171,8 +171,16 @@ html = re.sub(r'<header>(.*?)<p>.*?</p>', r'<header>\1<p>The same CSS physics en
 html = re.sub(r'<div class="grp counts">.*?</div>', '', html, count=1, flags=re.S)
 html = html.replace('<span class="m">Drag any body with the mouse.', '<span class="m">Drag a body by its edges or an empty spot; the widgets '
                     'take clicks. Find the controls on every side of the cube.')
-html = html.replace('</style>', CSS + '</style>', 1)
-lbl.check(html, dst)
+if '</style>' in html:      # (a PLAIN build: the CSS is inline)
+    html = html.replace('</style>', CSS + '</style>', 1)
+    lbl.check(html, dst)
+else:                       # linked sheets (build3d.py SHEETS): this page's own goes last, beside them
+    stem = os.path.splitext(dst)[0]
+    sheet = f'{os.path.basename(stem)}/face-widgets.css'
+    open(os.path.join(os.path.dirname(stem) or '.', sheet), 'w').write(
+        lbl.check(lbl.header('css-physics/experiments/widgets/build.py', 'css-physics/experiments/widgets/README.md') + '\n' + CSS.strip() + '\n', sheet))
+    links = list(re.finditer(r'<link rel="stylesheet" href="[^"]+">', html))
+    html = html[:links[-1].end()] + f'\n<link rel="stylesheet" href="{sheet}">' + html[links[-1].end():]
 open(dst, 'w').write(html)
 tv = os.path.join(HERE, 'tv.webm')
 if os.path.exists(tv):
