@@ -128,8 +128,11 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   measured on the page and on L3 (BENCHMARKS §21). Padding levels (the rest of each line to 64 columns, the empty lines:
   ~1,350 of FizzBuzz's 1,561 character levels) take a pass-through rule instead of the space lexer. The token chain
   waits for its tokens: in the lexer's pass its live levels had run their base rules on zeros (`--has: 0`). And the scan
-  starts at column 1 after a reset frame and stops at the first column blank in every row. Together Run → compiled
-  0.80× (FizzBuzz). On the way: a character level costs ~170 µs even as pure padding, of which the lexer's rules are
+  starts at column 1 and stops at the first column blank in every row; the compile chain reads the columns past it as
+  spaces (an earlier, longer text's codes may be there). Resetting the cells at the sweep's start instead cost more than it
+  saved: a reset value equal to the hold's target left the holds running (ENGINE_NOTES 85), any other value changed every
+  shown cell, a 210 ms layout (86), and a container query on the cells restyled all of them every frame. Together, Run → compiled on the
+  page 0.71× (FizzBuzz and a typed program), the chain alone (L3) 0.86×, a REPL entry 0.70×. On the way: a character level costs ~170 µs even as pure padding, of which the lexer's rules are
   ~100 and creating the line sources' 1,536 animations ~25 µs each (ENGINE_NOTES 83); the nesting itself costs nothing
   (a synthetic chain of 1,561 levels styles in ~3 µs a level). A token level costs ~1.1 ms of plumbing (state copies,
   the table writes' rules, the overlay slots) and ~1.6 ms of its variant. Two columns a frame worked (a sentinel up to
@@ -229,6 +232,7 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 88 | One source at the chain's top for every line's codes (`--lc<k>_<j>`, 1,536 animations), kept alive across runs | the lexer's pass 255 → 215 ms, but every paint lifecycle 170–280 ms (ENGINE_NOTES 83) | a source per line |
 | 89 | `timeline-scope: all` on the chain's root, to shorten each animation's named-timeline walk (timing only) | no change (115 against 112 ms) | — |
 | 90 | Two columns a frame: one sentinel W = (a − 31) + 96 (b − 31) px (`mkfont2.py` pair mode, in `4783a53`) | half the frames, but 2.4 passes a frame against 1.5 and dearer layouts: Run → compiled 0.874× of main against 0.798× for one column (ENGINE_NOTES 84) | one column, stopping at the first blank column |
+| 91 | A reset frame for the latch cells (every cell to 0 or −1 at the sweep's start) | to the hold's target: no effect (ENGINE_NOTES 85); to 0: a 210 ms layout (86); as a container query on the cells: every cell restyled every frame, +30% | the chain reads columns past the scan's end as spaces (`--rbe`) |
 
 ## Open leads (untried)
 

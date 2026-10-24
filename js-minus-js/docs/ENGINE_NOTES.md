@@ -308,3 +308,13 @@ chats.
     height (sized at W / 64 px, LayoutUnits being 1/64 px: unchanged), not shaping (HarfBuzz 1.8 against 0.6 ms a frame).
     Headless Chromium keeps fractional glyph advances (ten 10.23 px glyphs: 102.25 px), but Linux desktop Chrome
     without subpixel positioning may not, so the probe font keeps whole pixels. *(measured 2026-10-24, Chromium 153)*
+85. **A transition latch can't be overridden with its own hold target**: a cell holding a value has a transition to the
+    hold's target pending (1,000,000 s delay); a new value equal to that pending transition's end value leaves it running
+    (css-transitions-1: a running transition whose end value equals the after-change value is kept), so the held value
+    stays. A reset to the hold's target did nothing; a reset to any other value works. *(measured 2026-10-24; the editor
+    scan's cells)*
+86. **A custom property change on many visible inline elements is a layout**: setting `--lv` on the 512 shown latch cells
+    at once (−1 → 0, no box depending on it) took a 210 ms layout; so did starting a held transition on each (−1 → −2,
+    1,000,000 s delay, the value unchanged). One or two cells a frame cost little. And container-query rules that select
+    many elements make them depend on the container's style: a `@container rbscan style(--rbreset: 1)` rule on the cells
+    restyled all 1,536 every frame (`#app` changes every frame), +30% a compile. *(measured 2026-10-24, Chromium 153)*
