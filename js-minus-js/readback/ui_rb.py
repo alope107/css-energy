@@ -15,6 +15,9 @@ Changes from the original:
   - several editors (.ed: #ed, the page's program, then the sample programs), one shown at a time by the picker's radio
     buttons (#pk<i>, after #run): a hidden editor is display: none, so the line anchors are the shown one's, and the
     per-line checks (:has) are made per editor, under its radio button.
+  - the REPL's editor (REPL: its index) needs no Run: the scan runs while it shows, and starts again whenever its number of
+    lines changes (Enter): a register keeps the count the sweep started with (nl, taken while the sweep counter is 0), and
+    a count that differs from it holds the sweep at 0. Its last line is the prompt, which isn't read.
 XHTML-safe output.
 """
 import base64, html, subprocess, os, re
@@ -34,14 +37,15 @@ def font_b64(P):
 
 def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
-REGS = ['tp', 'sc', 'sr', 'rd']
+REGS = ['tp', 'sc', 'sr', 'rd', 'nl']
 
-def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
+def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, REPL=None):
     NG = P // GS; GSW = GS * 10
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
                           for n in REGS) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
-                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz'))
+                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz')) + \
+              '\n@property --rbcnt { syntax: "<integer>"; inherits: true; initial-value: 0; }'
     regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS)
     ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
     g = [lbl.group('Probe font, scan clock and latches', 'the readback font, the scan\'s driver state and the per-row latches')]
@@ -67,10 +71,10 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
    lets the compiler see the text. The latches keep their values. */
 #app {{
   container-name: rbscan;
-  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT;
-  animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both;
-  animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT;
-  animation-range: normal, cover, normal, normal, normal;
+  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT, --rbnlT;
+  animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both, rbknl auto linear both;
+  animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT, --rbnlT;
+  animation-range: normal, cover, normal, normal, normal, normal;
   --rbng: clamp(1, round(up, (10000 * var(--rbp) / (1 - var(--rbp)) - 30) / {GSW}, 1), {NG});
   --rbR: {P};   /* fixed: the editor's width includes the trailing sentinel, whose width is the code being read, so a
                     width-derived range flickers between frames and the scan would skip columns */
@@ -87,9 +91,10 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
   --rbn-tp: calc(var(--rbclk) + var(--rbfrz) * (var(--rbtp) - var(--rbclk))); --rbn-sc: mod(var(--rbsc) + var(--rbfresh) * (1 - var(--rbfrz)), 4096);
   --rbn-sr: calc(var(--rbrun) * min(var(--rbsr) + var(--rbfresh) * (1 - var(--rbdet)), 4000)); --rbn-rd: calc(var(--rbrun) * var(--rbready));
   --rbdet: calc(var(--rbrun) * clamp(0, var(--rbsr) - {SWEEPS * DWELL} * var(--rbR) - 7, 1));    /* a few frames after the compiler took the text */
+  --rbn-nl: calc(var(--rbnl) + (1 - min(1, var(--rbsr))) * (var(--rbcnt) - var(--rbnl)));   /* the REPL's line count, taken at a sweep's start */
 }}
 #run:checked ~ #app {{ --rbrun: 1; }}
-#run:checked ~ #app .ed {{ -webkit-user-modify: read-only; opacity: .75; }}
+{repl_run(REPL, L)}#run:checked ~ #app .ed {{ -webkit-user-modify: read-only; opacity: .75; }}
 .rbreg {{ position: absolute; left: 0; top: 0; width: 1px; height: 4096px; overflow: hidden; visibility: hidden; }}
 .rbreg > div {{ display: block; width: 1px; }} .rbreg > .rbsp {{ height: calc(var(--rbin) * 1px); }} .rbreg > .rbsub {{ height: 1px; }} .rbreg > .rbpad {{ height: 4096px; }}
 .width-reader {{ position: absolute; left: 0; bottom: 100%; width: 1px; height: anchor-size(--rbed width, 0px);
@@ -138,8 +143,8 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
     # and the picker's eleven editors made a compile ~1.7 s slower)
     for e in range(EDS):
         pane = f'#pk{e}:checked ~ #app > .pane' if EDS > 1 else '#app > .pane'
-        for k in range(1, L):
-            g.append(f'{pane}:not(:has(> .frame > .ed{e} > div:nth-of-type({k}))) ~ .probes .probe:nth-child({k + 1}) {{ display: none; }}')
+        for k in range(0 if e == REPL else 1, L):     # (the REPL's prompt, its last line, is not read: line k needs line k + 1)
+            g.append(f'{pane}:not(:has(> .frame > .ed{e} > div:nth-of-type({k + (e == REPL)}))) ~ .probes .probe:nth-child({k + 1}) {{ display: none; }}')
         g.append(f'{pane}:has(> .frame > .ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
         g.append(f'{pane}:has(> .frame > .ed{e} div div) .nested {{ display: block; }}')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
@@ -152,6 +157,13 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
     g.append(lbl.group('Character cells: the registers the compiler reads'))
     g.append(C.cell_css())
     return '\n'.join(g)
+
+def repl_run(R, L):
+    """the REPL's editor (index R) scans while it shows, again from its start whenever its line count (--rbcnt) differs from
+    the one the sweep started with (the nl register)"""
+    if R is None: return ''
+    return '\n'.join([f'#pk{R}:checked ~ #app {{ --rbrun: calc(1 - min(1, abs(var(--rbcnt) - var(--rbnl)))); }}'] +
+                     [f'#pk{R}:checked ~ #app:has(> .pane > .frame > .ed{R} > div:nth-of-type({k})) {{ --rbcnt: {k}; }}' for k in range(1, L + 1)]) + '\n'
 
 def regs_html():
     """the scan registers (inside #app). --rbrdT is read outside #app (by the compiler's wrapper), so it is scoped on body."""

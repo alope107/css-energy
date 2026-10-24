@@ -234,3 +234,15 @@ chats.
     the loop and 34 without (99–142 `BeginMainFrame`s), for the same style work. The page has no script, so time it
     without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §16's earlier times).
     *(measured 2026-10-22)*
+65. **A change an animation makes doesn't start a transition; a container query's does.** A latch held by
+    `transition: --v 0s calc((1 - var(--g)) * 1000000s)` never held when `--v`'s change came from an inherited custom
+    property that an animation (a view timeline register) drives: `getAnimations()` listed no transition, and the value
+    followed at once. With the gate in a rule, `@container style(--g: 1) { .x { --v: …; transition-delay: 0s } }` over
+    `--v: -1` and a 1,000,000 s delay, the transition starts and holds the last value (the editor scan's latches work
+    this way, through `@container rbscan style(--rbscan: k)`). The REPL's display latches so (ARCHITECTURE §3.10).
+    *(observed 2026-10-24, Chromium 153)*
+66. **A positioned element outside a `contain: strict` subtree can anchor to an element inside it**: the console box
+    (`position: absolute`, containing block the initial one) takes `anchor(--rbed top)` / `anchor-size(--rbed width)` of
+    the editor inside `#app` (`contain: strict; will-change: transform`), and follows it. The other way round doesn't
+    serve: a reader's anchors must be inside its containing block (the console box holds its leaves and its readers).
+    *(observed 2026-10-24, Chromium 153)*

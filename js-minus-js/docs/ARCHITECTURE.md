@@ -43,8 +43,8 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 12289 | the global object (`GCELL`: `this` outside a method, `window`; made the first time, NUMLIT word1 −1) | the program |
 | 12290 … 12293 | implicit globals (`IMPC`, 4: names read or assigned before any declaration) | the program |
 | 12294 … 12309 | `FCACHE`: the 16 functions' values, made the first time a name is read as a value | the program |
-| 12310 … 12312 | the timers' queue (`TCELL`), `Math.random`'s state (`RCELL`), `String.prototype` (`SPCELL`) | the library |
-| 12313 … 12543 | globals (231 words; a double literal's cache takes one) | the program |
+| 12310 … 12313 | the timers' queue (`TCELL`), `Math.random`'s state (`RCELL`), `String.prototype` (`SPCELL`), the REPL's entry value (`ECELL`) | the library, the REPL's statements |
+| 12314 … 12543 | globals (230 words; a double literal's cache takes one) | the program |
 | 12544 | `STR0`: the empty marker; then `FTAB` (16 words: each function's body pair + 8192 × (its parameters + 16 if it is an inner function)) | compiler overlays |
 | 12561 … 13311 | strings and property names, `[length][bytes…][0]` each (768 words with `FTAB`) | compiler overlays (the length: the parser) |
 | 13312 … 14334 | code (`code_base`, 1,023 words: 511 instructions) | compiler overlays |
@@ -52,9 +52,9 @@ Addresses are 15-bit words; a word is a 20-bit two's-complement integer. The map
 | 14336 … | `bstr`: the built-in strings (the specials' names, `typeof`'s), 12 words apart | compiler `.fin` |
 | 14591 | `strend`: the string area's end | compiler `.fin` |
 | 14592 … | `rt_base`: HP, GCLIM, …, G_FLO, G_FREE (`layout.json` `rt_cells`); NET's cells (NETSEQ, RLEFT, RBUF0 … RBUF7, padded into cache sets the stack and code don't use); the collector's map of block starts at 14640 (`map_base`) and its powers of two; the FPU's 14 scratch number lines at 14720 (`fpu_base`) and its digit buffer | instructions, ROM routines |
-| 14848 … 22383 | stack (`sp0`) | program |
-| 22384 … 28527 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ALLOC, the cat class, ROM routines, the collector |
-| 28528 … 28671 | console: the last `cols × rows` = 144 words | output instructions |
+| 14848 … 20991 | stack (`sp0`, 6,144 words) | program |
+| 20992 … 27135 | heap (`heap_lo`): two semi-spaces of 3,072 words | NEW, ALLOC, the cat class, ROM routines, the collector |
+| 27136 … 28671 | console (`console_words`, 1,536): the grid, `cols × rows` = 9 × 16 from its start (the REPL's `repl_cols × repl_rows` = 40 × 32), then the REPL's 32 marks from +1,280 (§3.10) | output instructions; marks: PUTC with A > 0 |
 
 Every global word (12289 … 12543) starts `undefined` in the images (`cc_ref.GINIT`; NUMLIT's caches take undefined
 for 'not made yet'), and on the page their RAM groups are live from the start (they hold a value before any write), so
@@ -491,6 +491,47 @@ frame that lays it out, the new documents scroll in the next, where the CPU read
 register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 bytes (BENCHMARKS §16).
 
 ---
+
+### 3.10 The REPL (`machine/replui.py`, 2026-10-24)
+
+The REPL is one more editor on the page, run by Enter. It keeps no machine state between entries: each Enter replays the
+whole session, which the machine's determinism makes print what it printed before.
+
+- **Enter.** `#app:has(> .pane > .frame > .ed<R> > div:nth-of-type(k))` gives the editor's line count (`--rbcnt`); a scan
+  register (`nl`) takes the count each sweep starts with, and while they differ the sweep counter is held at 0
+  (`ui_rb.repl_run`). So a new line restarts the scan, which drops `--rbrd` and `--ccgo`: the compile chain and the CPU
+  go away (its registers restart), and RAM, the globals (to `undefined`) and the console are cleared while the scan
+  runs, by an `if()` on the inherited `--ccgo` (`#memw`, a wrapper around the RAM trees, runs `kccgo` for it) where Edit
+  uses `#run:not(:checked)` selectors. The editor stays editable; its last line, the prompt, isn't read (its probe is
+  hidden, so it reads as spaces).
+- **The compiler's REPL mode** (`cc_ref.Compiler(repl=True)`, the DSL's input `repl`, `--repl` on `#ccw`). The lexer
+  leaves every newline pending, not only one after a token that can end a statement, and a line that starts with
+  `(` `[` `+` `-` starts a statement (`CONTR`); each `T_NL` carries the line its next token is on (`th1`: on the page each
+  level's `--lnum`). A `T_NL` that leaves the parser at a top-level statement start (no control entry, no function) ends
+  the entry before that line (`entry_end`): `CALL echo` if any token came since the last end (`rpend`), then `PUTC` with
+  A = 1 + the line, a mark. An `if` waiting for `else` there ends. Top-level expression statements, assignments and
+  `++` / `--` statements copy their value into `ECELL` (`echo_val`); the library's `echo` prints it as Node's REPL does
+  (`insel`: strings quoted) and resets it to `undefined`. The program's end writes the end mark (`MARKEND`) after the
+  timers; so does every library halt (`halt()` is `PUTC` end mark, `HALT`), so a run-time error ends a run too.
+- **Marks.** `PUTC A, #0` with A > 0 writes the output position + 1 (optr + 1) into console cell `1280 + A − 1`, in the
+  console's write set, and leaves optr; the out class's `--pmk` / `--pmo` pick that cell and its bank (csssim: `('mark', k)`).
+  Marks go through the console's channels because the page reads RAM leaves, and a write through the data cache stays
+  in the cache (write-back, no flush at HALT). The console is 1,536 words, its banks 384 leaves (radix 6 × 4 × 4 × 4, groups
+  of 16): with 1,312 the trees were radix 82 × 4, and every console write restyled 82 group nodes per bank, which made
+  FizzBuzz's CPU-only page 17.6% slower (BENCHMARKS §18). A program's page renders only its grid's groups. The grid's size
+  is a property, `--ocols` × `--osize`, which the out class reads: 9 × 16 for a program, 40 × 32 for the REPL.
+- **The display.** Readers must share a containing block with the leaves they read, so the REPL's are in the console box,
+  which the REPL moves over the editor (`position: absolute`, anchored to the editor's `--rbed`). They latch: a reader's
+  value is −1 while the gate is shut, and a 1,000,000 s transition keeps showing the last one; the gate is a container
+  query, `style(--rg: 1) and style(--ccgo: 1)` (a change an animation makes doesn't start a transition: ENGINE_NOTES
+  65), where `--rg` is a register of `--ccgo` × (the end mark is set). It shuts with `--ccgo`, in the frame RAM is cleared,
+  and opens a frame after the run's end: so Enter doesn't blank the transcript, and a session that doesn't compile keeps
+  the last one. The latched marks and the line count the run read (`nl`, which changes a frame after `--ccgo` drops) are
+  registers (view timelines scoped on body), animated onto the display (`.rdisp`) and onto the editor's frame.
+  From them: `t_L`, the rows before line L's entry (a running maximum over the marks' rows: a line without a mark goes on
+  an entry), and the end's rows. Line L's `::before` is as tall as the rows between lines L − 1 and L; row r shows
+  above line `L(r) = #{L < n : t_L ≤ r}`, at y = 12 + 24 (r + L(r)); a prompt is `>` where an entry starts (a mark)
+  and `...` where one goes on.
 
 ## 4. Editor readback (`readback/ui_rb.py`)
 

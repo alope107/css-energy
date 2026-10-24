@@ -93,6 +93,14 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   them, always at the same LDI, with nothing pending and the same block in both ways of its set. The data fill had no
   check that its block was absent (the prefetch has one); a pending miss seen again after its fill, as when a register
   lands a frame late under load, filled the other way too. With the check, 30 of 30 such runs halt.
+- **18, the REPL (2026-10-24, branch `repl`, from `lxym`).** A chip that turns the editor into a Node-style session:
+  Enter runs it, and each entry's output and value show under it (ARCHITECTURE §3.10, README REPL). No script presses
+  Run, so the page sees the editor's line count change (`:has`) and restarts the scan; CSS keeps no machine state
+  between runs, so each Enter replays the whole session. The compiler got a REPL mode (entries end where a top-level
+  statement starts a line: an echo of the entry's value, and a mark of where the output stands), the console a larger
+  grid for the REPL and the marks, and the display latches what the last finished run showed. Keeping the machine's
+  state instead (RAM kept, only the new entry compiled to run) would need the data cache flushed at HALT (it is
+  write-back), code that doesn't move when lines are added, and a resume address: not tried.
 
 ## Dead ends and superseded approaches
 
@@ -176,6 +184,9 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 76 | The lexer's `this` / `new` test on one combined hash (h1 × 65519 + h2) | exact in Python (L2 passed), but a registered integer keeps 6 significant digits (ENGINE_NOTES 2): the page took `this` for a name | each half compared |
 | 77 | GETP's string trap with its arguments in its frame at A | the frame (and the routine's locals) overwrite the slot above A, a method call's `this` | no arguments (the key decoded from the instruction) and one unused parameter (the locals start a slot higher) |
 | 78 | Inner functions' calls through the library's `callv` every time | closure_gc +5% passes, func_expr +15% after `this` added cases to `callv` | open lead: a CALLV fast path for them |
+| 79 | A 40 × 32 console for every program | FizzBuzz +24% on the page: the console box lays out every reader on each write | the grid's size a property: 9 × 16 for a program, 40 × 32 for the REPL |
+| 80 | The console's RAM as 1,312 words (the REPL's grid and its marks) | its trees decoded in radix 82 × 4: every console write restyled 82 group nodes per bank, FizzBuzz's CPU-only page +17.6% | 1,536 words, radix 6 × 4 × 4 × 4 |
+| 81 | The REPL's latches gated by an animated property in the transition's delay | no transition ever started (ENGINE_NOTES 65): Enter blanked the transcript | the gate as a container style query |
 
 ## Open leads (untried)
 

@@ -25,13 +25,13 @@ FUZZ     := $(B)/fuzz.$(call id,$(B)/py,-,tests/cmp_dsl.py tests/fuzz/fuzz.py te
 NOBROWSER := help all lib image page dist expect l1 l2 l2-generic c1 fuzz fuzz-quick test clean
 BCONF     = $(if $(filter-out $(NOBROWSER),$(MAKECMDGOALS)),$(call id,$(1),fontcpu,$(2)),no-browser)
 L3       := $(B)/l3.$(call BCONF,$(B)/fontcpu,tests/suite_css.js $(HARNESS)).log
-UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js $(HARNESS))
+UICONF   := $(call BCONF,$(B)/ui,machine/ui_seq.js tests/editor_input.js tests/repl_ui.js $(HARNESS))
 C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
 C2ALL    := $(B)/c2-all.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
 CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
 
 .PHONY: help all lib image page dist test test-browser test-ui test-ui-smoke test-all \
-        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net net-demo c1 c2 c2-all fuzz fuzz-quick fuzz-l3 clean
+        expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-repl l5-net net-demo c1 c2 c2-all fuzz fuzz-quick fuzz-l3 clean
 
 help:
 	@echo "make page           build/js_in_css.xhtml (lib -> image -> page: editor, compile chain, CSS CPU; ~7 s)"
@@ -43,6 +43,7 @@ help:
 	@echo "make test-ui        L5 on every quick program (~5.5 min)"
 	@echo "make c2             a CPU-only page per quick program runs to HALT (~30 s)"
 	@echo "make c2-all         the same for every program, the collector tests too (~5 min)"
+	@echo "make l5-repl        the REPL on the page: each tests/repl session typed, its transcript vs Node's REPL's"
 	@echo "make l5-net         L5 on the network programs, the page served with its gateway (net/server.js)"
 	@echo "make dist           copy the built page to dist/"
 
@@ -60,7 +61,7 @@ $(B)/ccimg.json: $(CC)/lib.json $(CC)/cc_ref.py $(CC)/mkimage.py tests/fizz.js
 	$(PY) $(CC)/mkimage.py tests/fizz.js $@
 
 page: $(B)/js_in_css.xhtml
-$(B)/js_in_css.xhtml: $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
+$(B)/js_in_css.xhtml: $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/replui.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
 	UI=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
 
 dist: page
@@ -152,6 +153,11 @@ l5-input: $(B)/l5-input.$(UICONF).log     # the editor under user input: what th
 	$(call report,$<,2)
 $(B)/l5-input.$(UICONF).log: $(B)/ui_exp/args-400-0.txt tests/editor_input.js $(UI)
 	SHARDS=$(SHARDS) EXP=$(B)/ui_exp/fizzbuzz.grid $(LOGGED) $@ -- $(NODE) tests/editor_input.js $(B)/js_in_css.xhtml
+
+l5-repl: $(B)/l5-repl.$(UICONF).log       # the REPL on the page: each session typed, its transcript vs Node's REPL's
+	$(call report,$<,3)
+$(B)/l5-repl.$(UICONF).log: tests/repl_ui.js $(wildcard tests/repl/*.tr) $(UI)
+	$(LOGGED) $@ -t 3 -p '^([0-9]+)/\1 pass$$' -- $(NODE) tests/repl_ui.js $(B)/js_in_css.xhtml tests/repl/*.js
 
 test: expect l1 fuzz-quick l2 c1
 test-browser: l3

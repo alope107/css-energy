@@ -1,0 +1,29 @@
+> [1, 'two', [3, 4], { k: 'v' }]
+[ 1, 'two', [ 3, 4 ], { k: 'v' } ]
+> ({})
+{}
+> []
+[]
+> ({ 'a b': 1, c: [] })
+{ 'a b': 1, c: [] }
+> undefined
+undefined
+> NaN
+NaN
+> Math.max(3, 7)
+7
+> parseInt("42") + 1
+43
+> String(12) + "!"
+'12!'
+> "tab\there"
+'tab\there'
+> "q\"uote"
+'q"uote'
+> new Number(5)
+[Number: 5]
+> "abc".split("")
+[ 'a', 'b', 'c' ]
+> [1, 2].concat([3]).reverse()
+[ 3, 2, 1 ]
+>

@@ -1162,7 +1162,7 @@ class Compiler:
         elif name == '__fv': self.emit(FVAL_I[kval(a[0][0])], t, a[1], a[2])
         elif name in ('__mcmp', '__mfeq', '__mfref', '__mwalk'): self.emit('MOV', t, a[2]); self.emit(name[2:].upper(), t, a[0], a[1])
         elif name != 'halt': self.emit(name[2:].upper(), a[0], a[1], a[2])         # (MCPY, MUPPER, MLOWER, MFILL)
-        else: self.emit('HALT')
+        else: self.emit('PUTC', (1 + MARKEND, 0), (K(0), 0)); self.emit('HALT')     # (the output's end: the REPL shows it, as at a program's end)
         self.nd = d0; self.push_od(TMP if name in INTRV else K(0), 0)
 
     def print_end(self):

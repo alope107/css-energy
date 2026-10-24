@@ -538,12 +538,16 @@ def build_class(c, k):
     for n, A, ops_n in k['reads']:
         d += read_pair(n, A, k['pair'][n]) if n in k.get('pair', {}) else read(n, A); acc.append((n, need(ops_n)))
     for n, A, ops_n in k.get('lines', []): d += line_read(n, A); acc.append((n, need(ops_n)))
+    # good: this read hit and so did every read its address came from, transitively (csssim stops at the first miss, so it
+    # never keeps a read whose address came from a missed one: e from z from x, with x missing, z and e read garbage that
+    # can hit; e kept that way was the bank sample's wrong ops[i] on 2026-10-24)
     good = {}
     for n, _, _ in k['reads'] + k.get('lines', []):
-        if n not in LATCH: continue
         g = f"(1 - {miss(n)})"
-        for m, ops_m in k.get('deps', {}).get(n, []): g += f" * (1 - {need(ops_m)}{miss(m)})"
+        for m, ops_m in k.get('deps', {}).get(n, []):
+            g += f" * (1 - {need(ops_m)}(1 - {good[m]}))" if k.get('deps', {}).get(m) else f" * (1 - {need(ops_m)}{miss(m)})"
         good[n] = g
+    good = {n: g for n, g in good.items() if n in LATCH}
     d.append("--hm: calc(1 - var(--mf)" + "".join(f" + {LATCH[n]} * {g}" for n, g in good.items()) + ");")
     if k['write']:
         A, V, reuse, en = k['write'][:4]
@@ -1131,7 +1135,7 @@ css.append(".ex { " + " ".join(ex) + " }")
 
 css.append(lbl.section('RAM', f'memtree.py: {len(CH)} write channels per bank, each a decode tree over the bank\'s cells'))
 if UI:
-    import ccpage5, ui_rb, uipage
+    import ccpage5, ui_rb, uipage, replui
     UIL, UIP, UIT = (int(os.environ.get(k_, d_)) for k_, d_ in (('UIL', 24), ('UIP', 64), ('UIT', 400)))
     # the picker's sample programs (samples/<file>.js): (file, label, icon); #ed (the page's program) comes first
     SAMPLES = [('fizzbuzz', 'FizzBuzz', '\U0001F41D'), ('primes', 'primes', '\U0001F9EE'), ('fib', 'Fibonacci', '\U0001F41A'),
@@ -1142,11 +1146,11 @@ if UI:
     SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
     # (an editor's initial text starts at its line 1, so UIL - 1 lines of it are read)
     assert all(len(t.rstrip('\n').split('\n')) <= UIL - 1 and max(map(len, t.split('\n'))) <= UIP for t in SRC), 'a sample longer than the editor reads'
-    EDS = 1 + len(SAMPLES)
+    EDS = 2 + len(SAMPLES); REPLI = EDS - 1           # (the REPL's editor comes last: machine/replui.py)
     ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
-    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES + NETTL] + ui_tls + ['--rbrdT']) + "; }")
+    css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES + NETTL] + ui_tls + ['--rbrdT'] + replui.timelines(UIL)) + "; }")
 else: css.append(memtree.scope(WNAMES + NETTL))
 _sp, _sc = memtree.shared(); props += [lbl.group('RAM write channels')] + _sp; css += _sc
 for w in range(WB):
@@ -1277,12 +1281,15 @@ if not UI:
     </html>
     """
 else:
-    ui_props = uipage.props(WOFF) + [
+    noR = f'#pk{REPLI}:not(:checked)'                  # (Edit's rules: the REPL clears RAM itself, machine/replui.py)
+    ui_props = uipage.props(WOFF, clear=f'{noR} ~ #memw .cell') + [
         # (Edit: the globals back to undefined, as the CPU-only image starts them, cc_ref GINIT: hoisting, FCACHE's sentinel)
-        f'#run:not(:checked) ~ .mem :is({", ".join(f".c{a - ROM}" for a in sorted(R.GINIT))}) {{ width: {R.UNDEF + WOFF}px; }}',
-        f'#run:not(:checked) ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}',
+        f'#run:not(:checked) ~ {noR} ~ #memw :is({", ".join(f".c{a - ROM}" for a in sorted(R.GINIT))}) {{ width: {R.UNDEF + WOFF}px; }}',
+        f'#run:not(:checked) ~ {noR} ~ #clkw .cons .cell {{ content-visibility: visible; width: {WOFF}px; }}', '#memw { display: contents; }',
                                      '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }',
-        f'#clkw {{ --ocols: {COLS}; --osize: {OUT_SIZE}; }}   /* the console\'s grid (OCOLS, OSIZE) */']
+        f'#clkw {{ --ocols: {COLS}; --osize: {OUT_SIZE}; }}   /* the console\'s grid (OCOLS, OSIZE) */'] + \
+        replui.css(REPLI, UIL, lambda k: OUT_BASE - ROM + k, WOFF, R.LAYOUT['repl_cols'], R.LAYOUT['repl_rows'], NMARK, R.MARKEND, OUTMAX,
+                   sorted(a - ROM for a in R.GINIT), R.UNDEF) + [f'#pk{REPLI}:checked ~ #ccw {{ --repl: 1; }}']
     notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back (a variable axis makes HarfBuzz "
              f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "
              f"stylesheet, runs over those characters: a lexer on a chain of one element per character, then a parser on a chain of one element "
@@ -1294,6 +1301,11 @@ else:
              f"<code>console.log(x)</code> and <code>putc(c)</code>. Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
              f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine. The chips above the "
              f"editor switch to a sample program; each keeps your edits.</p>")
+    replnote = (f"<p class=\"replnote\">The REPL is a session of one-line entries, as in Node's. Type a line and press Enter: the page reads the "
+                f"session again, compiles it and runs all of it (CSS keeps no state between runs, so each run replays the session), and "
+                f"shows under each entry what it printed and its value. An entry may span lines: a line that leaves a block or a call "
+                f"open goes on in the next (...). Edit any line, then press Enter on the last line to run the session again. "
+                f"Up to {UIL - 2} lines; the output holds {R.LAYOUT['repl_rows']} rows of {R.LAYOUT['repl_cols']} characters.</p>")
     page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -1301,12 +1313,12 @@ else:
 <style><![CDATA[
 {lbl.header('js-minus-js/machine/gen_css.py (page, CPU, RAM), compiler/ccpage5.py (compiler), readback/ui_rb.py (editor scan)', 'js-minus-js/docs/ARCHITECTURE.md')}
 {static}
-{uipage.static(COLS, ROWS, UIL, UIP, WOFF, EDS)}
+{uipage.static(COLS, ROWS, UIL, UIP, WOFF, EDS, REPLI)}
 {chr(10).join(props)}
 {chr(10).join(ui_props)}
 {chr(10).join(css)}
 {lbl.section('Editor scan', 'a font reads the editor back one column per frame and latches each character into a register')}
-{ui_rb.css(UIL, UIP, 8, EDS=EDS)}
+{ui_rb.css(UIL, UIP, 8, EDS=EDS, REPL=REPLI)}
 {lbl.section('Compiler', 'the lexer on a chain of one element per character, the parser on a chain of one element per token')}
 {ui_css}
 ]]></style>
@@ -1314,26 +1326,26 @@ else:
 <body>
 <input type="checkbox" id="run" class="runcb" aria-label="Run"/>
 {"".join(f'<input type="radio" name="pk" id="pk{e}" class="pkr"{' checked="checked"' if e == 0 else ''}/>' for e in range(EDS))}
-{mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
+<div id="memw">{mem_html}</div>{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
 <main id="app">
-<div class="width-reader"></div>{ui_rb.regs_html()}
+<div class="width-reader"></div>{ui_rb.regs_html()}{replui.html_app()}
 <header><h1>JavaScript, compiled and run by a stylesheet</h1>
 <p class="lede">Type a program and press Run. No JavaScript runs on this page.</p></header>
 <section class="pane">
-<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span></div>
-<div class="picker" role="radiogroup" aria-label="Programs"><label for="pk0" data-icon="\u270E">yours</label>{"".join(f'<label for="pk{e + 1}" data-icon="{ic}">{_h.escape(lb)}</label>' for e, (_, lb, ic) in enumerate(SAMPLES))}</div>
-<div class="frame"><div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
+<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="replhint">REPL: type a line, press Enter</span><span class="scanpos"></span></div>
+<div class="picker" role="radiogroup" aria-label="Programs"><label for="pk0" data-icon="\u270E">yours</label><label for="pk{REPLI}" data-icon="\u276F">REPL</label>{"".join(f'<label for="pk{e + 1}" data-icon="{ic}">{_h.escape(lb)}</label>' for e, (_, lb, ic) in enumerate(SAMPLES))}</div>
+<div class="frame"><div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}<div class="ed ed{REPLI}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="REPL">{ui_rb.editor_html(replui.DEMO)}<div><br/></div></div></div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
 <p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>
 </section>
-<section class="notes">{notes}</section>
+<section class="notes">{notes}{replnote}</section>
 {ui_rb.probes_html(UIL, UIP, 8)}
 </main>
 {NSHOW_HTML}<div class="nlatch">{MODEMS}</div>
 <div id="clkw">
 <div class="cons">{con_html}<div class="con"></div>
-{console}</div>
+{console}{replui.html_cons(UIL, R.LAYOUT['repl_cols'], R.LAYOUT['repl_rows'], R.MARKEND, lambda k: OUT_BASE - ROM + k, OUTMAX, WOFF)}</div>
 <div id="clk"><div id="cpu">
 <div class="head">
 <div class="status"><span>steps <b class="num" style="--v: var(--steps)"></b></span><span>pc <b class="num" style="--v: var(--pc)"></b> fp <b class="num" style="--v: var(--fp)"></b></span></div>

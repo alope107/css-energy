@@ -4,8 +4,8 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'py'))
 import csslabel as lbl
 
-def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
-    """the editor page's hand-written CSS (EDS: the editors, #ed and the samples the picker shows)"""
+def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1, REPL=None):
+    """the editor page's hand-written CSS (EDS: the editors, #ed and the samples the picker shows; REPL: the REPL's index)"""
     TOPS = ROWS * 20 + 48
     return f"""
   {lbl.section('Editor page', 'hand-written: the layout, the Run button and the compile status line')}
@@ -61,7 +61,7 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
     --csi: round(100cqi / 1px); --csd: mod(var(--csi), 2); --cse: mod(round(down, var(--csi) / 2), 512); --csn: round(down, var(--csi) / 1024);
     counter-set: csn var(--csn) cse var(--cse); }}
   .cstv::before {{ content: "edit the program, then Run"; color: var(--muted); }}
-  #run:checked ~ .cst .cstv::before {{ color: var(--ink);
+  #run:checked ~ .cst .cstv::before{f', #pk{REPL}:checked ~ .cst .cstv::before' if REPL is not None else ''} {{ color: var(--ink);
     content: if(style(--csd: 0): "compiling\\2026"; style(--cse: 0): "compiled: " counter(csn) " words";
       style(--cse: 4): "error: undefined variable"; style(--cse: 5): "error: undefined variable"; style(--cse: 6): "error: undefined variable";
       style(--cse: 7): "error: undefined variable"; style(--cse: 20): "error: too many labels"; style(--cse: 21): "error: blocks nested too deeply";
@@ -76,8 +76,9 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
       else: "syntax error (" counter(cse) ")"); }}
 """
 
-def props(WOFF, clear='.mem .cell'):
-    """Run / Edit and the compile status properties. clear: the RAM leaves Edit zeroes (a selector after #run ~)"""
+def props(WOFF, clear='#memw .cell'):
+    """Run / Edit and the compile status properties. clear: the RAM leaves Edit zeroes (a selector after #run ~; the REPL clears
+    them itself, machine/replui.py)"""
     return [lbl.section('Run / Edit', 'the Run checkbox starts the scan and the CPU; Edit clears RAM'),
                 '@property --run { syntax: "<integer>"; inherits: true; initial-value: 0; }',
                 '#run:checked ~ #clkw { --run: 1; }',
