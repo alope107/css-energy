@@ -128,17 +128,18 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
 .ed div div, .ed > div[style] {{ all: unset !important; display: block !important; unicode-bidi: normal !important; }}
 .ed :is({BLOCKS}) {{ display: block !important; }}
 .ed :is(img, svg, video, audio, iframe, object, embed, canvas, input, select, textarea, button, hr, math) {{ display: none !important; }}
-/* a <br> would start a second row that the scan doesn't read (a block's sentinel is on its last row): Chrome's
-   placeholder in an empty line made it two rows tall, Shift+Enter inserts one, and so do pastes. The sentinel gives an
-   empty line its height. */
-.ed br {{ display: none; }}
-/* The sentinels: line 0's leads the text typed straight into the editor, every block that holds no block ends its row
-   (a wrapper's would show as a blank row of its own after its lines; Chrome leaves no text beside the lines it nests).
-   Each is named by the row it shows in (--rbs<k>, read by probe k): a discrete animation of anchor-name on a view
-   timeline, whose progress is where the sentinel is in the editor's frame (ENGINE_NOTES 77). The inset cuts the frame's
-   scrollport to the rows read, so a frame that grows keeps every row's name; the rows below have none. (Positional
-   selectors could only name the editor's children, and a paste or a deletion restyled every rule that named one.) */
-.ed::before, .ed :is(div, {BLOCKS}):not(:has(> :is(div, {BLOCKS})))::after {{ content: "\\2058"; animation: rbrow auto linear;
+/* The sentinels lead their rows: line 0's the text typed straight into the editor, and every block that holds no block
+   its own (a wrapper's would show as a blank row of its own; Chrome leaves no text beside the lines it nests). Leading,
+   because <br> shows: an empty line's placeholder <br> is where the caret goes (hidden, ArrowUp/Down skipped the line
+   and Enter in it lost lines), and a trailing sentinel after it made the line two rows tall. A <br> inside a line
+   (Shift+Enter, or pasted) starts a row with no sentinel, unread: .unread says so. Each sentinel is named by the row it
+   shows in (--rbs<k>, read by probe k): a discrete animation of anchor-name on a view timeline, whose progress is where
+   the sentinel is in the editor's frame (ENGINE_NOTES 77). The inset cuts the frame's scrollport to the rows read, so a
+   frame that grows keeps every row's name; the rows below have none. (Positional selectors could only name the
+   editor's children, and a paste or a deletion restyled every rule that named one.) A wrapper whose first element is a
+   <br> has a row of its own before its lines: Enter at the end of line 0 wraps the lines below in a div, after the new
+   line's text and a <br>. */
+.ed::before, .ed :is(div, {BLOCKS}):is(:not(:has(> :is(div, {BLOCKS}))), :has(> br:first-child))::before {{ content: "\\2058"; animation: rbrow auto linear;
   animation-timeline: view(block 0px calc(100% - {RX}px)); }}
 /* an empty block after the lines: line 0 then sits in a block of its own even when it is all the editor holds. Without
    one, line 0's sentinel had another box (its progress put it 12px higher) and read as no row at all. */
@@ -174,6 +175,13 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
         pane = f'#pk{e}:checked ~ #app > .pane' if EDS > 1 else '#app > .pane'
         g.append(f'{pane}:has(> .frame > .ed{e} > div:nth-of-type({L})) .limit {{ display: block; }}')
         g.append(f'{pane}:has(> .frame > .ed{e} pre) .merged {{ display: block; }}')
+    # a row with no sentinel above one with a sentinel: row k absent while row k + 1 is there (a sentinel is 16px tall,
+    # an absent row's anchor-size is 0). .unread is that tall, times 1.5, so it shows only then.
+    gaps = ', '.join(f'anchor-size(--rbs{k + 1} height, 0px) - anchor-size(--rbs{k} height, 0px)' for k in range(L - 1))
+    g.append(f'.scanpos {{ anchor-name: --rbscanpos; }}\n'
+             f'.unread {{ position: absolute; left: anchor(--rbscanpos left); top: calc(anchor(--rbscanpos top) - 4px); overflow: hidden; '
+             f'white-space: nowrap; font: .8rem/24px system-ui, sans-serif; color: #b00; height: calc(1.5 * max(0px, {gaps})); }}\n'
+             '#run:checked ~ #app .unread { display: none; }')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
     for k in range(1, P + 1):
         G, j = (k - 1) // GS + 1, (k - 1) % GS + 1
@@ -191,10 +199,10 @@ def regs_html():
                    for n in REGS)
 
 def editor_html(text):
-    """every line in its own div. Text typed straight into the editor (line 0, after #ed::before) is read too, but
-    Enter in it, with lines below, makes Chrome nest all of them in one new div; so the initial program starts at line 1
-    and line 0 shows empty (Backspace at the start of line 1 deletes it)."""
-    return ''.join(f'<div>{nbsp(html.escape(s)) if s else "<br/>"}</div>' for s in text.rstrip('\n').split('\n'))
+    """the first line straight in the editor (line 0, after #ed::before), every other line in its own div. (Enter in
+    line 0, with lines below, makes Chrome nest all of them in one new div; nested lines read as they show.)"""
+    first, *rest = [nbsp(html.escape(s)) if s else '<br/>' for s in text.rstrip('\n').split('\n')]
+    return first + ''.join(f'<div>{s}</div>' for s in rest)
 
 def nbsp(s):
     """the spaces of a line as Chrome's editor writes them under white-space: nowrap: a run at either end of the line,

@@ -67,7 +67,7 @@ machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compile
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)
 tests/     suite/*.js + .out (Node oracle)  suite_err/*.js (must be rejected)  fuzz/ (differential tests)  level harnesses
            picker.js (the sample picker on the page)
-samples/   the picker's programs (at most 23 lines: an editor's initial text starts at its line 1; output = Node's, 9 columns)
+samples/   the picker's programs (at most 24 lines, the editor's; output = Node's, 9 columns)
 tools/     browser.js page.js (harness helpers)  vsz.py (compiler size)  romprof.py (passes by ROM routine)
 net/       server.js (web server + network gateway: the modem's documents and protocol)  device.py shim.js (the same
            protocol for the models and Node)  probe/ (what CSS can request and read back)  xhtml-tests/ (the user's tests)

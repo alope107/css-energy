@@ -430,18 +430,20 @@ register `rreq`'s. A READ takes about 10, most of them the CPU's work on its 8 b
 - The scan is frame-locked (one column per frame at any frame rate) over a fixed 64 columns.
 - It runs only after Run: while editing, `SCAN` is 0 and the registers are frozen (`--rbfrz`). After Run the editors
   are read-only, one sweep raises `--rbrd`, and `--ccgo` (from the `--rbrdT` timeline) shows the compile chain.
-- Rows: line 0 is text directly in the editor (a leading `::before` sentinel), and every block that holds no block is
-  a row ending in an `::after` sentinel, nested or not: Chrome nests lines (Enter in line 0, pastes into an empty
-  line) and formatted pastes bring wrappers (VS Code's `<div style>` around a `<div>` per line). A sentinel is named
-  for the row it shows in, `--rbs<k>`, by a discrete `anchor-name` animation on a view timeline (ENGINE_NOTES 77);
-  probe `k` reads `--rbs<k>`, and the probe of an absent row is 0px tall and reads spaces. `<br>` is hidden,
-  `white-space: nowrap` with `&nbsp;`; pasted elements take the editor's style (`!important`, ENGINE_NOTES 75), so a
-  `<pre>`'s newlines collapse and the page says the block shows as one line (`.merged`). No CSS rule may match the
-  line divs (ENGINE_NOTES 44–49). Hidden editors are `display: none`, so the anchors are the shown one's; the per-editor
-  checks (`:has`: the line limit, a `<pre>`) are under its radio button, on the editors' section with child combinators
-  (on `#app` each searched its ~10,000 elements: BENCHMARKS §14). `make l5-input` checks that the scan reads what the
-  editor shows; `tests/picker.js` the picker. An editor's initial text starts at its line 1, so a sample has at most 23
-  lines.
+- Rows: line 0 is text directly in the editor, where an editor's initial text starts, and every block that holds no
+  block is a row, nested or not: Chrome nests lines (Enter in line 0, pastes into an empty line) and formatted pastes
+  bring wrappers (VS Code's `<div style>` around a `<div>` per line). A wrapper whose first element is a `<br>` has a row
+  of its own before its lines (Enter at the end of line 0). Each row starts with a `::before` sentinel, named for the
+  row it shows in, `--rbs<k>`, by a discrete `anchor-name` animation on a view timeline (ENGINE_NOTES 77); probe `k`
+  reads `--rbs<k>`, and the probe of an absent row is 0px wide and has no cells. `<br>` shows, so an empty line keeps a
+  caret position (ENGINE_NOTES 78); a `<br>` inside a line (Shift+Enter, a paste) starts a row with no sentinel, and
+  `.unread` (as tall as any gap between named rows) says so. `white-space: nowrap` with `&nbsp;`; pasted elements take
+  the editor's style (`!important`, ENGINE_NOTES 75), so a `<pre>`'s newlines collapse and the page says the block shows
+  as one line (`.merged`). No CSS rule may match the line divs (ENGINE_NOTES 44–49). Hidden editors are `display: none`,
+  so the anchors are the shown one's; the per-editor checks (`:has`: the line limit, a `<pre>`) are under its radio
+  button, on the editors' section with child combinators (on `#app` each searched its ~10,000 elements: BENCHMARKS
+  §14). `make l5-input` checks that the scan reads what the editor shows; `tests/picker.js` the picker. A sample has at
+  most 24 lines. Tab moves focus out of the editor: without script the page can't keep it (ENGINE_NOTES 78).
 
 ---
 

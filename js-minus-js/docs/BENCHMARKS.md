@@ -624,3 +624,7 @@ The first version left every probe's 64 cells laid out, absent rows' too, and th
 1.35–1.38): the old `:has()` rules had hidden the probes of absent lines. A probe's width now comes from its
 sentinel's height (constant through the scan), and `@container (width: 0px)` drops its cells. Pausing the rows'
 animations at Run, or dropping their `:has()` leaf filter, changed nothing (1.41×, 1.41×).
+
+**Leading sentinels, shown `<br>`s, the unread-rows note (2026-10-24, branch `editor-quirks`).** Against `main`,
+interleaved, unleased (other agents' runs alongside): compile of FizzBuzz 0.981 (IQR 0.923–1.062; A-vs-A 0.995), 200
+formatted lines over 200 1.000 (0.926–1.067): no cost above the noise.
