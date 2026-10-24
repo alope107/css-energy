@@ -164,6 +164,10 @@ net/       server.js (web server + network gateway: the modem's documents and pr
   in `token()`. A new fallthrough between modes must go in `token()`'s `FALL` map, or the block silently vanishes
   from specialised variants. A DSL `emit()` is a code record that each of the 12 output slots multiplexes: in a loop
   (`popops` runs 8 times) emit one word per iteration, not one per case.
+- The editor scan stops at the first column blank in every row (`--rben`); cells past it keep an earlier text's codes, so
+  the compile chain reads those columns as spaces (`--rbe`, `ccpage5.colv`). A latch cell can't be reset to its hold's
+  target (a running transition to the same value stays), and changing many shown cells at once is a 200 ms layout
+  (ENGINE_NOTES 85–86).
 - Error 99 on the page means no parser variant accepts that token. L3 accepts any nonzero error for `suite_err`.
 - `tests/suite` programs must fit the editor (24 × 64); the page truncates long lines, so `suite_ref.py` fails one
   that doesn't.

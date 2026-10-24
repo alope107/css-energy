@@ -95,7 +95,7 @@
    the CPU on; where it starts; RAM, globals and console cleared while the scan of a run from line 0 runs (rbdn 1; 0: not known yet) */
 #clkw { --run: 1; --ocols: 40; --osize: 1280; animation-name: kccgo, rbkdn, kmkE; animation-timeline: --rbrdT, --rbdnT, --mkET; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; --rfr: calc(1 - min(1, abs(var(--rbdn) - 1))); --optr0: calc((1 - var(--rfr)) * max(0, var(--mkE) - 1)); }
 #memw { animation-name: kccgo, rbkdn; animation-timeline: --rbrdT, --rbdnT; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; --rclr: calc((1 - var(--ccgo)) * (1 - min(1, abs(var(--rbdn) - 1)))); }
-body #ccw { animation-name: kccgo, rbkdn; animation-timeline: --rbrdT, --rbdnT; --repl: 1; --rdone: max(0, var(--rbdn) - 1); }
+body #ccw { animation-name: kccgo, rbkdn, kre; animation-timeline: --rbrdT, --rbdnT, --rbenT; --repl: 1; --rdone: max(0, var(--rbdn) - 1); }
 /* --- Page ---
    the editor's frame holds the output too; the prompts' gutter */
 #app { height: 1984px; } .replhint { font: .8rem ui-monospace, monospace; color: var(--muted); }

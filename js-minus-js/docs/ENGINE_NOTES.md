@@ -291,3 +291,30 @@ chats.
     (the line div's), ignoring its own place and offsets, against the spec (bugs/chrome-view-timeline-inline-relative.html):
     so a row's name is its line div's position, which `position: relative` on the div moves.
     *(measured 2026-10-24, Chromium 153; machine/replui.py)*
+82. **The CSS `inherit()` function isn't in Chromium 153**: `--x: calc(inherit(--x) + 1)` is invalid at parse time (the
+    element keeps the inherited value). So a chain level can't read its parent's value of a property it writes, and the
+    compile chain keeps its parity copies (`--s-<n>-A/B`, `--p-<n>-A/B`). *(measured 2026-10-24)*
+83. **Creating an animation costs ~25 µs, and many animations on one element cost every paint ~O(n²)**: the compile
+    chain's 24 line sources create 1,536 named-view-timeline animations each time the chain shows (~40 ms of the lexer's
+    style pass; kept alive, the pass took 215 against 255 ms). The same 1,536 animations on one element (a single source
+    for every line) made every paint lifecycle 170–280 ms (untraced self time). A walk up the tree for each animation's
+    named timeline (`CSSAnimations::FindAncestorTimeline`, uncached, to the `timeline-scope` on body) was the first
+    suspect, but a shallow source cost the same. *(measured 2026-10-24, Chromium 153; compiler/ccpage5.py, BENCHMARKS §21)*
+84. **A glyph thousands of pixels wide makes every pass of the scan dearer**: a probe font whose sentinel carried two
+    columns (W = (a − 31) + 96 (b − 31) px, up to 9,215 px, the width beyond an advance's 511 px from GPOS single
+    adjustments and as many pair adjustments cancelling it on the next glyph) ran 2.4 style and layout passes per frame
+    against 1.5, each layout 18.7 against 13.1 ms, so two columns a frame were slower than one (BENCHMARKS §21). Not the
+    editor frame's scroll overflow (`overflow: visible` while running: 44 against 50 ms of layout), not the probes'
+    height (sized at W / 64 px, LayoutUnits being 1/64 px: unchanged), not shaping (HarfBuzz 1.8 against 0.6 ms a frame).
+    Headless Chromium keeps fractional glyph advances (ten 10.23 px glyphs: 102.25 px), but Linux desktop Chrome
+    without subpixel positioning may not, so the probe font keeps whole pixels. *(measured 2026-10-24, Chromium 153)*
+85. **A transition latch can't be overridden with its own hold target**: a cell holding a value has a transition to the
+    hold's target pending (1,000,000 s delay); a new value equal to that pending transition's end value leaves it running
+    (css-transitions-1: a running transition whose end value equals the after-change value is kept), so the held value
+    stays. A reset to the hold's target did nothing; a reset to any other value works. *(measured 2026-10-24; the editor
+    scan's cells)*
+86. **A custom property change on many visible inline elements is a layout**: setting `--lv` on the 512 shown latch cells
+    at once (−1 → 0, no box depending on it) took a 210 ms layout; so did starting a held transition on each (−1 → −2,
+    1,000,000 s delay, the value unchanged). One or two cells a frame cost little. And container-query rules that select
+    many elements make them depend on the container's style: a `@container rbscan style(--rbreset: 1)` rule on the cells
+    restyled all 1,536 every frame (`#app` changes every frame), +30% a compile. *(measured 2026-10-24, Chromium 153)*

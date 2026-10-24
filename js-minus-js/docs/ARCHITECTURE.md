@@ -236,7 +236,11 @@ only on top, for a branch to fuse). So `x = a + b * c` is `MUL T1, b, c` then `A
 **Character chain** (`#cc`): one nested `display: contents` level per character slot, 24 × (64 + newline) + 1 NUL
 = 1,561. One source element per line (`.ls`) animates its codes into `--lc0 … --lc63` from the latch cells' view
 timelines (`--ch<line>_<col>`); every line reuses the names, so a level inherits only its own line. `--ncl`, the next
-character's class, picks one of 9 class-specialised `LexProg` variants. A level that completes a token shows `.tr`, a
+character's class, picks one of 9 class-specialised `LexProg` variants, or a pass-through (class 9, `CL_PAD`): a space
+whose next character is blank, met with the lexer idle (no string, no two-character operator pending, no identifier's NUL
+to write), does nothing in `cc_ref.char`, so the parent, which knows its own output state, sends its child the rule that
+copies the state over (15 declarations against the space lexer's 63). Most levels are such padding: the rest of every line
+up to its 64 columns, and the empty lines (BENCHMARKS §21). A level that completes a token shows `.tr`, a
 scroller whose four subjects (code, value, hash1, hash2) are view timelines `--tk<t>c/v/h/g`. String bytes become
 in-flow overlays `.ovs` named after their RAM cell.
 
@@ -244,6 +248,9 @@ in-flow overlays `.ovs` named after their RAM cell.
 
 - One source element per 32 tokens animates their four values.
 - Level `t + 1` parses token `t` with the variant chosen by `@container style(--vh: mode) and style(--tcq: token)`.
+  A level whose token hasn't come (`--has: 0`: its register isn't laid out yet, in the style pass where the lexer
+  writes it) is `display: none`, and so is every level below it: the token chain waits for its tokens instead of running
+  each live level's step on zeros (that pass ran ~110 levels' base rules for FizzBuzz, ~40% of it; BENCHMARKS §21).
   `tools/vsz.py` counts 463 variants; they make 227 rules. Every rule costs time on every token level whether it
   applies or not (BENCHMARKS §4c), so variants whose CSS is identical share one rule, also across modes: a rule's
   condition lists every (mode, token codes) it serves. That makes the modes that only rename another (S_OPERC, S_NAMEEC,
@@ -556,9 +563,18 @@ left.
   lookups that copy column `j`'s character into a sentinel's advance. One probe per line measures it (`anchor-size()`
   of a `::after` anchor). Latch cells (0 s transition writes, 1,000,000 s delay holds) keep the codes, each with a
   view-timeline register `--ch<k>_<j>` the compiler reads.
-- The scan is frame-locked (one column per frame at any frame rate) over a fixed 64 columns.
+- The scan is frame-locked (one column per frame at any frame rate): frame k after Run (`--rbsr` k) reads column k, and the
+  sweep ends at the first column blank in every row. A register (`--rbsumT`, `rsum_html`) holds the rows' sentinel widths
+  summed; the first frame that sees it 0 latches its count E in `--rben`, which raises `--rbready`. A row's columns past
+  its end read 0, as a blank column does. Cells past the stop keep whatever an earlier, longer text left there, so the
+  compile chain reads every column from E − 1 on (0-based) as a space: `#ccw` animates E into `--rbe` from the register
+  `--rbenT`, and each level's code is `calc(32 + clamp(0, E − 1 − j, 1) × (code − 32))` (E is the blank column, 1-based,
+  or the next: a frame's later passes already lay out the next column). FizzBuzz's longest line is 47 columns: ~48 frames
+  instead of 64 (BENCHMARKS §21). (A reset of every cell at the sweep's start cost a frame of 200+ ms of layout.)
 - It runs only after Run: while editing, `SCAN` is 0 and the registers are frozen (`--rbfrz`). After Run the editors
   are read-only, one sweep raises `--rbrd`, and `--ccgo` (from the `--rbrdT` timeline) shows the compile chain.
+- A latch cell shows nothing (its code was counter text in the hidden readback pane, laid out again at every write: ~10% of
+  a scan frame); the harnesses read `--lv`.
 - Rows: line 0 is text directly in the editor, where an editor's initial text starts, and every block that holds no
   block is a row, nested or not: Chrome nests lines (Enter in line 0, pastes into an empty line) and formatted pastes
   bring wrappers (VS Code's `<div style>` around a `<div>` per line). A wrapper whose first element is a `<br>` has a
