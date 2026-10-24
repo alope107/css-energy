@@ -178,6 +178,27 @@ margins, a feature query in place of `-moz-appearance`) add no property or rule:
 scene at 1–3.5 s and on a 48-body rain pile; a state where rounding flips a box corner's clip shows 1–7 of 168,000
 values beyond 1e-2, up to 0.17. Firefox: up to 2.7e-3.
 
+### Art styles
+
+The original page (the default style) against the page without the styles (main), 2026-10-24, `ab.js -p bigmed
+'node tools/tr.js {} 1500 1500'`: in a bench lease, 16 bodies 1.057 (IQR 0.976–1.077, 10 rounds), 32 bodies 1.013
+(1.002–1.065, 8 rounds); interleaved without a lease (load about 6), 16 bodies 1.049 (0.984–1.125, 16 rounds) against
+main-vs-main 1.024 (0.975–1.088), and 1.065 without baroque's per-face ornament rule: within the noise. Scoped with
+`:root:has(#a-NAME:checked)` instead it was 1.11–1.18 (HISTORY.md).
+
+Each style at 16 bodies (tower, `ART=<name>`, `tr.js … 1500 1500`, median of 3 interleaved rounds, one bench lease,
+2026-10-24). Headless Chromium here composites in software, so fps falls with what the compositor redraws on every
+frame in which something moves (filters, shadows, masks); style per pass hardly changes. On a GPU: not measured.
+
+| Style | fps | Style per pass | The compositor runs |
+|---|---|---|---|
+| original | 45.3 | 9.5 ms | — |
+| cel | 44.7 | 9.8 ms | outlines |
+| mondrian | 40.7 | 10.8 ms | — |
+| baroque | 38.7 | 11.0 ms | gradients, inset shadows and a masked ornament on every face, drapes over the scene |
+| paper | 38.0 | 9.8 ms | a drop shadow over the scene and its scenery, a multiply overlay |
+| pencil | 35.3 | 10.0 ms | a displacement over the scene, a multiply overlay |
+
 ## 2. Style engine cost model (microbenchmarks)
 
 Pages: `experiments/costs/mk*.py` in a scratch directory, then `node tools/stylebench.js <pages> 500 1500` over every

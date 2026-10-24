@@ -678,3 +678,38 @@ and methods, arrows and `this` add operand-stack snapshots).
 
 **Costs.** The editor page 24.9 MB (main 17.4), 4,569 registered properties (3,828); the ROM 10,798 words (4,462); the
 compiler 152,295 temps in 492 variants, 24 label ports (79,100, 338, 22).
+
+## 18. Pasting into the editor (2026-10-23, branch `editor-paste`)
+
+Pasting over many lines froze the page (ENGINE_NOTES 76). The probes' contents now lay out only from Run on. Paste
+times, `main`'s page against this one, interleaved (`shared/js/ab.js`) in a bench lease:
+
+| Paste | `main` | `display: none` probes while editing | `content-visibility: hidden` (kept) |
+|---|---|---|---|
+| 200 plain lines over 200 | 2,451 ms | 660 ms | — |
+| 200 formatted lines over 200 (VS Code's HTML) | 3,251–3,509 ms | 675–730 ms | 1,212 ms |
+| 2 formatted lines over FizzBuzz | 80 ms | 40 ms | — |
+| Compile, FizzBuzz (`compiledMs`, ratio to `main`, median and IQR) | 1.00 | 1.02–1.04 (IQR up to 1.07; A-vs-A 1.018, 0.96–1.06) | 0.96 (0.92–1.07) |
+
+`display: none` was faster to paste into but built ~6,000 probe boxes at Run, a few percent of the compile; the
+content-visibility version keeps them and showed no compile cost above the noise.
+
+**Rows named by where they show (ENGINE_NOTES 77).** The sentinels' names now come from a view-timeline animation, so
+the positional selectors and the `:has()` rules per line are gone, and lines nested by Chrome or by a paste read as
+they show. Against the content-visibility page above, interleaved in a bench lease (FizzBuzz; pastes as above):
+
+| | before | rows named by position |
+|---|---|---|
+| 200 formatted lines over 200 | 1,125 ms | 211 ms (0.19×) |
+| 200 plain lines over 200 | 1,174 ms | 222 ms (0.19×) |
+| 8 formatted lines into FizzBuzz | 81 ms | 33 ms (0.38×) |
+| Compile, FizzBuzz (`compiledMs` ratio, median and IQR; A-vs-A 0.997, 0.985–1.016) | 1.00 | 0.945 (0.924–0.974) |
+
+The first version left every probe's 64 cells laid out, absent rows' too, and the compile took 1.37× as long (IQR
+1.35–1.38): the old `:has()` rules had hidden the probes of absent lines. A probe's width now comes from its
+sentinel's height (constant through the scan), and `@container (width: 0px)` drops its cells. Pausing the rows'
+animations at Run, or dropping their `:has()` leaf filter, changed nothing (1.41×, 1.41×).
+
+**Leading sentinels, shown `<br>`s, the unread-rows note (2026-10-24, branch `editor-quirks`).** Against `main`,
+interleaved, unleased (other agents' runs alongside): compile of FizzBuzz 0.981 (IQR 0.923–1.062; A-vs-A 0.995), 200
+formatted lines over 200 1.000 (0.926–1.067): no cost above the noise.

@@ -44,8 +44,8 @@ def static(COLS, ROWS, UIL, UIP, WOFF, EDS=1):
   .runbtn span::before {{ content: "\\25B6  Run"; }}
   #run:checked ~ #app .runbtn {{ background: #5b6875; }}
   #run:checked ~ #app .runbtn span::before {{ content: "\\270E  Edit"; }}
-  .limit, .nested {{ display: none; margin: 0; font-size: .85rem; color: var(--muted); }}
-  .nested {{ color: #b00; }}
+  .limit, .merged {{ display: none; margin: 0; font-size: .85rem; color: var(--muted); }}
+  .merged {{ color: #b00; }}
   .notes {{ color: var(--muted); font-size: .9rem; display: grid; gap: .5rem; }}
   .notes p {{ margin: 0; }}
   .notes code {{ font: .82rem ui-monospace, monospace; color: var(--ink); }}

@@ -1132,8 +1132,8 @@ if UI:
                ('counter', 'closures', '\u23F2'), ('animals', 'prototypes', '\U0001F43E')]
     if os.environ.get('NOPICK') == '1': SAMPLES = []     # (measurement: the page without the picker)
     SRC = [open(os.path.join(ROOT, 'samples', f + '.js')).read() for f, _, _ in SAMPLES]
-    # (an editor's initial text starts at its line 1, so UIL - 1 lines of it are read)
-    assert all(len(t.rstrip('\n').split('\n')) <= UIL - 1 and max(map(len, t.split('\n'))) <= UIP for t in SRC), 'a sample longer than the editor reads'
+    # (an editor's initial text starts at its line 0, so UIL lines of it are read)
+    assert all(len(t.rstrip('\n').split('\n')) <= UIL and max(map(len, t.split('\n'))) <= UIP for t in SRC), 'a sample longer than the editor reads'
     EDS = 1 + len(SAMPLES)
     # each editor's radio button right before it in .frame: '.pkr:checked + .ed' is the editor that shows, for one set of
     # readback rules (ui_rb.css) and one display rule whatever the number of editors
@@ -1311,12 +1311,12 @@ else:
 <header><h1>JavaScript, compiled and run by a stylesheet</h1>
 <p class="lede">Type a program and press Run. No JavaScript runs on this page.</p></header>
 <section class="pane">
-<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span></div>
+<div class="bar"><span class="label" id="in-label">Program</span><label class="runbtn" for="run"><span></span></label><span class="scanpos"></span><span class="unread">A line break from Shift+Enter or a paste isn't read: use Enter.</span></div>
 <div class="picker" role="radiogroup" aria-label="Programs"><label for="pk0" data-icon="\u270E">yours</label>{"".join(f'<label for="pk{e + 1}" data-icon="{ic}">{_h.escape(lb)}</label>' for e, (_, lb, ic) in enumerate(SAMPLES))}</div>
 <div class="frame">{PKR(0)}<div id="ed" class="ed ed0" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-labelledby="in-label">{ui_rb.editor_html(image.get('source', ''))}</div>{"".join(f'{PKR(e + 1)}<div class="ed ed{e + 1}" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true" aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC)))}</div>
 <div class="rbout"></div>
 <p class="limit">Lines past {UIL} are not read.</p>
-<p class="nested">Chrome nested some lines inside another, so they show and run as one line. Undo (Ctrl+Z), then press Enter or paste at the start of the next line instead.</p>
+<p class="merged">A pasted code block shows and runs as one line. If it had several, undo (Ctrl+Z, or ⌘Z on a Mac) and paste it as plain text: Ctrl+Shift+V, or ⌥⇧⌘V on a Mac.</p>
 </section>
 <section class="notes">{notes}</section>
 {ui_rb.probes_html(UIL, UIP, 8)}

@@ -33,6 +33,15 @@ their techniques.
   css-physics's `smoke.sh` runs in real time, one check at a time: start it alone, with no other browser job or fuzz
   running beside it (`shared/README.md#parallel-runs`).
 
+## Performance testing
+
+- **Don't use the bench-lease queue** (`shared/py/bench.py`, branch `bench-queue`): its waits slowed everyone down.
+  It is switched off machine-wide (`/tmp/css-energy-bench/off`), so `bench.py run`/`hold` run the command directly.
+- Interleave instead: A against B in one process, alternating rounds (`shared/js/ab.js`), more rounds when it's noisy.
+  Other sessions' work runs alongside; say in the report that the timings were interleaved, unleased.
+- Exception: an agent the user explicitly gives priority. While it measures, the others hold off their timing runs,
+  and only it may take a real lease (`BENCH_LEASE=force`).
+
 ## Browser bugs
 
 The projects lean on corners of the engines, so they run into browser bugs. Don't go looking for them, but when one

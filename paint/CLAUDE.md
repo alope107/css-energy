@@ -77,8 +77,8 @@ proposing an idea).
   `mouse.move` waits for the renderer, and its sparse moves hid the "hunks".
 - On touch screens every scroller is a composited layer; with 480 handles a drag re-layerizes the page every frame
   (~8–12 fps, `docs/ARCHITECTURE.md#touch`). `anchor()` ignores scroll offsets (only `position-anchor` follows).
-- Time things under the bench lease (`../.claude/worktrees/bench-queue/shared/py/bench.py run -m p -- …` until it is
-  merged): other sessions benchmark on this machine, and an unleased run lands on the E-cores.
+- Time things interleaved, not under a bench lease (`../CLAUDE.md#performance-testing`): other sessions run on this
+  machine too.
 - **Cloudflare ends each connection after ~10,000 requests** (HTTP/2 `GOAWAY`, HTTP/3 close), and a load is ~9,000.
   Chrome then fails a few hundred queued probes with `ERR_FAILED` and doesn't retry them (crbug 355006326): ~5–30
   blank cells per reload, live only. The page's retry row covers it (`docs/ARCHITECTURE.md#retry`); local HTTP/1.1

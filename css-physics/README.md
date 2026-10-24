@@ -13,7 +13,7 @@ bash tools/smoke.sh 16            # physics pass/fail check in headless Chromium
 python3 src/build3d.py out/rigid3d.html   # the published pages: out/rigid3d-{8,16,24,32,48,64}.html
 ```
 
-Open a built page in Chrome, Safari or Firefox; for 48 and 64, serve the folder, because they link split `.css` files. The page offers scenes (tower, rain, stack), gravity, shake and reset.
+Open a built page in Chrome, Safari or Firefox; for 48 and 64, serve the folder, because they link split `.css` files. The page offers scenes (tower, rain, stack), gravity, shake and reset, and art styles (cel, pencil, baroque, Mondrian, paper; [ARCHITECTURE](docs/ARCHITECTURE.md) §3).
 
 ## Status (Oct 2026)
 
