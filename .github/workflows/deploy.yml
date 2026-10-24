@@ -1,15 +1,16 @@
 # Deploy css-physics, js-minus-js and paint to Cloudflare Workers (static assets, no script). deploy/README.md explains
 # the setup, the trust model and how agents use it. In short:
 #   push to main      -> production deploy (https://<worker>.<subdomain>.workers.dev) of each project that changed
-#   push to a branch  -> preview version (https://<branch>-<worker>.<subdomain>.workers.dev) of each project the
-#                        branch changed
-#   workflow_dispatch -> deploy the projects you name, from the branch you pick
+#   push to preview*  -> preview version (https://<branch>-<worker>.<subdomain>.workers.dev) of each project the
+#                        branch changed; other branches deploy nothing
+#   workflow_dispatch -> deploy the projects you name, from the branch you pick (any branch: a person chose it)
 # build runs repo code and has no secrets; deploy has the Cloudflare token and runs no repo code, only this file.
 name: deploy
 
 on:
   push:
-    branches: ['**']
+    # main, and branches named preview… (preview, preview-x, preview/x); a push elsewhere starts no run
+    branches: [main, 'preview**']
     paths:
       - css-physics/**
       - js-minus-js/**
