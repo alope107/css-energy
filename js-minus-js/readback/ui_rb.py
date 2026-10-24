@@ -38,7 +38,6 @@ def font_b64(P):
         subprocess.run([sys.executable, os.path.join(HERE, 'mkfont2.py'), str(P), out], check=True, capture_output=True, cwd=bd)
     return base64.b64encode(open(out, 'rb').read()).decode()
 
-def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 EARLY = os.environ.get('EARLY', '1') == '1'     # the sweep reads columns 1, 2, ... and stops at the first column blank in every row
 REGS = ['tp', 'sc', 'sr', 'rd'] + (['en'] if EARLY else [])
@@ -61,14 +60,11 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
                           for n in REGS_) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
-                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz') + (('rbcnt',) if repl else ()) + (('rbsum', 'rbreset') if EARLY else ()))
+                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz') + (('rbcnt',) if repl else ()) + (('rbsum',) if EARLY else ()))
     regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS_ + (['cnt'] if repl else []) + (['sum'] if EARLY else []))
-    ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
     g = [lbl.group('Probe font, scan clock and latches', 'the readback font, the scan\'s driver state and the per-row latches')]
     g.append(f"""
 @font-face {{ font-family: "AsciiProbe"; src: url(data:font/woff2;base64,{font_b64(P)}) format("woff2"); font-display: block; }}
-@counter-style rbblank {{ system: cyclic; symbols: ""; }}
-@counter-style rbascii {{ system: fixed 32; symbols: {ascii_symbols}; fallback: rbblank; }}
 @property --rbp     {{ syntax: "<number>";  inherits: false; initial-value: 0; }}
 @property --rbng    {{ syntax: "<integer>"; inherits: false; initial-value: 1; }}
 @property --rbR     {{ syntax: "<integer>"; inherits: false; initial-value: 1; }}
@@ -88,7 +84,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
    lets the compiler see the text. The latches keep their values. */
 #app {{
   container-name: rbscan;
-  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT{', --rbnlT, --rbcntT' if repl else ''}{', --rbenT, --rbsumT' if EARLY else ''};
+  timeline-scope: --rbedw, --rbtpT, --rbscT, --rbsrT{', --rbnlT, --rbcntT' if repl else ''}{', --rbsumT' if EARLY else ''};
   animation: rbclkk .4096s linear infinite, rbwidth linear both, rbktp auto linear both, rbksc auto linear both, rbksr auto linear both{', rbknl auto linear both, rbkdn auto linear both, rbkcnt auto linear both, krn auto linear both, krbz auto linear both' if repl else ''}{', rbken auto linear both, rbksum auto linear both' if EARLY else ''};
   animation-timeline: auto, --rbedw, --rbtpT, --rbscT, --rbsrT{', --rbnlT, --rbdnT, --rbcntT, --rnT, --rbzT' if repl else ''}{', --rbenT, --rbsumT' if EARLY else ''};
   animation-range: normal, cover, normal, normal, normal{', normal' * 5 if repl else ''}{', normal' * 2 if EARLY else ''};
@@ -168,11 +164,9 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
   --rbhit: calc(1 - min(1, abs(var(--rbgj) - sibling-index())));
   --lv: calc(var(--rbhit) * (var(--rbglive) + 1) - 1);
   transition: --lv 0s calc((1 - var(--rbhit)) * 1000000s);
-  counter-reset: rbch var(--lv);
 }}
-.row i::before {{ content: counter(rbch, rbascii); }}
-/* (EARLY) the reset frame (a container query: #app's state doesn't inherit): every cell takes 0, a space */
-@container rbscan style(--rbreset: 1) {{ .row i {{ --rbhit: 1; }} }}
+/* (a cell shows nothing: its code as counter text, in the hidden readback pane, was laid out again at every write, ~10% of
+   a scan frame's time; the harnesses read --lv) */
 """)
     g.append(lbl.group('Line probes: one per editor row', 'probe k is as tall as the sentinel of row k is wide'))
     # (the REPL's page: row k is read only if row k + 1 is there, so the last row, the prompt, isn't)
@@ -205,13 +199,16 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
     return '\n'.join(g)
 
 def early_driver(P):
-    """(EARLY) the sweep: frame 0 after Run (--rbsr 0) resets every latch to 0 (a space: a sweep that stops early leaves no
-    character of a longer earlier text), frame k reads column k, and the first frame that sees (in --rbsum, the rows'
-    sentinel widths summed by rsum_html) last frame's column blank in every row ends it: --rben latches that frame's count,
-    which raises --rbready. A row's columns past its end read 0, as a blank column does; so does every column past P."""
-    return (f"\n  --rbreset: calc(var(--rbrun) * (1 - min(1, var(--rbsr))));"
-            f"\n  --rbn-en: calc(var(--rbrun) * (var(--rben) + (1 - min(1, var(--rben))) * var(--rbfresh) * clamp(0, var(--rbsr) - 1, 1)"
-            f" * max(1 - min(1, var(--rbsum)), clamp(0, var(--rbsr) - {P}, 1)) * var(--rbsr)));")
+    """(EARLY) the sweep: frame k after Run (--rbsr k) reads column k (frame 0 none), and the first frame that sees (in
+    --rbsum, the rows' sentinel widths summed by rsum_html) last frame's column blank in every row ends it: --rben latches
+    that frame's count E (the blank column, 1-based, or the next: a frame's later passes lay out the next column already),
+    which raises --rbready. A row's columns past its end read 0, as a blank column does. Cells past the blank column keep
+    whatever an earlier, longer text left there: the compile chain reads every column from E - 1 on (0-based) as a space
+    (--rbe, from the register --rbenT, ccpage5.py). Past P columns the sweep ends anyway (E = P + 2).
+    (A reset of every cell at the sweep's start cost a frame of 200+ ms of layout: each shown cell that changed, or that
+    started a held transition.)"""
+    return (f"\n  --rbn-en: calc(var(--rbrun) * (var(--rben) + (1 - min(1, var(--rben))) * var(--rbfresh) * clamp(0, var(--rbsr) - 1, 1)"
+            f" * max(1 - min(1, var(--rbsum)), clamp(0, var(--rbsr) - {P + 1}, 1)) * var(--rbsr)));")
 
 def rsum_html(L):
     """(EARLY) the rows' sentinel widths summed (the scanned column's codes; 0 where every row is past its end) as a register,

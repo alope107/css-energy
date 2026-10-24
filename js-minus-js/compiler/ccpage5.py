@@ -89,6 +89,10 @@ HC = 128                 # character register height
 HT = 1 << 20             # token register height
 TOKF = [('c', 'tc'), ('v', 'tv'), ('h', 'th1'), ('g', 'th2')]
 
+def colv(j):
+    """column j's code on its line's level (0-based): a space from the scan's end on (--rbe, on #ccw)"""
+    return f'calc(32 + clamp(0, var(--rbe) - {j + 1}, 1) * (var(--lc{j}) - 32))'
+
 def ccl_css(prop, pad=None):
     """class of the printable code held in the registered property prop (CSS expression); CL_PAD where pad holds"""
     v = f'var(--{prop})'
@@ -199,7 +203,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                    )
         N.reg[f'lc{j}'] = True
     css.append(f'.ls {{ animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both;'
-               f' animation-name: {", ".join(f"ka{j}" for j in range(P))}; --ncl: {ccl_css("lc0")};'
+               f' animation-name: {", ".join(f"ka{j}" for j in range(P))}; --c0m: {colv(0)}; --ncl: {ccl_css("c0m")};'
                # base values: a line whose probe is hidden (past the end of the text) has no registers, so its
                # animations are inactive; it must read as spaces, not inherit the previous line's characters
                + ''.join(f' --lc{j}: 32;' for j in range(P)) + ' }')
@@ -213,14 +217,19 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         pad = (f'style(--cn: 32) and style(--s-p2-{wr}: 0) and style(--s-inul-{wr}: 0) and (style(--cn2: 32) or style(--cn2: 10))'
                f' and (style(--s-lx-{wr}: 0) or style(--s-lx-{wr}: 2) or style(--s-lx-{wr}: 4))')
         css.append(f'.lv{rd} {{ --ncl: {ccl_css("cn", pad if PAD else None)}; }}')
-    for n in ('c', 'cn', 'cn2', 'ncl'): N.add(n, False)
+    for n in ('c', 'cn', 'cn2', 'ncl', 'c0m'): N.add(n, False)
     # the chain exists only once the editor's scan says the text is complete (--rbrdT, raised one sweep after Run)
     # (the sources keep running: an animation created paused does not reliably take its timeline's value, and a pause
     # driven by an animated flag is ignored, since Blink reads animation-play-state from the base style)
     # (a pause driven by an animated flag does not work: Blink reads animation-play-state from the base style)
     css.append(lbl.group('Chain switch', 'the chain exists only once the editor scan is complete'))
     css.append('@property --ccgo { syntax: "<integer>"; inherits: true; initial-value: 0; } @keyframes kccgo { from { --ccgo: 4096; } to { --ccgo: -1; } }'
-               ' #ccw { display: contents; animation: kccgo auto linear both; animation-timeline: --rbrdT; --repl: 0; --x-repl: var(--repl); --rdone: 0; --x-rdone: var(--rdone); }'
+               ' #ccw { display: contents; animation: kccgo auto linear both, kre auto linear both; animation-timeline: --rbrdT, --rbenT; --repl: 0; --x-repl: var(--repl); --rdone: 0; --x-rdone: var(--rdone); --rbe: 99; }'
+               # (--rbe: the editor scan's end E, from its register --rbenT: columns from E - 1 on, 0-based, read as spaces.
+               # E is the first column (1-based) blank in every row, or the next (the later passes of a frame already lay
+               # out the next column); past it the cells may hold an earlier text's codes. 99 where the scan doesn't run
+               # (the L3 page) or has no end register)
+               ' @property --rbe { syntax: "<integer>"; inherits: true; initial-value: 99; } @keyframes kre { from { --rbe: 4096; } to { --rbe: -1; } }'
                ' #cc { display: if(style(--ccgo: 1): block; else: none); contain: strict; position: relative; height: 0; }'
                ' .ls, .lvA, .lvB, .gs0, .gs1 { display: contents; }'
                )
@@ -286,10 +295,10 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         kcls = {'col': 'kc', 'nl': 'kn', 'nul': 'kz'}[sl[0]] + x
         nxt = slots[i + 1] if i + 1 < NC else ('nul',)
         st = []
-        if sl[0] == 'col': st.append(f'--c: var(--lc{sl[2]})')
+        if sl[0] == 'col': st.append(f'--c: {colv(sl[2])}')
         else: st.append(f'--c: {10 if sl[0] == "nl" else 0}')
         nxt2 = slots[i + 2] if i + 2 < NC else ('nul',)
-        if nxt[0] == 'col': st.append(f'--cn: var(--lc{nxt[2]}); --cn2: ' + (f'var(--lc{nxt2[2]})' if nxt2[0] == 'col' else '10'))
+        if nxt[0] == 'col': st.append(f'--cn: {colv(nxt[2])}; --cn2: ' + (colv(nxt2[2]) if nxt2[0] == 'col' else '10'))
         else: st.append(f'--cn: {10 if nxt[0] == "nl" else 0}; --ncl: {CL_NL if nxt[0] == "nl" else CL_NUL}')
         # a line's source opens just before the previous line's newline level, whose --cn must be this line's first
         # character (the lexer's lookahead at a newline decides semicolon insertion; that level's own --c is 10)

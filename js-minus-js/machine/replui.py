@@ -56,7 +56,7 @@ def css(L, cells, WOFF, RCOLS, RROWS, NMARK, MARKEND, OUTMAX):
     # (the cells' own rule clears them while --rclr is 1, memtree.py: a rule of its own here was one more each cell tests)
     out.append('#memw { animation-name: kccgo, rbkdn; animation-timeline: --rbrdT, --rbdnT; animation-duration: auto; animation-timing-function: linear;'
                ' animation-fill-mode: both; --rclr: calc((1 - var(--ccgo)) * (1 - min(1, abs(var(--rbdn) - 1)))); }')
-    out.append('body #ccw { animation-name: kccgo, rbkdn; animation-timeline: --rbrdT, --rbdnT; --repl: 1; --rdone: max(0, var(--rbdn) - 1); }')
+    out.append('body #ccw { animation-name: kccgo, rbkdn, kre; animation-timeline: --rbrdT, --rbdnT, --rbenT; --repl: 1; --rdone: max(0, var(--rbdn) - 1); }')
     # ---- the page around it
     out.append(lbl.group('Page', 'the editor\'s frame holds the output too; the prompts\' gutter'))
     out.append(f'#app {{ height: {(L + RROWS) * LH + 640}px; }} .replhint {{ font: .8rem ui-monospace, monospace; color: var(--muted); }}')
