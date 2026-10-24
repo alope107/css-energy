@@ -4,12 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>rigid3d.css</title>
-<style>
-/*UI*/
-/*SHARED*/
-/*ART*/
-/*ENGINES*/
-</style>
+<!--CSS-->
 </head>
 <body>
 <div id="app"><!--ARTIN-->
@@ -44,7 +39,7 @@
     </div>
     <div class="grp art"><b>style</b><!--ARTLABELS--></div>
   </div>
-  <p class="hint"><span class="m">Drag any body with the mouse. It moves in the plane facing the camera; grab a box off-center to swing it.</span><span class="t">Touch a body and drag it; it moves in the plane facing the camera. Let go to drop it.</span> Fewer bodies run faster; switching the count restarts the scene.</p>
+  <p class="hint"><span class="m">Drag any body with the mouse. It moves in the plane facing the camera; grab a box off-center to swing it.</span><span class="t">Touch a body and drag it; it moves in the plane facing the camera. Let go to drop it.</span> Fewer bodies run faster; each count is its own page.</p>
   <footer>
     <p>__ENGINES_SENTENCE__ Every style pass reads each body's position, orientation and velocity back from layout through view timelines (__NREG__ registers for __NMAX__ bodies). Prediction, broadphase, a box/box SAT face manifold, closest-point sphere tests and a Gauss&ndash;Seidel solve with world-space inertia tensors, friction, rolling resistance, restitution and shock propagation run as up to __NPROPS__ custom properties across __NLEV__ nested elements: one element per Gauss&ndash;Seidel round, each body's running totals inherited from round to round. Every rule is gated by an <code>@container</code> query that names its body's container (<code>b0</code>, <code>b1</code>, &hellip;), and a level carries that name only while the body is awake or near an awake one, so the rules of a sleeping neighbourhood are rejected without being evaluated. Picking unprojects the pointer through the camera and ray-casts box slabs and spheres; on touch screens each body carries a scrollable handle, and the drag is that handle's scroll offset. The next state is written back into layout; the picture is CSS 3D transforms with per-face lighting. Bodies that come to rest fall asleep (a scene placed at rest loads asleep), and once everything is still the style engine has next to nothing to do.</p>
   </footer>

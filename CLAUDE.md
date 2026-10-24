@@ -83,5 +83,5 @@ turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec v
 | Project | Build | Lands in |
 |---|---|---|
 | js-minus-js | `make page` (in `js-minus-js/`) | `js-minus-js/build/js_in_css.xhtml` (its stylesheets in `build/js_in_css/`) |
-| css-physics | `python3 src/build3d.py out/<name>.html` (in `css-physics/`) | `css-physics/out/<name>.html` (the 16-body page; it links `<name>-N.html` for 8–64) |
+| css-physics | `python3 src/build3d.py out/<name>.html` (in `css-physics/`) | `css-physics/out/<name>.html` (the 16-body page; it links `<name>-N.html` for 8–64; stylesheets in `out/<name>/`) |
 | paint | `python3 build.py` (in `paint/`) | `paint/site/`. It needs response headers the repo-root `http.server` doesn't send: serve it with `node serve.js site 8766` (in `paint/`) and link `http://localhost:8766/` |

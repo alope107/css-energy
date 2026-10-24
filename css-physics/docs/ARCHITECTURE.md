@@ -200,11 +200,22 @@ The "style" radios restyle the same scene: original (the look above), cel, penci
 | Command | Output |
 |---|---|
 | `COUNTS=16 PLAIN=1 python3 src/build3d.py out/x.html` | One engine, readable names, a `<!--BODYINFO …-->` comment. **What the test tools expect.** |
-| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked; `out/x.html` copies the `DEFAULT` (16). The deploy builds this as `index.html` (`../deploy/assemble.sh`), and `widgets.html` beside it (`experiments/widgets/`, linked from the header). |
-| `MULTI=0 python3 src/build3d.py out/x.html` | One page with every engine, selected by radios. |
+| `python3 src/build3d.py out/x.html` | `out/x-N.html` per count (8, 16, 24, 32, 48, 64), linked to each other; `out/x.html` copies the `DEFAULT` (16). Their CSS is in linked stylesheets (below). The deploy builds this as `index.html` (`../deploy/assemble.sh`), and `widgets.html` beside it (`experiments/widgets/`, linked from the header). |
 
-Engines are generated in parallel; non-PLAIN ones get a name prefix (`PFX`) and minified names. Stylesheets over
-`CSS_SPLIT` (14 MB; Workers allows 25 MiB per file) split into linked `x-N.k.css` files.
+Every count is its own page with its own engine; the count picker is links. Engines are generated in parallel;
+non-PLAIN ones get a name prefix (`PFX`) and minified names.
+
+**Stylesheets.** A published page links its CSS as sheets named by what they hold (`build3d.py SHEETS`, each a run
+of `===` sections, in cascade order). Shared by every count, so cached once for all of them, in `out/x/`: `page`
+(layout, scene, controls), `engine` (the wrappers, touch handles, register cells and face lighting every engine
+uses), `art`. The count's own, in `out/x/N/`: `properties`, `readback` (register keyframes, #LS, #LT), `predict`
+(#L0), `narrowphase` (#L1), `solve-L<a>-L<b>` (the Gauss–Seidel batches, cut into runs of levels of about
+`SOLVE_SHEET` = 10 MB: one sheet up to 32 bodies, four at 64), `next` (the last level), `input` (grab, pick, shake,
+reset overrides), `gates`, `scenes`, `registers`, `bodies`, `touch`. The largest is 7.5 MB (48 bodies); the build
+fails past 20 MiB (Workers serves at most 25 MiB per file). A rule only matches its own level, so the solver's
+sections group the step's blocks by level without changing any level's order. PLAIN pages (and `SHEETS=0`) keep the
+CSS inline: the tools read and rewrite it. Load and step cost against the single inline sheet: unchanged
+(2026-10-24, 16 and 64 bodies, interleaved, unleased).
 
 ### gen3d.py knobs (environment)
 
