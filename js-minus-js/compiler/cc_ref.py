@@ -38,7 +38,11 @@ from device import Device
 
 # the memory map (compiler/layout.json): ROM 0..rom_size-1 (the lib); RAM from rom_size = data_base; see layout.json's _doc
 LAYOUT = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')))
-LAYOUT['out_base'] = LAYOUT['rom_size'] + LAYOUT['ram_size'] - LAYOUT['cols'] * LAYOUT['rows']
+OUTMAX = LAYOUT['repl_cols'] * LAYOUT['repl_rows']    # the console's grid: cols x rows, on the REPL repl_cols x repl_rows
+LAYOUT['out_base'] = LAYOUT['rom_size'] + LAYOUT['ram_size'] - OUTMAX - LAYOUT['marks']
+# the REPL's output marks follow the console's largest grid (PUTC with A = 1 + k: mark k := the output position + 1): mark L for the
+# entry that starts on line L, MARKEND for the program's end
+NMARK = LAYOUT['marks']; MARKEND = NMARK - 1
 assert LAYOUT['data_base'] == LAYOUT['rom_size'], 'RAM index = address - rom_size = address - data_base (the compile chain relies on it)'
 AMASK = 32767                           # addresses are 15-bit
 
@@ -537,6 +541,7 @@ FCACHE = IMPC + NIMP
 TCELL, TIMERS = FCACHE + 16, 64
 RCELL = TCELL + 1                       # Math.random's state
 SPCELL = RCELL + 1                      # String.prototype (an object made the first time)
+ECELL = SPCELL + 1                      # the REPL's entry value (Compiler repl): what the entry's last expression statement left
 PKVAL = 1                               # a wrapper object's key for its primitive (no string's address, no number's key)
 # every global starts undefined (a read before its var runs: hoisting; so var x without a value is no code at the top level),
 # the caches too (FCACHE's, a double literal's: NUMLIT's 'not made yet'). The images hold it (the page's RAM groups with these
@@ -575,6 +580,9 @@ BIN = {42: MUL, 47: DIV, 37: MOD, 43: ADD, 45: SUB, 60: LT, 62: GT, 3: LE, 4: GE
 # continues) and '/' (a comment or a division) are decided on the character itself. After return (lt 2, JavaScript's
 # restricted production) the newline always ends the statement. A newline inside a /* */ comment counts.
 CONT = (46, 91, 40, 63, 58, 44, 41, 93, 42, 37, 60, 62, 38, 124, 94, 61, 59, 125)    # . [ ( ? : , ) ] * % < > & | ^ = ; }
+# The REPL (Compiler repl) leaves a newline pending after any token, and a line that starts with ( [ + or - starts a statement, as in
+# Node's REPL: so the next line's first token comes after a T_NL wherever a statement could start there
+CONTR = tuple(x for x in CONT if x not in (40, 91))
 BLANK = (9, 10, 13, 32)
 COMPOUND = {9: ADD, 10: SUB, 11: MUL, 12: DIV, 13: MOD, 18: BAND, 19: BOR, 20: BXOR, 21: SHL, 22: SHR, 23: USHR}
 # the bitwise operators' tokens: rare, so the CSS compiler's variants don't tell them apart (cc_dsl.PUNCT)
@@ -654,10 +662,11 @@ def tmerge(a, b):
     return 1 if 1 in (a, b) else a if a == b else 0
 
 class Compiler:
-    def __init__(self, data_base, code_base, lib=None, rom=False):
+    def __init__(self, data_base, code_base, lib=None, rom=False, repl=False):
         """lib: the runtime library's entry addresses (lib.json). rom: compile the runtime library itself (rtlib.py): raw memory
-        (peek, poke, p[i]), the intrinsics (INTR), no globals, and tables large enough for it"""
-        self.db, self.cb, self.rom = data_base, code_base, rom
+        (peek, poke, p[i]), the intrinsics (INTR), no globals, and tables large enough for it. repl: the page's REPL (README REPL):
+        each line that starts a top-level statement ends the entry before it, which prints its value and marks the output"""
+        self.db, self.cb, self.rom, self.repl = data_base, code_base, rom, int(repl)
         self.NF, self.NL = (NF, NL) if not rom else (256, 8192)
         self.LM, self.FM = self.NL, max(16, self.NF)         # a label + LM * a flag or type; a function + FM * its type
         self.CODESZ = CODESZ if not rom else LAYOUT['rom_size']
@@ -667,6 +676,7 @@ class Compiler:
         # after '.' at once, after '{' or ',' when a ':' follows (icm: its length)
         self.lx = 0; self.q = 0; self.lt = 0; self.tkc = 0; self.acc = 0; self.h1 = 0; self.h2 = 0; self.p2 = 0; self.sstart = 0
         self.inul = 0; self.icm = 0; self.kpos = 0; self.lcon = 0; self.tid = 0; self.tlen = 0; self.tparen = 0; self.pnl = 0; self.tflag = 0
+        self.line = 0; self.tline = 0           # the line being read; a T_NL's: the line its next token is on (the page: each level's)
         self.dp = 1                         # globals (parser): global k is data_base + k (data_base itself holds STRTAG)
         self.sdp = data_base + SDATA + 1 + NF     # string literals and property names (lexer): STRP0; data_base + SDATA itself is the lib's
                                             # empty DONE marker, which PRINT stops at
@@ -688,8 +698,9 @@ class Compiler:
         self.clab = 0                       # the top-level function's close label (cc_ref.closelab)
         self.ca = 0                         # the current function is an arrow's expression body (S_OPERC)
         self.nimp = 0                       # implicit globals in entries 0 ... NIMP - 1 (user code: those and their globals are kept)
-        if not rom: self.nsym = NIMP; self.dp = SPCELL + 1
+        if not rom: self.nsym = NIMP; self.dp = ECELL + 1
         self.pendLa = 0; self.err = 0; self.asic = 0; self.pm = 0
+        self.rpend = 0                      # REPL: a token since the last entry's end (its value is printed at the next)
         self.code = {}; self.data = {}
 
     # ---------------- helpers
@@ -1234,8 +1245,8 @@ class Compiler:
         self.asic = 1; f(); self.asic = 0
         if not self.err: self.close_block()
 
-    def incdec(self, h, v, x=0):
-        """++ (v 7) / -- (8) of a variable. x: 0 a statement, 1 ++x in an expression (its new value), 2 x++ (the old)"""
+    def incdec(self, h, v, x=0, pre=0):
+        """++ (v 7) / -- (8) of a variable. x: 0 a statement (pre: ++x), 1 ++x in an expression (its new value), 2 x++ (the old)"""
         j = self.lookup(h)
         if j < 0: return self.fail(6)
         if self.sym[j][5]: return self.fail(64)
@@ -1248,7 +1259,9 @@ class Compiler:
         o = self.var(j)
         if x: self.snapshot(lambda q: q == o)
         if x == 2: self.push_od(o, 3); self.to_temp(self.nd - 1)
+        if not x and not pre: self.echo_val((o, 0))           # (REPL: x++'s value is the old one, ++x's the new)
         self.step1(v == 7)((o, 0), (o, 0))
+        if not x and pre: self.echo_val((o, 0))
         if x == 1: self.push_od(o, 3)
         if x: self.pm = 3; self.mode = S_OPER
         else: self.mode = S_INC
@@ -1332,8 +1345,8 @@ class Compiler:
         else: tok = ('P', c)
         if self.pnl:                                      # the pending newline: decide on the next significant character
             if gap:
-                if cn in CONT: self.pnl = 0
-                elif cn not in BLANK + (47, 43, 45): tok = ('P', T_NL); self.pnl = 0
+                if cn in (CONTR if self.repl else CONT): self.pnl = 0
+                elif cn not in BLANK + ((47,) if self.repl else (47, 43, 45)): tok = ('P', T_NL); self.pnl = 0
             elif c in (43, 45):                           # ++x / --x: a new statement; x + y / x - y: continues
                 if cn == c: tok = ('P', T_NL)
                 self.pnl = 0
@@ -1345,21 +1358,37 @@ class Compiler:
                 self.kpos = 2 if (tok == ('P', 46) and not self.lcon) or (tok == ('ID', KW['function']) and not self.rom) else int(tok in (('P', 123), ('P', 44)))
                 self.lcon = int(tok == ('ID', KW['console']))
             self.lt = int(tok[0] in ('ID', 'NUM', 'STR') or (tok[0] == 'P' and tok[1] in (41, 93, 125, 7, 8))) + int(tok == ('ID', KW['return']))
+            if tok == ('P', T_NL): self.tline = self.line + (c == 10)
             cp0 = self.cp; self.token(*tok)
             if self.cp - cp0 > EMAX:                     # (instructions; the page's EMAX slots don't hold the rest)
                 self.fail(61)
                 for k in range(cp0 + EMAX, self.cp): self.code.pop(k, None)
+        if c == 10: self.line += 1
 
     def newline(self):
         """a newline (also in a comment): after return a T_NL at once; after another token that can end a statement, pending"""
         if self.lt == 2: return ('P', T_NL)
-        if self.lt: self.pnl = 1
+        if self.lt or self.repl: self.pnl = 1
         return None
 
     # ---------------- parser: one token
     def token(self, kind, v):
+        nl = kind == 'P' and v == T_NL
+        if self.repl and not nl and kind != 'EOF': self.rpend = 1
         self.token_(kind, v)
+        if self.repl and nl and not self.err and not self.curf and not self.csp:     # a top-level statement starts on this line:
+            if self.mode == S_ELSE: self.deflab(self.pendLa, self.here()); self.mode = S_STMT     # (an if ends at its line, as in Node's REPL)
+            if self.mode == S_STMT: self.entry_end(self.tline)
         if self.ca and not self.err: self.mode = {S_OPER: S_OPERC, S_NAMEE: S_NAMEEC}.get(self.mode, self.mode)     # (CMODES)
+    def entry_end(self, line):
+        """REPL: the entry before line `line` ended: its value printed (echo; only if a token came since the last end), then the
+        output's position marked for that line (PUTC with A = 1 + the mark: the page lays the output out under each entry)"""
+        if self.rpend:
+            t = self.tmp(0); self.emit('CALL', (self.ent.get('echo', 0) // 2, 0), w1=(t[0] - 256, t[1]))
+        self.emit('PUTC', (1 + min(line, MARKEND - 1), 0), (K(0), 0)); self.rpend = 0
+    def echo_val(self, o):
+        """REPL: a top-level expression statement's value (operand o) is the entry's"""
+        if self.repl and not self.csp and not self.curf: self.emit('MOV', (ECELL, 0), o)
     def token_(self, kind, v):
         if self.err: return
         isP = lambda c: kind == 'P' and v == c
@@ -1483,6 +1512,7 @@ class Compiler:
                                      or any(self.sym[k][2] == 3 for k in range(self.nimp))     # read, never assigned or declared
                                      or any((self.fn[k][0], self.fn[k][1]) in RESERVED for k in range(self.nfn))): return self.fail(4)
                 if self.nfdef >= TIMERS and not self.rom: self.timer_loop()
+                if self.repl: self.emit('PUTC', (1 + MARKEND, 0), (K(0), 0))     # (the output's end)
                 self.emit('HALT'); return
             if isP(123): self.push_cs(C_BLOCK); return
             if isP(125): return self.close_block()
@@ -1528,7 +1558,7 @@ class Compiler:
             self.pn = v; self.mode = S_NAMES; return
         if m == S_PREINC:
             if kind != 'ID': return self.fail(10)
-            return self.incdec(v, self.pn[0], self.pn[1])
+            return self.incdec(v, self.pn[0], self.pn[1], 1)
         if m == S_VAR:
             if kind != 'ID' or v in RESERVED: return self.fail(9)
             cst, blk = int(self.pn[0] == 2), self.decl_blk()
@@ -1882,6 +1912,7 @@ class Compiler:
             else: self.put(o, i); self.settype(t[1], self.otype(i))
             self.nd -= 1
             if self.err: return                                # (settype's 61: the statement goes no further, as in cc_dsl)
+            if not t[3]: self.echo_val(o)                      # (x = e: its value; a declaration's is undefined)
             if isP(44) and t[3]: self.pn = (t[3] - 1, 0); self.mode = S_VAR; return     # var a = 1, b ...
             return self.end_simple_stmt(kind, v)
         if k == C_PSET:                                        # t: dynamic (x[k]), compound op, the key's offset (o.key: 64 * t[3] + t[4]).
@@ -1890,9 +1921,12 @@ class Compiler:
             else: val = self.src(i)
             if dyn: self.index_write(i - 2, val)
             else: self.prop_write(i - 1, self.db + 64 * t[3] + t[4], val)
+            self.echo_val(val)
             return self.end_simple_stmt(kind, v)
         if k == C_EXPR:
-            self.pop_cs(); self.nd -= 1; return self.end_simple_stmt(kind, v)
+            self.pop_cs()
+            if self.repl and not self.csp and not self.curf: self.put((ECELL, 0), self.nd - 1)     # (echo_val)
+            self.nd -= 1; return self.end_simple_stmt(kind, v)
         if k == C_RETURN and (isP(59) or isP(T_NL)):
             self.pop_cs(); i = self.nd - 1
             if self.otype(i): self.fn[self.cfn][3] = self.otype(i)
@@ -2027,12 +2061,13 @@ class Compiler:
         return words, dict(self.data)
 
 # ---------------- simulator
-def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, strict=False, trace=None, ent=None, net=None):
+def run(rom, mem_init, sp0, out_base=None, cols=None, rows=None, max_steps=10 ** 6, strict=False, trace=None, ent=None, net=None, marks=None):
     """the register machine from code_base (fp = sp0) on a RAM image; returns (steps, output). ent: the runtime library's entries
     (the traps' routines). strict: fp is back at sp0 at HALT. net: the NET instruction's gateway (default: net/device.py's,
-    which serves tests/net/)"""
+    which serves tests/net/). marks: a list that gets the REPL's marks at HALT"""
     if net is None: net = Device()
     if out_base is None: out_base = LAYOUT['out_base']
+    cols, rows = cols or LAYOUT['cols'], rows or LAYOUT['rows']
     mem = [0] * (AMASK + 1)
     romw = [w or 0 for w in rom]       # instructions only: a data read below RAM gives 0 (the page has no ROM leaves)
     for a, v in mem_init.items(): mem[a] = v
@@ -2115,6 +2150,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
         elif op == 'JNZ': pc = 2 * a if truthy(mem, val(b), user) else pc
         elif op == 'HALT':                              # (the ROM's halt is out of memory's, inside its routines' frames)
             if strict and fp != sp0 and pc - 2 >= ROMN: raise RuntimeError(f'frame unbalanced at HALT: fp - sp0 = {fp - sp0}')
+            if marks is not None: marks[:] = mem[out_base + OUTMAX:out_base + OUTMAX + NMARK]
             return steps, ''.join(chr(ch % 0x10000) for ch in out)     # (putc's code mod 2^16, as String.fromCharCode)
         elif op[0] == 'J':
             x, y = val(b), val(c); ng = op[1] == 'N' and op != 'JNE'
@@ -2142,6 +2178,7 @@ def run(rom, mem_init, sp0, out_base=None, cols=8, rows=16, max_steps=10 ** 6, s
                 while p != db + SDATA and mem[p] != 0: text.append(mem[p]); p += 1
             else: text = [ord(ch) for ch in str(v)]
             for ch in text + ([sep] if sep else []): emit(ch)
+        elif op == 'PUTC' and a: mem[out_base + OUTMAX + a - 1] = optr + 1     # a REPL mark (NMARK): where the output stands
         elif op == 'PUTC': emit(val(b))
         elif op == 'NUMLIT':                            # a number literal: its cache, or the library parses it (once)
             if pst == WBACK: wr(addr(a), rd(fp + TRAPDEF)); pst = 0
@@ -2233,27 +2270,30 @@ def image_mem(c, words, data, init=None):
     mem[LAYOUT['strend']] = c.sdp       # the string area's end (the runtime looks string keys up in it)
     return mem
 
-def compile_and_run(src, lib, max_steps=10 ** 6, strict=False, trace=None):
-    c = Compiler(LAYOUT['data_base'], LAYOUT['code_base'], lib)
+def compile_and_run(src, lib, max_steps=10 ** 6, strict=False, trace=None, repl=False):
+    """repl: as the page's REPL compiles and runs it (its console's grid)"""
+    c = Compiler(LAYOUT['data_base'], LAYOUT['code_base'], lib, repl=repl)
     words, data = c.compile(src)
     if c.err: return c, None
     mem = image_mem(c, words, data, lib.get('init', LAYOUT['init']))
-    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'), trace=trace)
+    geo = dict(cols=LAYOUT['repl_cols'], rows=LAYOUT['repl_rows']) if repl else {}
+    return c, run(lib['rom'], mem, LAYOUT['sp0'], max_steps=max_steps, strict=strict, ent=lib.get('entries'), trace=trace, **geo)
 
-def image(src, lib, ram=False):
+def image(src, lib, ram=False, repl=False):
     """The machine image every harness takes (gen_css.py, csssim.py, the C2 pages): ROM = the lib; RAM all zero but the globals
     (undefined: GINIT; the page's compile chain supplies code and data), or with ram=True the program as the CSS compiler leaves it (CPU-only pages,
-    the CSS CPU's model). steps/expected come from cc_ref's simulation."""
+    the CSS CPU's model). steps/expected come from cc_ref's simulation. repl: compiled and run as the page's REPL (its console's grid)"""
     La = LAYOUT
-    c = Compiler(La['data_base'], La['code_base'], lib)
+    c = Compiler(La['data_base'], La['code_base'], lib, repl=repl)
     words, data = c.compile(src)
     if c.err: raise ValueError(f'compile error {c.err}')
     mem = image_mem(c, words, data, lib.get('init', La['init']))
-    r = run(lib['rom'], dict(mem), La['sp0'], ent=lib.get('entries'))
+    cols, rows = (La['repl_cols'], La['repl_rows']) if repl else (La['cols'], La['rows'])
+    mk = []; r = run(lib['rom'], dict(mem), La['sp0'], ent=lib.get('entries'), cols=cols, rows=rows, marks=mk)
     if not ram: mem = dict(GINIT)
     return dict(rom=lib['rom'], romSize=La['rom_size'], ram=[mem.get(La['rom_size'] + i, 0) for i in range(La['ram_size'])],
-                ramSize=La['ram_size'], sp0=La['sp0'], outBase=La['out_base'], rows=La['rows'], cols=La['cols'], source=src,
-                codeBase=La['code_base'], init=La.get('init'), steps=r[0], expected=r[1], entries=lib.get('entries', {}))
+                ramSize=La['ram_size'], sp0=La['sp0'], outBase=La['out_base'], rows=rows, cols=cols, repl=int(repl), source=src,
+                codeBase=La['code_base'], init=La.get('init'), steps=r[0], expected=r[1], marks=mk, entries=lib.get('entries', {}))
 
 def disasm(words, base=None):
     """the instructions of a {address: word} map, as text lines"""

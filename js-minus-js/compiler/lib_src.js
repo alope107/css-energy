@@ -1293,6 +1293,8 @@ function pval(v, fl) {
   if (sp == 2) { putc(10); }
   return 0;
 }
+// the REPL's echo (cc_ref.entry_end): the entry's value (ECELL) as Node's REPL shows it, strings quoted; ECELL undefined again
+function echo() { var v = peek(__DB__ + __ECELL__); poke(__DB__ + __ECELL__, __UNDEF__); insel(v, 0); putc(10); return 0; }
 // a string as Node quotes it: 'x', or "x" if it holds a ' and no ", with \\ \n \t and the quote escaped
 function qstr(s) {
   var n = peek(s - 1); var i = 0; var q = 39; var c = 0;

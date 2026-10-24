@@ -1,4 +1,5 @@
-"""suite_ref.py [dir] — level 1: the reference compiler (cc_ref) + bytecode simulator against Node's output.
+"""suite_ref.py [dir] — level 1: the reference compiler (cc_ref) + bytecode simulator against Node's output. A directory named
+repl holds REPL sessions (tests/repl_expect.js): compiled and run as the page's REPL does.
 A program may declare the garbage collections it is written to cause, in order, by the routine that called the collector
 (`// collections: galloc gcnew`: an ALLOC, a NEW, gccat for a string's +). A GC test's loops are sized for the heap, so
 a change that moves where (or whether) it collects fails here instead of leaving the test quietly weaker."""
@@ -21,13 +22,14 @@ def one(f):
         if pc == ENT['gc']: gcs.append(routine(prev[0]))
         prev[0] = pc
     try:
-        c, r = R.compile_and_run(src, lib, strict=True, trace=trace if m else None)
+        c, r = R.compile_and_run(src, lib, strict=True, trace=trace if m else None, repl=REPL)
         if r is None: return ('COMPILE-ERR', c.err)
         elif m and gcs != m.group(1).split(): return ('COLLECTIONS', f'{" ".join(gcs) or "none"}, want {m.group(1)}')
         elif r[1] == want: return ('ok', r[0])
         else: return ('WRONG', repr(r[1][:60]) + ' want ' + repr(want[:60]))
     except Exception as e: return ('CRASH', str(e)[:80])
 from par import pmap                    # one program per worker process
+REPL = os.path.basename(os.path.normpath(d)) == 'repl'
 fs = sorted(glob.glob(d + '/*.js'))
 res = {os.path.basename(f)[:-3]: v for f, v in zip(fs, pmap(one, fs))}
 ok = sum(1 for v in res.values() if v[0] == 'ok')

@@ -26,7 +26,7 @@ LEX_STATE = ['lx', 'q', 'lt', 'tkc', 'acc', 'h1', 'h2', 'p2', 'sstart', 'sdp', '
 
 def parse_state_names():
     s = ['dp', 'mode', 'pn1', 'pn2', 'osp', 'csp', 'nsym', 'nlet', 'nfn', 'nlab', 'cp', 'curf', 'cfn', 'nfdef', 'nloc', 'npar', 'fsym', 'pendLa',
-         'err', 'nint', 'pm', 'nd', 'pk', 'tb', 'nimp', 'obase', 'dbase', 'fcsp', 'flab', 'sv0', 'sv1', 'sv2', 'sv3', 'fmark', 'clab', 'ca']
+         'err', 'nint', 'pm', 'nd', 'pk', 'tb', 'nimp', 'obase', 'dbase', 'fcsp', 'flab', 'sv0', 'sv1', 'sv2', 'sv3', 'fmark', 'clab', 'ca', 'rpend']
     s += [f'op{k}' for k in range(OD)]
     s += [f'csA{k}' for k in range(CD)] + [f'csB{k}' for k in range(CD)]
     s += [f'od{k}' for k in range(ODN)]
@@ -44,7 +44,7 @@ def initial_lex(data_base):
 
 def initial_parse(data_base):
     st = {n: 0 for n in parse_state_names()}
-    st['dp'] = R.SPCELL + 1; st['mode'] = R.S_STMT        # (global k: data_base + k; cc_ref.NIMP, FCACHE: the implicit globals', the functions')
+    st['dp'] = R.ECELL + 1; st['mode'] = R.S_STMT        # (global k: data_base + k; cc_ref.NIMP, FCACHE: the implicit globals', the functions')
     st['nsym'] = R.NIMP
     return st
 
@@ -95,7 +95,7 @@ class Prog(Base):
         self.db, self.cb = data_base, code_base
         self.ent = (lib or {}).get('entries', {})   # ROM routines (cc_ref)
         self.spec_mode, self.spec_tk, self.spec_tv = mode, tk, tv
-        X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2'])
+        X = self.x = Ctx(parse_state_names(), ['tk', 'tv', 'th1', 'th2', 'repl'])
         X.cur.update(live=K(1), f_expr=K(0), f_simple=K(0), f_compl=K(0), f_asic=K(0), f_compl2=K(0), f_imp=K(0))
         X.cur.update({f'sc{c}{f}': K(0) for c in 'AOT' for f in ('', 'l', 'x')}); X.cur['ptop'] = K(0); X.cur['psp'] = K(0)
         if mode is not None: X.cur['mode'] = K(mode); X.cur['err'] = K(0)
@@ -461,9 +461,10 @@ class Prog(Base):
         with self.when(L(3)):
             eb = self.m(ite(ceq(110), 10, ite(ceq(116), 9, ite(ceq(114), 13, c))), 'esc')
             self.datum(self.v('sdp'), eb); adv(); self.set('lx', 1); shash(eb)
-        def newline():                                  # cc_ref.newline: after return a T_NL now, else pending
-            with self.when(eq(ltk, 2)): tok(4, R.T_NL)
-            with self.when(eq(ltk, 1)): self.set('pnl', 1)
+        repl = I('repl'); nline = self.m(add(I('lnum'), ceq(10)), 'nline')     # (a T_NL's th1: cc_ref.tline)
+        def newline():                                  # cc_ref.newline: after return a T_NL now, else pending (the REPL: always)
+            with self.when(eq(ltk, 2)): tok(4, R.T_NL, nline)
+            with self.when(or_(eq(ltk, 1), and_(eq(ltk, 0), repl))): self.set('pnl', 1)
         with self.when(L(2)):
             with self.when(ceq(10)): self.set('lx', 0); newline()
         with self.when(L(4)):
@@ -540,12 +541,13 @@ class Prog(Base):
         pnl = self.m(self.v('pnl'), 'pnl')
         gap = self.m(or_(and_(L(2), ceq(10)), L(5), and_(L(0), eq(p2, 0), or_(*[ceq(v) for v in R.BLANK]))), 'gap')
         with self.when(and_(pnl, gap)):
-            cont = self.m(anyeq(cn, R.CONT), 'cont'); wait = self.m(anyeq(cn, R.BLANK + (47, 43, 45)), 'wait')
+            cont = self.m(or_(anyeq(cn, R.CONTR), and_(not_(repl), anyeq(cn, (40, 91)))), 'cont')     # (cc_ref.CONTR)
+            wait = self.m(or_(anyeq(cn, R.BLANK + (47,)), and_(not_(repl), anyeq(cn, (43, 45)))), 'wait')
             with self.when(cont): self.set('pnl', 0)
-            with self.when(and_(not_(cont), not_(wait))): tok(4, R.T_NL); self.set('pnl', 0)
+            with self.when(and_(not_(cont), not_(wait))): tok(4, R.T_NL, nline); self.set('pnl', 0)
         with self.when(and_(pnl, not_(gap), L(0), eq(p2, 0))):
             with self.when(or_(ceq(43), ceq(45))):
-                with self.when(eq(cn, c)): tok(4, R.T_NL)
+                with self.when(eq(cn, c)): tok(4, R.T_NL, nline)
                 self.set('pnl', 0)
             with self.when(and_(ceq(47), ne(cn, 47), ne(cn, 42))): self.set('pnl', 0)
 
@@ -864,8 +866,8 @@ class Prog(Base):
         with self.when(and_(ok, isr)): self.push_od(R.K(R.UNDEF), 0); self.set('mode', R.S_OPER); self.done()
         with self.when(and_(ok, not_(isr))): self.pop_cs(); self.set('mode', R.S_INC); self.done()
 
-    def incdec(self, h1, h2, op, x=0, pre=None):
-        """cc_ref.incdec. x: 0 statement, 1 ++x / 2 x++ in an expression; pre: the symbol (j, k, o, b, cst) if looked up"""
+    def incdec(self, h1, h2, op, x=0, pre=None, prefix=0):
+        """cc_ref.incdec. x: 0 statement (prefix: ++x), 1 ++x / 2 x++ in an expression; pre: the symbol (j, k, o, b, cst) if looked up"""
         if pre is None: j = self.lookup(h1, h2); k, o, b, cst = self.symkind_addr(j)
         else: j, k, o, b, cst = pre
         x = lift(x); x1, x2 = self.m(eq(x, 1), 'ix1'), self.m(eq(x, 2), 'ix2')
@@ -881,7 +883,11 @@ class Prog(Base):
                 with self.when(ne(x, 0)): self.push_od(TMP, 3)
             with self.when(and_(not_(cap), ne(x, 0))): self.snapshot(lambda d: eq(d, o))
             with self.when(and_(not_(cap), x2)): self.push_od(o, 3); self.to_temp(self.v('nd') - 1)
+            with self.when(and_(not_(cap), eq(x, 0))):
+                if not prefix: self.echo_val((o, 0))           # (the REPL: x++'s value is the old one, ++x's the new)
             with self.when(not_(cap)): self.emit(OP['DSUB'], (o, 0), (o, 0), (ite(eq(op, 7), R.K(-1), R.K(1)), 0))     # (cc_ref.step1: x - -1)
+            with self.when(and_(not_(cap), eq(x, 0))):
+                if prefix: self.echo_val((o, 0))
             with self.when(and_(not_(cap), x1)): self.push_od(o, 3)
             with self.when(ne(x, 0)): self.set('pm', 3); self.set('mode', R.S_OPER)
             with self.when(eq(x, 0)): self.set('mode', R.S_INC)
@@ -908,7 +914,20 @@ class Prog(Base):
     def parser(self):
         tk = I('tk') if self.spec_tk is None else K(self.spec_tk)
         with self.when(and_(ne(tk, 0), eq(self.v('err'), 0))):
-            self.token(tk, I('tv') if self.spec_tv is None else K(self.spec_tv), I('th1'), I('th2'))
+            tv = I('tv') if self.spec_tv is None else K(self.spec_tv)
+            self.token(tk, tv, I('th1'), I('th2'))
+            # the REPL (cc_ref.token): a token since the last entry's end; a line where a top-level statement starts ends the entry
+            repl = I('repl'); nl = self.m(and_(eq(tk, 4), eq(tv, R.T_NL)), 'rnl')
+            with self.when(and_(repl, not_(nl), ne(tk, 5))): self.set('rpend', 1)
+            top = self.m(and_(repl, nl, eq(self.v('err'), 0), eq(self.v('curf'), 0), eq(self.v('csp'), 0)), 'rtop')
+            with self.when(and_(top, eq(self.v('mode'), R.S_ELSE))): self.deflab(self.v('pendLa'), self.here()); self.set('mode', R.S_STMT)
+            with self.when(and_(top, eq(self.v('mode'), R.S_STMT))):
+                with self.when(ne(self.v('rpend'), 0)):
+                    t = self.tmp(K(0)); self.emit(OP['CALL'], (self.ent.get('echo', 0) // 2, 0), w1=(sub(t[0], 256), t[1]))
+                self.emit(OP['PUTC'], (add(1, mn(I('th1'), R.MARKEND - 1)), 0), (R.K(0), 0)); self.set('rpend', 0)
+    def echo_val(self, o):
+        """cc_ref.echo_val: the REPL keeps a top-level expression statement's value (operand o) for the entry's echo"""
+        with self.when(and_(I('repl'), eq(self.v('csp'), 0), eq(self.v('curf'), 0))): self.emit(OP['MOV'], (R.ECELL, 0), o)
 
     def token(self, tk, tv, th1, th2):
         # a variant for 'other punctuation' (tk 4, no tv) only sees codes outside PUNCT
@@ -1109,6 +1128,7 @@ class Prog(Base):
                         t = self.tmp(K(0)); l = self.here()
                         self.emit(OP['CALL'], (self.ent.get('nexttimer', 0) // 2, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JZ'], (add(l, 4), 0), b=t)
                         self.emit(OP['CALLV'], (0, 0), w1=(sub(t[0], 256), t[1])); self.emit(OP['JMP'], (l, 0))
+                    with self.when(I('repl')): self.emit(OP['PUTC'], (1 + R.MARKEND, 0), (R.K(0), 0))     # (cc_ref: the output's end)
                     self.emit(OP['HALT']); self.done()
             with self.when(P(123)): self.push_cs(R.C_BLOCK); self.done()
             with self.when(P(125)): self.close_block()
@@ -1172,7 +1192,7 @@ class Prog(Base):
         # ---- S_PREINC
         with block(R.S_PREINC):
             with self.when(not_(isID)): self.fail(10)
-            with self.when(isID): self.incdec(th1, th2, self.v('pn1'), self.v('pn2'))
+            with self.when(isID): self.incdec(th1, th2, self.v('pn1'), self.v('pn2'), prefix=1)
         # ---- S_VAR
         with block(R.S_VAR):
             vres = self.m(or_(not_(isID), self.isres(th1, th2)), 'vres')
@@ -1632,6 +1652,7 @@ class Prog(Base):
             with self.when(cmp_): self.set('nd', i - 1)
             with self.when(and_(not_(cmp_), not_(acap))): self.put((o, 0), i); self.set_symbool(t[1], self.otype(i))
             with self.when(not_(cmp_)): self.set('nd', i)
+            with self.when(and_(eq(t[3], 0), eq(self.v('err'), 0))): self.echo_val((o, 0))     # (cc_ref: not a declaration's)
             vdecl = self.m(and_(P(44), ne(t[3], 0)), 'vdecl')
             with self.when(self.m(self.v('live'), 'live')):
                 with self.when(vdecl): self.set('pn1', sub(t[3], 1)); self.set('pn2', 0); self.set('mode', R.S_VAR); self.done()
@@ -1640,14 +1661,17 @@ class Prog(Base):
             self.pop_cs(); i = self.m(self.v('nd') - 1, 'qi'); cm = self.m(ne(t[2], 0), 'qcm'); ti = self.tmp(i - 1)
             with self.when(cm): self.compound(t[2], i - 1, ti, True); self.set('nd', i)
             with self.when(not_(cm)): vs = self.src(i)
-            self.write_elem(t[1], add(self.db, mul(t[3], 64), t[4]), (ite(cm, ti[0], vs[0]), ite(cm, ti[1], vs[1])))
+            vv = (self.m(ite(cm, ti[0], vs[0]), 'qv0'), self.m(ite(cm, ti[1], vs[1]), 'qv1'))
+            self.write_elem(t[1], add(self.db, mul(t[3], 64), t[4]), vv); self.echo_val(vv)
             self.set('f_simple', 1)
         with self.when(c10):                                 # the value into T(0), where the case tests read it
             db_ = self.m(self.v('dbase'), 'swdb'); self.pop_cs(); self.to_temp(db_); ty = self.otype(db_); self.set('nd', db_)
             l1 = self.newlab(); l2 = self.newlab()
             self.push_cs(R.C_SWITCH, l1, l2, 0, mul(4, ty)); self.set('mode', R.S_LBRACE); self.done()
         with self.when(c6):
-            self.pop_cs(); self.set('nd', self.v('nd') - 1); self.set('f_simple', 1)
+            self.pop_cs()
+            with self.when(and_(I('repl'), eq(self.v('csp'), 0), eq(self.v('curf'), 0))): self.put((R.ECELL, 0), self.v('nd') - 1)     # (echo_val)
+            self.set('nd', self.v('nd') - 1); self.set('f_simple', 1)
         with self.when(c7):
             self.pop_cs()
             i = self.m(self.v('nd') - 1, 'ri'); rty = self.otype(i)
@@ -1835,7 +1859,7 @@ class LexProg(Prog):
     def __init__(self, data_base, c=None, cset=None):
         if cset is not None and len(cset) == 1: c = next(iter(cset)); cset = None
         self.spec_c = c; self.cset = cset; self.db = data_base
-        X = self.x = Ctx(LEX_STATE, ['c', 'cn', 'ptk'])
+        X = self.x = Ctx(LEX_STATE, ['c', 'cn', 'ptk', 'repl', 'lnum'])
         X.cur.update(tk=K(0), tv=K(0), th1=K(0), th2=K(0))
         self.data = []; self.out = []
         self.lexer()
