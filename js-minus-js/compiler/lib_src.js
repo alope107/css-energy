@@ -223,6 +223,7 @@ function scmp(a, b) {
 // instruction's destination. + : arrays and objects as their strings, then a string on either side joins; otherwise numbers
 // (ToNumber: true 1, false and null 0, undefined NaN, a string's integer)
 function dadd(a, b) {
+  if (__kind(a, __K_NUM__) * __kind(b, __K_NUM__)) { __fl(__FL_FADD__, __F0__, a, b); return fbox(); }     // (two numbers: no prim)
   a = prim(a); b = prim(b);
   if (__kind(a, __K_STR__) + __kind(b, __K_STR__)) {
     if (__kind(a, __K_DBL__)) { a = numstr(a); }                // (the cat class joins strings, integers and specials)
@@ -239,6 +240,7 @@ function dneg(a, b) { return arith(5, a, 0); }
 // ToNumber for the operators: a number (an integer of the machine's range, NaN, +-Infinity, -0 or a double); objects as their
 // strings, booleans 1 / 0, null 0, undefined NaN
 function tonum(v) {
+  if (__kind(v, __K_NUM__)) { return v; }               // (a number, the common case: no prim)
   v = prim(v);
   if (__kind(v, __K_STR__)) { return strnum(v); }
   if (__kind(v, __K_NUM__)) { return v; }
@@ -248,7 +250,7 @@ function tonum(v) {
 }
 // op 0 + 1 - 2 * 3 / 4 % 5 unary - of two values as numbers, in the FPU (IEEE doubles, as JavaScript computes)
 function arith(op, a, b) {
-  a = tonum(a); b = tonum(b);
+  if (__kind(a, __K_NUM__) * __kind(b, __K_NUM__) == 0) { a = tonum(a); b = tonum(b); }
   if (op == 0) { __fl(__FL_FADD__, __F0__, a, b); }
   else if (op == 1) { __fl(__FL_FSUB__, __F0__, a, b); }
   else if (op == 2) { __fl(__FL_FMUL__, __F0__, a, b); }
@@ -288,6 +290,8 @@ function fbox() {
 // a and b compared: -1, 0, 1, or 2 (unordered: NaN). Arrays and objects as their strings; two strings by their characters,
 // otherwise as numbers
 function dcmp(a, b) {
+  if (__kind(a, __K_NUM__) * __kind(b, __K_NUM__)) { return __fv(__FV_FCMP__, a, b); }     // (two numbers or two strings,
+  if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return scmp(a, b); }                  // the common cases: no prim)
   a = prim(a); b = prim(b);
   if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return scmp(a, b); }
   return __fv(__FV_FCMP__, tonum(a), tonum(b));
@@ -702,10 +706,10 @@ function numfmt(neg, nd, pt) {
   }
   return r;
 }
-function dlt(a, b) { return jsb(dcmp(a, b) == 0 - 1); }
-function dgt(a, b) { return jsb(dcmp(a, b) == 1); }
-function dle(a, b) { var c = dcmp(a, b); return jsb((c == 0 - 1) + (c == 0)); }
-function dge(a, b) { var c = dcmp(a, b); return jsb((c == 0) + (c == 1)); }
+function dlt(a, b) { return __FALSE__ - (dcmp(a, b) == 0 - 1); }
+function dgt(a, b) { return __FALSE__ - (dcmp(a, b) == 1); }
+function dle(a, b) { var c = dcmp(a, b); return __FALSE__ - ((c == 0 - 1) + (c == 0)); }
+function dge(a, b) { var c = dcmp(a, b); return __FALSE__ - ((c == 0) + (c == 1)); }
 // a === b, raw: strings by their characters, NaN equal to nothing, -0 equal to 0
 function deqr(a, b) {
   var n = 0;
@@ -718,8 +722,8 @@ function deqr(a, b) {
   if (__kind(a, __K_NUM__) * __kind(b, __K_NUM__)) { return __fv(__FV_FCMP__, a, b) == 0; }
   return a == b;
 }
-function deq(a, b) { return jsb(deqr(a, b)); }
-function dne(a, b) { return jsb(deqr(a, b) == 0); }
+function deq(a, b) { return __FALSE__ - (deqr(a, b)); }
+function dne(a, b) { return __FALSE__ - (deqr(a, b) == 0); }
 // a == b, raw: null and undefined equal each other only; two objects by identity; otherwise primitives (an object's
 // string), two strings by their characters, anything else as numbers
 function leqr(a, b) {
@@ -731,8 +735,8 @@ function leqr(a, b) {
   if (__kind(a, __K_STR__) * __kind(b, __K_STR__)) { return deqr(a, b); }
   return dcmp(a, b) == 0;
 }
-function dleq(a, b) { return jsb(leqr(a, b)); }
-function dlne(a, b) { return jsb(leqr(a, b) == 0); }
+function dleq(a, b) { return __FALSE__ - (leqr(a, b)); }
+function dlne(a, b) { return __FALSE__ - (leqr(a, b) == 0); }
 // JLT ... JNE in user code on anything but two integers: the jump is decided here. The frame is at TRAPOFF and returns to
 // the instruction after the jump; a jump taken rewrites the return word to its target (A, from the instruction itself)
 function jcmp(a, b) {
@@ -742,15 +746,15 @@ function jcmp(a, b) {
   else if (op == __OP_JLEQ__) { t = leqr(a, b); }
   else if (op == __OP_JLNE__) { t = leqr(a, b) == 0; }
   else {
-    c = dcmp(a, b);
-    if (op == __OP_JLT__) { t = c == 0 - 1; }
-    if (op == __OP_JGT__) { t = c == 1; }
-    if (op == __OP_JLE__) { t = (c == 0 - 1) + (c == 0); }
-    if (op == __OP_JGE__) { t = (c == 0) + (c == 1); }
+    c = dcmp(a, b);                                      // (the loops' JNLT ... first; one test past the match)
     if (op == __OP_JNLT__) { t = c != 0 - 1; }
-    if (op == __OP_JNGT__) { t = c != 1; }
-    if (op == __OP_JNLE__) { t = (c != 0 - 1) * (c != 0); }
-    if (op == __OP_JNGE__) { t = (c != 0) * (c != 1); }
+    else if (op == __OP_JNGE__) { t = (c != 0) * (c != 1); }
+    else if (op == __OP_JNGT__) { t = c != 1; }
+    else if (op == __OP_JNLE__) { t = (c != 0 - 1) * (c != 0); }
+    else if (op == __OP_JLT__) { t = c == 0 - 1; }
+    else if (op == __OP_JGE__) { t = (c == 0) + (c == 1); }
+    else if (op == __OP_JGT__) { t = c == 1; }
+    else { t = (c == 0 - 1) + (c == 0); }
   }
   if (t) { poke(f, peek(f) - r / 2 + w0 % 8192); }      // (a return word holds the address / 2, as a jump's target)
   return 0;
@@ -848,11 +852,15 @@ function join(x, sep) {
 // (a key other than a string or an integer is its string: o[[1]] is o["1"], o[true] o["true"]; an array's or a string's
 // index given as a string is that number: a["0"] is a[0])
 function xkey(x, k) {
-  if (__kind(k, __K_AO__) + __kind(k, __K_SPECIAL__) + __kind(k, __K_DBL__)) { k = tostr(k); }
-  if (__kind(k, __K_STR__)) {
-    if (__kind(x, __K_STR__) + __kind(x, __K_ARR__)) { k = strnum(k); }
-    else if (__kind(x, __K_OBJ__)) { k = canint(k); }
+  if (__kind(k, __K_STR__) == 0) {
+    if (__kind(k, __K_AO__) + __kind(k, __K_SPECIAL__) + __kind(k, __K_DBL__) == 0) { return k; }
+    k = tostr(k);
   }
+  if (__kind(x, __K_OBJ__)) {
+    if (peek(k) > 57) { return k; }                     // (a name: past '9', no integer's form)
+    return canint(k);
+  }
+  if (__kind(x, __K_STR__) + __kind(x, __K_ARR__)) { return strnum(k); }
   return k;
 }
 // a string that is an integer's canonical form ("7", "-3"; not "07", "+3" or "-0") of the machine's range: that integer
@@ -873,13 +881,13 @@ function canint(s) {
   return s;
 }
 function getx(x, k) {
-  if ((k <= __PKSTAT__) * (k > __PKSTAT__ - __NSTAT__)) {        // (Math.PI ..., Math.min, Object.create as values)
-    k = __PKSTAT__ - k;
+  if ((k <= __PKPROTO__) * (k > __PKSTAT__ - __NSTAT__)) {       // (a hidden key: one range test for every other key)
+    if (k == __PKPROTO__) { return getdp(x); }
+    if (k == __PKPT__) { return getpt(x); }
+    k = __PKSTAT__ - k;                                  // (Math.PI ..., Math.min, Object.create as values)
     if (k < __NMATHK__) { return mathk(k); }
     return mathfn(k - __NMATHK__);
   }
-  if (k == __PKPROTO__) { return getdp(x); }
-  if (k == __PKPT__) { return getpt(x); }
   k = xkey(x, k);
   if (__kind(x, __K_STR__)) { return charat(x, k); }
   if (__kind(x, __K_ARR__)) {
@@ -890,9 +898,11 @@ function getx(x, k) {
   return __UNDEF__;
 }
 function setx(x, k, v) {
-  if ((k <= __PKSTAT__) * (k > __PKSTAT__ - __NSTAT__)) { return 0; }
-  if (k == __PKPROTO__) { return setdp(x, v); }
-  if (k == __PKPT__) { return setpt(x, v); }
+  if ((k <= __PKPROTO__) * (k > __PKSTAT__ - __NSTAT__)) {       // (a hidden key; the statics can't be set)
+    if (k == __PKPROTO__) { return setdp(x, v); }
+    if (k == __PKPT__) { return setpt(x, v); }
+    return 0;
+  }
   k = xkey(x, k);
   if (__kind(x, __K_ARR__)) { if (__kind(k, __K_SMI__)) { aset(x, k, v); } return 0; }
   if (__kind(x, __K_OBJ__)) { pset(x, okey(x, k, 1) + __STRTAG__, v); }
