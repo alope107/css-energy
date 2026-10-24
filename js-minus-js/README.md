@@ -1,8 +1,8 @@
 # JavaScript, compiled and run by a stylesheet
 
-`dist/js_in_css.xhtml` is one static XHTML page, and no script runs on it. You type a JavaScript program into its
-editor (or pick one of twelve samples) and press Run; `dist/repl.xhtml` is a REPL on the same machinery, run a line at a
-time ([REPL](#repl)). The program then goes through four stages:
+`dist/js_in_css.xhtml` is one static XHTML page (its stylesheets in `dist/js_in_css/`), and no script runs on it. You
+type a JavaScript program into its editor (or pick one of twelve samples) and press Run; `dist/repl.xhtml` is a REPL on
+the same machinery, run a line at a time ([REPL](#repl)). The program then goes through four stages:
 
 1. **CSS reads the text back.** A variable-font axis copies characters into glyph widths, and CSS measures them.
 2. **CSS compiles it.** One nested element per character lexes, and one per token parses and generates register code.
@@ -28,8 +28,8 @@ It works in Chrome only, and has been tested only on headless Chromium 153.
   code cache since 2026-10-22 (BENCHMARKS §15). The language above costs it time (BENCHMARKS §17): against the machine
   before it, CPU-only pages run 1.20× longer (geometric mean of 16 programs) and programs compile 1.18× longer (median
   of 186).
-- On the page, FizzBuzz 1–15 compiles in about 2.8 s from Run (including the 1.2 s readback sweep) and halts about
-  3.8 s after Run (main: 2.4 and 3.3 s; BENCHMARKS §17).
+- On the page, FizzBuzz 1–15 compiles in about 2.6 s from Run (including the 1.2 s readback sweep) and halts about
+  3.8 s after Run (before the language: 2.3 and 3.2 s; BENCHMARKS §17).
 - `fetch(url)` and `read()` reach the network through a gateway that serves the page ([Network](#network)).
 - A REPL (2026-10-24, its own page): Enter runs the new entry on the memory the last one left and shows its output and
   value under it, checked against Node's REPL ([REPL](#repl)).

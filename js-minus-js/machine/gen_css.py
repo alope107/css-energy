@@ -84,7 +84,7 @@ WREGS = [(f"wa{w}{c}", BANKN + 1, 0, f"var(--nwa{w}{c})") for w in range(WB) for
 # the console's trees: a program's grid's (KS leaves a bank, as before the REPL), and the whole console's (KN: the REPL's grid
 # and its marks; groups of 16 leaves), which are display: none but on the REPL. Both take the same channels; cells in both get
 # both's writes, and a read takes the later tree's. A program's page then costs what it did: with the whole console's trees
-# alone, FizzBuzz's CPU-only page was 2.8% slower (BENCHMARKS §19)
+# alone, FizzBuzz's CPU-only page was 2.8% slower (BENCHMARKS §20)
 KN, KS, CGROUP = R.LAYOUT['console_words'] // WB, OUT_SIZE // WB, 16
 WREGS += [(f"wak{w}{c}", KN + 1, 0, f"var(--nwak{w}{c})") for w in range(WB) for c in CH] + \
          [(f"wdk{w}{c}", 2048, 0, f"var(--nwdk{w}{c})") for w in range(WB) for c in CH]     # (a character, or a mark: an output position + 1)
@@ -1322,7 +1322,8 @@ else:
                                      '.cons .oc { display: if(style(--ccgo: 1): block; else: none); }',
         f'#clkw {{ --ocols: {COLS}; --osize: {OUT_SIZE}; }}   /* the console\'s grid (OCOLS, OSIZE) */',
         f'.cg {{ --rclw: {R.UNDEF + WOFF}px; }}   /* a global cleared is undefined (memtree --rclr) */']
-    if REPLP: ui_props += replui.css(UIL, lambda k: OUT_BASE - ROM + k, WOFF, R.LAYOUT['repl_cols'], R.LAYOUT['repl_rows'], NMARK, R.MARKEND, OUTMAX)
+    # the REPL's page's own rules (machine/replui.py), a section after the scan's: they override the page's and the scan's
+    repl_css = replui.css(UIL, lambda k: OUT_BASE - ROM + k, WOFF, R.LAYOUT['repl_cols'], R.LAYOUT['repl_rows'], NMARK, R.MARKEND, OUTMAX) if REPLP else []
     notes = (f"<p>Everything below the editor happens in CSS. When you press Run, a font reads your text back (a variable axis makes HarfBuzz "
              f"copy the code of one column into an invisible glyph's width, and a scan sweeps the columns, one per frame). Then the compiler, a "
              f"stylesheet, runs over those characters: a lexer on a chain of one element per character, then a parser on a chain of one element "
@@ -1359,22 +1360,45 @@ else:
                    + "".join(f'{PKR(e + 1)}<div class="ed ed{e + 1}" {edattr} aria-label="{_h.escape(lb)}">{ui_rb.editor_html(src)}</div>' for e, ((_, lb, _), src) in enumerate(zip(SAMPLES, SRC))) + '</div>')
         cons_box = f'<div class="cons">{con_html}<div class="con"></div>\n{console}</div>'
         app_regs = ui_rb.regs_html()
-    page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>{title}</title>
-<style><![CDATA[
-{lbl.header('js-minus-js/machine/gen_css.py (page, CPU, RAM), compiler/ccpage5.py (compiler), readback/ui_rb.py (editor scan)' + (', machine/replui.py (the REPL)' if REPLP else ''), 'js-minus-js/docs/ARCHITECTURE.md')}
-{static}
+    page_css = f"""{static}
 {uipage.static(COLS, ROWS, UIL, UIP, WOFF, EDS, repl=REPLP)}
 {chr(10).join(props)}
 {chr(10).join(ui_props)}
 {chr(10).join(css)}
 {lbl.section('Editor scan', 'a font reads the editor back one column per frame and latches each character into a register')}
 {ui_rb.css(UIL, UIP, 8, EDS=EDS, repl=REPLP)}
-{lbl.section('Compiler', 'the lexer on a chain of one element per character, the parser on a chain of one element per token')}
+{chr(10).join(repl_css)}
 {ui_css}
-]]></style>
+"""
+    # the page's stylesheets: (file, the section it starts at, what writes it), in cascade order; each is a run of
+    # consecutive sections, written to <page>/<file>.css beside the page (no file may pass Cloudflare's 25 MiB)
+    SHEETS = ([('page', 'Page and machine layout', 'machine/gen_css.py, machine/uipage.py'),
+               ('machine-properties', 'Registered properties', 'machine/gen_css.py, machine/memtree.py'),
+               ('cpu', 'Run / Edit', 'machine/gen_css.py, machine/uipage.py'),
+               ('memory', 'RAM', 'machine/gen_css.py, machine/memtree.py'),
+               ('console', 'Console', 'machine/gen_css.py'),
+               ('scan', 'Editor scan', 'readback/ui_rb.py')] + ([('repl', 'REPL', 'machine/replui.py')] if REPLP else []) +
+              [('compiler-properties', 'Compiler: registered properties', 'compiler/ccpage5.py'),
+               ('lexer', 'Lexer', 'compiler/ccpage5.py'),
+               ('parser', 'Parser', 'compiler/ccpage5.py')]
+              + [(f'parser-{f}', f'Parser variants: {f}', 'compiler/ccpage5.py') for f, _, _ in ccpage5.FAMILIES])
+    secs = [(m.start(), m.group(1)) for m in re.finditer(r'/\* === (.*?) ===', page_css)]
+    starts = []
+    for name, title, _ in SHEETS:
+        at = [i for i, (_, t) in enumerate(secs) if t == title]
+        assert len(at) == 1, f'sheet {name}: {len(at)} sections titled {title!r}'
+        starts.append(at[0])
+    assert starts[0] == 0 and starts == sorted(starts), f'the sheets\' sections are out of order: {starts}'
+    cuts = [secs[i][0] for i in starts] + [len(page_css)]
+    sheets = [(name, lbl.header(f'js-minus-js/{gen}', 'js-minus-js/docs/ARCHITECTURE.md') + '\n' + page_css[a:b].strip() + '\n')
+              for (name, _, gen), a, b in zip(SHEETS, cuts, cuts[1:])]
+    sheet_dir = os.path.splitext(outp)[0]
+    links = '\n'.join(f'<link rel="stylesheet" href="{os.path.basename(sheet_dir)}/{name}.css"/>' for name, _ in sheets)
+    page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>{title}</title>
+{links}
 </head>
 <body>
 {'' if REPLP else '<input type="checkbox" id="run" class="runcb" aria-label="Run"/>'}
@@ -1424,8 +1448,17 @@ def lint(text, ints):
     return bad
 _bad = lint("\n".join(css), set(re.findall(r'@property --([\w-]+) \{ syntax: "<integer>"', "\n".join(props))))
 assert not _bad, f'registered integers with more than one term: {_bad[:5]}'
-_dup = [n for n, c in collections.Counter(re.findall(r'@property (--[\w-]+)', page)).items() if c > 1]
+_dup = [n for n, c in collections.Counter(re.findall(r'@property (--[\w-]+)', page_css if UI else page)).items() if c > 1]
 assert not _dup, f'properties registered twice (memtree.py, the compile chain and the scan have their own): {_dup}'
-if UI: lbl.check(page, outp)
+for path, text in [(outp, page)] + ([(f'{sheet_dir}/{n}.css', t) for n, t in sheets] if UI else []):
+    assert len(text.encode()) < 20 << 20, f'{path} is {len(text.encode()) / 2**20:.1f} MiB: split it (Cloudflare serves at most 25 MiB per file)'
+if UI:
+    # the sheets first, then the page, so the page is the newest file (make's target)
+    for name, text in sheets: lbl.check(text, f'{sheet_dir}/{name}.css')
+    os.makedirs(sheet_dir, exist_ok=True)
+    for f in os.listdir(sheet_dir):
+        if f.endswith('.css') and f[:-4] not in {n for n, _ in sheets}: os.remove(os.path.join(sheet_dir, f))
+    for name, text in sheets: open(os.path.join(sheet_dir, name + '.css'), 'w').write(text)
+    print(' '.join(f'{name}.css {len(text) / 1e6:.2f} MB' for name, text in sheets))
 open(outp, 'w').write(page)
 print(outp, len(page), 'bytes; K', K, 'ISSUE', ISSUE, '; registers', len(regs), '; properties', len(P))

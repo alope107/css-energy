@@ -1,6 +1,6 @@
 # Architecture
 
-`make page` builds one XHTML file that runs no script. The user types JavaScript (or picks a sample) and presses Run;
+`make page` builds one XHTML file and its stylesheets, and no script runs. The user types JavaScript (or picks a sample) and presses Run;
 CSS reads the text back, CSS compiles it to register code, and CSS executes it: a chain of instructions per layout
 pass. Output goes to a 9 × 16 console. (Until 2026-10-21 the machine was a stack machine, last at commit `212175a`;
 until 2026-10-19 the CPU was a GSUB font, §3.8.)
@@ -533,7 +533,7 @@ left.
   console's write set, and leaves optr; the out class's `--pmk` / `--pmo` pick that cell and its bank (csssim: `('mark', k)`).
   Marks go through the console's channels because the page reads RAM leaves, and the console isn't cached. The console is
   1,536 words, its banks 384 leaves (radix 6 × 4 × 4 × 4, groups of 16): with 1,312 the trees were radix 82 × 4, and every
-  console write restyled 82 group nodes per bank, which made FizzBuzz's CPU-only page 17.6% slower (BENCHMARKS §19). The
+  console write restyled 82 group nodes per bank, which made FizzBuzz's CPU-only page 17.6% slower (BENCHMARKS §20). The
   program page renders only its grid's trees. The grid's size is a property, `--ocols` × `--osize`, which the out class
   reads: 9 × 16 for a program, 40 × 32 for the REPL.
 - **The display.** Readers must share a containing block with the leaves they read, so the REPL's are in the console box,
@@ -615,14 +615,25 @@ left.
 ## 6. Build
 
 ```
-make page   # compiler/lib.json (if lib_src.js or cc_ref.py changed) -> build/ccimg.json -> build/js_in_css.xhtml
-make dist   # copy it to dist/
+make page   # compiler/lib.json (if lib_src.js or cc_ref.py changed) -> build/ccimg.json -> build/js_in_css.xhtml, build/repl.xhtml
+make dist   # copy them and their stylesheets (build/js_in_css/, build/repl/) to dist/
 ```
+
+- The page's CSS is in 16 stylesheets in `build/js_in_css/`, which the page links in cascade order (`gen_css.py`
+  `SHEETS`). Each one is a run of consecutive `===` sections: `page`, `machine-properties`, `cpu`, `memory`, `console`,
+  `scan`, `compiler-properties`, `lexer`, `parser`, then one `parser-<family>` per family of parser modes
+  (`ccpage5.FAMILIES`: statements, declarations, functions, names, operands, operators, console). Cloudflare serves at
+  most 25 MiB per file, and the build fails past 20 MiB. The parser variants grow with the language, so give a new mode
+  a family (the build fails until it has one), and split a family that outgrows the limit. A rule shared by modes of two
+  families (S_ABODY's with S_OPND's) goes in its lowest mode's, the one the others rename. The variants sit in their
+  families' sections, not in the order they were built; that is safe because each (mode, token code) has one rule
+  (asserted). The tokens that change nothing come before all of them, in `parser`. The REPL's page (§3.10) has its own
+  directory of sheets (`build/repl/`), with a `repl` sheet after `scan`.
 
 - Reproducible (the Makefile pins `PYTHONHASHSEED` and `SOURCE_DATE_EPOCH`). The image (`mkimage.py tests/fizz.js`)
   supplies the ROM and the editor's initial program; `samples/*.js` the picker's.
 - The compile chain's ~1,000 parser variants are built on every CPU (`JOBS`), and the chain is reused while the
   compiler doesn't change (`build/ccpage5/`, §5): a page takes ~7 s, or under a second after a machine-only change.
-- `gen_css.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
+- `gen_css.py`: `UI=1` builds the product page (`REPL=1` too: the REPL's); `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
   the compiler's readable property names; `K` the levels per pass (32); `INLINE=0` (cc_dsl) keeps every temp.
   Without `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`).

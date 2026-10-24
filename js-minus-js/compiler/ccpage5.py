@@ -36,6 +36,22 @@ BSTRW = sorted(R.BSTRW.items())        # the built-in strings' words (cc_ref BST
 OTH = {'A': 'B', 'B': 'A'}
 DELAYED_V = {f'o_{pre}{f}' for pre, last in (('y', 'k'), ('f', 'l'), ('i', 'v')) for f in ('h1', 'h2', last)}   # read by var() one level down
 PORTS = ['o_yw', 'o_yi', 'o_yh1', 'o_yh2', 'o_yk', 'o_fw', 'o_fi', 'o_fh1', 'o_fh2', 'o_fl', 'o_iw', 'o_ii', 'o_ih1', 'o_ih2', 'o_iv']
+# the parser variants by the modes they serve: each family is a section of its own, the page's stylesheet
+# parser-<name>.css (machine/gen_css.py SHEETS); every mode with a variant belongs to exactly one
+FAMILIES = [
+    ('statements', 'statement keywords, blocks, if / else, do / while, switch, break / continue, a statement x++ or ++x',
+     [R.S_STMT, R.S_LBRACE, R.S_LPAREN, R.S_ELSE, R.S_AFTERELSE, R.S_DOWHILE, R.S_SWCASE, R.S_INC, R.S_PREINC, R.S_BRK]),
+    ('declarations', 'var / let / const', [R.S_VAR, R.S_VARAFTER]),
+    ('functions', 'function headers, arrow functions\' parameters and the start of their bodies',
+     [R.S_FNAME, R.S_FPAREN, R.S_FPARAM, R.S_FPSEP, R.S_APAR1, R.S_AARROW0, R.S_AARROW, R.S_ABODY]),
+    ('names', 'the token after a name, at a statement\'s start (an assignment, a call) or in an expression', [R.S_NAMES, R.S_NAMEE, R.S_NAMEEC]),
+    ('operands', 'where an operand is expected: values, property names, object literals, window. / Math., new F(',
+     [R.S_OPND, R.S_DOT, R.S_OKEY, R.S_OCOLON, R.S_WDOT, R.S_MATHDOT, R.S_NEW, R.S_NEWN]),
+    ('operators', 'after an operand: operators, closing brackets, the end of an expression', [R.S_OPER, R.S_OPERC]),
+    ('console', 'console.log( up to its first argument', [R.S_CONDOT, R.S_CONLOG, R.S_CONLP, R.S_CONFIRST]),
+]
+FAMILY_OF = {m: f for f, _, ms in FAMILIES for m in ms}
+assert len(FAMILY_OF) == sum(len(ms) for _, _, ms in FAMILIES), 'a mode in two of ccpage5.FAMILIES'
 
 def mux_shift(prop, n, base, shift=0):
     """--c<v + shift> for v in [base, base+n): prop holds v, prop-h holds (v - base) // 32; shift may be a function of v"""
@@ -174,6 +190,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     # (an animation on each level made every timeline update restyle the chain: ~3 ms per level)
     # one source element per line, nested in the chain just before the line's first level; it animates the line's
     # P codes and classes into --lc<j> / --ll<j> (names reused by every line, so each level inherits only one line's)
+    css.append(lbl.section('Lexer', 'a chain of one element per character'))
     css.append(lbl.group('Character chain: line sources', f'each line\'s source animates its {P} character codes from the editor scan\'s registers'))
     for j in range(P):
         css.append(f'@keyframes ka{j} {{ from {{ --lc{j}: {HC}; }} to {{ --lc{j}: -1; }} }}'
@@ -271,6 +288,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     css.append(lbl.group('Lexer start state (#cc)'))
     css.append('#cc { ' + ' '.join(f'--{n}: {v};' for n, v in init.items()) + ' }')
     # ================= token chain
+    css.append(lbl.section('Parser', 'a chain of one element per token; each step\'s rule (Parser variants) is picked by a container query'))
     css.append(lbl.group('Token chain: group sources', 'one source per group of 32 tokens animates their fields from the token registers'))
     css.append(f'#tcr {{ contain: strict; position: relative; height: 0; --ntf: var(--s-nt-{fo}); --sdf: var(--s-sdp-{fo}); }}')
     N.add('ntf', True)
@@ -332,14 +350,14 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                            + ' '.join(f'--t-{a}{j}: var(--q-o_{pre}{b}-{yp});' for a, b in zip(nm, fl)) + ' } }')
     for n in tabs: N.add(f't-{n}', True)
     # parser variants. A variant that changes nothing (a newline token where it means nothing) is folded into one
-    # pass-through rule per token code, placed first so a mode-specific variant (later in the sheet) overrides it;
-    # only when every reachable mode has a variant for that code (else a mode without one must stay 'bad').
+    # pass-through rule per token code, placed before every mode-specific variant (the family sections at the end), which
+    # overrides it; only when every reachable mode has a variant for that code (else a mode without one must stay 'bad').
     allm = set(range(R.NMODES)) - {R.S_ERR}
     noop_tc = []
     for tc in sorted({c for r in progs for c in D.key_tcodes(r[0])}):
         ks = [r for r in progs if D.key_tcodes(r[0]) == [tc]]
         if {r[0][0] for r in ks} >= allm and any(r[2] for r in ks): noop_tc.append(tc)
-    css.append(lbl.group('Parser variants', 'one rule per parser mode and set of token codes; the first rules are the tokens that change nothing'))
+    css.append(lbl.group('Tokens that change nothing', 'one pass-through rule per token code; a mode\'s own variant, later, overrides it'))
     for tc in noop_tc:
         css.append(f'@container style(--tcq: {tc}) {{ .tpA, .tpB {{ ' + ' '.join(f'--q-new-{n}: var(--x-{n});' for n in pst) + ' --q-ran: 1; } }')
     progs = [r for r in progs if not (D.key_tcodes(r[0])[0] in noop_tc and len(D.key_tcodes(r[0])) == 1 and r[2])]
@@ -351,13 +369,21 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     for key, _, _, decl, names in progs:
         for n, inh in names: N.add(n, inh)
         rules.setdefault(decl, {}).setdefault(key[0], []).extend(D.key_tcodes(key))
+    # the variants go last, a section per family of modes (FAMILIES). That reorders them, which is safe while no two
+    # match one level: each (mode, token code) has one rule. A rule shared by modes of two families goes in its lowest
+    # mode's: the others only rename that one (cc_ref.CMODES, S_ABODY)
+    seen = [(m, t) for bym in rules.values() for m, tcs in bym.items() for t in tcs]
+    assert len(seen) == len(set(seen)), 'two parser variants for one (mode, token code): their order would matter'
+    nofam = sorted({m for m, _ in seen} - set(FAMILY_OF))
+    assert not nofam, f'parser modes with no family in ccpage5.FAMILIES: {nofam}'
     def anyof(name, vs): return f'style(--{name}: {vs[0]})' if len(vs) == 1 else '(' + ' or '.join(f'style(--{name}: {v})' for v in vs) + ')'
+    vcss = {f: [] for f, _, _ in FAMILIES}
     for body, bym in rules.items():
         byt = {}                                       # token codes -> the modes with exactly those
         for mode, tcs in bym.items(): byt.setdefault(tuple(tcs), []).append(mode)
         conds = [f'{anyof("vh", ms)} and {anyof("tcq", tcs)}' for tcs, ms in byt.items()]
         cond = conds[0] if len(conds) == 1 else ' or '.join(f'({c})' for c in conds)
-        css.append(f'@container {cond} {{ .tpA, .tpB {{ {body} }} }}')
+        vcss[FAMILY_OF[min(bym)]].append(f'@container {cond} {{ .tpA, .tpB {{ {body} }} }}')
     # code / data overlays (fixed, contained by #tcr)
     css.append(lbl.group('Code and data overlays', 'each emitted word is an element anchored as its RAM cell'))
     cb0 = code_base - R.LAYOUT['rom_size']          # RAM index of the first code word (--c<index> names RAM cells)
@@ -399,6 +425,10 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                ' .fin > .ds { display: block; height: 0; anchor-name: --ccstart; width: calc(var(--rsf) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
     for n in ('e', 'done', 'n', 'dpf', 'sdf', 'rsf'): N.add(n, True)
+    R_NAMES = {getattr(R, n): n for n in dir(R) if n.startswith('S_')}
+    for f, what, ms in FAMILIES:
+        css.append(lbl.section(f'Parser variants: {f}', f'{what} ({", ".join(R_NAMES[m] for m in ms)}): one rule per body, its condition the modes and token codes it serves'))
+        css += vcss[f]
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
               + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b><b class="ds"></b></div>')
@@ -415,7 +445,8 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
     body = f'<div id="ccw"><div id="cc" style="{root_st}">{"".join(ch_html)}{tok}{"</div>" * (NC + L)}</div></div>'
     timelines = ([f'--ch{k}_{j}' for k in range(L) for j in range(P)]
                  + [f'--tk{t}{f}' for t in range((TMAX // G + 1) * G) for f, _ in TOKF])
-    css_text = N.rename('\n'.join([lbl.group('Registered properties')] + N.props() + css))
+    css_text = N.rename('\n'.join([lbl.section('Compiler: registered properties', 'the lexer\'s and the parser\'s state and temps: integers')]
+                                  + N.props() + css))
     info = dict(char_levels=NC, token_levels=TMAX + 1, variants=len(progs), rules=len(rules), noop_codes=noop_tc, lports=NLP, css_bytes=len(css_text))
     return css_text, N.rename(body), timelines, info
 

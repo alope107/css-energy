@@ -669,6 +669,9 @@ medians (ms) and the median per-round ratio, at `a6a745c`:
   compiles in ~2.8 s against main's 2.4 (+14%).
 - The final page (`0908314`) against main, eight interleaved rounds each, unleased on a busy machine (runs up to 10 s):
   compiled 1.147 (IQR 1.105–1.348), HALT 1.151 (1.096–1.207).
+- After merging main (`3d9f039`, with §18: rows named by where they show, so the per-line checks are gone from both
+  pages and two per editor are left for the one set), against that main, eight interleaved rounds each, unleased on a
+  quiet machine: compiled 2,256 → 2,614 ms (1.168, IQR 1.152–1.216), HALT 3,238 → 3,781 ms (1.164, 1.156–1.193).
 
 **Compile time** (`tests/suite_css.js`, the L3 page, the 186 programs both compile, one browser, main / lxym / lxym /
 main): median per-program ratio 1.178 (IQR 1.115–1.252), total 119.0 → 146.2 s. The parser evaluates 454 temps per
@@ -714,8 +717,34 @@ animations at Run, or dropping their `:has()` leaf filter, changed nothing (1.41
 interleaved, unleased (other agents' runs alongside): compile of FizzBuzz 0.981 (IQR 0.923–1.062; A-vs-A 0.995), 200
 formatted lines over 200 1.000 (0.926–1.067): no cost above the noise.
 
+## 19. The page's CSS in linked stylesheets (2026-10-24, branch `css-split`)
 
-## 19. The REPL (2026-10-24, branch `repl`)
+The 13.8 MB inline `<style>` became 15 linked sheets in `js_in_css/` (ARCHITECTURE §6), and the parser variants moved
+into one section per family of modes. The rules are the same (5,764, each section's in its order but the variants').
+Against `main`'s inline page, three variants (A, A again, the split page), 9 rounds interleaved with `ab.js`,
+unleased (other agents' runs alongside, load average ~12), FizzBuzz on the editor page (`ui_seq.js`):
+
+| ratio to A (median, range) | A again | split page |
+|---|---|---|
+| load (`p.goto` to `load`; A 714 ms) | 1.020 (0.80–1.15) | 0.654 (0.55–0.75): 481 ms |
+| compile (`compiledMs`; A 2,443 ms) | 0.987 (0.88–1.13) | 1.000 (0.91–1.08) |
+| Run → HALT (`haltMs`; A 3,506 ms) | 0.991 (0.89–1.09) | 0.991 (0.91–1.04) |
+
+Compile and run cost the same. The page loads in two thirds of the time, every round. Not explained: the XML parser
+no longer holds 13.8 MB of CDATA, and the sheets load in parallel, but no trace separates those.
+
+On `lxym` (merged 2026-10-24, 1d2ad55): 16 sheets (lxym's arrow functions made `parser-functions`), the largest
+`parser-names.css` at 9.2 MB, the page 4.3 MB; the same 6,520 rules as lxym's inline page. Against that page, the
+same three variants, 21 rounds (9 + 12) interleaved, unleased (load average 2–9):
+
+| ratio to A (median, IQR) | A again | split page |
+|---|---|---|
+| load (A 987 ms) | 0.998 (0.97–1.03) | 0.709 (0.67–0.72): 703 ms |
+| compile (A 2,724 ms) | 1.004 (0.98–1.07) | 1.009 (0.98–1.05) |
+| Run → HALT (A 3,840 ms) | 0.998 (0.98–1.07) | 1.005 (0.98–1.05) |
+
+
+## 20. The REPL (2026-10-24, branch `repl`)
 
 All pinned to the E-cores (`taskset -c 8-15`: ~1.9× slower than the P-cores but steady; the machine had 5–20 other
 agents' load), interleaved with `../shared/js/ab.js`, ratios per round against `lxym` (`a6a745c`). A against A: IQR
@@ -750,3 +779,9 @@ again. 8 lines (284 steps): the scan done 2.2 s, compiled 2.5 s, shown 3.9 s. 19
 steps): 3.9, 4.7, 12.9 s. Pinned to the E-cores, line by line through that session: 3.2 s for the first, 9.8 s at 5,
 20 s at 10, 36 s at 15, 57.5 s at 19. The run grows with the session (each Enter replays it all) and the scan with the
 editor's text (it reshapes every line every frame).
+
+**With the state kept** (the REPL's page; each Enter runs only its entry): `tests/repl/statements.js` line by line
+(`WAIT=1 node tests/repl_ui.js`), pinned to the E-cores: 4.8 s for the first, 6.8 s at 5, 11.6 s at 10, 13.0 s at 15,
+15.5 s at 19 (the replay: 3.2, 9.8, 20, 36, 57.5). The 19th entry, two runs: the scan restarts 1.35 s after Enter, ends
+at 12.2–12.7 s, the compile at 13.8–14.5 s, the output shows at 16.5–17.3 s (37 steps). So the scan is the cost now: 64
+columns a frame each, every frame reshaping every line, though the lines already run keep their latched characters.
