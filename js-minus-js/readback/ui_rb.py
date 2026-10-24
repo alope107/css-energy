@@ -33,16 +33,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def font_b64(P):
     bd = os.path.join(os.path.dirname(HERE), 'build'); os.makedirs(bd, exist_ok=True)
-    out = os.path.join(bd, f'probe{P}{"p" if PAIR else ""}.woff2')        # the readback font (built once, cached)
-    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(os.path.join(HERE, 'mkfont2.py')):
-        subprocess.run([sys.executable, os.path.join(HERE, 'mkfont2.py'), str(P), out] + (['pair'] if PAIR else []), check=True, capture_output=True, cwd=bd)
+    out = os.path.join(bd, f'probe{P}.woff2')        # the readback font (built once, cached)
+    if not os.path.exists(out):
+        subprocess.run([sys.executable, os.path.join(HERE, 'mkfont2.py'), str(P), out], check=True, capture_output=True, cwd=bd)
     return base64.b64encode(open(out, 'rb').read()).decode()
 
 def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
-EARLY = os.environ.get('EARLY', '1') == '1'
-PAIR = EARLY and os.environ.get('PAIR', '1') == '1'   # two columns per frame (mkfont2.py pair: the sentinel W = (a - 31) + 96 (b - 31) px)
-PC = 2 if PAIR else 1                             # columns a frame reads     # the sweep reads columns 1, 2, ... and stops at the first column blank in every row
+EARLY = os.environ.get('EARLY', '1') == '1'     # the sweep reads columns 1, 2, ... and stops at the first column blank in every row
 REGS = ['tp', 'sc', 'sr', 'rd'] + (['en'] if EARLY else [])
 RREGS = REGS + ['nl', 'dn']     # (the REPL's page)
 BLOCKS = ('p, pre, li, h1, h2, h3, h4, h5, h6, blockquote, dt, dd, tr, ul, ol, dl, table, thead, tbody, tfoot, caption, '
@@ -77,7 +75,6 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
 @property --rbscan  {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}
 @property --rbgj    {{ syntax: "<integer>"; inherits: true;  initial-value: 0; }}
 @property --rbglive {{ syntax: "<integer>"; inherits: true;  initial-value: 0; }}
-@property --rbgb    {{ syntax: "<integer>"; inherits: true;  initial-value: 0; }}
 @property --rbhit   {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}
 @property --lv      {{ syntax: "<integer>"; inherits: false; initial-value: -1; }}
 {regprops}
@@ -104,7 +101,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
   /* the counter register already shows next frame's value in the later passes of a frame (Chrome re-runs style and layout
      while view timelines are stale); --rbfresh is 0 exactly then, so sc - 1 + fresh keeps the column the same for every
      pass of a frame. A column that changed mid-frame would lose its latch (the hold transition starts from last frame). */
-  --rbscan: calc(var(--rbrun) * (1 - var(--rbready)) * {f'min(var(--rbsr), {P // PC})' if EARLY else f'(mod(round(down, var(--rbsc) / {DWELL}), var(--rbR)) + 1)'});{early_driver(P // PC) if EARLY else ''}
+  --rbscan: calc(var(--rbrun) * (1 - var(--rbready)) * {f'min(var(--rbsr), {P})' if EARLY else f'(mod(round(down, var(--rbsc) / {DWELL}), var(--rbR)) + 1)'});{early_driver(P) if EARLY else ''}
   /* while editing, and once the compiler has the text (--rbdet), the registers stop changing: no layout or timeline
      work per frame */
   --rbfrz: calc(1 - var(--rbrun) * (1 - var(--rbdet)));
@@ -165,16 +162,11 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
   container-type: size; visibility: hidden; content-visibility: hidden; }}
 @container (width: 0px) {{ .row {{ display: none; }} }}
 .row {{ position: absolute; left: 0; top: 0; max-width: 100cqw; overflow: hidden; visibility: hidden; font: 15px/24px monospace; white-space: pre; }}
-{'''.row > b { font-weight: inherit; --rbglive: calc(min(1, var(--rbgj)) * (mod(100cqh / 1px, 96) + 31 * sign(mod(100cqh / 1px, 96))));
-  --rbgb: calc(min(1, var(--rbgj)) * (round(down, 100cqh / 1px / 96) + 31 * sign(round(down, 100cqh / 1px / 96)))); }''' if PAIR else
-'.row > b { font-weight: inherit; --rbglive: calc(min(1, var(--rbgj)) * (100cqh / 1px + 31 * sign(100cqh))); }'}
+.row > b {{ font-weight: inherit; --rbglive: calc(min(1, var(--rbgj)) * (100cqh / 1px + 31 * sign(100cqh))); }}
 .row i {{
   font-style: normal;
-{'''  /* (PAIR) the group's cells gj and gj + 1 take the frame's two columns, a and b */
-  --rbhit: calc(max(1 - min(1, abs(var(--rbgj) - sibling-index())), min(1, var(--rbgj)) * (1 - min(1, abs(var(--rbgj) + 1 - sibling-index())))));
-  --lv: calc(var(--rbhit) * ((1 - min(1, abs(var(--rbgj) - sibling-index()))) * (var(--rbglive) - var(--rbgb)) + var(--rbgb) + 1) - 1);''' if PAIR else
-'''  --rbhit: calc(1 - min(1, abs(var(--rbgj) - sibling-index())));
-  --lv: calc(var(--rbhit) * (var(--rbglive) + 1) - 1);'''}
+  --rbhit: calc(1 - min(1, abs(var(--rbgj) - sibling-index())));
+  --lv: calc(var(--rbhit) * (var(--rbglive) + 1) - 1);
   transition: --lv 0s calc((1 - var(--rbhit)) * 1000000s);
   counter-reset: rbch var(--lv);
 }}
@@ -202,9 +194,9 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, repl=False):
              f'white-space: nowrap; font: .8rem/24px system-ui, sans-serif; color: #b00; height: calc(1.5 * max(0px, {gaps})); }}\n'
              '#run:checked ~ #app .unread { display: none; }')
     g.append(lbl.group(f'Scan: one rule per column ({P})', 'the probe font\'s SCAN axis picks the column whose code each glyph\'s width carries'))
-    for k in range(1, P // PC + 1):
-        G, j = (PC * (k - 1)) // GS + 1, (PC * (k - 1)) % GS + 1     # (PAIR: columns 2k - 2 and 2k - 1, one group's cells j and j + 1)
-        g.append(f'@container rbscan style(--rbscan: {k}) {{ .ed {{ font-variation-settings: "SCAN" {k}; }} .row > b:nth-child({G}) {{ --rbgj: {j}; }} .scanpos {{ --rbcol: {PC * k}; }} }}')
+    for k in range(1, P + 1):
+        G, j = (k - 1) // GS + 1, (k - 1) % GS + 1
+        g.append(f'@container rbscan style(--rbscan: {k}) {{ .ed {{ font-variation-settings: "SCAN" {k}; }} .row > b:nth-child({G}) {{ --rbgj: {j}; }} .scanpos {{ --rbcol: {k}; }} }}')
     g.append('@property --rbcol { syntax: "<integer>"; inherits: false; initial-value: 0; }')
     g.append('.scanpos { counter-reset: rbcol var(--rbcol); } .scanpos::before { content: "reading column " counter(rbcol); }'
              ' @container rbscan style(--rbscan: 0) { .scanpos { visibility: hidden; } }')
