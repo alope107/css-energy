@@ -140,7 +140,7 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 32 | Readers with value, scroller, spacer and pad per size container | ~1,300 restyles inside layout per pass | one scroller, positioned subjects |
 | 33 | 3 or 4 issues per frame | wrong output | 2 issues |
 | 34 | Code / data cache partition (model) | suite shapings +5% | one ring |
-| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K | sparse RAM groups |
+| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K (2026-10-24: likely an unmasked address; masked, with explicit `inherit`, only the paths restyle: `exp/ram`, ENGINE_NOTES 79) | sparse RAM groups |
 | 36 | 13-bit addresses, ROM 0 … 4095 for a 93-word lib | RAM capped at 4K words | 15-bit, 1K ROM |
 | 37 | Object instructions with 3-way selectors everywhere | 531 subtables per cycle; export dropped | gated rule groups, merged digits |
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
@@ -233,6 +233,10 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   chained 8 shapings in one layout).
 - **Allocation loops** (`obj_gc.js`: 18 shapings per iteration, 14 misses evicting the loop's code): LRU, or writes to
   fresh heap lines that bypass the cache.
+- **A RAM that scales, and misses filled inside the pass** (`exp/ram/README.md`, 2026-10-24): unnamed two-word leaves read
+  through non-inherited decode trees fed through layout (2.5–4.4 ms vs 10.7–14 at 16K dense, 13.7 vs 87 at 64K), and
+  mid-chain read stages with a size-query name mux (~0.13–0.24 ms per dependent read). Probes only; the catalog lists
+  ~40 other ways and why they lose.
 - **RAM group size 16 or 64** instead of 256: measured, not adopted. Both halted ~6% sooner in two rounds (BENCHMARKS §8);
   re-check with `ab.js` and the L5 suite before switching.
 - **More shapings per frame**: chain dependent shapings in one lifecycle update with container-query
