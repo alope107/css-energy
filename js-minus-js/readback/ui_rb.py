@@ -36,12 +36,14 @@ def css_str(ch): return '"' + ch.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 REGS = ['tp', 'sc', 'sr', 'rd']
 
-def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
+def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1, tick=False):
+    """tick: the scan advances when its clock, --rbclk (ms) divided by --xsd, changes (the X-ray page's speeds), not every
+    frame: still at most a column per frame, so a slower clock never skips one"""
     NG = P // GS; GSW = GS * 10
     # per-frame driver state does NOT inherit: #app changes every frame, and inherited changes would restyle every cell
     regprops = '\n'.join(f'@property --rb{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }} @property --rbn-{n} {{ syntax: "<integer>"; inherits: false; initial-value: 0; }}'
                           for n in REGS) + '\n' + '\n'.join(f'@property --{n} {{ syntax: "<integer>"; inherits: {"true" if n in ("rbin", "rbdet") else "false"}; initial-value: 0; }}'
-                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz'))
+                                                           for n in ('rbclk', 'rbrun', 'rbfresh', 'rbready', 'rbin', 'rbdet', 'rbfrz') + (('rbq',) if tick else ()))
     regkeys = '\n'.join(f'@keyframes rbk{n} {{ from {{ --rb{n}: 4096; }} to {{ --rb{n}: -1; }} }}' for n in REGS)
     ascii_symbols = ' '.join(css_str(chr(c)) for c in range(32, 127))
     g = [lbl.group('Probe font, scan clock and latches', 'the readback font, the scan\'s driver state and the per-row latches')]
@@ -75,7 +77,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
   --rbR: {P};   /* fixed: the editor's width includes the trailing sentinel, whose width is the code being read, so a
                     width-derived range flickers between frames and the scan would skip columns */
   --rbrun: 0;
-  --rbfresh: min(1, abs(var(--rbclk) - var(--rbtp)));
+  --rbfresh: min(1, abs({'var(--rbq)' if tick else 'var(--rbclk)'} - var(--rbtp)));{' --rbq: round(down, var(--rbclk) / var(--xsd, 1));' if tick else ''}
   --rbready: clamp(0, var(--rbsr) - {SWEEPS * DWELL} * var(--rbR) - 1, 1);
   /* the counter register already shows next frame's value in the later passes of a frame (Chrome re-runs style and layout
      while view timelines are stale); --rbfresh is 0 exactly then, so sc - 1 + fresh keeps the column the same for every
@@ -84,7 +86,7 @@ def css(L, P, GS, SWEEPS=1, DWELL=1, EDS=1):
   /* while editing, and once the compiler has the text (--rbdet), the registers stop changing: no layout or timeline
      work per frame */
   --rbfrz: calc(1 - var(--rbrun) * (1 - var(--rbdet)));
-  --rbn-tp: calc(var(--rbclk) + var(--rbfrz) * (var(--rbtp) - var(--rbclk))); --rbn-sc: mod(var(--rbsc) + var(--rbfresh) * (1 - var(--rbfrz)), 4096);
+  --rbn-tp: calc({'var(--rbq)' if tick else 'var(--rbclk)'} + var(--rbfrz) * (var(--rbtp) - {'var(--rbq)' if tick else 'var(--rbclk)'})); --rbn-sc: mod(var(--rbsc) + var(--rbfresh) * (1 - var(--rbfrz)), 4096);
   --rbn-sr: calc(var(--rbrun) * min(var(--rbsr) + var(--rbfresh) * (1 - var(--rbdet)), 4000)); --rbn-rd: calc(var(--rbrun) * var(--rbready));
   --rbdet: calc(var(--rbrun) * clamp(0, var(--rbsr) - {SWEEPS * DWELL} * var(--rbR) - 7, 1));    /* a few frames after the compiler took the text */
 }}

@@ -208,7 +208,9 @@ chats.
     transition: --nlive 0s calc((1 - min(1, var(--rreq))) * 1000000s)`, with `--rreq` from a scroll-driven animation on
     the same element or inherited from its parent, followed `--rreq` back to 0 within the frame, where memtree's group
     latch (fed by registers) holds. A held register (`rlive`, zeroed by Edit like the others) latches instead.
-    *(observed 2026-10-21, not reduced)*
+    *(observed 2026-10-21, not reduced)* The X-ray page's trace hit it again (2026-10-24): rows latched from the chain
+    (inherited `--pc`, `--ok`, …, delay `(1 - go) * 10^6 s`) never had a transition (`getAnimations()` empty) and followed
+    the stopped chain, where the same latch fed by a checkbox's change holds. Registers keep the trace instead (ARCHITECTURE §7).
 61. **A document fetches a CSS image URL once**: `CSSImageValue::CacheImage` keeps the image it fetched, and the style
     engine caches image contents by URL per document (`StyleEngine::CacheImageContent`), so an `if()` that comes back to
     a branch it took before requests nothing, `no-store` or not. A request a document sends more than once needs a URL
@@ -234,3 +236,8 @@ chats.
     the loop and 34 without (99–142 `BeginMainFrame`s), for the same style work. The page has no script, so time it
     without one: `net/probe/pagenet.js` had one to count frames until 2026-10-22 (BENCHMARKS §16's earlier times).
     *(measured 2026-10-22)*
+65. **A keyframed `display: none` gates a chain a level at a time**: on nested `display: contents` levels, each with
+    `animation: g T` where `@keyframes g { from, to { display: none } }`, level n + 1 exists (and its animation starts)
+    only once level n's has ended, so the levels appear one every T, each styled once as it appears; the earlier levels
+    aren't restyled. With T = 0 s nothing waits. The X-ray page's lexer and parser gates (ARCHITECTURE §7).
+    *(measured 2026-10-24, Chromium 153)*

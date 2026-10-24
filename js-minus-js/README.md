@@ -42,6 +42,10 @@ make c2                           # the CSS CPU on CPU-only pages (about 30 s)
 make l5-smoke                     # the real page, typed like a user (about 30 s)
 ```
 
+`make xray` builds `build/js_xray.xhtml`, the same page with its work shown at a speed you pick: the scan reading the
+editor, the lexer and the parser a line and a token at a time, the code they emit, and the CPU pass by pass (each level
+of the chain, both caches, registers, RAM), down to one pass per click ([ARCHITECTURE §7](docs/ARCHITECTURE.md)).
+
 Open `dist/js_in_css.xhtml` (or `build/js_in_css.xhtml`) in Chrome. Elsewhere than Linux x64, set
 `CHROME=/path/to/chrome` for the harnesses. Toolchain: Python 3.12+, fontTools 4.65+ (the readback font), Node 22+;
 the page needs CSS `if()`, `sibling-index()`, anchor positioning and view timelines.

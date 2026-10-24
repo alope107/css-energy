@@ -134,23 +134,25 @@ def variant_rules(data_base, code_base, lib):
 # build()'s output is a function of its arguments (of the ROM, its entry points and init) and the sources it imports:
 # build/ccpage5/<hash>.json keeps the last few, so a page whose compiler didn't change (a machine change, the L3 page
 # after the editor page) skips the chain. CCCACHE=0 always builds.
-def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
+def build(lib, L, P, TMAX, code_base=None, data_base=None, short=True, xray=None):
     import hashlib
     lib = {k: lib[k] for k in ('init', 'entries') if k in lib}      # all the chain reads of the ROM
-    h = hashlib.sha256(json.dumps([lib, L, P, TMAX, code_base, data_base, short, D.INLINE, D.SPEC_LEVEL], sort_keys=True).encode())
+    h = hashlib.sha256(json.dumps([lib, L, P, TMAX, code_base, data_base, short, D.INLINE, D.SPEC_LEVEL] + ([xray] if xray else []), sort_keys=True).encode())
     here = os.path.dirname(os.path.abspath(__file__))
     D.sources_hash(h, sys.modules[__name__])
     d = os.path.join(here, '..', 'build', 'ccpage5'); path = os.path.join(d, h.hexdigest()[:16] + '.json')
     if os.environ.get('CCCACHE', '1') == '1' and os.path.exists(path):
         os.utime(path); return tuple(json.load(open(path)))
-    r = build_chain(lib, L, P, TMAX, code_base, data_base, short)
+    r = build_chain(lib, L, P, TMAX, code_base, data_base, short, xray)
     os.makedirs(d, exist_ok=True); tmp = f'{path}.{os.getpid()}'
     json.dump(r, open(tmp, 'w')); os.replace(tmp, path)
     for old in sorted((f for f in os.listdir(d) if f.endswith('.json')), key=lambda f: -os.path.getmtime(os.path.join(d, f)))[4:]:
         os.remove(os.path.join(d, old))
     return r
 
-def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
+def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True, xray=None):
+    """xray: the X-ray page's geometry (machine/xray.py chain_args): the chain then shows its work, gated a line / a token
+    level at a time (xray_css), and the product page's chain is unchanged without it"""
     code_base = R.LAYOUT['code_base'] if code_base is None else code_base; data_base = R.LAYOUT['data_base'] if data_base is None else data_base
     initw = lib.get('init', R.LAYOUT['init'])
     code_cells = initw - 1 - code_base; data_cells = R.SDATA; ishift = initw - data_base
@@ -261,8 +263,10 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         nk = 0 if sl == ('col', 0, 0) else sl[1] + 1 if sl[0] == 'nl' and sl[1] + 1 < L else None
         if nk is not None:
             ch_html.append(f'<div class="ls" style="animation-timeline: {", ".join(f"--ch{nk}_{j}" for j in range(P))}">')
+            if xray: ch_html.append(xray_gate_html(xray, nk))
         ch_html.append(f'<div class="lv{x} {kcls}" style="{"; ".join(st)}"><b class="ovs"></b>'
-                       f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>')
+                       f'<div class="tr"><b class="tc"></b><b class="tv"></b><b class="th"></b><b class="tg"></b><b class="tp"></b></div>'
+                       + (xray_char_html(xray, sl) if xray else ''))
     root_st = ''
     fo = OTH['A' if (NC - 1) % 2 == 0 else 'B']      # suffix written by the deepest character level
     css.append(lbl.group('Lexer start state (#cc)'))
@@ -394,6 +398,7 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
                ' .fin > .di { display: block; height: 0; anchor-name: --ccinfo; width: calc((var(--done) + 2 * var(--e) + 1024 * var(--n)) * 1px); }')
     css.append(f'#tcr > .big {{ display: block; height: 0; anchor-name: --cctoo; width: calc(clamp(0, var(--ntf) - {TMAX}, 1) * 1px); }}')
     for n in ('e', 'done', 'n', 'dpf', 'sdf'): N.add(n, True)
+    if xray: css += xray_css(xray, N, E)
     # html
     oslots = (''.join(f'<b class="ov k{k}"></b><b class="ov j{k}"></b>' for k in range(E)) + '<b class="ovd"></b>'
               + ''.join(f'<b class="lp lp{k}"></b>' for k in range(NLP)) + '<div class="fin"><b class="ovn"></b><b class="ovk"></b><b class="ovt"></b>' + ''.join(f'<b class="sd{i}"></b>' for i in range(len(BSTRW))) + '<b class="dn"></b><b class="di"></b></div>')
@@ -405,14 +410,75 @@ def build_chain(lib, L, P, TMAX, code_base=None, data_base=None, short=True):
         if t % G == 0:
             g = t // G
             tl_html.append(f'<div class="gs{g % 2}" style="animation-timeline: {", ".join(f"--tk{g * G + i}{f}" for i in range(G) for f, _ in TOKF)}">')
-        tl_html.append(f'<div class="{cls}" style="--ti: {t}; --tcq: {tref("c", t)};{tin}">{oslots}')
-    tok = f'<div id="tcr"><b class="big"></b>{"".join(tl_html)}{"</div>" * (TMAX + 1 + (TMAX + G) // G)}</div>'
-    body = f'<div id="ccw"><div id="cc" style="{root_st}">{"".join(ch_html)}{tok}{"</div>" * (NC + L)}</div></div>'
+        xin, xh = (f' --xtc: {tref("c", t - 1)};', xray_tok_html(xray, t)) if xray and t else ('', '')
+        tl_html.append(f'<div class="{cls}" style="--ti: {t}; --tcq: {tref("c", t)};{tin}{xin}">{oslots}{xh}')
+    xnt = '<b class="xnt"></b>' if xray else ''
+    tok = f'<div id="tcr"><b class="big"></b>{xnt}{"".join(tl_html)}{"</div>" * (TMAX + 1 + (TMAX + G) // G)}</div>'
+    body = f'<div id="ccw"><div id="cc" style="{root_st}">{"".join(ch_html)}{tok}{"</div>" * (NC + L + (L if xray else 0))}</div></div>'
     timelines = ([f'--ch{k}_{j}' for k in range(L) for j in range(P)]
                  + [f'--tk{t}{f}' for t in range((TMAX // G + 1) * G) for f, _ in TOKF])
     css_text = N.rename('\n'.join([lbl.group('Registered properties')] + N.props() + css))
     info = dict(char_levels=NC, token_levels=TMAX + 1, variants=len(progs), rules=len(rules), noop_codes=noop_tc, lports=NLP, css_bytes=len(css_text))
     return css_text, N.rename(body), timelines, info
+
+# ---------------- XRAY=1 (machine/xray.py): the chain shows its work. Each line of the character chain and each token level
+# waits behind a gate (an animation whose keyframes say display: none, --xlg / --xtg long), so a level exists only once its
+# gate has run out; the next level's gate starts when it shows. A line's gate sits inside its source (.ls), whose codes say
+# whether it has any text: an empty line's gate takes no time. The compile is then really done a line, a token at a time,
+# each step styling one new level. Levels hold elements the page shows: a mark where the lexer finished a token, a row of
+# the parse table per token level, and anchors the progress bar reads (the last in tree order wins: the deepest level's).
+def xray_gate_html(xr, k):
+    gx, gy, cw, lh = xr['grid']
+    return (f'<div class="xg"><b class="xgl" style="left: {gx - 3}px; top: {gy + k * lh}px"></b>'
+            f'<b class="xga" style="width: {k + 1}px"></b>')
+
+def xray_char_html(xr, sl):
+    gx, gy, cw, lh = xr['grid']
+    if sl[0] == 'nul': return '<b class="xld"></b>'
+    k, j = (sl[1], sl[2]) if sl[0] == 'col' else (sl[1], xr['P'])
+    return f'<b class="xlm" style="left: {gx + j * cw}px; top: {gy + k * lh}px"></b>'
+
+def xray_tok_html(xr, t):
+    tx, ty, nc, w, h = xr['tok']
+    r, c = divmod(t - 1, nc)
+    return (f'<b class="xtr" style="left: {tx + c * w}px; top: {ty + r * h}px; --xti: {t - 1}"></b>'
+            f'<b class="xta" style="width: {t}px"></b>')
+
+def xray_css(xr, N, E):
+    gx, gy, cw, lh = xr['grid']
+    tx, ty, nc, w, h = xr['tok']
+    for n in ('xtc', 'xkw', 'xne', 'xer', 'xvh'): N.add(n, True)     # (inherited: the row's pseudo-elements read them)
+    N.add('xti', False); N.add('xlne', False)
+    lne = 'min(1, calc(' + ' + '.join(f'abs(var(--lc{j}) - 32)' for j in range(xr['P'])) + '))'
+    kwi = 'calc(' + ' + '.join(f'{i + 1} * (1 - min(1, abs(var(--x-th1) - {a}) + abs(var(--x-th2) - {b})))'
+                               for i, (a, b) in enumerate(R.KW.values())) + ')'
+    kind = lambda v: (f'if(style(--xtc: 1): var(--col-num); style(--xtc: 2): var(--col-id); style(--xtc: 3): var(--col-str);'
+                      f' style(--xtc: 5): var(--col-muted); else: var(--col-punct))')
+    tokname = ('if(style(--xtc: 1): counter(xv); style(--xtc: 2) and style(--xkw: 0): "name"; style(--xtc: 2): counter(xkw, xkw);'
+               ' style(--xtc: 3): "string"; style(--xtc: 5): "end"; else: counter(xv, xpun))')
+    return [lbl.group('X-ray: the chain shows its work', 'gates (a line, a token level at a time), lexer marks, the parse table, progress anchors'),
+            '@keyframes xgate { from { display: none; } to { display: none; } }'
+            f' .xg {{ display: contents; --xlne: {lne}; animation: xgate calc(var(--xlg, 0s) * var(--xlne)) linear; }}'
+            ' .tlA, .tlB { animation: xgate var(--xtg, 0s) linear; }',
+            f'.xgl {{ position: absolute; width: {(xr["P"] + 1) * cw + 6}px; height: {lh}px; background: var(--col-lexed); }}'
+            ' .xga { position: absolute; left: 0; top: 0; height: 0; anchor-name: --xlprog; }'
+            ' .xld { position: absolute; left: 0; top: 0; width: 1px; height: 0; anchor-name: --xlexd; }'
+            ' .xnt { position: absolute; left: 0; top: 0; height: 0; anchor-name: --xntf; width: calc(var(--ntf) * 1px); }'
+            ' .xta { position: absolute; left: 0; top: 0; height: 0; anchor-name: --xtprog; }',
+            f'.xlm {{ display: none; position: absolute; width: {cw}px; height: {lh}px; box-sizing: border-box; pointer-events: none; z-index: 2; }}'
+            f' @container style(--l-o_tkany: 1) {{ .xlm {{ display: block; --xtc: var(--l-o_tc); counter-reset: xt var(--l-tix);'
+            f' border-bottom: 3px solid {kind("xtc")}; }} }}'
+            f' .xlm::after {{ content: counter(xt); position: absolute; left: {cw - 1}px; top: -4px; font: 8px/1 ui-monospace, monospace; color: var(--col-muted); }}',
+            f'.xtr {{ position: absolute; width: {w - 4}px; height: {h - 4}px; box-sizing: border-box; padding: 2px 5px; border-radius: 4px;'
+            ' font: 11px/15px ui-monospace, monospace; white-space: pre; overflow: hidden; border: 1px solid var(--col-rule);'
+            ' --x-tv: inherit; --x-th1: inherit; --x-th2: inherit; --vh: inherit; --xvh: var(--vh); --xtc: inherit;'
+            f' --xkw: {kwi}; --xne: calc({" + ".join(f"var(--q-o_v{s})" for s in range(E))});'
+            ' --xer: max(var(--s-perr-A), var(--s-perr-B), 99 * max(var(--s-bad-A), var(--s-bad-B)));'
+            ' counter-reset: xi var(--xti) xv var(--x-tv) xkw var(--xkw) xm var(--vh) xn var(--xne) xa var(--q-o_a0) xe var(--xer);'
+            f' border-left: 4px solid {kind("xtc")}; background: if(style(--xer: 0): var(--col-card); else: var(--col-bad)); }}'
+            f' .xtr::before {{ content: counter(xi) "  " {tokname}; color: var(--col-ink); }}'
+            ' .xtr::after { content: "\\A " if(style(--xvh: 127): "stop " counter(xe); else: counter(xm, xmode))'
+            ' if(style(--xne: 0): ""; else: "  +" counter(xn) " @" counter(xa)); color: var(--col-muted); }']
 
 def padded_source(text, L, P):
     """what the chain sees for a given editor text"""

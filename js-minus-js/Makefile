@@ -30,7 +30,7 @@ C2       := $(B)/c2.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).
 C2ALL    := $(B)/c2-all.$(call BCONF,$(B)/fontcpu,tests/csscpu_pages.js $(HARNESS)).log
 CSSCPU   := machine/gen_css.py machine/csssim.py machine/cssref.py
 
-.PHONY: help all lib image page dist test test-browser test-ui test-ui-smoke test-all \
+.PHONY: help all lib image page xray dist test test-browser test-ui test-ui-smoke test-all \
         expect l1 l2 l2-generic l3 l5 l5-smoke l5-input l5-net net-demo c1 c2 c2-all fuzz fuzz-quick fuzz-l3 clean
 
 help:
@@ -63,6 +63,10 @@ page: $(B)/js_in_css.xhtml
 $(B)/js_in_css.xhtml: $(B)/ccimg.json machine/gen_css.py machine/memtree.py machine/uipage.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
 	UI=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
 
+# the X-ray page: the same page with its work shown (scan, lexer, parser, CPU passes) at a speed the reader picks (machine/xray.py)
+xray: $(B)/js_xray.xhtml
+$(B)/js_xray.xhtml: $(B)/ccimg.json machine/gen_css.py machine/xray.py machine/memtree.py machine/uipage.py machine/uarch.py $(wildcard $(CC)/*.py readback/*.py) $(SHARED)/py/csslabel.py
+	UI=1 XRAY=1 $(PY) machine/gen_css.py $(B)/ccimg.json $@
 dist: page
 	cp $(B)/js_in_css.xhtml dist/js_in_css.xhtml
 

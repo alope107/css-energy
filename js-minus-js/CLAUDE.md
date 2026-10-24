@@ -23,6 +23,7 @@ Chrome behaviour it depends on), BENCHMARKS (measurements) and HISTORY (dead end
 ```
 npm install && pip install -r requirements.txt     # once
 make page            # build/js_in_css.xhtml: lib -> image -> page (~7 s; <1 s if the compiler didn't change)
+make xray            # build/js_xray.xhtml: the page with its work shown, slowed down (machine/xray.py, ARCHITECTURE §7)
 make test            # fast gate, no browser (~5 s): Node oracle, L1, quick fuzz, L2, C1
 make fuzz            # differential tests vs Node on ~10,000 programs: L1, L2, C1 (~30 s; tests/fuzz/fuzz.py)
 make l3              # the generated CSS compiler in Chrome vs the reference (~40 s)
@@ -62,6 +63,7 @@ compiler/  cc_ref.py (reference compiler + simulator)  cc_dsl.py + dsl.py (same 
            layout.json (the memory map, the runtime cells)
            mkimage.py (machine images: the page's, or `--ram` with the program in RAM)
 machine/   gen_css.py (page: CSS CPU, RAM, console; UI=1 adds editor and compiler)  csssim.py (its pass-by-pass model)
+           xray.py (XRAY=1: the X-ray page's panels, controls and trace)
            cssref.py (the ISA as a stepper)  memtree.py (RAM)  uipage.py (editor page parts)  uarch.py (ISA constants)
            ui_seq.js halttime.js trace.js (browser harnesses)
 readback/  ui_rb.py (editor scan)  mkfont2.py (readback font)

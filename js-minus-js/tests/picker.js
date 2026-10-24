@@ -14,6 +14,7 @@ const grid = text => { const cols = LA.cols, rows = LA.rows, cells = new Array(c
   const todo = names.length ? names : ['hanoi', 'bank', 'caesar'];
   const b = await launch(); const p = await b.newPage({ viewport: { width: 1300, height: 950 } });
   await p.goto(fileUrl(pg), { timeout: 600000 }); await p.waitForTimeout(3000);
+  for (const sel of (process.env.PRECLICK || '').split(',').filter(Boolean)) await p.click(sel);   // (e.g. the X-ray page's speed: label[for=xs-full])
   let pass = 0;
   for (const name of todo) {
     const k = SAMPLES.indexOf(name) + 1, file = path.join(__dirname, '..', 'samples', name + '.js');
@@ -23,7 +24,7 @@ const grid = text => { const cols = LA.cols, rows = LA.rows, cells = new Array(c
     const text = await p.evaluate(k => document.querySelector('.ed' + k).innerText.replace(/ /g, ' ').replace(/\n$/, ''), k);
     const want = grid(execFileSync('node', [file], { encoding: 'utf8' }));
     const t = Date.now(); await p.click('.runbtn'); let r;
-    while (Date.now() - t < 240000) {
+    while (Date.now() - t < +(process.env.HALTWAIT || 240000)) {
       await p.waitForTimeout(200);
       r = await p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); return { halted: +c.getPropertyValue('--isHALT') === 1, steps: +c.getPropertyValue('--steps') }; });
       if (r.halted) break;

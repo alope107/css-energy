@@ -30,11 +30,12 @@ element. A rule evaluates every declaration in it whether the instruction needs 
 instructions read; .c commits a whole cache set (16 rules) rather than a word (128).
 Env: K (levels, default 32), ISSUE (passes per frame, default 2), NOCAT=1 (a string's + in the ROM), UI=1: the editor page (XHTML; the image's RAM is
 empty: the compile chain's overlays hold the program): Run starts the scan, the compiler, then the CPU;
-Edit zeroes the registers and RAM. BENCH=1 PROG=prog.js (STALL=1): the chain alone, for exp/csscpu/chainbench.js."""
+Edit zeroes the registers and RAM. XRAY=1 (with UI=1): the X-ray page (machine/xray.py). BENCH=1 PROG=prog.js (STALL=1): the chain alone, for exp/csscpu/chainbench.js."""
 import sys, os, json, re, html as _h
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path[:0] = [os.path.join(ROOT, "machine"), os.path.join(ROOT, "compiler"), os.path.join(ROOT, "readback"), os.path.join(ROOT, "..", "shared", "py"), HERE]
 UI = os.environ.get("UI") == "1"
+XRAY = UI and os.environ.get("XRAY") == "1"     # the X-ray page (machine/xray.py): the work shown, at a speed the reader picks
 import memtree, csslabel as lbl, cc_ref as R
 from uarch import STRTAG, STR_LO, STRP_HI, HEAP0, HEAP_HI, OBJTAG, ARRTAG, HP
 OP = R.OP; RC = R
@@ -68,7 +69,7 @@ LATCH = {"f": 1, "g": 1, "x": 2, "y": 4, "z": 8, "h": 8, "p": 16, "e": 32, "k": 
 # ---------------- registers: (name, H, OFF), value range [-OFF, H - OFF); the subject's expression at the chain's end
 regs = [("rpc", A15, 0, "var(--pc)"), ("rfp", A15, 0, "var(--fp)"), ("optr", 256, 0, "var(--optr)"),
         ("pst", A15, 0, "var(--pst)"), ("steps", 1 << 21, 0, "var(--steps)"), ("halt", 2, 0, "var(--halt)"), ("pend", 8192, 0, "var(--pend)"),
-        ("init", 2, 0, "1"), ("k", 16, 0, "var(--nk)"), ("par", 2, 0, "var(--npar)"), ("tprev", 65536, 0, "var(--t)")]
+        ("init", 2, 0, "1"), ("k", 16, 0, "var(--nk)"), ("par", 2, 0, "var(--npar)"), ("tprev", 65536, 0, "var(--xr-t)" if XRAY else "var(--t)")]
 regs += [(f"T{k}", 16384, 0, f"var(--T{k})") for k in range(NL)] + [(f"F{s}", 2, 0, f"var(--F{s})") for s in range(NSET)]
 regs += [(f"W{k}_{j}", M20, M20 // 2, f"var(--W{k}_{j})") for k in range(NL) for j in range(4)]
 WREGS = [(f"wa{w}{c}", BANKN + 1, 0, f"var(--nwa{w}{c})") for w in range(WB) for c in CH] + \
@@ -94,6 +95,13 @@ def isel(key, val):
     return lo(0) if ISET == 8 else "if(" + " ".join(f"style(--{key}hi: {h}): {lo(h)};" for h in range(ISET // 8 - 1)) + f" else: {lo(ISET // 8 - 1)})"
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
+# With one pass a tick (the X-ray page but at full speed) a pass's follow-up restyle in the same frame doesn't run the chain
+# (go = 0): it must keep what the next running pass needs, which with two passes a frame the second took at once: the
+# fill's target cache (pic) and the stale flags (go = 0 has no fill, so they would read 0)
+if XRAY:
+    import xray
+    regs += xray.trace_regs(K)     # the trace: what each level of the chain ran, kept until the next pass that runs
+    regs = [(n, H, O, f"calc(var(--go) * {e} + (1 - var(--go)) * var(--{n}))" if n in ('stale', 'pstale') else e) for n, H, O, e in regs]
 # NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the clock (--t, 600 a second)
 # when this request began: a new request takes the time (consecutive words always differ, by the sequence bit, even when
 # a read() loop's next NET stalls in the pass the last one completed). NWAIT ticks without an answer give -1 (no gateway:
@@ -108,13 +116,19 @@ WNAMES = [r[0] for r in WREGS]
 # ---------------- #cpu: effective state, frame gate, the fill's victims (all from the registers)
 cpu = ["--first: calc(1 - var(--init));",
        f"--pc: calc(var(--init) * var(--rpc) + var(--first) * {CODE0});", f"--fp: calc(var(--init) * var(--rfp) + var(--first) * {sp0});",
-       "--fresh: calc(min(1, max(var(--t) - var(--tprev), var(--tprev) - var(--t))));",
-       f"--go: calc({'var(--ccok) * var(--run) * ' if UI else ''}min(1, var(--fresh) + min(1, max(0, {ISSUE} - var(--k)))));", "--isHALT: var(--halt);",
+       # (X-ray: a pass per tick, --xr-t: the clock divided by --xdiv, or the Step checkbox)
+       ("--xr-t: if(style(--xspd: step): var(--xstep, 0); else: round(down, var(--t) / var(--xdiv, 1)));"
+        "--fresh: calc(min(1, max(var(--xr-t) - var(--tprev), var(--tprev) - var(--xr-t))));" if XRAY else
+        "--fresh: calc(min(1, max(var(--t) - var(--tprev), var(--tprev) - var(--t))));"),
+       # (X-ray: --xiss, the passes a tick runs, 1 but at full speed)
+       f"--go: calc({'var(--ccok) * var(--run) * ' if UI else ''}min(1, var(--fresh) + min(1, max(0, {'var(--xiss, 1)' if XRAY else ISSUE} - var(--k)))));", "--isHALT: var(--halt);",
        f"--chan: calc({ISSUE} * var(--par) + (1 - var(--fresh)) * var(--k));",
        f"--nk: calc(var(--fresh) + (1 - var(--fresh)) * min({ISSUE}, var(--k) + 1));",   # saturates, so frames settle (ENGINE_NOTES 16)
        "--npar: calc(var(--fresh) * (1 - var(--par)) + (1 - var(--fresh)) * var(--par));",
        # the fill: block fb into set fs's victim way fv (line fk); a dirty victim (block fvb) is written back
        "--fon: calc(var(--go) * min(1, var(--pend)) * (1 - var(--stale)));", "--fb: max(0, var(--pend) - 1);",
+       # (X-ray: --xr-go, the passes whose trace the registers keep; --xr-pic, the pic register, which .fl keeps when go = 0)
+       *(["--xr-go: calc(var(--go) * (1 - var(--halt)));", "--xr-pic: var(--pic);"] if XRAY else []),
        f"--fs: {setof('var(--fb)')};",
        "--fv: " + sel("fs", NSET, lambda s: f"var(--F{s})") + ";", "--fk: calc(2 * var(--fs) + var(--fv));",
        "--fT: " + sel("fk", NL, lambda k: f"var(--T{k})") + ";",
@@ -1067,7 +1081,7 @@ for i in range(2 * WB):
     css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(RB0, BLKS)) - set(HOT), leaf, '--rom')}; }} }}")
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
-css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --pic: 0; --cw: 0; --lat: 1; --req: 0;"
+css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); " + ("--pic: calc((1 - var(--go)) * var(--xr-pic));" if XRAY else "--pic: 0;") + " --cw: 0; --lat: 1; --req: 0;"
            f" --rom: {rom_of('var(--pc)')}; --Lm: calc((1 - var(--go)) * var(--rLm));"
            + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
            " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
@@ -1096,8 +1110,10 @@ css += [f"@container style(--stop: 0) and style(--rom: {t + 1}) {{ .f {{ --rh: r
 css.append(lbl.group('.x: execute', 'one rule per instruction class; if() on --op inside it'))
 css += [f"@container style(--cls: {CLS[c]}) {{ .x {{ {' '.join(d)} }} }}" for c, (_, d) in cls_rules.items()]
 css.append(lbl.group('.c: commit', 'registers on success; the stall (stop, the missing block); output; the written word\'s cache set'))
-css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --fp: var(--nfp); --steps: var(--nsteps); --stop: var(--nstop); --halt: var(--nhalt); --pst: var(--npst);"
-           f" --lat: 0; --rom: {rom_of('var(--npc)')}; }} }}")
+css.append("@container style(--ok: 1) { .c { --pc: var(--npc); --fp: var(--nfp); --steps: var(--nsteps);"
+           # (X-ray: a commit at level --xkmax stops the chain: the instructions per pass the reader picked)
+           + (" --stop: max(var(--nstop), clamp(0, var(--xr-lv) - var(--xkmax, 32) + 1, 1));" if XRAY else " --stop: var(--nstop);") +
+           f" --halt: var(--nhalt); --pst: var(--npst); --lat: 0; --rom: {rom_of('var(--npc)')}; }} }}")
 css.append("@container style(--ok: 0) { .c { --stop: 1; --pend: calc(var(--mb) + 1); --pic: var(--mic); --Lm: var(--hm);"
            + " ".join(f" --L{n}: var(--v{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--pw{j});" for j in range(4)) + " } }")
 css.append("@container style(--pout: 1) { .c { --optr: var(--noptr); --cw: var(--ncw); } }")
@@ -1138,7 +1154,8 @@ if UI:
     # each editor's radio button right before it in .frame: '.pkr:checked + .ed' is the editor that shows, for one set of
     # readback rules (ui_rb.css) and one display rule whatever the number of editors
     PKR = lambda e: f'<input type="radio" name="pk" id="pk{e}" class="pkr"{" checked=\"checked\"" if e == 0 else ""}/>'
-    ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1')
+    ui_css, ui_chain, ui_tls, ui_info = ccpage5.build(json.load(open(os.path.join(ROOT, 'compiler', 'lib.json'))), UIL, UIP, UIT, short=os.environ.get('SHORT', '1') == '1',
+                                                      xray=xray.chain_args(UIP) if XRAY else None)
     print('compile chain', ui_info)
     css.append(lbl.group('Timeline scope: the RAM channels, the compiler\'s registers, the scan\'s done flag'))
     css.append("body { timeline-scope: " + ", ".join(["--" + n for n in WNAMES + NETTL] + ui_tls + ['--rbrdT']) + "; }")
@@ -1239,7 +1256,10 @@ if UI: subj += ('<div class="rp" style="width: anchor-size(--ccdone width, 0px)"
                 '<div class="sub" style="view-timeline-name: --ccok; top: calc(min(1, round(100cqi / 1px)) * 1px)"></div></div></div>')
 subj += "".join(f'<div class="rp rp{i}"><div class="reg" style="height: {M20}px"><div class="sub" style="view-timeline-name: --mv{i}; top: calc(100cqi - {WOFF - M20 // 2}px)"></div></div></div>' for i in range(2 * WB))
 chain = f'<div class="ex"><div class="regs" aria-hidden="true">{subj}</div></div>'
-for _ in range(K): chain = f'<i class="f"><i class="x"><i class="c">{chain}</i></i></i>'
+if XRAY:      # (the level's number, 1 the first of a pass, for --xkmax; its class, for its trace registers)
+    for i in range(K): chain = f'<i class="f" style="--xr-lv: {K - i}"><i class="x xl{K - i}"><i class="c">{chain}</i></i></i>'
+else:
+    for _ in range(K): chain = f'<i class="f"><i class="x"><i class="c">{chain}</i></i></i>'
 blurb = (f"<p>No font: style alone runs the bytecode, a register machine's three-address instructions. Each layout pass runs up "
          f"to {K} instructions as a chain of nested elements (fetch and decode, execute, commit) out of a 2-way, 32-line cache of RAM "
          f"held in custom properties. The first cache miss stops the chain; the next pass fills the line, and prefetches the next, "
@@ -1286,6 +1306,14 @@ else:
              f"<code>console.log(x)</code> and <code>putc(c)</code>. Up to {UIL} lines of {UIP} columns (the faint line marks the edge); "
              f"paste as plain text. Run scans the editor once (about a second), then compiles; Edit clears the machine. The chips above the "
              f"editor switch to a sample program; each keeps your edits.</p>")
+    X_CSS = X_TOP = X_CPU = X_TAIL = ''
+    if XRAY:
+        _lib = json.load(open(os.path.join(ROOT, 'compiler', 'lib.json')))
+        props += xray.props()
+        X_CSS = "\n" + "\n".join(xray.css(UIL, UIP, COLS, ROWS, K, NL, _lib['entries'], len(RC.OPN)))
+        X_TOP = xray.inputs_html() + xray.cards_html(UIL, UIP) + xray.bar_html()
+        X_CPU = xray.cpu_html(K, NL, ISET, _lib['entries'], _lib.get('init', R.LAYOUT['init']) - 1 - CODE0, sp0, DB, ROM)
+        X_TAIL = xray.tail_html(UIL, UIT)
     page = f"""<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -1298,14 +1326,14 @@ else:
 {chr(10).join(ui_props)}
 {chr(10).join(css)}
 {lbl.section('Editor scan', 'a font reads the editor back one column per frame and latches each character into a register')}
-{ui_rb.css(UIL, UIP, 8, EDS=EDS)}
+{ui_rb.css(UIL, UIP, 8, EDS=EDS, tick=XRAY)}
 {lbl.section('Compiler', 'the lexer on a chain of one element per character, the parser on a chain of one element per token')}
-{ui_css}
+{ui_css}{X_CSS}
 ]]></style>
 </head>
 <body>
 <input type="checkbox" id="run" class="runcb" aria-label="Run"/>
-{mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
+{X_TOP}{mem_html}{rom_html}{ui_chain}<div class="cst"><div class="cstv"></div></div><div class="cst2"><b>more than {UIT} tokens</b></div>
 <main id="app">
 <div class="width-reader"></div>{ui_rb.regs_html()}
 <header><h1>JavaScript, compiled and run by a stylesheet</h1>
@@ -1325,13 +1353,13 @@ else:
 <div id="clkw">
 <div class="cons">{con_html}<div class="con"></div>
 {console}</div>
-<div id="clk"><div id="cpu">
+<div id="clk"><div id="cpu">{X_CPU}
 <div class="head">
 <div class="status"><span>steps <b class="num" style="--v: var(--steps)"></b></span><span>pc <b class="num" style="--v: var(--pc)"></b> fp <b class="num" style="--v: var(--fp)"></b></span></div>
 </div>
 <div class="fl">{chain}</div>
 </div></div></div>
-</body>
+{X_TAIL}</body>
 </html>
 """
 import collections
@@ -1344,14 +1372,14 @@ def lint(text, ints):
         i, d = m.end(), 0
         while i < len(text) and (d or text[i] not in ';}'): d += {'(': 1, ')': -1}.get(text[i], 0); i += 1
         val = text[m.end():i].strip()
-        if re.fullmatch(r'-?\d+', val): continue
+        if re.fullmatch(r'-?\d+|inherit|initial|unset', val): continue     # (a CSS-wide keyword is one term too)
         f = re.match(r'[a-z-]+\(', val)
         if not f: bad.append(f'--{m.group(1)}: {val[:60]}'); continue
         j, d = f.end(), 1
         while d: d += {'(': 1, ')': -1}.get(val[j], 0); j += 1
         if j != len(val): bad.append(f'--{m.group(1)}: {val[:60]}')
     return bad
-_bad = lint("\n".join(css), set(re.findall(r'@property --([\w-]+) \{ syntax: "<integer>"', "\n".join(props))))
+_bad = lint("\n".join(css) + (X_CSS if XRAY else ''), set(re.findall(r'@property --([\w-]+) \{ syntax: "<integer>"', "\n".join(props))))
 assert not _bad, f'registered integers with more than one term: {_bad[:5]}'
 _dup = [n for n, c in collections.Counter(re.findall(r'@property (--[\w-]+)', page)).items() if c > 1]
 assert not _dup, f'properties registered twice (memtree.py, the compile chain and the scan have their own): {_dup}'

@@ -24,6 +24,7 @@ const fs = require('fs'), path = require('path');
     const b = await launch({ extraArgs: envArgs('FLAGS') });
     const p = await b.newPage(process.env.FLAGS ? { viewport: null } : { viewport: { width: 1300, height: 950 } });
     const t0 = Date.now(); await p.goto(at, { timeout: 600000 }); console.log('load ms', Date.now() - t0);
+    for (const sel of (process.env.PRECLICK || '').split(',').filter(Boolean)) await p.click(sel);   // (e.g. the X-ray page's speed: label[for=xs-full])
     const st = () => p.evaluate(() => { const c = getComputedStyle(document.querySelector('#cpu')); return { steps: +c.getPropertyValue('--steps'), kind: +c.getPropertyValue('--kind'),
       halted: +c.getPropertyValue('--isHALT') === 1,
       status: getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''), n: getComputedStyle(document.querySelector('.cstv')).getPropertyValue('--csn') }; });

@@ -559,3 +559,42 @@ make dist   # copy it to dist/
 - `gen_css.py`: `UI=1` builds the product page; `UIL` / `UIP` / `UIT` set lines, columns, tokens; `SHORT=0` keeps
   the compiler's readable property names; `K` the levels per pass (32); `INLINE=0` (cc_dsl) keeps every temp.
   Without `UI=1` it builds a CPU-only page for a RAM image holding the program (HTML: name it `.html`).
+
+---
+
+## 7. The X-ray page (`make xray`: `machine/xray.py`)
+
+`build/js_xray.xhtml` is the editor page with its work shown, at a speed the reader picks (full speed, fast, slow, crawl,
+or Step: a pass per click) and 1, 4 or 32 instructions per pass. Still no script. `XRAY=1` (with `UI=1`) changes only
+what it says below; without it `gen_css.py`, `ccpage5.py` and `ui_rb.py` write the product page byte for byte as before.
+
+- **Scan.** The sentinel glyphs show (orange: their width is the code being read), and the latch cells show as a grid
+  beside the editor with the column being read highlighted. The scan's clock is quantized: `--rbfresh` compares
+  `--rbclk / --xsd` (ms a column) instead of `--rbclk`, so the column still advances at most once a frame and a slower
+  clock never skips one.
+- **Lex and parse, really a step at a time.** Each line of the character chain (`.xg`, inside the line's source `.ls`)
+  and each token level (`.tlA` / `.tlB`) has an animation whose keyframes say `display: none`, `--xlg` / `--xtg` long
+  (0 s at full speed; an empty line's gate is 0 s: `--xlne`). A level's animation starts when it is first displayed,
+  so level t + 1's gate starts when level t's runs out: the compile is styled a new level at a time, and `.fin` (the
+  done flag the CPU waits for) exists only at the end. The levels hold what the page shows: `.xlm` under the character
+  where the lexer finished a token (`--l-o_tkany`), `.xtr` (the parse table: the token, the mode after it, the
+  instructions emitted and where), `.xgl` (the line's band), and anchors the phase bar reads (`--xlprog`, `--xtprog`:
+  the last in tree order, the deepest level, wins; `--xlexd` in the NUL level; `--xntf`). `#cc` and `#tcr` drop paint
+  containment so the levels' boxes show; they are at the page's origin, so the chain places them in page coordinates.
+- **The CPU's pass is gated by a tick**, `--xr-t`: the clock divided by `--xdiv` (radio buttons after `#run`), or the
+  Step checkbox, which flips on every click. `--fresh` and the register `tprev` use it instead of `--t`, so a pass runs
+  when it changes. A tick runs `--xiss` passes: 2 at full speed (as the editor page), else 1. With one, the restyle that
+  follows a pass in the same frame doesn't run the chain (go = 0): `.fl` then keeps the fill's cache (`--pic`) and the
+  registers `stale` / `pstale` keep their values, which a frame's second pass used at once (the editor page with
+  ISSUE = 1 livelocks on its first fetch: the fill goes to the data cache). (Chrome also re-styles while the view timelines are stale,
+  which runs the same pass again from the same registers: harmless, but a count of passes would count those.) A commit
+  at level `--xkmax` stops the chain (the instructions per pass).
+- **The trace** is registers: level L of the chain writes `--xr-t<L>a … f` (4 pc + ok + 1, the instruction's words, the
+  values of B and C, the missing block or pst) on passes that run (`@container style(--xr-go: 1)`, go and not halted),
+  and the registers keep them through the passes that don't. A transition latch (0 s, delay 10^6 s) on the rows didn't
+  hold: every style change here is animation-driven (ENGINE_NOTES 60). 192 registers more.
+- **Panels in `#cpu`** read its registers: pc (and the ROM routine it is in: a sum over `lib.json`'s entries), fp, both
+  caches (the lines this pass fills in blue), and RAM through readers of the leaves' anchors (globals, the stack with fp
+  marked). The listing reads each instruction's two overlays with one reader, width word 0 and height word 1, and
+  highlights pc. A reader is as wide as its word (up to 1.5 M px), so readers sit 1.6 M px left of and above the page,
+  where they don't extend its scroll area, and place their visible child back on it.
