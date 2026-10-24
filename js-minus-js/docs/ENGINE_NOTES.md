@@ -260,3 +260,12 @@ chats.
     `display: block` `::after` put the inline content in an anonymous block. Positional selectors can name only an
     element's siblings, and each line a paste adds or removes restyles every one of them (76).
     *(measured 2026-10-23; readback/ui_rb.py; tests/editor_input.js)*
+78. **A contenteditable's empty line needs its placeholder `<br>` rendered, and Tab always leaves it**: with
+    `br { display: none }` an empty `<div><br></div>` has no caret position, so ArrowUp/Down skip it, a click can't
+    land in it, and typing lines with blank ones between lost a blank (`display: contents`, `position: absolute`,
+    `float`, `font-size: 0` on the `<br>` either hid it the same way or still broke the line). Rendered, it breaks the
+    line, so a sentinel after it starts a second row: the editor's sentinels lead their rows instead. Shift+Enter writes
+    `abc<br>def` (no trailing `<br>` once text follows), so a mid-line `<br>` can't be told from a placeholder by a
+    selector. Tab: `KeyboardEventManager::DefaultTabEventHandler` moves focus unless the document is in design mode
+    (script only); past the last element `FocusController` hands focus to the browser's UI, so the Tab key never
+    reaches the editor's InsertTab command. *(measured 2026-10-24; Chromium 153 source; tests/editor_input.js)*

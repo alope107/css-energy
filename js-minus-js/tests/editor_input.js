@@ -2,7 +2,8 @@
 // editor like a user, presses Run and waits for the compile. It checks what matters: the scan latched what the editor
 // shows. Latch row r must equal visual row r of the editor, where each character is placed by its on-screen position.
 // Also: lines Chrome nests in another (its editing, formatted pastes) read as they show, a pasted code block (<pre>) shows
-// as one line and the page says so (.merged), a selection's highlight stays still while editing, and formatted text
+// as one line and the page says so (.merged), a line break inside a line (Shift+Enter) makes the page say a row isn't
+// read (.unread), a selection's highlight stays still while editing, and formatted text
 // pasted from other apps reads as it shows. Cases marked known are reported but don't fail the run. EXP=grid also runs
 // the TO_HALT cases to HALT.
 const { launch, fileUrl } = require(require('path').join(__dirname, '..', 'tools', 'browser.js'));
@@ -61,7 +62,12 @@ const CASES = {
   'enter at a line start': async p => { await caretAt(p, 'while', 0); await keys(p, 'Home', 'Enter'); },
   'split a line, rejoin it': async p => { await caretAt(p, 'while', 6); await keys(p, 'Enter', 'Backspace'); },
   'join two lines': async p => { await caretAt(p, '  i = i + 1;', 0); await keys(p, 'Home', 'Backspace'); },
-  'delete the blank first line': async p => { await caretAt(p, 'var i = 1;', 0); await keys(p, 'Home', 'Backspace'); },
+  'backspace at the start of the first line': async p => { await caretAt(p, 'var i = 1;', 0); await keys(p, 'Home', 'Backspace'); },
+  'join line 0 and the next': async p => { await caretAt(p, 'var i = 1;'); await keys(p, 'End', 'Delete'); },
+  'type with blank lines': async p => { await typeLines(p, ['var a = 1;', '', 'var b = 2;', '', '', 'console.log(a + b);']); },
+  'arrow into blank lines, type there': { shows: ['var a = 1;', 'var c = 3;', 'var b = 2;', 'var d = 4;', '', 'console.log(a + b);'], edit: async p => {
+    await typeLines(p, ['var a = 1;', '', 'var b = 2;', '', '', 'console.log(a + b);']); await keys(p, 'Control+Home', 'ArrowDown');
+    await p.keyboard.insertText('var c = 3;'); await keys(p, 'ArrowDown', 'ArrowDown'); await p.keyboard.insertText('var d = 4;'); } },
   'copy two lines, paste mid-program': async p => {
     await caretAt(p, '  else if (i % 3', 0); await keys(p, 'Home', 'Shift+ArrowDown', 'Shift+ArrowDown', 'Control+C');
     await caretAt(p, '  i = i + 1;', 0); await keys(p, 'Home', 'Control+V'); },
@@ -76,7 +82,7 @@ const CASES = {
   'paste lines into an empty line': async p => {
     await caretAt(p, '  else if (i % 3', 0); await keys(p, 'Home', 'Shift+ArrowDown', 'Control+C');
     await caretAt(p, '  i = i + 1;'); await keys(p, 'End', 'Enter', 'Control+V'); },
-  'shift+enter': async p => { await caretAt(p, 'var i = 1;'); await keys(p, 'End', 'Shift+Enter'); await p.keyboard.insertText('var j = 2;'); },
+  'shift+enter': { unread: true, edit: async p => { await caretAt(p, '  i = i + 1;'); await keys(p, 'End', 'Shift+Enter'); await p.keyboard.insertText('var j = 2;'); } },
   // formatted text: the editor shows it in its own font and style (what was pasted can't restyle it), so it reads as shown
   'paste formatted code (VS Code)': async p => { await caretAt(p, '  i = i + 1;', 0); await keys(p, 'Home'); await clipRich(p, VSCODE, TWO + '\n'); await keys(p, 'Control+V'); },
   'paste formatted code into an empty line (VS Code)': async p => { await caretAt(p, '  i = i + 1;'); await keys(p, 'End', 'Enter'); await clipRich(p, VSCODE, TWO); await keys(p, 'Control+V'); },
@@ -107,13 +113,14 @@ const trimEnd = rows => { const r = [...rows]; while (r.length && !r.at(-1)) r.p
 const status = p => p.evaluate(() => getComputedStyle(document.querySelector('.cstv'), '::before').content.replace(/"/g, ''));
 
 async function runCase(b, page, name, c, exp, log = console.log) {
-  const { edit, known } = typeof c === 'function' ? { edit: c } : c;
+  const { edit, known, unread, shows } = typeof c === 'function' ? { edit: c } : c;
   const p = await b.newPage({ viewport: { width: 1300, height: 950 } });
   await p.goto(fileUrl(page), { timeout: 600000 }); await p.waitForTimeout(500);
   await edit(p); await p.waitForTimeout(200);
   const nested = await p.evaluate(() => !!document.querySelector('#ed div div'));
   const merged = await p.evaluate(() => !!document.querySelector('#ed pre'));
-  const warned = await p.evaluate(() => { const e = document.querySelector('.merged'); return !!e && e.getClientRects().length > 0; });
+  const shown = sel => p.evaluate(sel => { const e = document.querySelector(sel); return !!e && e.getBoundingClientRect().height > 0 && e.getClientRects().length > 0; }, sel);
+  const warned = await shown('.merged'), unreadNote = await shown('.unread');
   const seen = trimEnd(await visualRows(p));
   const t = Date.now(); await p.click('.runbtn'); let st = '';
   while (Date.now() - t < 60000) { await p.waitForTimeout(100); st = await status(p); if (/compiled|error/.test(st)) break; }
@@ -124,8 +131,9 @@ async function runCase(b, page, name, c, exp, log = console.log) {
     while (Date.now() - t < 120000 && !(await p.evaluate(() => +getComputedStyle(document.querySelector('#cpu')).getPropertyValue('--isHALT') === 1))) await p.waitForTimeout(200);
     out = gridText(await consoleCodes(p)) === exp.replace(/\s+$/, '');
   }
-  const ok = wysiwyg && warned === merged && out !== false;
-  log(JSON.stringify({ case: name, ok, known: !!known, wysiwyg, nested, merged, warned, status: st.replace(/ +counter\(\w+\) +/g, ' n '), ...(out === null ? {} : { output: out }) }));
+  // a line holding a <br> shows a row the scan doesn't read: then the page must say so (.unread), and only then
+  const ok = (unread ? unreadNote : wysiwyg && !unreadNote) && warned === merged && out !== false && (!shows || JSON.stringify(seen) === JSON.stringify(shows));
+  log(JSON.stringify({ case: name, ok, known: !!known, wysiwyg, nested, merged, warned, unreadNote, status: st.replace(/ +counter\(\w+\) +/g, ' n '), ...(out === null ? {} : { output: out }) }));
   if (!wysiwyg) log('  editor shows:\n' + seen.map((r, i) => `  ${String(i).padStart(2)}|${r}`).join('\n') + '\n  scan read:\n' + read.map((r, i) => `  ${String(i).padStart(2)}|${r}`).join('\n'));
   await p.close();
   return { ok, known: !!known };
