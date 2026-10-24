@@ -1801,7 +1801,10 @@ ENG_HTML = ('<div class="eng" id="ENG"><div class="ini" id="INI"><div class="ptr
                                          for l in range(NLEV)) +
             '<div class="regs"><div class="sc">' + reg_html + '</div></div>' +
             '</div>' * (NLEV + 5) +
-            '<div class="view"><div class="cam"><i class="floor"></i><i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
+            # (.deco: scenery an art style may show, first so that Firefox, which draws 3D planes in document order, draws
+            # it behind the tray: art3d.py)
+            '<div class="view"><div class="cam"><div class="deco">' + '<i></i>' * 5 + '</div>'
+            '<i class="floor"></i><i class="ceil"></i><i class="post p1"></i><i class="post p2"></i>'
             '<i class="post p3"></i><i class="post p4"></i><i class="rail rb"></i><i class="rail rl"></i><i class="rail rr"></i>'
             '<i class="rail rn"></i>' + ''.join(render_html) + '</div></div></div>' + '</div>' * NTS + '</div></div></div></div></div>')
 ENG_CSS = (PHYS_CSS + '\n' + '\n'.join(render_css)).replace('__NP1__', str(N + 1)).replace('__HVW__', f(VIEW_W / 2)).replace('__HVH__', f(VIEW_H / 2))

@@ -64,6 +64,9 @@ header a{color:var(--acc)}
 .cam{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;
   transform:translate3d(0,calc(__TY__ * 1px),calc(__NDIST__ * 1px)) rotateX(__TILT__deg) rotateY(calc(var(--yaw) * 1rad))}
 .cam > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
+/* scenery for the art styles (art3d.py), hidden unless one shows it */
+.cam > .deco{display:none}
+.deco > *{position:absolute;left:0;top:0;display:block;transform-style:preserve-3d}
 
 .floor{width:calc(__2WX__ * 1px);height:calc(__2WZ__ * 1px);
   margin:calc(-__WZ__ * 1px) 0 0 calc(-__WX__ * 1px);

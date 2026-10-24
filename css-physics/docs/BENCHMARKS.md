@@ -180,29 +180,24 @@ values beyond 1e-2, up to 0.17. Firefox: up to 2.7e-3.
 
 ### Art styles
 
-The plain page (the default style) against the page without the styles (main), one bench lease, 2026-10-23,
-`ab.js -p bigmed 'node tools/tr.js {} 1500 1500'`: 16 bodies 0.997 (IQR 0.986–1.113, 10 rounds), 32 bodies 0.969
-(0.918–1.146, 8 rounds). Scoped with `:root:has(#a-NAME:checked)` instead it was 1.11–1.18 (HISTORY.md).
+The original page (the default style) against the page without the styles (main), 2026-10-24, `ab.js -p bigmed
+'node tools/tr.js {} 1500 1500'`: in a bench lease, 16 bodies 1.057 (IQR 0.976–1.077, 10 rounds), 32 bodies 1.013
+(1.002–1.065, 8 rounds); interleaved without a lease (load about 6), 16 bodies 1.049 (0.984–1.125, 16 rounds) against
+main-vs-main 1.024 (0.975–1.088), and 1.065 without baroque's per-face ornament rule: within the noise. Scoped with
+`:root:has(#a-NAME:checked)` instead it was 1.11–1.18 (HISTORY.md).
 
-Each style at 16 bodies (tower, `ART=<name>`, `tr.js … 1500 1500`, median of 3 interleaved rounds, one lease).
-Headless Chromium here composites in software, so fps falls with the filters the compositor re-runs on every frame in
-which something under them moves; style per pass hardly changes. In an earlier lease the same day pencil without its
-filter ran at 43 fps and pixel at 45. On a GPU these are shader passes: not measured.
+Each style at 16 bodies (tower, `ART=<name>`, `tr.js … 1500 1500`, median of 3 interleaved rounds, one bench lease,
+2026-10-24). Headless Chromium here composites in software, so fps falls with what the compositor redraws on every
+frame in which something moves (filters, shadows, masks); style per pass hardly changes. On a GPU: not measured.
 
 | Style | fps | Style per pass | The compositor runs |
 |---|---|---|---|
-| plain | 44.7 | 9.8 ms | — |
-| cel | 44.0 | 10.0 ms | — |
-| baroque | 42.0 | 10.5 ms | gradients and inset shadows on every face |
-| mondrian | 41.3 | 10.7 ms | — |
-| paper | 40.0 | 11.1 ms | a drop shadow over the scene, a multiply overlay |
-| pencil | 34.0 | 10.6 ms | a displacement over the scene, a multiply overlay |
-| undulating | 32.0 | 11.4 ms | a displacement over the scene, moving stripes under it |
-| impressionist | 31.3 | 12.0 ms | a displacement and blur, a soft-light overlay |
-| wireframe | 28.0 (26–37) | 15.6 ms (noisy: 10.5 in the earlier lease) | a drop-shadow glow over the scene |
-| plasma | 23.3 | 12.4 ms | a hue rotation over the arena, glows |
-| pixel | 20.7 | 11.3 ms | pixelation (tile, morphology) and posterization over the arena |
-| oil | 17.3 | 11.4 ms | a displacement and a lit noise (impasto) over the scene |
+| original | 45.3 | 9.5 ms | — |
+| cel | 44.7 | 9.8 ms | outlines |
+| mondrian | 40.7 | 10.8 ms | — |
+| baroque | 38.7 | 11.0 ms | gradients, inset shadows and a masked ornament on every face, drapes over the scene |
+| paper | 38.0 | 9.8 ms | a drop shadow over the scene and its scenery, a multiply overlay |
+| pencil | 35.3 | 10.0 ms | a displacement over the scene, a multiply overlay |
 
 ## 2. Style engine cost model (microbenchmarks)
 
