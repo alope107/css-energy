@@ -850,3 +850,6 @@ against the default page; C2 149/149 for every variant.
 A stage costs every pass: the register subjects restyle again in its two size containers, +32 registers, ~0.9 MB of
 CSS. The compile chain pays that too, so compile is 1.03× (one stage) and 1.05× (two) slower. `RAMDEC` loses because
 its size container is resolved during layout, and the RAM tree under it is restyled there each pass.
+
+On top of §21's faster compile (2026-10-25, quiet, 6 rounds; the page with `STAGE=0 RAMNI=0` against the default):
+FizzBuzz Run → compiled 1.031 (1.022–1.039), 1,954 → 2,011 ms; Run → HALT 1.044 (1.023–1.071).

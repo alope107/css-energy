@@ -9,6 +9,10 @@
   .status { font-family: ui-monospace, monospace; color: #666; font-size: 13px; } .status b { color: #222; margin-right: .8em; font-weight: 600; }
   .num { counter-set: v var(--v); } .num::after { content: counter(v); }
   .mem { height: 0; overflow: hidden; }
+  .memx { position: fixed; left: 0; top: 0; overflow: hidden; visibility: hidden; container-type: size;
+    width: anchor-size(--ab width, 1px); height: anchor-size(--ab height, 1px); }
+  .memx .mem { width: 1px; }
+  .ab { display: block; anchor-name: --ab; width: calc((1 + var(--xon) * (var(--xb) + 1)) * 1px); height: calc((1 + var(--xon) * (var(--yb) + 1)) * 1px); }
   .w { width: fit-content; height: 1px; }
   .cell { display: block; content-visibility: hidden; width: fit-content; height: 1px; contain-intrinsic-size: auto 1048576px; }
   .rp { position: fixed; top: 0; left: 0; visibility: hidden; height: 1px; container-type: inline-size; }
