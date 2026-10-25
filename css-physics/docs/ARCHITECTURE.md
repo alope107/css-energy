@@ -168,6 +168,7 @@ gets neither. A scroll does follow the finger, and the scroller that scrolls say
 - `#w{i}` animates its pose from the registers' timelines (`v{K}`) into **non-inherited**
   `--Rx --Ry --Rz --Ri --Rj --Rk --Rg`; `.bd` pulls them with explicit `inherit` into a `matrix3d`, and faces get
   lighting by `color-mix` from the rotation columns (3× cheaper than inherited registered props in every face).
+  Safari 26 doesn't re-apply those explicit `inherit`s: there the children read inherited copies instead (§7).
 - Shadows are blurred floor discs sized and faded by height.
 
 ### Art styles (`src/art3d.py`)
@@ -280,20 +281,23 @@ Runs in Safari 26+ (scroll-driven animations, `timeline-scope` and anchor positi
 custom properties in 18). Checked in Playwright's WebKit 27.2 (WPE, Linux, headless), 2026-10-21, with and without
 `if()`: Safari 27.0 has none (Technology Preview 249 added it), `NOIF=1` makes the checks see the page as it does.
 `smoke.sh` passes in both; `tools/xcheck.js` finds every value on every level within 1e-2 of Chrome's, mostly within
-2e-3, on 16- and 48-body piles (BENCHMARKS.md §1 WebKit).
+2e-3, on 16- and 48-body piles (BENCHMARKS.md §1 WebKit). Since 2026-10-25 also in the real Safari 26.6.2 on macOS,
+driven from the devcontainer through `safaridriver` (`BROWSER=safari`, `../shared/README.md#safari-on-the-mac-host`):
+that found the stale rotation below, which WPE (a newer WebKit) doesn't have.
 
 | WebKit behaviour | Workaround |
 |---|---|
 | No `if()` before Safari 27.x | Firefox's fallback (§6), on a feature query: every body always named on #L0 |
-| `atan2()` of a relative length (`100cqw`) comes out wrong in Safari (probably [248513](https://bugs.webkit.org/show_bug.cgi?id=248513)); the view was scaled by `tan(atan2(100cqw, 900px))` | typed division (Safari 26) is declared after it and wins; `experiments/safari/probe.html` B2 prints the values |
+| `tan()` of `atan2()` of a relative length (`100cqw`) comes out wrong in Safari 26.6 (degrees read as radians: 1.6197 for 1; probably [323108](https://bugs.webkit.org/show_bug.cgi?id=323108), fixed in Technology Preview; `../bugs/webkit-tan-atan2-relative.html`); the view was scaled by `tan(atan2(100cqw, 900px))` | typed division (Safari 26) is declared after it and wins; `experiments/safari/probe.html` B2 prints the values |
 | `var()` of a registered number keeps 6 decimal places, as CSSOM serializes a number (Chrome and Firefox keep 6 significant digits): `1e-8` is 0, `45.999999` stays | registers read back a hair off (46 as 45.999999, −1600 as −1599.999924) and Chrome's rounding hid it; WebKit's exact tests on them woke every sleeping body on every pass (a 16-body tower never slept; one box rocked in a two-step cycle). `SC` and `GYP` are compared with a margin of 0.5 |
 | An animated registered `<integer>` isn't rounded ([327925](https://bugs.webkit.org/show_bug.cgi?id=327925)) | why the margin and not `<integer>` registers |
+| An explicit `inherit` of a registered non-inherited property isn't re-applied when the parent's value changes (Safari 26; WebKit before 318999@main, [321094](https://bugs.webkit.org/show_bug.cgi?id=321094)): `.bd` kept the rotation and `.sh` the height of their first resolution, so bodies slid without turning and snapped to their angle when something else restyled them; faces kept old colours after a restyle of `.bx` alone (an art style switch) | behind `@supports (-webkit-backdrop-filter: none) and (not (width: inherit(--x)))` (WebKit without `inherit()`, which came with the fix) `.bw` copies the pose into inherited `--Qi --Qj --Qk --Qg --Qy`, `.bx` its face colours into inherited `--K0`–`--K5`, and the children read those (`gen3d.py` "WebKit: explicit inherit"). Chrome and Firefox keep the explicit inherit (§3). `tools/posecheck.js` checks every frame |
 | One step per frame (timelines are sampled once per frame, as in Firefox): 60 steps/s at 60 Hz against `RATE` 90 | left as is: two-thirds speed |
 | Headless WPE screenshots flatten `preserve-3d` (Playwright paints a software snapshot) | harness only: frames of a `recordVideo` recording are composited and show the scene as Chrome draws it |
 
 Everything small loses relative precision through `var()` (a rotation increment of 1.5e-3 keeps 3 digits), which moves
 contact normals by about 1e-3 against Chrome, and where it flips a gate (a box corner just touching) a handful of
 values by up to 0.17: chaos, not a fault (smoke, sleep and grabbing behave as in Chrome). **Untested:** touch on iOS (the touch
-input rests on Chrome's deferred layout re-snap, "Touch" above) and drawing through Core Animation on macOS (only WPE's
-compositor on Linux was checked).
+input rests on Chrome's deferred layout re-snap, "Touch" above). Drawing through Core Animation on macOS is checked by
+screenshots only (`tools/shots.js`, about 8 a second): safaridriver has no screencast.
 

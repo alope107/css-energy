@@ -3,21 +3,22 @@
 # (../shared/make/checks.mk): make re-runs it only when its page or its harness changed since its last pass, or with
 # RERUN=1. <gen> and <config> are hashes of the Python, browser and environment variables the generator and the
 # checks run with (out/gen.<gen>.id, out/<browser>.<config>.id), so each configuration has its own pages and passes.
-# BROWSER=firefox|webkit: that browser (Playwright's), and xcheck.js against Chromium. NOIF=1: the checks run on
-# copies of the pages with if( renamed iff(, as a browser without if() sees them (Firefox; Safari before 27.x).
+# BROWSER=firefox|webkit: that browser (Playwright's), and xcheck.js against Chromium; BROWSER=safari: the real
+# Safari on the Mac host (../shared/js/safari.js). NOIF=1: the checks run on copies of the pages with if( renamed
+# iff(, as a browser without if() sees them (Firefox; Safari before 27.x).
 include ../shared/make/checks.mk
 .PHONY: smoke statcheck
 .SECONDARY:
 N  ?= 16
 MS ?= 12000
 O  := out
-BR := $(or $(filter firefox webkit,$(BROWSER)),chromium)
+BR := $(or $(filter firefox webkit safari,$(BROWSER)),chromium)
 V  := $(if $(NOIF),.noif)
 SCENES  := tower rain stack
 JS      := $(wildcard tools/lib/*.js $(SHARED)/js/*.js)
 # what the pages and checks depend on outside the repo, and the environment variables their scripts read
 P  := $(O)/smoke_$(N).$(call id,$(O)/gen,-,$(wildcard src/*.py))
-C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter chromium,$(BR)),physics,$(BR)),tools/smoke.js tools/floatcheck.js tools/overlaycheck.js tools/grabtest.js tools/touchcheck.js tools/xcheck.js $(JS))
+C  := $(BR).$(call id,$(O)/$(BR),$(if $(filter chromium,$(BR)),physics,$(BR)),tools/smoke.js tools/floatcheck.js tools/overlaycheck.js tools/grabtest.js tools/touchcheck.js tools/xcheck.js tools/posecheck.js $(JS))
 HARNESS := $(JS) $(RERUN_IF)
 
 $(P)_%.html: $(wildcard src/*) $(SHARED)/py/csslabel.py
@@ -38,6 +39,9 @@ $(P)$(V).overlay.$(C).log: $(P)_tower$(V).html tools/overlaycheck.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/overlaycheck.js $<
 $(P)$(V).grab.$(C).log: $(P)_field$(V).html tools/grabtest.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/grabtest.js $<
+# (what's drawn follows each body's pose: rotation, shadow and face colours, on bodies tumbling as they land)
+$(P)$(V).pose.$(C).log: $(P)_rain$(V).html tools/posecheck.js $(HARNESS)
+	@$(LOGGED) $@ -- node tools/posecheck.js $<
 # (touch gestures go through Chromium's gesture recognizer over CDP: Chromium only)
 $(P).touch.$(C).log: $(P)_tower.html tools/touchcheck.js $(HARNESS)
 	@$(LOGGED) $@ -- node tools/touchcheck.js $<
@@ -48,7 +52,7 @@ $(P).xcheck.$(C).log: $(P)_tower.html tools/xcheck.js $(HARNESS)
 statcheck: $(SCENES:%=$(P)_%.html)                # static and quick: always runs
 	@rc=0; for f in $^; do python3 tools/statcheck.py $$f || rc=1; done; exit $$rc
 
-CHECKS := $(SCENES:%=$(P)_%$(V).smoke-$(MS).$(C).log) $(P)$(V).float.$(C).log $(P)$(V).overlay.$(C).log $(P)$(V).grab.$(C).log \
+CHECKS := $(SCENES:%=$(P)_%$(V).smoke-$(MS).$(C).log) $(P)$(V).float.$(C).log $(P)$(V).overlay.$(C).log $(P)$(V).grab.$(C).log $(P)$(V).pose.$(C).log \
           $(if $(filter chromium,$(BR)),$(if $(V),,$(P).touch.$(C).log),$(P).xcheck.$(C).log)
 smoke: $(CHECKS) statcheck
 	$(call report,$(CHECKS),20)

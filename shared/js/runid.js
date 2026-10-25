@@ -28,6 +28,11 @@ const run = (f, a) => { try { return execFileSync(f, a, { encoding: 'utf8', stdi
       .sort((a, b) => b.split('-')[1] - a.split('-')[1]).map(d => `/ms-playwright/${d}/pw_run.sh`).find(f => fs.existsSync(f)) || 'none';
     const mb = path.join(path.dirname(exe), 'minibrowser-wpe', 'MiniBrowser');   // pw_run.sh has no --version (Linux builds)
     out.push(`playwright ${require(require.resolve('playwright/package.json', from)).version}`, `browser ${exe} ${run(fs.existsSync(mb) ? mb : exe, ['--version'])}`);
+  } else if (name === 'safari') {     // safaridriver on the Mac host (safari.js): the version a session reports
+    const S = require('./safari.js');
+    let ver = 'none';
+    try { const b = await S.launch(); await b.newPage(); ver = b.version(); await b.close(); } catch (e) {}
+    out.push(`browser safari ${ver}`);
   } else if (name !== '-') {
     const B = profile(name), P = PROFILES[name];
     const pkg = require.resolve(`${P.pkg}/package.json`, { paths: [process.cwd(), path.join(__dirname, '..', '..', P.home)] });

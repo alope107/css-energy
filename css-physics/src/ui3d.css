@@ -35,6 +35,18 @@
 @property --k4{syntax:'<color>';inherits:false;initial-value:#000}
 @property --k5{syntax:'<color>';inherits:false;initial-value:#000}
 @property --cs{syntax:'<color>';inherits:false;initial-value:#000}
+/* --- Render properties: inherited copies for WebKit before 318999@main (gen3d.py "WebKit: explicit inherit") --- */
+@property --Qi{syntax:'<number>';inherits:true;initial-value:0}
+@property --Qj{syntax:'<number>';inherits:true;initial-value:0}
+@property --Qk{syntax:'<number>';inherits:true;initial-value:0}
+@property --Qg{syntax:'<number>';inherits:true;initial-value:0}
+@property --Qy{syntax:'<number>';inherits:true;initial-value:0}
+@property --K0{syntax:'<color>';inherits:true;initial-value:#000}
+@property --K1{syntax:'<color>';inherits:true;initial-value:#000}
+@property --K2{syntax:'<color>';inherits:true;initial-value:#000}
+@property --K3{syntax:'<color>';inherits:true;initial-value:#000}
+@property --K4{syntax:'<color>';inherits:true;initial-value:#000}
+@property --K5{syntax:'<color>';inherits:true;initial-value:#000}
 /* --- Header and stage --- */
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);
