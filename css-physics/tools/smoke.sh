@@ -7,9 +7,11 @@
 #   grabtest.js    dragging one body doesn't move any other
 #   overlaycheck.js the grab overlay (ring, pin, tether) follows the drag
 #   touchcheck.js  touch dragging on a phone-sized touch screen: grab, follow, drop on release (Chromium only)
-#   xcheck.js      BROWSER=firefox|webkit: every value on every level against Chromium's, on a state that browser reached
-# BROWSER=firefox|webkit runs them in that browser; NOIF=1 on copies with if( renamed iff( (a browser without if():
-# Firefox, Safari before 27.x).
+#   posecheck.js   what's drawn follows each body's pose (rotation, shadow, face colours) on every frame
+#   xcheck.js      BROWSER=firefox|webkit|safari: every value on every level against Chromium's, on a state that
+#                  browser reached
+# BROWSER=firefox|webkit|safari runs them in that browser (safari: the Mac host's, ../shared/js/safari.js); NOIF=1 on
+# copies with if( renamed iff( (a browser without if(): Firefox, Safari before 27.x).
 # The builds and checks are make targets (Makefile): a check runs only when its page, its harness or the browser
 # changed since it last passed here, and says "up to date" otherwise. RERUN=1 runs them all.
 exec make -k -s smoke N=${1:-16}

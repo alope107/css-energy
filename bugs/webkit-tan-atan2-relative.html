@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>WebKit: tan() of atan2() of a relative length reads degrees as radians</title>
+<style>
+body{font:14px/1.4 system-ui,sans-serif;margin:16px}
+.c{container-type:inline-size;width:900px;font-size:20px}
+.row{display:flex;gap:12px;align-items:center;margin:6px 0}
+.row code{width:340px;font-size:14px}
+/* each bar: the expression × 200px wide, over a 200px × expected reference; green when they match within 1px */
+.bar{height:18px;background:#1f8a3a}
+.ref{width:var(--want);height:4px;background:#000}
+@property --d{syntax:'<length>';inherits:false;initial-value:0px}
+.bar{--d:abs(var(--got) - var(--want));background:color-mix(in srgb,#b3261e calc(min(1, var(--d) / 1px) * 100%),#1f8a3a)}
+</style>
+<p>Each green bar should be as long as the black line under it; red means the bug.</p>
+<div class="c">
+<div class="row"><code>tan(atan2(450px, 900px))</code><div><div class="bar" style="--want:100px;--got:calc(tan(atan2(450px, 900px)) * 200px);width:var(--got)"></div><div class="ref" style="--want:100px"></div></div></div>
+<div class="row"><code>tan(atan2(50cqw, 900px))</code><div><div class="bar" style="--want:100px;--got:calc(tan(atan2(50cqw, 900px)) * 200px);width:var(--got)"></div><div class="ref" style="--want:100px"></div></div></div>
+<div class="row"><code>tan(atan2(10em, 400px))</code><div><div class="bar" style="--want:100px;--got:calc(tan(atan2(10em, 400px)) * 200px);width:var(--got)"></div><div class="ref" style="--want:100px"></div></div></div>
+<div class="row"><code>tan(atan2(100cqw, 100cqw))</code><div><div class="bar" style="--want:200px;--got:calc(tan(atan2(100cqw, 100cqw)) * 200px);width:var(--got)"></div><div class="ref" style="--want:200px"></div></div></div>
+<div class="row"><code>calc(atan2(50cqw, 900px) / 1deg)</code><div><div class="bar" style="--want:265.65px;--got:calc(atan2(50cqw, 900px) / 1deg * 10px);width:var(--got)"></div><div class="ref" style="--want:265.65px"></div></div></div>
+<div class="row"><code>rotate: atan2(50cqw, 900px)</code><div style="width:200px;height:2px;background:#888;rotate:atan2(50cqw, 900px)"></div><div style="width:200px;height:2px;background:#000;rotate:26.565deg;margin-left:-212px"></div></div>
+</div>
+<!--
+Observed (2026-10-25):
+- Safari 26.6.2 (macOS, build 25G83): rows 1 and 5 and the rotation right; rows 2-4 wrong. The bars measure
+  tan(atan2(50cqw, 900px)) = 7.1747, tan(atan2(10em, 400px)) = 7.1747, tan(atan2(100cqw, 100cqw)) = 1.6197 (also
+  tan(atan2(100cqw, 900px)) = 1.6197). These are tan(26.565) and tan(45) in radians: the angle atan2() gives is right
+  in degrees (row 5: 26.565deg), and tan() reads that number of degrees as radians. Only with a relative length
+  argument (cqw, em), whose atan2() can't be resolved at parse time: with absolute lengths (row 1) it's right.
+- Playwright's WebKit 27.2 (WPE build 2359), Chrome 153: all rows right.
+Spec (css-values-4 §10.6): atan2(A, B) returns the <angle> between -180deg and 180deg; tan() of an <angle> treats it
+as that angle. Likely cause: when the calc tree is kept for computed-value time, the result of atan2() loses its
+angle unit (degrees) on the way into tan(), which then takes the raw number as radians.
+Probably https://bugs.webkit.org/show_bug.cgi?id=323108 ("CSS tan(atan2()) with round() results in incorrect
+computed value", RESOLVED FIXED 2026-09-02: already fixed in Safari Technology Preview, the commit not named).
+https://bugs.webkit.org/show_bug.cgi?id=248513 (atan2 should resolve relative lengths, New since 2022) is older
+and about atan2() not accepting them; here they parse and the angle itself is right.
+-->
+</html>

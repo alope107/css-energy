@@ -8,6 +8,7 @@ project's `node_modules`.
 | File | What | Used by |
 |---|---|---|
 | `js/browser.js` | `profile('physics' \| 'fontcpu')`: `launch()`, `open()`, `fileUrl()`, `envArgs()` | every browser tool (css-physics via `tools/lib/physics.js`, js-minus-js via `tools/browser.js`, paint via `tools/lib.js`) |
+| `js/safari.js` | the real Safari on the Mac host through `safaridriver`, behind the part of Playwright's API the evaluate-based tools use ([below](#safari-on-the-mac-host)) | css-physics `BROWSER=safari` (`tools/lib/physics.js`), `runid.js` |
 | `js/page.js` | `countFrames`, `vars`, `pollUntil` | css-physics |
 | `js/trace.js` | `record()`, `durations`, `median`, `bigmed`, `aggregate`, `selfTime`, `saveTrace`, presets `CATS` | css-physics `tr` and friends; js-minus-js `machine/trace.js` |
 | `js/ab.js` | A/B timing (below) | both, command line |
@@ -33,6 +34,44 @@ compositor path). Don't merge the profiles without re-measuring both.
 `launch({args})` replaces the profile's flags; `launch({extraArgs: envArgs('FLAGS')})` appends. In the devcontainer
 Playwright's own build is usually missing (the npm package is newer than the image), so `launch()` falls back to
 `/usr/local/bin/chromium` and says so on stderr.
+
+## Safari on the Mac host
+
+The devcontainer runs on a Mac (Docker Desktop), so the tools can drive the Mac's own Safari through `safaridriver`
+(WebDriver): css-physics's evaluate-based tools take `BROWSER=safari`, `smoke.sh` included. Setup on the Mac, once:
+Safari's Settings > Advanced > "Show features for web developers", then Develop > Allow Remote Automation, and
+`safaridriver --enable`. Then leave `safaridriver -p 4444` running.
+
+- **Reaching it.** `host.docker.internal` resolves to the Mac (use its IPv4 address: the IPv6 one is unreachable);
+  safaridriver binds to the Mac's localhost, which Docker Desktop passes through, and refuses any request whose `Host`
+  header isn't localhost, so `safari.js` sends `Host: localhost:4444`. `SAFARIDRIVER=http://host:port` overrides.
+- **Pages.** Safari loads them from the repo-root server (`python3 -m http.server 8765 --bind 127.0.0.1 --protocol
+  HTTP/1.1 --directory /workspaces/css-energy`, the main checkout, worktrees included) through VS Code's forwarding of port 8765; a path or
+  `file://` URL under the main checkout becomes `http://localhost:8765/<path>`. If Safari shows "can't connect",
+  VS Code isn't forwarding 8765: check its Ports panel.
+- **One session at a time**, in a visible Safari window that automation takes over (touching it ends the session).
+  safaridriver can't list sessions, so `safari.js` keeps the open one's id in `$TMPDIR/css-energy-safari.session` and
+  closes it however the tool exits. Commands run in order per session: a tool killed inside `evaluate` leaves Safari
+  paired until its script times out (`SAFARI_SCRIPT_MS`, 120 s); the next tool waits for that. "Already paired with
+  another WebDriver session" with no session file: restart safaridriver.
+- **Mouse drags** sampled between moves send one actions command per move, and safaridriver forgets the pressed button
+  after the first ([`../bugs/safaridriver-pressed-button.sh`](../bugs/safaridriver-pressed-button.sh)): Safari ends
+  `:active` mid-drag. While the button is down `safari.js` starts every move with a `pointerDown` again, which keeps
+  `:active` on (the page sees another mousedown per move; no script here listens).
+- **Serve with HTTP/1.1.** `python3 -m http.server` speaks HTTP/1.0 unless told otherwise: a connection per file,
+  and VS Code's port forwarding drops or stalls some of a page's 15 parallel ones. Uncached (`no-store`), 15 of 20
+  loads of the 32-body page lost a stylesheet (the engine never runs, and the load event comes anyway) and the
+  single-file pages stalled mid-parse; gzip alone made it 8 of 20; `--protocol HTTP/1.1` (keep-alive), 0 of 20, and 0
+  of 10 single-file loads (2026-10-25). With HTTP/1.0 a by-hand test in Safari can look dead until reloaded. `goto`
+  still loads the page again after 10 s without progress, or when a linked stylesheet is missing (4 tries, said on
+  stderr).
+- **A hidden window draws no frames.** The automation window can come up minimized or behind (the page `hidden`,
+  a frame every few seconds); `goto` maximizes it then, and says so on stderr if it stays hidden (the Mac's display
+  asleep or locked: nothing to do from here).
+- **What you get:** `evaluate` (promises awaited), computed styles, element boxes, mouse input, window screenshots at
+  the Mac's device pixel ratio. **What you don't:** CDP (no tracing, virtual time, screencast or touch), console
+  logs, parallel runs. Motion is sampled from inside the page (`requestAnimationFrame`).
+- `runid.js safari` opens a session to read the version, so a check's pass is tied to the Safari version it ran on.
 
 ## A/B timing (`js/ab.js`)
 

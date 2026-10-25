@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>explicit inherit from an animated parent</title>
+<!--
+  Does a child that takes a non-inherited custom property with an explicit `inherit` follow its parent's value while an
+  animation changes it? (rigid3d.css: #w<i> animates the pose into non-inherited --Ri --Rj --Rk, .bd pulls them with
+  `inherit`; in Safari 26.6 its rotation stayed stale.) Each row: the parent's bar (its own value) over the child's
+  bar (the value it reads); they should stay the same length. experiments/safari/inherit.js samples them per frame
+  (row M needs it: it sets the parent's value from script).
+-->
+<style>
+/* === Probe === */
+body{margin:0;padding:16px;font:13px/1.4 ui-monospace,Menlo,monospace;background:#fff}
+.row{display:flex;gap:12px;align-items:center;margin:8px 0}
+.row>code{width:420px}
+@property --x{syntax:'<number>';inherits:false;initial-value:0}
+@property --xi{syntax:'<number>';inherits:true;initial-value:0}
+@property --y{syntax:'<number>';inherits:false;initial-value:0}
+@keyframes ax{from{--x:0}to{--x:200}}
+@keyframes axi{from{--xi:0}to{--xi:200}}
+@keyframes atr{from{translate:0}to{translate:10px}}
+.p{animation:ax 2s linear infinite alternate}
+.p,.c,.g{display:block}
+.p::before,.c::before,.g::before{content:'';display:block;height:6px}
+/* bars: the parent's value (black), what the child computed (green) */
+.p::before{width:calc(var(--x) * 1px);background:#000}
+.c::before{width:calc(var(--x) * 1px);background:#1f8a3a}
+.g::before{width:calc(var(--x) * 1px);background:#06c}
+
+/* --- Cases --- */
+/* A: registered non-inherited, child `--x: inherit` (the engine's form) */
+#A .c{--x:inherit}
+/* B: the same, and the grandchild inherits from the child */
+#B .c{--x:inherit}#B .g{--x:inherit}
+/* C: registered inherited, child reads var() */
+#C .p{animation-name:axi}#C .p::before{width:calc(var(--xi) * 1px)}#C .c::before{width:calc(var(--xi) * 1px)}
+/* D: as A, but the parent also animates a standard property */
+#D .p{animation-name:ax,atr;animation-duration:2s,2s}#D .c{--x:inherit}
+/* E: as A, with the child's value through a second property computed from it */
+#E .c{--x:inherit;--y:calc(var(--x) * 1)}#E .c::before{width:calc(var(--y) * 1px)}
+/* F: child `--x: inherit` and the child itself animates something unrelated */
+#F .c{--x:inherit;animation:atr 2s linear infinite alternate}
+/* G: the child takes it with inherit() / var(--x) from an inherited copy the parent declares */
+#G .p{--xi:var(--x)}#G .c{--x:var(--xi)}
+/* H: no animation: the parent declares --x: 50, the child inherits */
+#H .p{animation:none;--x:50}#H .c{--x:inherit}
+/* I: the parent declares --x: 50 and animates it: does the child get the declared (unanimated) value? */
+#I .p{--x:50}#I .c{--x:inherit}
+/* J: the parent animates an inherited --xi; the child computes non-inherited --y from it; the grandchild inherits --y
+   (the faces' --k<f>: inherit from .bd) */
+#J .p{animation-name:axi}#J .p::before{width:calc(var(--xi) * 1px)}#J .c{--y:var(--xi)}#J .c::before{width:calc(var(--y) * 1px)}
+#J .g{--y:inherit}#J .g::before{width:calc(var(--y) * 1px)}
+/* K: G's copy, one level further: child copies into non-inherited --y, grandchild --y: inherit */
+#K .p{--xi:var(--x)}#K .c{--x:var(--xi);--y:var(--x)}#K .c::before{width:calc(var(--y) * 1px)}#K .g{--y:inherit}#K .g::before{width:calc(var(--y) * 1px)}
+/* L: as A, and the parent also animates an inherited --xi (the child restyles every frame for it) */
+#L .p{animation-name:ax,axi;animation-duration:2s,2s}#L .c{--x:inherit}
+/* M: no animation; inherit.js sets the parent's --x from script every frame */
+#M .p{animation:none}#M .c{--x:inherit}
+</style>
+</head>
+<body>
+<p>Each green (child) bar should match the black (parent) bar above it at every moment.</p>
+<div class="row" id="A"><code>A non-inherited, --x: inherit</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="B"><code>B two levels of inherit</code><div class="p"><i class="c"><i class="g"></i></i></div></div>
+<div class="row" id="C"><code>C inherited property, var()</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="D"><code>D A + parent animates translate</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="E"><code>E A, through a computed --y</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="F"><code>F A, child animates translate</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="G"><code>G parent copies into inherited --xi</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="H"><code>H static parent --x: 50, --x: inherit</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="I"><code>I parent declares 50 and animates</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="J"><code>J inherited --xi, child --y, grandchild inherit</code><div class="p"><i class="c"><i class="g"></i></i></div></div>
+<div class="row" id="K"><code>K G's copy, then --y: inherit below</code><div class="p"><i class="c"><i class="g"></i></i></div></div>
+<div class="row" id="L"><code>L A + parent animates inherited --xi</code><div class="p"><i class="c"></i></div></div>
+<div class="row" id="M"><code>M script sets the parent's --x (no animation)</code><div class="p"><i class="c"></i></div></div>
+</body>
+<!--
+Observed (inherit.js, 3 s, 2026-10-25):
+- Safari 26.6.2 (macOS 25G83): A, B, D, E, F, I, M wrong in every frame (the child keeps the value of its first
+  resolution: 0); C, G, H, J, K, L right. So: an explicit `inherit` of a registered non-inherited custom property isn't
+  re-applied when the parent's value changes, by animation (A) or script (M), unless the parent's inherited style
+  changes too (L): WebKit re-resolves the child from its matched declarations cache without the declaration
+  (bugs.webkit.org 321094; fixed for the literal keyword with inherit(), 320984, 318999@main).
+- Chrome 153, Firefox 155, Playwright's WebKit 27.2 (WPE): every row right.
+css-physics reads its pose through inherited copies there (gen3d.py "WebKit: explicit inherit"; ARCHITECTURE.md §7).
+-->
+</html>

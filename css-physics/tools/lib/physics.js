@@ -30,7 +30,10 @@ async function launchWebkit(o={}){const {args,extraArgs,...rest}=o;
  const opts={...rest,executablePath:process.env.WEBKIT||undefined};
  try{return await wk.launch(opts)}catch(e){const alt=imageWebkit();if(opts.executablePath||!/Executable doesn't exist/.test(e.message)||!alt)throw e;
   console.error(`physics.js: Playwright's own WebKit isn't installed; using ${alt} (set WEBKIT to choose)`);return wk.launch({...opts,executablePath:alt})}}
-const launchers={chromium:B.launch,firefox:launchFirefox,webkit:launchWebkit};
+// BROWSER=safari: the real Safari on the Mac host through safaridriver (../../../shared/js/safari.js: its setup, the
+// repo-root server on :8765 it loads pages from, one page at a time). Evaluate-based tools only.
+const launchSafari=()=>require('../../../shared/js/safari.js').launch();
+const launchers={chromium:B.launch,firefox:launchFirefox,webkit:launchWebkit,safari:launchSafari};
 const launch=launchers[process.env.BROWSER]||B.launch;
 
 // world point -> page coordinates of its screen projection, for the arena's bounding box `ar` (yaw: the view's default)

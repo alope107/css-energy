@@ -1776,7 +1776,20 @@ for fi, (k, sg, tf, wa, ha) in enumerate(FACES):
     LIT.append(f'--k{fi}:color-mix(in oklab,var(--cs) calc((0.42 + 0.58 * max(0, {lam})) * 100%),#07080a)')
 SHARED_CSS = [lbl.section('Box face lighting', 'shared by every engine: each face\'s colour from its world normal'),
               '.bx{--cs:color-mix(in oklab,var(--c),var(--acc) calc(var(--sel) * 55%));' + ';'.join(LIT) + '}',
-              ''.join(f'.bx .f{fi}{{--k{fi}:inherit;background:var(--k{fi})}}' for fi in range(6))]
+              ''.join(f'.bx .f{fi}{{--k{fi}:inherit;background:var(--k{fi})}}' for fi in range(6)),
+              # Safari 26 (WebKit before 318999@main, which also brought inherit(): hence the query) doesn't re-apply an
+              # explicit `inherit` of a registered non-inherited custom property when the parent's value changes: the
+              # element's style comes back from the matched declarations cache with the old value (bugs.webkit.org
+              # 321094). .bd's rotation, .sh's height and the faces' colours stayed stale: bodies slid without turning
+              # and snapped when something else restyled them. There the parent copies each value into an inherited
+              # property and the child reads that (ARCHITECTURE.md §7); Chrome and Firefox keep the explicit inherit
+              # (3x cheaper than inherited registered properties in every face, §3).
+              lbl.section('WebKit: explicit inherit', 'before 318999@main: children read inherited copies instead (Safari 26)'),
+              '@supports (-webkit-backdrop-filter: none) and (not (width: inherit(--x))){'
+              '.bw{--Qi:var(--Ri);--Qj:var(--Rj);--Qk:var(--Rk);--Qg:var(--Rg);--Qy:var(--Ry)}'
+              '.bd{--Ri:var(--Qi);--Rj:var(--Qj);--Rk:var(--Qk);--Rg:var(--Qg)}.sh{--Ry:var(--Qy)}'
+              '.bx{' + ';'.join(f'--K{fi}:var(--k{fi})' for fi in range(6)) + '}'
+              + ''.join(f'.bx .f{fi}{{--k{fi}:var(--K{fi})}}' for fi in range(6)) + '}']
 # grab feedback, drawn flat over the scene in screen units (reads this engine's grab state)
 render_css.append(lbl.section('Grab feedback (ring, pin, tether)', 'drawn flat over the scene in screen units'))
 render_css.append("""#ENG .ring,#ENG .pin,#ENG .tether{position:absolute;left:50%;top:50%;pointer-events:none;opacity:clamp(0, (__NP1__ - var(--GIr)) * var(--GIr) * var(--att), 1)}

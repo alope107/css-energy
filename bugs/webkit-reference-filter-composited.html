@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>WebKit: an SVG reference filter skips composited descendants</title>
+<style>
+body{margin:16px;font:14px/1.4 system-ui,sans-serif}
+.row{display:flex;gap:28px;align-items:center;margin:14px 0}
+.row code{width:300px;font-size:13px}
+/* the filtered element: a grid of straight lines with a 3D-transformed child that draws more straight lines */
+.box{position:relative;width:220px;height:120px;perspective:600px;
+  background:repeating-linear-gradient(90deg,#000 0 1px,transparent 1px 14px)}
+.kid{position:absolute;left:30px;top:20px;width:160px;height:80px;background:#fff repeating-linear-gradient(0deg,#c00 0 2px,transparent 2px 10px);
+  border:2px solid #c00;transform:rotateX(20deg)}
+.box.f{filter:url(#wobble)}
+</style>
+<svg width="0" height="0" style="position:absolute"><filter id="wobble" color-interpolation-filters="sRGB">
+  <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="3"/>
+  <feDisplacementMap in="SourceGraphic" scale="9" xChannelSelector="R" yChannelSelector="G"/></filter></svg>
+<p>Second row: <code>filter: url(#wobble)</code> (a displacement map) on the box. Its own black lines <b>and</b> the red
+lines of its 3D-transformed child should both be wavy. If the red lines stay straight, the filter skipped the child.</p>
+<div class="row"><code>no filter (reference)</code><div class="box"><div class="kid"></div></div></div>
+<div class="row"><code>filtered</code><div class="box f"><div class="kid"></div></div></div>
+<!--
+Observed (2026-10-25):
+- Safari 26.6.2 (macOS 25G83): the box's black lines are wavy, its child's red lines straight: the child is drawn
+  unfiltered. The same with any composited descendant (a 3D transform, or an element that overlaps one and is pushed
+  into its own layer). In css-physics the whole scene is 3D, so the pencil art style's wobble (filter: url(#art-pencil)
+  on .view) doesn't show at all (experiments/safari/filter.html, ../css-physics ARCHITECTURE.md §7).
+- Chrome 153, Firefox 155: both wavy.
+Spec (Filter Effects 1, §5 "The filter property"): "The filter property ... applies to the element and its
+descendants as a whole"; the SourceGraphic is the element's rendering including its descendants.
+Likely cause: WebKit can't run SVG reference filters on Core Animation layers; it paints them in software for the
+layer's own content (bugs.webkit.org 75842, 2012), and a descendant that has its own compositing layer isn't part of
+that painting. No report found for it (searched: reference filter composited, SVG filter composited layer, filter url
+accelerated, css filter url 3d transform).
+-->
+</html>

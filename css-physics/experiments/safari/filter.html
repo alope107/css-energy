@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SVG displacement filter over 3D content</title>
+<!--
+  Does `filter: url(#wobble)` (feTurbulence + feDisplacementMap, as the pencil art style's #art-pencil) wobble the lines
+  of an element whose children are 3D-transformed? (rigid3d.css puts it on .view, the perspective container; Safari 26.6
+  drew pencil's lines straight.) Each row: the same box with straight lines, without the filter (left) and with it
+  (right). Wobbly lines on the right mean the filter applies. experiments/safari/filter.js diffs the two in screenshots.
+-->
+<style>
+/* === Probe === */
+body{margin:0;padding:12px;font:13px/1.4 ui-monospace,Menlo,monospace;background:#fff}
+.row{display:flex;gap:24px;align-items:center;margin:6px 0}
+.row>code{width:330px}
+.box{width:180px;height:90px;position:relative;
+  background:repeating-linear-gradient(90deg,#000 0 1px,transparent 1px 12px),repeating-linear-gradient(0deg,#000 0 1px,transparent 1px 12px)}
+.f{filter:url(#wobble)}
+/* --- Variants --- */
+.p3{perspective:600px}
+.p3>.t{position:absolute;inset:10px;transform:rotateX(30deg);transform-style:preserve-3d;background:repeating-linear-gradient(45deg,#c00 0 1px,transparent 1px 8px)}
+.p3>.t>i{position:absolute;inset:10px;transform:translateZ(10px);border:1px solid #00c;display:block}
+.wrap{display:inline-block}
+.wc{will-change:transform}
+.sc{transform-origin:0 0;transform:scale(.9)}
+.p3>.t.wct>i{will-change:transform}
+@keyframes spin{to{transform:translateZ(10px) rotate(360deg)}}
+.p3>.t.ani>i{animation:spin 4s linear infinite}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><filter id="wobble" x="-3%" y="-3%" width="106%" height="106%" color-interpolation-filters="sRGB">
+  <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="7"/>
+  <feDisplacementMap in="SourceGraphic" scale="6" xChannelSelector="R" yChannelSelector="G"/></filter></svg>
+<p>Right of each pair: the lines should wobble.</p>
+<div class="row" id="A"><code>A 2D box</code><div class="box"></div><div class="box f"></div></div>
+<div class="row" id="B"><code>B perspective + 3D child</code><div class="box p3"><div class="t"><i></i></div></div><div class="box p3 f"><div class="t"><i></i></div></div></div>
+<div class="row" id="C"><code>C filter on B's parent</code><div class="wrap"><div class="box p3"><div class="t"><i></i></div></div></div><div class="wrap f"><div class="box p3"><div class="t"><i></i></div></div></div></div>
+<div class="row" id="D"><code>D 2D box, will-change: transform</code><div class="box wc"></div><div class="box wc f"></div></div>
+<div class="row" id="E"><code>E 2D box inside a 3D-rotated parent</code><div style="perspective:600px"><div class="box" style="transform:rotateY(10deg)"></div></div><div style="perspective:600px"><div class="box f" style="transform:rotateY(10deg)"></div></div></div>
+<div class="row" id="F"><code>F B + transform: scale (the page's .view)</code><div class="box p3 sc"><div class="t"><i></i></div></div><div class="box p3 sc f"><div class="t"><i></i></div></div></div>
+<div class="row" id="G"><code>G B inside a scaled parent</code><div class="wrap sc"><div class="box p3"><div class="t"><i></i></div></div></div><div class="wrap sc"><div class="box p3 f"><div class="t"><i></i></div></div></div></div>
+<div class="row" id="H"><code>H filter on G's scaled parent</code><div class="wrap sc"><div class="box p3"><div class="t"><i></i></div></div></div><div class="wrap sc f"><div class="box p3"><div class="t"><i></i></div></div></div></div>
+<div class="row" id="I"><code>I B, 3D grandchild will-change: transform</code><div class="box p3"><div class="t wct"><i></i></div></div><div class="box p3 f"><div class="t wct"><i></i></div></div></div>
+<div class="row" id="J"><code>J B, 3D grandchild animates its transform</code><div class="box p3"><div class="t ani"><i></i></div></div><div class="box p3 f"><div class="t ani"><i></i></div></div></div>
+</body>
+</html>
