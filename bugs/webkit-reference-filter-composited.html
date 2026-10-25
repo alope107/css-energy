@@ -26,7 +26,7 @@ Observed (2026-10-25):
   unfiltered. The same with any composited descendant (a 3D transform, or an element that overlaps one and is pushed
   into its own layer). In css-physics the whole scene is 3D, so the pencil art style's wobble (filter: url(#art-pencil)
   on .view) doesn't show at all (experiments/safari/filter.html, ../css-physics ARCHITECTURE.md §7).
-- Chrome 153: both wavy.
+- Chrome 153, Firefox 155: both wavy.
 Spec (Filter Effects 1, §5 "The filter property"): "The filter property ... applies to the element and its
 descendants as a whole"; the SourceGraphic is the element's rendering including its descendants.
 Likely cause: WebKit can't run SVG reference filters on Core Animation layers; it paints them in software for the
