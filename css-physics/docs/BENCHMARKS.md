@@ -178,6 +178,27 @@ margins, a feature query in place of `-moz-appearance`) add no property or rule:
 scene at 1–3.5 s and on a 48-body rain pile; a state where rounding flips a box corner's clip shows 1–7 of 168,000
 values beyond 1e-2, up to 0.17. Firefox: up to 2.7e-3.
 
+### Safari (macOS)
+
+Safari 26.6.2 on the Mac host (macOS 25G83, a 60 Hz display), driven from the devcontainer through safaridriver
+(`BROWSER=safari`), 2026-10-25. Not the mini PC: compare Safari with Safari only. Published pages (`out/rigid3d*.html`),
+`perf3.js` (its drag column means nothing in Safari: safaridriver runs one command at a time, so the frame count waits
+for the moves; Safari has no `if()`, so its names never drop and `perf3` can't see it settle):
+
+| Page | Chaos fps (1 s windows) | Idle fps | Hold fps |
+|---|---|---|---|
+| 16 | 61 62 62 62 62 59 | 61 | 61 |
+| 32 | 41 41 44 50 53 48 | 61 | 45 |
+| 48 | 18 16 15 14 13 15 | 61 | 22 |
+| 64 | 9 9 9 8 7 7 | 8 | 7 |
+
+One step per frame, as in WPE: 60 steps/s, so the physics runs at two-thirds speed (ARCHITECTURE.md §7).
+The explicit-inherit workaround (§7) costs Chrome nothing: the live 16-body tower (PLAIN), `ab.js -p bigmed 'node
+tools/tr.js {} 1500 1500'`, 15 interleaved rounds without a lease: 5.90 ms against 5.89 without it (A/A 5.87).
+Pencil's displacement filter on every plane in Safari (rain, first 4 s): 62 -> 29–39 fps at 16 bodies, 24–27 -> 14 at 32
+(a moving face repaints, and is filtered again, every frame); on the scenery only (what ships): 62 at 16, 23–25 at
+32; no filter at all (Safari before, the filter on `.view` being ignored): 62 at 16.
+
 ### Art styles
 
 The original page (the default style) against the page without the styles (main), 2026-10-24, `ab.js -p bigmed

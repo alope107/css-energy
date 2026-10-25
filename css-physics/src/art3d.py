@@ -22,7 +22,8 @@ Cost: the original page must cost what it did without the styles (BENCHMARKS.md 
 In `css`, a selector that starts with & is the root itself, one that starts with body is under the root, and any
 other is under #app. In `k` and `vars`, {lam} is the face's lighting term and {l} = max(0, lam); `k` gives the face
 colour --k<fi> (declared on .bx, inherited by the face), `vars` more per-face values (--<name><fi>, unregistered,
-so faces inherit them). In `face`, {k}, {<var name>} and {fi} are the face's.
+so faces inherit them). In `face`, {k}, {<var name>} and {fi} are the face's. `webkit`: flat rules scoped as `css`
+and applied in WebKit only (for what Safari draws differently: pencil's filter).
 """
 import math
 import re
@@ -143,6 +144,10 @@ header h1{{font-family:'Bradley Hand','Segoe Print','Chalkboard SE','Comic Sans 
 .disc::after{{background:repeating-linear-gradient(-45deg,{GRAPH}/.65) 0 .8px,transparent .8px 4.2px);
   -webkit-mask:radial-gradient(circle at 30% 24%,transparent 62%,#000 96%);mask:radial-gradient(circle at 30% 24%,transparent 62%,#000 96%)}}
 .sp .eq{{border-width:1.2px}}""",
+      # (WebKit draws the scene's planes on their own compositing layers, which a filter on .view never reaches: there
+      # the scenery wobbles plane by plane. Not the bodies: a moving face repaints, and its filter with it, every frame:
+      # 62 -> 30 fps at 16 bodies in Safari 26.6; the scenery is painted once, 62 fps)
+      webkit=".view{filter:none}.floor,.ceil,.post,.rail{filter:url(#art-pencil)}",
       svg="""<filter id="art-pencil" x="-3%" y="-3%" width="106%" height="106%" color-interpolation-filters="sRGB">
   <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="7"/>
   <feDisplacementMap in="SourceGraphic" scale="3.5" xChannelSelector="R" yChannelSelector="G"/></filter>""")
@@ -378,6 +383,10 @@ def css(lams, lbl):
     for name, s in STYLES.items():
         out.append(lbl.group(f'Style: {name}'))
         out.append(_scope(name, s['css']))
+        if s.get('webkit'):
+            # (WebKit only: a reference filter there skips composited descendants, and every body and scenery plane is
+            # one; ../../bugs/webkit-reference-filter-composited.html)
+            out.append('@supports (-webkit-backdrop-filter: none){' + _scope(name, s['webkit']) + '}')
         if s.get('keyframes'):
             out.append(s['keyframes'])
         # every frame: one rule on .bx (the faces' colours), one per face, .sp, .sh and `frame`, behind .cam's name

@@ -9,7 +9,11 @@ let settle=-1;for(let i=0;i<40;i++){const cn=await p.evaluate(()=>getComputedSty
 const idle=(await fpsFor(1500)).toFixed(0);
 const {proj}=await arena(p);
 const [bx,by]=proj([70,-145,10]);await p.mouse.move(bx,by);await p.mouse.down();
-let k=0;const dr=fpsFor(3000);const st=Date.now();while(Date.now()-st<3000){await p.mouse.move(bx+80*Math.sin(k/7),by-60-40*Math.cos(k/5));k++;await p.waitForTimeout(16)}const drag=(await dr).toFixed(0);
+// (the drag's frames are counted in the page while the moves go in: an evaluate that waits 3 s would hold the moves back
+// in a driver that runs one command at a time, safaridriver)
+await p.evaluate(()=>{const c=window.__fc={n:0,t0:performance.now(),on:true};(function f(){if(c.on){c.n++;requestAnimationFrame(f)}})()});
+let k=0;const st=Date.now();while(Date.now()-st<3000){await p.mouse.move(bx+80*Math.sin(k/7),by-60-40*Math.cos(k/5));k++;await p.waitForTimeout(16)}
+const drag=(await p.evaluate(()=>{const c=window.__fc;c.on=false;return c.n*1000/(performance.now()-c.t0)})).toFixed(0);
 const still=(await fpsFor(1500)).toFixed(0);await p.mouse.up();
 console.log(f.padEnd(18),'chaos',chaos.join(' '),'| settled',settle,'s | idle',idle,'| drag',drag,'| hold',still);await p.close()}
 await b.close()})();

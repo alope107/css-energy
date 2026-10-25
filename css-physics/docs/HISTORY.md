@@ -82,6 +82,15 @@ Numbers are from BENCHMARKS.md (mini PC, Chromium 153) unless marked "141" (an o
 - **Shrinking boxes 2–4%** so resting faces don't intersect: Firefox still draws whole bodies in document order.
 - **A second step per frame:** not found; Firefox samples view timelines once per tick.
 
+### Safari (Oct 25, the real Safari 26.6 on macOS)
+
+- **Making pencil's filter on `.view` reach the scene:** `overflow: hidden`, `contain: paint`, `isolation: isolate`,
+  `will-change: filter` or `transform`, `clip-path: inset(0)` on `.view`: no effect. WebKit runs a reference filter
+  on the layer's own painting only, and every plane of the scene is its own layer
+  (`../../bugs/webkit-reference-filter-composited.html`).
+- **The filter on every plane instead, bodies included:** wobbles everything, but a moving face repaints and is
+  filtered again every frame: 62 -> about 30 fps at 16 bodies. The scenery alone costs nothing (BENCHMARKS.md "Safari").
+
 ### Safari (Oct 21)
 
 - **Registering `SC` and `GYP` as `<integer>`** so their registers read back exact: WebKit doesn't round an animated
