@@ -38,6 +38,9 @@ const r=await p.evaluate(T=>new Promise(res=>{
 await b.close();
 let bad=false;const parts=[];
 for(const [k,[m,off,worst]] of Object.entries(r.kinds)){const fail=off>Math.max(2,m*0.01);bad=bad||fail;parts.push(`${k} ${off}/${m} off (worst ${worst.toPrecision(2)})${fail?' FAIL':''}`)}
+// (and a run that checked nothing fails too: too few frames (a hidden window draws one every few seconds) or no body
+// moving (the engine didn't run))
+const idle=r.frames<T/1000*10||!r.kinds.rotation[0];if(idle)parts.push(`only ${r.frames} frames, ${r.kinds.rotation[0]} moving body-frames: nothing checked`);bad=bad||idle;
 console.log(`${bad?'FAIL':'PASS'} ${f}: ${r.frames} frames; body-frames moving with the drawn copy off: ${parts.join(', ')}`);
 if(bad)for(const e of r.ex)console.log('  '+e);
 process.exit(bad?1:0)})();

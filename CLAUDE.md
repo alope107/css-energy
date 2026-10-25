@@ -76,7 +76,8 @@ turns up (a wrong result, an invalidation that doesn't happen, a crash, a spec v
 - **Whenever you have something new for the user, build it and give them a link to test it by hand, plus the
   build's path.**
   - Serve the repo root in the background:
-    `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspaces/css-energy` (VS Code forwards the port).
+    `python3 -m http.server 8765 --bind 127.0.0.1 --protocol HTTP/1.1 --directory /workspaces/css-energy` (VS Code
+    forwards the port; over HTTP/1.0 the forwarding drops some of a page's files: `shared/README.md#safari-on-the-mac-host`).
   - Link `http://localhost:8765/<path from the repo root>`. A worktree's build is under
     `.claude/worktrees/<name>/`.
   - Check the link with `curl -sI` before handing it over.

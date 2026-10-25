@@ -45,8 +45,8 @@ Safari's Settings > Advanced > "Show features for web developers", then Develop 
 - **Reaching it.** `host.docker.internal` resolves to the Mac (use its IPv4 address: the IPv6 one is unreachable);
   safaridriver binds to the Mac's localhost, which Docker Desktop passes through, and refuses any request whose `Host`
   header isn't localhost, so `safari.js` sends `Host: localhost:4444`. `SAFARIDRIVER=http://host:port` overrides.
-- **Pages.** Safari loads them from the repo-root server (`python3 -m http.server 8765 --bind 127.0.0.1 --directory
-  /workspaces/css-energy`, the main checkout, worktrees included) through VS Code's forwarding of port 8765; a path or
+- **Pages.** Safari loads them from the repo-root server (`python3 -m http.server 8765 --bind 127.0.0.1 --protocol
+  HTTP/1.1 --directory /workspaces/css-energy`, the main checkout, worktrees included) through VS Code's forwarding of port 8765; a path or
   `file://` URL under the main checkout becomes `http://localhost:8765/<path>`. If Safari shows "can't connect",
   VS Code isn't forwarding 8765: check its Ports panel.
 - **One session at a time**, in a visible Safari window that automation takes over (touching it ends the session).
@@ -58,10 +58,16 @@ Safari's Settings > Advanced > "Show features for web developers", then Develop 
   after the first ([`../bugs/safaridriver-pressed-button.sh`](../bugs/safaridriver-pressed-button.sh)): Safari ends
   `:active` mid-drag. While the button is down `safari.js` starts every move with a `pointerDown` again, which keeps
   `:active` on (the page sees another mousedown per move; no script here listens).
-- **Flaky transfers.** VS Code's port forwarding now and then stalls in the middle of a large file (a few hundred
-  elements parsed, then nothing for minutes) or drops one (a published page's 2 MB stylesheet missing: the engine
-  never runs, and the load event comes anyway). `goto` loads the page again after 10 s without progress, or when a
-  linked stylesheet is missing (4 tries, said on stderr).
+- **Serve with HTTP/1.1.** `python3 -m http.server` speaks HTTP/1.0 unless told otherwise: a connection per file,
+  and VS Code's port forwarding drops or stalls some of a page's 15 parallel ones. Uncached (`no-store`), 15 of 20
+  loads of the 32-body page lost a stylesheet (the engine never runs, and the load event comes anyway) and the
+  single-file pages stalled mid-parse; gzip alone made it 8 of 20; `--protocol HTTP/1.1` (keep-alive), 0 of 20, and 0
+  of 10 single-file loads (2026-10-25). With HTTP/1.0 a by-hand test in Safari can look dead until reloaded. `goto`
+  still loads the page again after 10 s without progress, or when a linked stylesheet is missing (4 tries, said on
+  stderr).
+- **A hidden window draws no frames.** The automation window can come up minimized or behind (the page `hidden`,
+  a frame every few seconds); `goto` maximizes it then, and says so on stderr if it stays hidden (the Mac's display
+  asleep or locked: nothing to do from here).
 - **What you get:** `evaluate` (promises awaited), computed styles, element boxes, mouse input, window screenshots at
   the Mac's device pixel ratio. **What you don't:** CDP (no tracing, virtual time, screencast or touch), console
   logs, parallel runs. Motion is sampled from inside the page (`requestAnimationFrame`).

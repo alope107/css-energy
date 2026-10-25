@@ -10,7 +10,8 @@
 // once, then `safaridriver -p 4444`. The container reaches it at host.docker.internal (IPv4: its IPv6 address is
 // unreachable); safaridriver refuses any request whose Host header isn't localhost, so every request says so.
 // SAFARIDRIVER=http://host:port overrides the address.
-// Safari loads pages from the repo-root server (python3 -m http.server 8765 --bind 127.0.0.1 --directory <main checkout>)
+// Safari loads pages from the repo-root server (python3 -m http.server 8765 --bind 127.0.0.1 --protocol HTTP/1.1
+// --directory <main checkout>; HTTP/1.0, the default, loses files in the forwarding: shared/README.md#safari-on-the-mac-host)
 // through VS Code's forwarding of port 8765; a file:// URL or path under the main checkout (a worktree's included)
 // becomes http://localhost:8765/<path>. SERVE=url overrides the base. Pages outside it can't be loaded.
 // One session at a time (safaridriver's limit): newPage opens the session, a second concurrent page is an error.
@@ -63,7 +64,7 @@ const fileUrl = f => toUrl(path.resolve(f));
 // the repo-root server must answer here, or Safari has nothing to load
 async function checkServer() {
   await new Promise((resolve, reject) => http.get('http://127.0.0.1:8765/', r => { r.resume(); resolve(); })
-    .on('error', () => reject(new Error('safari.js: nothing serves the repo root on :8765; start python3 -m http.server 8765 --bind 127.0.0.1 --directory ' + ROOT))));
+    .on('error', () => reject(new Error('safari.js: nothing serves the repo root on :8765; start python3 -m http.server 8765 --bind 127.0.0.1 --protocol HTTP/1.1 --directory ' + ROOT))));
 }
 
 let open = null;  // the one session's page
@@ -124,6 +125,7 @@ async function launch() {
       open = page(caps.sessionId);
       // (evaluate runs as long as the tool's script does: smoke.js watches the page for MS, 12 s by default)
       await wd('POST', `/session/${caps.sessionId}/timeouts`, { script: SCRIPT_MS });
+      open.viewport = opts.viewport;
       if (opts.viewport) await open.setViewportSize(opts.viewport);
       return open;
     },
@@ -150,6 +152,19 @@ function page(sid) {
   const frames = () => evaluate(() => new Promise(res => { let n = 0; const t = performance.now();
     (function f() { if (++n < 30 && performance.now() - t < 1000) requestAnimationFrame(f); else res(n); })(); }))
     .then(n => `${n} frames drawn in the next second${n < 5 ? ': is the Mac\'s display asleep or the Safari window hidden?' : ''}`);
+  // The automation window can be hidden (minimized, behind, on another desktop): the page is then `hidden` and Safari
+  // draws a frame every few seconds, so anything that waits for frames stalls. Maximizing it brings it to the front
+  // (then the size asked for again). A display that sleeps or a locked screen it can't help.
+  const show = async () => {
+    if (await evaluate(() => document.visibilityState) !== 'hidden') return;
+    await cmd('POST', '/window/maximize', {}).catch(() => {});
+    // (it shows up to a second or two later)
+    for (const t = Date.now(); Date.now() - t < 5000 && await evaluate(() => document.visibilityState) === 'hidden'; )
+      await new Promise(r => setTimeout(r, 200));
+    if (P.viewport) await P.setViewportSize(P.viewport);
+    if (await evaluate(() => document.visibilityState) === 'hidden')
+      console.error('safari.js: the Safari window stays hidden (the Mac\'s display asleep or locked?): frames will barely run');
+  };
   const P = {
     sid,
     frames,
@@ -167,7 +182,7 @@ function page(sid) {
       for (let attempt = 1; ; attempt++) {
         await cmd('POST', '/url', { url: toUrl(u) });
         let st, last = -1, since = Date.now();
-        for (;;) { st = await state(); if (st.readyState === 'complete') { if (!st.missing.length) return; break; }
+        for (;;) { st = await state(); if (st.readyState === 'complete') { if (!st.missing.length) return show(); break; }
           if (st.elements !== last) { last = st.elements; since = Date.now(); }
           if (Date.now() - since > 10000) break;
           await new Promise(r => setTimeout(r, 50)); }
