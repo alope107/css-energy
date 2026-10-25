@@ -54,6 +54,20 @@ assert OUT_BASE % 4 == 0 and ROM % 4 == 0
 WOFF = M20 = 1 << 20; A15 = 32768
 NSET, NWAY = 16, 2; NL = NSET * NWAY
 CH = 'ABCDEFGHIJKL'[:2 * ISSUE]; sp0 = image['sp0']; CODE0 = image['codeBase']; DB = R.LAYOUT['data_base']
+# RAMNI=1: the RAM trees' properties don't inherit (explicit inherit per node: the restyle stops one level off a write's
+# path, ENGINE_NOTES 87; the default, RAMNI=0 for the inherited trees). RAMDEC=1: the leaves past the named area are unnamed; each bank's tree has two read paths that
+# name the missing block's leaf --rx<bank> and the next one's --ry<bank>, the block arriving through layout (the box .ab
+# at the chain's end, a fixed size container .memx around the RAM: exp/ram/README.md)
+RAMNI = os.environ.get('RAMNI', '1') == '1'; RAMDEC = os.environ.get('RAMDEC') == '1'
+if RAMDEC: RAMNI = True
+# STAGE=s[,s2...] (exp/ram; csssim MIDS=... MIDW=<stages + 1> MIDPF=0 MIDIC=0): a fill stage between levels s - 1 and s. A data
+# miss above it is filled there in the same pass: two fixed size containers as wide and tall as the missing block's four words
+# (anchor-size() of its leaves, the names picked by a style query on the block's high digit), then .fl's line update; the
+# stalled instruction re-executes at level s with its latches. Stage j's dirty victim leaves through write set j (CHS[j]).
+# The default is one stage at level 16 (K/2; none for K < 4); STAGE=0 for none (BENCHMARKS §22).
+STAGES = [int(x) for x in os.environ.get('STAGE', str(K // 2) if K >= 4 else '0').split(',') if x and x != '0']
+CHS = ['MNOPQRST', 'UVWXYZab', 'cdefghij'][:len(STAGES)]; CHS = [c[:2 * ISSUE] for c in CHS]
+CHW = CH + ''.join(CHS)
 
 def eq(x, c): return f"calc(1 - min(1, max(({x}) - ({c}), ({c}) - ({x}))))"     # 1 iff x == c (integers)
 def s20(e): return f"calc(mod({e} + {1 << 19}, {M20}) - {1 << 19})"
@@ -79,8 +93,8 @@ regs = [("rpc", A15, 0, "var(--pc)"), ("rfp", A15, 0, "var(--fp)"), ("roptr" if 
         ("init", 2, 0, "var(--ccok)" if REPLP else "1"), ("k", 16, 0, "var(--nk)"), ("par", 2, 0, "var(--npar)"), ("tprev", 65536, 0, "var(--t)")]
 regs += [(f"T{k}", 16384, 0, f"var(--T{k})") for k in range(NL)] + [(f"F{s}", 2, 0, f"var(--F{s})") for s in range(NSET)]
 regs += [(f"W{k}_{j}", M20, M20 // 2, f"var(--W{k}_{j})") for k in range(NL) for j in range(4)]
-WREGS = [(f"wa{w}{c}", BANKN + 1, 0, f"var(--nwa{w}{c})") for w in range(WB) for c in CH] + \
-        [(f"wd{w}{c}", 1 << 21, 1 << 20, f"var(--nwd{w}{c})") for w in range(WB) for c in CH]
+WREGS = [(f"wa{w}{c}", BANKN + 1, 0, f"var(--nwa{w}{c})") for w in range(WB) for c in CHW] + \
+        [(f"wd{w}{c}", 1 << 21, 1 << 20, f"var(--nwd{w}{c})") for w in range(WB) for c in CHW]
 # the console's trees: a program's grid's (KS leaves a bank, as before the REPL), and the whole console's (KN: the REPL's grid
 # and its marks; groups of 16 leaves), which are display: none but on the REPL. Both take the same channels; cells in both get
 # both's writes, and a read takes the later tree's. A program's page then costs what it did: with the whole console's trees
@@ -109,6 +123,9 @@ def isel(key, val):
     return lo(0) if ISET == 8 else "if(" + " ".join(f"style(--{key}hi: {h}): {lo(h)};" for h in range(ISET // 8 - 1)) + f" else: {lo(ISET // 8 - 1)})"
 regs += [("stale", 2, 0, f"calc(var(--fd) * {eq('var(--pend) - 1', 'var(--fvb)')} * min(1, var(--pend)))"),
          ("pstale", 2, 0, f"calc(var(--fd) * {eq('var(--pend)', 'var(--fvb)')} * min(1, var(--pend)))")]
+if STAGES:     # (a block a stage wrote back is stale for the next pass's fill too)
+    wbk = lambda x: "min(1, var(--fd) * " + eq(x, 'var(--fvb)') + "".join(f" + var(--sfd{j}) * {eq(x, f'var(--sfvb{j})')}" for j in range(len(STAGES))) + ")"
+    regs[-2:] = [("stale", 2, 0, f"calc({wbk('var(--pend) - 1')} * min(1, var(--pend)))"), ("pstale", 2, 0, f"calc({wbk('var(--pend)')} * min(1, var(--pend)))")]
 # NET: the request a waiting NET leaves at the chain's end (the modem iframe's height), and the clock (--t, 600 a second)
 # when this request began: a new request takes the time (consecutive words always differ, by the sequence bit, even when
 # a read() loop's next NET stalls in the pass the last one completed). NWAIT ticks without an answer give -1 (no gateway:
@@ -160,6 +177,9 @@ cpu = ["--first: calc(1 - var(--init));",
 cpu += [f"--fwd{w}: " + sel("fk", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
 cpu += [f"--Lb{n}: mod(round(down, var(--rLm) / {b}), 2);" for n, b in LATCH.items()]
 HOT = range(R.LAYOUT["data_base"] // 4, (R.LAYOUT["data_base"] + 2048) // 4)     # the blocks runs mostly read: globals, strings, code (read ports, below)
+# RAMDEC: the named leaves (the compile chain's overlays share these names and win by tree order: code, strings, the .fin
+# cells up to strend), read through the HOT mux; the rest through the read paths
+if RAMDEC: HOT = range(R.LAYOUT["data_base"] // 4, R.LAYOUT["rt_base"] // 4)
 
 # ---------------- reads: a word through the cache. For read n of address A: block b, word u, set z, hits h (way 0) and
 # H (way 1), each one if() over the set comparing that way's tag, and the word v (set, then way, then word).
@@ -1006,6 +1026,9 @@ P += [f"{x}{w}" for w in range(WB) for x in ("fwd", "wA", "wD", "cA", "cD", "nwA
 P += [f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch")] + [f"n{i}" for i in range(8)]
 P += [f"n{r[0]}" for r in WREGS]
 P += [x + n for n in READS for x in LOOKUP] + [f"v{n}" for n in READS if n not in ("w", "p", "l")] + [f"lw{j}" for j in range(4)]
+for j in range(len(STAGES)):
+    P += [f"{x}{j}" for x in ("son", "sstale", "sxb", "sfs", "sfv", "sfk", "sfT", "sfabs", "sfd", "sfvb", "sfk1", "sxh", "sxl")] + \
+         [f"sw{j}_{i}" for i in range(4)] + [f"{x}{j}_{w}" for w in range(WB) for x in ("sfwd", "sA", "sD")]
 P = list(dict.fromkeys(P))
 _unreg = {m for _, d in cls_rules.values() for x in d for m in re.findall(r'(?:^|;\s*)--([\w-]+):', x)} - set(P)
 assert not _unreg, f'declared by an instruction class but not registered: {sorted(_unreg)}'
@@ -1020,6 +1043,7 @@ LOCAL |= {"pp", "isStr", "isNum", "pq", "pdone", "pj0", "mpp", "pa", "pneg", "pL
 LOCAL |= {f"{x}{i}" for i in range(4) for x in ("pg", "pnb", "pb", "pc", "pr", "pch", "pi", "dp")}
 props += [f'@property --{n} {{ syntax: "<integer>"; inherits: {"false" if n in LOCAL else "true"}; initial-value: 0; }}' for n in P]
 props += [f'@property --sR{i} {{ syntax: "<custom-ident>"; inherits: false; initial-value: --c0; }}' for i in range(2 * WB)]   # a port's leaf name
+props += [f'@property --sn{j}_{i} {{ syntax: "<custom-ident>"; inherits: true; initial-value: --rom; }}' for j in range(len(STAGES)) for i in range(4)]   # the stages' leaf names
 
 css = [lbl.section('CPU: clock, registers, frame gate, the fill\'s victims', 'on #cpu: the registers are view timelines'),
        "#clk { animation: wc 100s linear infinite; }\n@keyframes wc { from { --t: 0; } to { --t: 60000; } }",
@@ -1095,13 +1119,15 @@ for i in range(2 * WB):
     leaf = lambda b, w=w: leafname(4 * b + w)
     css.append(f".rp{i} {{ width: anchor-size(var(--sR{i}) width, {WOFF}px); }}")
     css.append(f"@container style(--xon: 1) and style(--{q}hot: 1) {{ .rp{i} {{ --sR{i}: {mux(q, set(HOT), leaf, f'--c{w}')}; }} }}")
-    css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(RB0, BLKS)) - set(HOT), leaf, '--rom')}; }} }}")
+    if RAMDEC: css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: --r{q[0]}{w}; }} }}")    # (a ROM block: no leaf takes the name, 0)
+    else: css.append(f"@container style(--xon: 1) and style(--{q}hot: 0) {{ .rp{i} {{ --sR{i}: {mux(q, set(range(RB0, BLKS)) - set(HOT), leaf, '--rom')}; }} }}")
 
 css.append(lbl.section('The fill', 'the victim line takes the pending block (a dirty victim\'s words are the pass\'s RAM write set), and the prefetch line the next'))
 css.append(".fl { --stop: calc(1 - var(--go) * (1 - var(--halt))); --pend: var(--pend0); --pic: 0; --cw: 0; --lat: 1; --req: 0;"
            f" --rom: {rom_of('var(--pc)')}; --Lm: calc((1 - var(--go)) * var(--rLm));"
            + " ".join(f"--L{n}: var(--rL{n});" for n in LATCH if n != "p") + " ".join(f" --Lp{j}: var(--rLp{j});" for j in range(4)) + "\n  " +
-           " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) + " }")
+           " ".join(f"--wA{w}: calc(var(--fd) * (var(--fvb) - {RB0 - 1})); --wD{w}: var(--fwd{w}); --cA{w}: 0; --cD{w}: 0;" for w in range(WB)) +
+           "".join(f" --sA{j}_{w}: 0; --sD{j}_{w}: 0;" for j in range(len(STAGES)) for w in range(WB)) + "".join(f" --sfd{j}: 0; --sfvb{j}: 0;" for j in range(len(STAGES))) + " }")
 if REPLP: css += [f"@container style(--xk1: {k + 1}) {{ .fl {{ --T{k}: calc(var(--fT) - 1); }} }}" for k in range(NL)]    # (written back: clean)
 css += [f"@container style(--fk1: {k + 1}) {{ .fl {{ --T{k}: calc(2 * var(--fb) + 2); --F{k // 2}: {1 - k % 2}; " +
         " ".join(f"--W{k}_{j}: var(--mv{j});" for j in range(4)) + " } }" for k in range(NL)]
@@ -1138,13 +1164,48 @@ css += [f"@container style(--pout: 1) and style(--dp{w}: 1) {{ .c {{ --cA{w}: va
 css += [f"@container style(--wz: {s + 1}) {{ .c {{ " + " ".join(f"--W{2 * s + i // 4}_{i % 4}: var(--n{i});" for i in range(8)) +
         f" --T{2 * s}: var(--nT0); --T{2 * s + 1}: var(--nT1); }} }}" for s in range(NSET)]
 
+for j, lvj in enumerate(STAGES):
+    css.append(lbl.section(f'Fill stage {j} (between levels {lvj - 1} and {lvj})', 'a data miss above it filled in the same pass: .sa decides, .sr1 / .sr2 '
+                           'read the block\'s words as their sizes, .sf updates the line and resumes the chain with the stalled instruction\'s latches'))
+    v_ = lambda n: f"var(--{n}{j})"
+    css.append(f".sa{j}, .sf{j} {{ display: contents; }} .sa{j} {{ --son{j}: 0; --sfk1{j}: 0; --sfd{j}: 0; }}")
+    sa = [f"--sxb{j}: max(0, var(--pend) - 1);", f"--sfs{j}: {setof(v_('sxb'))};",
+          f"--sfv{j}: " + sel(f"sfs{j}", NSET, lambda s_: f"var(--F{s_})") + ";", f"--sfk{j}: calc(2 * {v_('sfs')} + {v_('sfv')});",
+          f"--sfT{j}: " + sel(f"sfk{j}", NL, lambda k: f"var(--T{k})") + ";",
+          f"--sfabs{j}: " + sel(f"sfs{j}", NSET, lambda s_: f"calc(1 - {eq(f'round(down, var(--T{2 * s_}) / 2)', v_('sxb') + ' + 1')} - {eq(f'round(down, var(--T{2 * s_ + 1}) / 2)', v_('sxb') + ' + 1')})") + ";",
+          # (a block .fl or an earlier stage wrote back this pass: its leaf holds the old words until the channels apply, next pass)
+          f"--sstale{j}: min(1, calc(var(--fd) * {eq(v_('sxb'), 'var(--fvb)')}" + "".join(f" + var(--sfd{i}) * {eq(v_('sxb'), f'var(--sfvb{i})')}" for i in range(j)) + "));",
+          f"--son{j}: calc(var(--go) * (1 - var(--halt)) * min(1, var(--pend)) * (1 - {v_('sstale')}) * {v_('sfabs')});",
+          f"--sfd{j}: calc({v_('son')} * mod({v_('sfT')}, 2));", f"--sfvb{j}: calc(round(down, {v_('sfT')} / 2) - 1);",
+          f"--sfk1{j}: calc({v_('son')} * ({v_('sfk')} + 1));", f"--sxh{j}: round(down, {v_('sxb')} / 64);", f"--sxl{j}: mod({v_('sxb')}, 64);"]
+    sa += [f"--sfwd{j}_{w}: " + sel(f"sfk{j}", NL, lambda k, w=w: f"var(--W{k}_{w})") + ";" for w in range(WB)]
+    css.append(f"@container style(--stop: 1) and style(--pic: 0) {{ .sa{j} {{ " + " ".join(sa) + " } }")
+    css.append(f".sr1_{j}, .sr2_{j} {{ display: block; position: fixed; left: 0; top: 0; width: 1px; height: 1px; container-type: size; }}")
+    for h in range(BLKS // 64):
+        nm = lambda i_: "if(" + " ".join(f"style(--sxl{j}: {i}): {leafname(4 * (64 * h + i) + i_)};" for i in range(64)) + " else: --rom)"
+        css.append(f"@container style(--son{j}: 1) and style(--sxh{j}: {h}) {{ .sr1_{j} {{ " + " ".join(f"--sn{j}_{i_}: {nm(i_)};" for i_ in range(4)) + " } }")
+    css.append(f"@container style(--son{j}: 1) {{ .sr1_{j} {{ width: anchor-size(var(--sn{j}_0) width, {WOFF}px); height: anchor-size(var(--sn{j}_1) width, {WOFF}px);"
+               + "".join(f" --Lb{n}: mod(round(down, var(--Lm) / {b}), 2);" for n, b in LATCH.items()) + " } }")
+    css.append(f"@container style(--son{j}: 1) {{ .sr2_{j} {{ width: anchor-size(var(--sn{j}_2) width, {WOFF}px); height: anchor-size(var(--sn{j}_3) width, {WOFF}px);"
+               f" --sw{j}_0: calc(round(100cqw / 1px) - {WOFF}); --sw{j}_1: calc(round(100cqh / 1px) - {WOFF}); }} }}")
+    css.append(f"@container style(--son{j}: 1) {{ .sf{j} {{ --sw{j}_2: calc(round(100cqw / 1px) - {WOFF}); --sw{j}_3: calc(round(100cqh / 1px) - {WOFF});"
+               " --stop: 0; --pend: 0; --lat: 1; --Lm: 0;" + "".join(f" --rL{n}: var(--L{n});" for n in LATCH if n != "p") +
+               "".join(f" --rLp{i}: var(--Lp{i});" for i in range(4)) +
+               "".join(f" --sA{j}_{w}: calc({v_('sfd')} * ({v_('sfvb')} - {RB0 - 1})); --sD{j}_{w}: var(--sfwd{j}_{w});" for w in range(WB)) + " } }")
+    css += [f"@container style(--sfk1{j}: {k + 1}) {{ .sf{j} {{ --T{k}: calc(2 * {v_('sxb')} + 2); --F{k // 2}: {1 - k % 2}; " +
+            " ".join(f"--W{k}_{i}: var(--sw{j}_{i});" for i in range(4)) + " } }" for k in range(NL)]
+
 css.append(lbl.section('Export', 'the write set into the RAM channels; the registers\' subjects'))
 ex = []
 for w in range(WB):
-    for i, c in enumerate(CH):
-        for p_, A_, D_ in (("", f"wA{w}", f"wD{w}"), ("k", f"cA{w}", f"cD{w}")):
-            s_ = f"var(--go) * {eq('var(--chan)', i)} * min(1, var(--{A_}))"
-            rel = f"min(1, var(--{A_})) * {eq(f'var(--{A_})', f'var(--wa{p_}{w}{c})')}"
+    for i, c in enumerate(CHW):
+        # (the console: CH only; RAM: CH for .fl's write set, CHS[j] for stage j's, the same index as the pass's channel)
+        sets_all = [(f"wA{w}", f"wD{w}")] + [(f"sA{j}_{w}", f"sD{j}_{w}") for j in range(len(STAGES))]
+        own = 0 if c in CH else 1 + next(j for j, cs in enumerate(CHS) if c in cs)
+        for p_, A_, D_ in ((("", f"wA{w}", f"wD{w}"), ("k", f"cA{w}", f"cD{w}")) if own == 0 else (("", *sets_all[own]),)):
+            s_ = f"var(--go) * {eq('var(--chan)', i % len(CH))} * min(1, var(--{A_}))"
+            sets = [A_] + ([a_ for a_, _ in sets_all if a_ != A_] if p_ == "" else [])     # a channel lets go of a cell any set now writes
+            rel = "min(1, " + " + ".join(f"min(1, var(--{a_})) * {eq(f'var(--{a_})', f'var(--wa{p_}{w}{c})')}" for a_ in sets) + ")"
             ex += [f"--nwa{p_}{w}{c}: calc({s_} * var(--{A_}) + (1 - {s_}) * (1 - {rel}) * var(--wa{p_}{w}{c}));",
                    f"--nwd{p_}{w}{c}: calc({s_} * var(--{D_}) + (1 - {s_}) * var(--wd{p_}{w}{c}));"]
 ex += ["--xon: min(1, var(--pend));"] + [
@@ -1178,7 +1239,9 @@ if UI:
 else: css.append(memtree.scope(WNAMES + NETTL))
 _sp, _sc = memtree.shared(); props += [lbl.group('RAM write channels')] + _sp; css += _sc
 for w in range(WB):
-    _mp, _mc = memtree.css(CH, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"{w}{c}" for c in CH)}, BANKN, WOFF, prefix=str(w))
+    # (RAMDEC: .memx is (missing block + 2) px wide, (next block + 2) px tall, 1 px when there is no miss)
+    rd = {q: (f"clamp(0, round(100cq{ax} / 1px) - {RB0 + 1}, 1)", f"max(0, round(100cq{ax} / 1px) - {RB0 + 2})") for q, ax in (("x", "w"), ("y", "h"))} if RAMDEC else None
+    _mp, _mc = memtree.css(CHW, {n: (H, OFF) for n, H, OFF, _ in WREGS if n[2:] in (f"{w}{c}" for c in CHW)}, BANKN, WOFF, prefix=str(w), ni=RAMNI, reads=rd)
     props += _mp; css += [lbl.group(f'Bank {w}')] + _mc
 # the whole console's trees: the REPL's page's only ones (the k trees there); a CPU-only page of a REPL session's beside the grid's
 WANTQ = not UI and image.get('repl')
@@ -1205,6 +1268,10 @@ static = f"""
   .status {{ font-family: ui-monospace, monospace; color: #666; font-size: 13px; }} .status b {{ color: #222; margin-right: .8em; font-weight: 600; }}
   .num {{ counter-set: v var(--v); }} .num::after {{ content: counter(v); }}
   .mem {{ height: 0; overflow: hidden; }}
+  .memx {{ position: fixed; left: 0; top: 0; overflow: hidden; visibility: hidden; container-type: size;
+    width: anchor-size(--ab width, 1px); height: anchor-size(--ab height, 1px); }}
+  .memx .mem {{ width: 1px; }}
+  .ab {{ display: block; anchor-name: --ab; width: calc((1 + var(--xon) * (var(--xb) + 1)) * 1px); height: calc((1 + var(--xon) * (var(--yb) + 1)) * 1px); }}
   .w {{ width: fit-content; height: 1px; }}
   .cell {{ display: block; content-visibility: hidden; width: fit-content; height: 1px; contain-intrinsic-size: auto {WOFF}px; }}
   .rp {{ position: fixed; top: 0; left: 0; visibility: hidden; height: 1px; container-type: inline-size; }}
@@ -1265,7 +1332,9 @@ MODEMS = "".join(f'<div class="nslot np{i}"><div class="nclip"><iframe class="mo
                  f' title="network modem {i}" aria-hidden="true"></iframe></div></div>' for i in range(NS))
 STATIC_CELLS = set(range(R.LAYOUT['data_base'] + R.SDATA - ROM, image.get('init', R.LAYOUT['init']) + R.SDATA - ROM)) | {R.LAYOUT['data_base'] - ROM}
 LIVE = (set() if UI else STATIC_CELLS) | {a - ROM for a in R.GINIT}     # on the editor page the compile chain's overlays hold code, strings and staging; the globals start undefined
-mem_html = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE, cg={a - ROM for a in R.GINIT}) for w in range(WB))
+NAMED = {a - ROM for b in HOT for a in range(4 * b, 4 * b + 4)} if RAMDEC else None
+mem_html = "".join(memtree.html(image["ram"], list(range(w, RAMN, WB)), WOFF, prefix=str(w), live=LIVE, cg={a - ROM for a in R.GINIT}, named=NAMED) for w in range(WB))
+if RAMDEC: mem_html = f'<div class="memx">{mem_html}</div>\n'      # (before the chain in tree order: .ab is in flow, laid out before any fixed box)
 # the console's trees and readers in one contain: strict box: a pass that doesn't write the console doesn't lay it out
 con_html = "".join(memtree.html(image["ram"], list(range(OUT_BASE - ROM + w, OUT_BASE - ROM + OUT_SIZE, WB)), WOFF, prefix=f"k{w}") for w in range(WB))
 # the whole console's trees, in a box of their own (.rcons, with the REPL's display): a program's page leaves it display: none
@@ -1283,8 +1352,11 @@ if UI: subj += ('<div class="rp" style="width: anchor-size(--ccdone width, 0px)"
 if REPLP: subj += ('<div class="rp" style="width: anchor-size(--ccstart width, 0px)"><div class="reg" style="height: 8192px">'
                    '<div class="sub" style="view-timeline-name: --ccpc; top: calc(round(100cqi / 1px) * 1px)"></div></div></div>')
 subj += "".join(f'<div class="rp rp{i}"><div class="reg" style="height: {M20}px"><div class="sub" style="view-timeline-name: --mv{i}; top: calc(100cqi - {WOFF - M20 // 2}px)"></div></div></div>' for i in range(2 * WB))
-chain = f'<div class="ex"><div class="regs" aria-hidden="true">{subj}</div></div>'
-for _ in range(K): chain = f'<i class="f"><i class="x"><i class="c">{chain}</i></i></i>'
+chain = f'<div class="ex"><div class="regs" aria-hidden="true">{"<i class=\"ab\"></i>" if RAMDEC else ""}{subj}</div></div>'     # (.ab first: past the registers' boxes, 2^21 px each, its offset saturates LayoutUnit and its height reads 0)
+for lv in range(K - 1, -1, -1):
+    chain = f'<i class="f"><i class="x"><i class="c">{chain}</i></i></i>'
+    if lv in STAGES: j = STAGES.index(lv); chain = f'<i class="sa{j}"><i class="sr1_{j}"><i class="sr2_{j}"><i class="sf{j}">{chain}</i></i></i></i>'
+
 blurb = (f"<p>No font: style alone runs the bytecode, a register machine's three-address instructions. Each layout pass runs up "
          f"to {K} instructions as a chain of nested elements (fetch and decode, execute, commit) out of a 2-way, 32-line cache of RAM "
          f"held in custom properties. The first cache miss stops the chain; the next pass fills the line, and prefetches the next, "
@@ -1439,7 +1511,7 @@ def lint(text, ints):
         i, d = m.end(), 0
         while i < len(text) and (d or text[i] not in ';}'): d += {'(': 1, ')': -1}.get(text[i], 0); i += 1
         val = text[m.end():i].strip()
-        if re.fullmatch(r'-?\d+', val): continue
+        if re.fullmatch(r'-?\d+|inherit|initial', val): continue
         f = re.match(r'[a-z-]+\(', val)
         if not f: bad.append(f'--{m.group(1)}: {val[:60]}'); continue
         j, d = f.end(), 1

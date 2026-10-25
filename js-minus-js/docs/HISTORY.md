@@ -137,6 +137,16 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   (a synthetic chain of 1,561 levels styles in ~3 µs a level). A token level costs ~1.1 ms of plumbing (state copies,
   the table writes' rules, the overlay slots) and ~1.6 ms of its variant. Two columns a frame worked (a sentinel up to
   9,215 px wide, GPOS adjustments past an advance's 511 px) but each frame cost 1.7× the layout (ENGINE_NOTES 84).
+- **20, a fill stage in the chain; RAM trees not inherited (2026-10-24, branch `ram-explore`).** (`exp/ram/README.md`, BENCHMARKS §22.) A catalog
+  of ~40 ways to build RAM, probed, led to two changes. In the first, a RAM whose cost doesn't grow with its size,
+  only the non-inherited trees (`RAMNI`, now the default) were kept. They cut the RAM's restyles ~3× (arr_gc ~790 → ~260
+  elements per layout) but saved no time. The rest of it (unnamed leaves read through paths, the miss address through
+  layout: `RAMDEC`) lost on the page, 0.95–1.29. The second, misses filled inside the pass, won. A data miss above
+  level 16 is filled there through two nested size containers (the missing block's four leaves' widths and heights)
+  and re-executed with its latches. The model gave 0.78 of the passes (geomean of 180 programs). On CPU-only pages it
+  was 0.84 of the time (deep_recursion 0.62, closure_gc 0.80), and on the editor page deep_recursion 0.71 and
+  closure_gc 0.81; short programs pay ~1–3% in compile. Two and three stages saved more passes but cost each pass more
+  (the register subjects restyle in every stage's containers), so they lost on the GC programs and the compile.
 
 ## Dead ends and superseded approaches
 
@@ -176,7 +186,7 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 32 | Readers with value, scroller, spacer and pad per size container | ~1,300 restyles inside layout per pass | one scroller, positioned subjects |
 | 33 | 3 or 4 issues per frame | wrong output | 2 issues |
 | 34 | Code / data cache partition (model) | suite shapings +5% | one ring |
-| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K | sparse RAM groups |
+| 35 | Read-decoded anchors (read block down the trees) | whole trees restyled: 90 ms per recalc at 16K (2026-10-24: likely an unmasked address; masked, with explicit `inherit`, only the paths restyle: `exp/ram`, ENGINE_NOTES 87) | sparse RAM groups |
 | 36 | 13-bit addresses, ROM 0 … 4095 for a 93-word lib | RAM capped at 4K words | 15-bit, 1K ROM |
 | 37 | Object instructions with 3-way selectors everywhere | 531 subtables per cycle; export dropped | gated rule groups, merged digits |
 | 38 | `x[k]` dispatch in microcode (KEYV, PUTX), DUP2 | +1.2 ms per shaping for all programs | ROM dispatch via JNEG; OVER OVER |
@@ -233,6 +243,8 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
 | 89 | `timeline-scope: all` on the chain's root, to shorten each animation's named-timeline walk (timing only) | no change (115 against 112 ms) | — |
 | 90 | Two columns a frame: one sentinel W = (a − 31) + 96 (b − 31) px (`mkfont2.py` pair mode, in `4783a53`) | half the frames, but 2.4 passes a frame against 1.5 and dearer layouts: Run → compiled 0.874× of main against 0.798× for one column (ENGINE_NOTES 84) | one column, stopping at the first blank column |
 | 91 | A reset frame for the latch cells (every cell to 0 or −1 at the sweep's start) | to the hold's target: no effect (ENGINE_NOTES 85); to 0: a 210 ms layout (86); as a container query on the cells: every cell restyled every frame, +30% | the chain reads columns past the scan's end as spaces (`--rbe`) |
+| 92 | Read paths down the RAM trees, the miss address through layout, unnamed leaves (`RAMDEC`) | the size container around the RAM is resolved in layout, and the tree under it restyled there each pass: 0.95–1.29 on CPU-only pages (arr_gc layout 9.8 → 16.7 ms) | the named leaves and the read ports' mux |
+| 93 | Two or three fill stages (`STAGE=11,22`, `8,16,24`) | fewer passes, but each stage costs every pass: the GC programs 0.85–0.95 against one stage's 0.80–0.82, the compile 1.05× | one stage at level 16 |
 
 ## Open leads (untried)
 
@@ -282,6 +294,9 @@ on 2026-10-20 (last at `181cbb7`). "Self-compile": the self-hosted `jsc.js` in R
   chained 8 shapings in one layout).
 - **Allocation loops** (`obj_gc.js`: 18 shapings per iteration, 14 misses evicting the loop's code): LRU, or writes to
   fresh heap lines that bypass the cache.
+- **A cheaper fill stage** (`exp/ram/README.md`): the one stage (2026-10-24) costs every pass, since the register
+  subjects restyle again in its two containers. One container holding all four words, or the registers kept outside
+  the stage, would make two stages pay (the model: 0.71 of the passes against one stage's 0.78).
 - **RAM group size 16 or 64** instead of 256: measured, not adopted. Both halted ~6% sooner in two rounds (BENCHMARKS §8);
   re-check with `ab.js` and the L5 suite before switching.
 - **More shapings per frame**: chain dependent shapings in one lifecycle update with container-query

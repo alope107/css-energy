@@ -19,7 +19,8 @@ until 2026-10-19 the CPU was a GSUB font, §3.8.)
    ▼
  CSS CPU: registers in view timelines; each layout pass runs up to 32    machine/gen_css.py, csssim.py (model)
    instructions as nested elements (fetch > execute > commit) out of a   machine/memtree.py (RAM)
-   2-way cache in custom properties; the first miss stops the chain and
+   2-way cache in custom properties; a data miss in levels 0–15 is
+   filled at level 16 in the same pass; any other stops the chain and
    read ports at its end fetch the block for the next pass
    ▼
  console: 9 × 16 RAM cells shown with a counter-style font
@@ -274,9 +275,9 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
 
 ### 3.1 A pass
 
-- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px; 358 of them: pc, fp, the console cursor,
+- **Registers** (`#cpu`): view-timeline scrollers, a subject at `value` px; 392 of them (a CPU-only page): pc, fp, the console cursor,
   `--pst`, steps, halt, the pending miss, the data cache (32 tags with dirty bits, 16 victim bits, 128 words), the code
-  cache (16 tags, 64 words), the read ports' eight words, the latches, the RAM and console write channels. Two passes
+  cache (16 tags, 64 words), the read ports' eight words, the latches, the fill stage's, the RAM and console write channels. Two passes
   per frame.
 - **Fill** (`.fl`): the block the last pass missed goes into its set's victim way, from the port registers, unless it is
   already in the set (a pending miss seen again after its fill under load; two ways holding one block stall the CPU:
@@ -299,6 +300,13 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
   line resident at the end. A read is latched only if the reads its address came from were good (a class's `deps`).
   Two reads aren't latched: the map's word (r), which the same execution writes, so a miss there fills the written line,
   and MCMP's second line (l), the last read in order, which the last fill leaves resident.
+- **Fill stage** (between levels 15 and 16; `STAGE=` other levels, a list, or 0 for none): an instruction above it
+  that stalled on a data miss is filled there and re-executed at level 16 with its latches. Two nested fixed size
+  containers (`.sr1_0`, `.sr2_0`) are as wide and tall as the missing block's four leaves (`anchor-size()`, the names
+  picked by a style query on the block's high digit and an `if()` on the low ones). `.sf0` then updates the line as
+  `.fl` does, and a dirty victim leaves through the stage's own write channels (`M`…`P`). A block written back by `.fl`
+  in the same pass is stale there too. The stage costs every pass: the register subjects restyle again in its two
+  containers, +32 registers; CPU-only pages 0.62–0.97 of the time without it, compile 1.03× (BENCHMARKS §22).
 - **Export** (`.ex`): the registers' subjects at the chain's end; the pass's writes into the channels; and eight
   **read ports** that read the missing block and the next during this pass's layout, for the next pass's fill.
 - A miss on the block the same pass writes back would read its leaf before the write lands, so that fill waits a pass
@@ -314,7 +322,9 @@ Measurements and the style-engine costs behind the design: `exp/csscpu/README.md
   −28% (code misses 6,881 → 1,539; BENCHMARKS §15). Every register costs every pass, so 32 lines (caesar 24% faster) made
   23 of the 25 timed programs 2–12% slower (BENCHMARKS §15). Code isn't written at run time; the data cache still serves
   reads of code as data (`ptrap` decoding a PRINT).
-- RAM: `memtree.py`'s leaves and decode trees, four banks. The read ports' leaf names are muxes; the most-read blocks
+- RAM: `memtree.py`'s leaves and decode trees, four banks. The trees' properties don't inherit: each node takes its
+  parent's by explicit `inherit`, so a write restyles one level off its path (ENGINE_NOTES 87; `RAMNI=0` for the
+  inherited trees). The read ports' leaf names are muxes; the most-read blocks
   (globals, strings, code) have their own mux, evaluated only when a block is missing.
 - Console: its own four small trees and channels in a `contain: strict` box. A pass writes at most one cell per bank
   (cell address mod 4). `--cw` is the mask of the banks this pass has written: an output instruction runs if the bank of

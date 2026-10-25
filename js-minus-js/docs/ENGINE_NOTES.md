@@ -318,3 +318,29 @@ chats.
     1,000,000 s delay, the value unchanged). One or two cells a frame cost little. And container-query rules that select
     many elements make them depend on the container's style: a `@container rbscan style(--rbreset: 1)` rule on the cells
     restyled all 1,536 every frame (`#app` changes every frame), +30% a compile. *(measured 2026-10-24, Chromium 153)*
+87. **A decode tree restyles its paths, not the tree, when the off-path nodes' children come out equal.** Blink
+    recalcs only the children of an element whose diff is `kInherited` (`ComputedStyle::ComputeDifference`,
+    `ApplyComputedStyleDiff`), and each child's own diff decides whether to go on. With memtree's two parities and the
+    address masked by the enable at every level, a read address changing at 16K cells restyled ~1,300 elements per
+    update (inherited properties: two levels off the path), ~520 with non-inherited properties taken by explicit
+    `inherit` (one level), out of ~17,500. An unmasked inherited address, or any inherited property every node reads,
+    restyles every node (likely HISTORY dead end 35). *(measured 2026-10-24; exp/ram §1, restyles.js)*
+88. **A paused animation's `animation-delay` picks a keyframe, exactly, in the same style update**: a discrete
+    `<custom-ident>` animation, `animation: nm Ns linear paused both; animation-delay: calc(-1s * var(--i) - 0.25s)`,
+    names the anchor `anchor-size()` reads. Every change rebuilds the keyframe model, so it costs ~N keyframes per
+    change: 3–4× an `if()` over the same names at 4K–16K. *(measured 2026-10-24; exp/ram §1)*
+89. **Nested `position: fixed` size containers chain layout → style inside one update**: a level's width is
+    `anchor-size()` of a name chosen from the level above's `100cqw`, and 32 dependent reads come out exact in one
+    forced update (~3 resolves per level, linear). Nested `position: absolute` levels can't: each level's containing
+    block is the one above, and anchors outside it aren't acceptable (fallback). `100cqw / 1px` comes out a hair
+    under an exact width: `round(down, …)` floors 255 to 254, so round to nearest. A size query on the level above
+    makes a cheap name mux: one `@container (width >= a) and (width < b)` rule per high digit, so only that rule's
+    `if()` is evaluated (10–25× cheaper than one two-level `if()` at 4K–16K). *(measured 2026-10-24; exp/ram §2)*
+90. **A `content-visibility: hidden` leaf remembers both axes**: `contain-intrinsic-size: auto 1px auto 1px` keeps
+    width and height separately (exact up to 2^20 px each), so a RAM leaf can hold two words. *(measured 2026-10-24;
+    exp/ram §3, feasible.js)*
+91. **A scroll offset is a latch written by snapping**: an `overflow: hidden` scroller with one snap area at `top: v`
+    snaps to it while `scroll-snap-type` is on; with snapping off it keeps the offset while the area moves, and through
+    `display: none` (59); a scroll timeline reads it. `ident()` (test flag) works in a registered `<custom-ident>`
+    (`--n: ident("--c" var(--k))`, then `anchor-size(var(--n) width)`), where `anchor-size(ident(…))` itself crashes
+    (bugs/README). *(measured 2026-10-24; exp/ram §3)*
