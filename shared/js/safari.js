@@ -138,8 +138,12 @@ function page(sid) {
   const evaluate = (fn, arg) => cmd('POST', '/execute/sync', typeof fn === 'function'
     ? { script: `return (${fn}).apply(null, arguments)`, args: arg === undefined ? [] : [arg] }
     : { script: `return (${fn})`, args: [] });
-  // pointer state (position, pressed buttons) persists across perform-actions calls within the session
-  let at = { x: 0, y: 0 };
+  // A drag sampled between moves (move, evaluate, move, …) is one actions command per move. safaridriver forgets the
+  // pressed button after the first command that follows the press (the WebDriver spec keeps it): the next move comes
+  // as a plain mouse move, and Safari ends :active although the events still say buttons 1. Within one command it
+  // holds. So while the button is down every move command starts with a pointerDown again: Safari then sees another
+  // mousedown (no script here listens) and :active stays on throughout (experiments/safari/active.html).
+  let at = { x: 0, y: 0 }, down = false;
   const pointer = acts => cmd('POST', '/actions', { actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: acts }] });
   // whether Safari draws frames: it stops when the Mac's display sleeps or the window is hidden, and then nothing that
   // waits for requestAnimationFrame (or, sometimes, a load) finishes
@@ -151,21 +155,24 @@ function page(sid) {
     frames,
     url: () => cmd('GET', '/url'),
     // As Playwright's goto, until the load event: safaridriver's navigate can return while a large page still loads.
-    // A load that makes no progress for 10 s is started again (up to 4 tries): the page comes through VS Code's port
-    // forwarding, which now and then stalls in the middle of a large page (the server sent it all; Safari's parser
-    // stopped at a few hundred elements and waited for the rest for minutes).
+    // The page comes through VS Code's port forwarding, which now and then stalls in the middle of a large file (the
+    // server sent it all; Safari's parser stopped at a few hundred elements and waited for the rest for minutes) or
+    // drops it (a published page's 2 MB stylesheet missing, so the engine never ran, and the load event came anyway).
+    // So a load that makes no progress for 10 s, or ends with a linked stylesheet missing, is started again (4 tries).
     async goto(u) {
       const state = () => evaluate(() => ({ readyState: document.readyState, href: location.href, elements: document.getElementsByTagName('*').length,
+        missing: [...document.querySelectorAll('link[rel=stylesheet]')].filter(l => { try { return !l.sheet || !l.sheet.cssRules.length; } catch (e) { return true; } })
+          .map(l => l.getAttribute('href')),
         resources: performance.getEntriesByType('resource').map(e => `${e.name.split('/').pop()} ${Math.round(e.duration)} ms`) }));
       for (let attempt = 1; ; attempt++) {
         await cmd('POST', '/url', { url: toUrl(u) });
         let st, last = -1, since = Date.now();
-        for (;;) { st = await state(); if (st.readyState === 'complete') return;
+        for (;;) { st = await state(); if (st.readyState === 'complete') { if (!st.missing.length) return; break; }
           if (st.elements !== last) { last = st.elements; since = Date.now(); }
           if (Date.now() - since > 10000) break;
           await new Promise(r => setTimeout(r, 50)); }
         if (attempt === 4) throw new Error(`safari.js: ${u} didn't finish loading in 4 tries: ${JSON.stringify(st)}; ${await frames()}`);
-        console.error(`safari.js: loading ${u} stalled at ${st.elements} elements (${st.readyState}); loading it again`);
+        console.error(`safari.js: loading ${u} ${st.readyState === 'complete' ? `lost ${st.missing.join(', ')}` : `stalled at ${st.elements} elements (${st.readyState})`}; loading it again`);
       }
     },
     evaluate,
@@ -177,12 +184,12 @@ function page(sid) {
     viewportSize: () => evaluate(() => ({ width: innerWidth, height: innerHeight })),
     mouse: {
       // steps as in Playwright: intermediate moves, here over steps × 16 ms
-      async move(x, y, o = {}) { const n = o.steps || 1, acts = [];
+      async move(x, y, o = {}) { const n = o.steps || 1, acts = down ? [{ type: 'pointerDown', button: 0 }] : [];
         for (let i = 1; i <= n; i++) acts.push({ type: 'pointerMove', origin: 'viewport', duration: n > 1 ? 16 : 0,
           x: Math.round(at.x + (x - at.x) * i / n), y: Math.round(at.y + (y - at.y) * i / n) });
         at = { x, y }; await pointer(acts); },
-      down: () => pointer([{ type: 'pointerDown', button: 0 }]),
-      up: () => pointer([{ type: 'pointerUp', button: 0 }]),
+      async down() { await pointer([{ type: 'pointerDown', button: 0 }]); down = true; },
+      async up() { await pointer([{ type: 'pointerUp', button: 0 }]); down = false; },
     },
     async click(sel) {
       const el = await cmd('POST', '/element', { using: 'css selector', value: sel });

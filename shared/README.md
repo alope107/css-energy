@@ -54,6 +54,14 @@ Safari's Settings > Advanced > "Show features for web developers", then Develop 
   closes it however the tool exits. Commands run in order per session: a tool killed inside `evaluate` leaves Safari
   paired until its script times out (`SAFARI_SCRIPT_MS`, 120 s); the next tool waits for that. "Already paired with
   another WebDriver session" with no session file: restart safaridriver.
+- **Mouse drags** sampled between moves send one actions command per move, and safaridriver forgets the pressed button
+  after the first ([`../bugs/safaridriver-pressed-button.sh`](../bugs/safaridriver-pressed-button.sh)): Safari ends
+  `:active` mid-drag. While the button is down `safari.js` starts every move with a `pointerDown` again, which keeps
+  `:active` on (the page sees another mousedown per move; no script here listens).
+- **Flaky transfers.** VS Code's port forwarding now and then stalls in the middle of a large file (a few hundred
+  elements parsed, then nothing for minutes) or drops one (a published page's 2 MB stylesheet missing: the engine
+  never runs, and the load event comes anyway). `goto` loads the page again after 10 s without progress, or when a
+  linked stylesheet is missing (4 tries, said on stderr).
 - **What you get:** `evaluate` (promises awaited), computed styles, element boxes, mouse input, window screenshots at
   the Mac's device pixel ratio. **What you don't:** CDP (no tracing, virtual time, screencast or touch), console
   logs, parallel runs. Motion is sampled from inside the page (`requestAnimationFrame`).
