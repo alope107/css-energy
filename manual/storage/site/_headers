@@ -1,0 +1,9 @@
+/cells/references/*
+# Any reference matches URL for all the probes (but only a probe that has the right data will decode)
+  Use-As-Dictionary: match="/cells/probes/*"
+# Store reference dictionaries for 1 year
+  Cache-Control: public, max-age=31536000
+# Always refresh the reference dictionary when requested
+  Vary: *
+
+  
